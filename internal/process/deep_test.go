@@ -52,6 +52,21 @@ func TestParseLSOFDeepListeningPorts(t *testing.T) {
 	}
 }
 
+func TestParseLSOFDeepOutboundConnections(t *testing.T) {
+	procs := []Info{
+		{PID: 412, Command: "Slack"},
+		{PID: 999, Command: "bash"},
+	}
+	parseLSOFDeep(procs, lsofDeepFixture)
+
+	if len(procs[0].OutboundConnections) != 1 || procs[0].OutboundConnections[0] != "127.0.0.1:443" {
+		t.Errorf("Slack OutboundConnections = %v, want [127.0.0.1:443]", procs[0].OutboundConnections)
+	}
+	if len(procs[1].OutboundConnections) != 0 {
+		t.Errorf("bash OutboundConnections = %v, want []", procs[1].OutboundConnections)
+	}
+}
+
 func TestParseLSOFDeepUnknownPIDSkipped(t *testing.T) {
 	// PID 999 not in procs — should not panic or produce errors.
 	procs := []Info{{PID: 412, Command: "Slack"}}
