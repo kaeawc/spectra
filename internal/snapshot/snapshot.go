@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // Kind distinguishes a live snapshot from an immutable baseline.
@@ -22,27 +23,21 @@ const (
 )
 
 // Snapshot is the structured capture of one host at one point in time.
-// Most fields are placeholders for collectors that don't exist yet (JVMs,
-// JDKs, toolchains, network state, storage state, power, env, sysctls).
-// Each will arrive in its own commit; the schema is shaped now so the
-// SQLite layer that lands next has a stable target.
 type Snapshot struct {
-	ID       string    `json:"id"`
-	TakenAt  time.Time `json:"taken_at"`
-	Kind     Kind      `json:"kind"`
-	Host     HostInfo  `json:"host"`
-	Apps     []detect.Result `json:"apps"`
+	ID         string               `json:"id"`
+	TakenAt    time.Time            `json:"taken_at"`
+	Kind       Kind                 `json:"kind"`
+	Host       HostInfo             `json:"host"`
+	Apps       []detect.Result      `json:"apps"`
+	Toolchains toolchain.Toolchains `json:"toolchains"`
 
-	// Placeholders for upcoming collectors. Empty in v0.1.
+	// Placeholders for upcoming collectors. Empty until implemented.
 	// See docs/design/system-inventory.md.
 	// Processes  []ProcessInfo
 	// JVMs       []JVMInfo
-	// JDKs       []JDKInstall
-	// Toolchains *Toolchains
 	// Network    *NetworkState
 	// Storage    *StorageState
 	// Power      *PowerState
-	// Env        *EnvSnapshot
 	// Sysctls    map[string]string
 }
 
@@ -58,6 +53,10 @@ type Options struct {
 
 	// DetectOpts are forwarded to each Detect call.
 	DetectOpts detect.Options
+
+	// ToolchainOpts are forwarded to the toolchain collector.
+	// Zero value uses production defaults (live machine paths).
+	ToolchainOpts toolchain.CollectOptions
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -70,9 +69,8 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		Kind:    KindLive,
 	}
 
-	// Two collectors today: host info, app inventory.
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
@@ -82,6 +80,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	go func() {
 		defer wg.Done()
 		s.Apps = collectApps(ctx, opts)
+	}()
+
+	go func() {
+		defer wg.Done()
+		s.Toolchains = toolchain.Collect(ctx, opts.ToolchainOpts)
 	}()
 
 	wg.Wait()
