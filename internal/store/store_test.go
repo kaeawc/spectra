@@ -163,6 +163,40 @@ func TestListSnapshotsByMachine(t *testing.T) {
 	}
 }
 
+// --- Baseline snapshots (name field) ---
+
+func TestBaselineNameRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	in := sampleInput()
+	in.Kind = "baseline"
+	in.Name = "pre-incident"
+	if err := db.SaveSnapshot(ctx, in); err != nil {
+		t.Fatalf("SaveSnapshot baseline: %v", err)
+	}
+
+	row, err := db.GetSnapshot(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+	if row.Name != "pre-incident" {
+		t.Errorf("name = %q, want pre-incident", row.Name)
+	}
+	if row.Kind != "baseline" {
+		t.Errorf("kind = %q, want baseline", row.Kind)
+	}
+
+	// ListSnapshots should also return the name.
+	rows, err := db.ListSnapshots(ctx, "")
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "pre-incident" {
+		t.Errorf("list name = %q", rows[0].Name)
+	}
+}
+
 // --- Snapshot retention / pruning ---
 
 func TestPruneSnapshotsKeepsBaselines(t *testing.T) {

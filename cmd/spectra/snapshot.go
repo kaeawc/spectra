@@ -42,6 +42,8 @@ func runSnapshot(args []string) int {
 	withNetwork := fs.Bool("network", false, "Extract embedded URL hosts (slower; scans app.asar)")
 	skipApps := fs.Bool("no-apps", false, "Skip the apps inventory; capture host info only")
 	noStore := fs.Bool("no-store", false, "Do not persist the snapshot to the local database")
+	baseline := fs.Bool("baseline", false, "Save as a baseline (immutable; never auto-pruned)")
+	name := fs.String("name", "", "Human label for the snapshot (most useful with --baseline)")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -59,10 +61,17 @@ func runSnapshot(args []string) int {
 	if *skipApps {
 		snap.Apps = nil
 	}
+	if *baseline {
+		snap.Kind = snapshot.KindBaseline
+	}
 
 	if !*noStore {
-		if err := saveSnapshot(snap); err != nil {
+		snapName := *name
+		if err := saveSnapshotNamed(snap, snapName); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not persist snapshot: %v\n", err)
+		}
+		if *baseline && snapName != "" {
+			fmt.Fprintf(os.Stderr, "baseline %q saved as %s\n", snapName, snap.ID)
 		}
 	}
 
@@ -79,6 +88,12 @@ func runSnapshot(args []string) int {
 // saveSnapshot opens the default DB, persists snap, and prunes old live
 // snapshots beyond the default retention limit (100 per machine).
 func saveSnapshot(snap snapshot.Snapshot) error {
+	return saveSnapshotNamed(snap, "")
+}
+
+// saveSnapshotNamed persists snap with an optional human name label and prunes
+// old live snapshots. Baselines are never pruned.
+func saveSnapshotNamed(snap snapshot.Snapshot, name string) error {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
 		return err
@@ -89,10 +104,14 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if err := db.SaveSnapshot(ctx, store.FromSnapshot(snap)); err != nil {
+	input := store.FromSnapshot(snap)
+	input.Name = name
+	if err := db.SaveSnapshot(ctx, input); err != nil {
 		return err
 	}
-	_, _ = db.PruneSnapshots(ctx, 100) // best-effort; ignore prune errors
+	if snap.Kind == snapshot.KindLive {
+		_, _ = db.PruneSnapshots(ctx, 100) // best-effort; baselines skipped by PruneSnapshots
+	}
 	return nil
 }
 
@@ -101,6 +120,7 @@ func runSnapshotList(args []string) int {
 	fs := flag.NewFlagSet("spectra snapshot list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
+	kindFilter := fs.String("kind", "", "Filter by kind: live or baseline")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -122,6 +142,18 @@ func runSnapshotList(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+
+	// Apply kind filter client-side (avoids schema change to ListSnapshots sig).
+	if *kindFilter != "" {
+		filtered := rows[:0]
+		for _, r := range rows {
+			if r.Kind == *kindFilter {
+				filtered = append(filtered, r)
+			}
+		}
+		rows = filtered
+	}
+
 	if len(rows) == 0 {
 		fmt.Fprintln(os.Stderr, "no snapshots stored — run `spectra snapshot` first")
 		return 0
@@ -134,12 +166,13 @@ func runSnapshotList(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("%-32s  %-8s  %-20s  %s\n", "ID", "KIND", "TAKEN AT", "APPS")
-	fmt.Println(strings.Repeat("-", 72))
+	fmt.Printf("%-32s  %-8s  %-20s  %-20s  %s\n", "ID", "KIND", "TAKEN AT", "NAME", "APPS")
+	fmt.Println(strings.Repeat("-", 90))
 	for _, r := range rows {
-		fmt.Printf("%-32s  %-8s  %-20s  %d\n",
+		fmt.Printf("%-32s  %-8s  %-20s  %-20s  %d\n",
 			r.ID, r.Kind,
 			r.TakenAt.Format("2006-01-02 15:04:05Z"),
+			truncate(r.Name, 20),
 			r.AppCount,
 		)
 	}
