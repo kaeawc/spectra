@@ -148,6 +148,33 @@ CREATE TABLE IF NOT EXISTS snapshot_processes (
 CREATE INDEX IF NOT EXISTS idx_snapshot_processes_snap ON snapshot_processes(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_snapshot_processes_app  ON snapshot_processes(app_path) WHERE app_path != '';
 
+CREATE TABLE IF NOT EXISTS login_items (
+    snapshot_id  TEXT NOT NULL,
+    bundle_id    TEXT NOT NULL DEFAULT '',
+    plist_path   TEXT NOT NULL,
+    label        TEXT NOT NULL DEFAULT '',
+    scope        TEXT NOT NULL DEFAULT '',
+    daemon       INTEGER NOT NULL DEFAULT 0,
+    run_at_load  INTEGER NOT NULL DEFAULT 0,
+    keep_alive   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (snapshot_id, plist_path),
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_items_snap   ON login_items(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_login_items_bundle ON login_items(bundle_id) WHERE bundle_id != '';
+
+CREATE TABLE IF NOT EXISTS granted_perms (
+    snapshot_id  TEXT NOT NULL,
+    bundle_id    TEXT NOT NULL,
+    service      TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, bundle_id, service),
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_granted_perms_snap   ON granted_perms(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_granted_perms_bundle ON granted_perms(bundle_id);
+
 CREATE TABLE IF NOT EXISTS process_metrics (
     pid          INTEGER NOT NULL,
     minute_at    DATETIME NOT NULL,
@@ -435,6 +462,129 @@ func (s *DB) GetSnapshotProcesses(ctx context.Context, snapID string) ([]Process
 	return out, rows.Err()
 }
 
+// LoginItemRow is one row from login_items.
+type LoginItemRow struct {
+	SnapshotID string
+	BundleID   string
+	PlistPath  string
+	Label      string
+	Scope      string
+	Daemon     bool
+	RunAtLoad  bool
+	KeepAlive  bool
+}
+
+// SaveLoginItems inserts login item rows for snapID. Uses INSERT OR IGNORE.
+func (s *DB) SaveLoginItems(ctx context.Context, snapID string, items []LoginItemRow) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, it := range items {
+		_, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO login_items
+			  (snapshot_id, bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			snapID, it.BundleID, it.PlistPath, it.Label, it.Scope,
+			boolInt(it.Daemon), boolInt(it.RunAtLoad), boolInt(it.KeepAlive),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetLoginItems returns all login item rows for snapID.
+func (s *DB) GetLoginItems(ctx context.Context, snapID string) ([]LoginItemRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive
+		 FROM login_items WHERE snapshot_id=? ORDER BY plist_path`, snapID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LoginItemRow
+	for rows.Next() {
+		var r LoginItemRow
+		var daemon, runAtLoad, keepAlive int
+		if err := rows.Scan(&r.BundleID, &r.PlistPath, &r.Label, &r.Scope,
+			&daemon, &runAtLoad, &keepAlive); err != nil {
+			return nil, err
+		}
+		r.SnapshotID = snapID
+		r.Daemon = daemon != 0
+		r.RunAtLoad = runAtLoad != 0
+		r.KeepAlive = keepAlive != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GrantedPermRow is one row from granted_perms.
+type GrantedPermRow struct {
+	SnapshotID string
+	BundleID   string
+	Service    string
+}
+
+// SaveGrantedPerms inserts TCC permission rows for snapID. Uses INSERT OR IGNORE.
+func (s *DB) SaveGrantedPerms(ctx context.Context, snapID string, perms []GrantedPermRow) error {
+	if len(perms) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, p := range perms {
+		_, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO granted_perms (snapshot_id, bundle_id, service)
+			VALUES (?,?,?)`,
+			snapID, p.BundleID, p.Service,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetGrantedPerms returns all TCC permission rows for snapID.
+func (s *DB) GetGrantedPerms(ctx context.Context, snapID string) ([]GrantedPermRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT bundle_id, service FROM granted_perms
+		 WHERE snapshot_id=? ORDER BY bundle_id, service`, snapID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GrantedPermRow
+	for rows.Next() {
+		var r GrantedPermRow
+		if err := rows.Scan(&r.BundleID, &r.Service); err != nil {
+			return nil, err
+		}
+		r.SnapshotID = snapID
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // SaveProcessMetrics persists a batch of 1-minute aggregates from the ring
 // buffer. Uses INSERT OR IGNORE so duplicate (pid, minute_at) rows are skipped.
 func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) error {
@@ -558,35 +708,15 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 
 	var total int64
 	for _, m := range machines {
-		// Delete snapshot_processes for the to-be-pruned snapshots first (FK constraint).
-		if _, err := s.db.ExecContext(ctx, `
-			DELETE FROM snapshot_processes
-			WHERE snapshot_id IN (
-			  SELECT id FROM snapshots
-			  WHERE kind='live' AND machine_uuid=?
-			    AND id NOT IN (
-			      SELECT id FROM snapshots
-			      WHERE kind='live' AND machine_uuid=?
-			      ORDER BY taken_at DESC
-			      LIMIT ?
-			    )
-			)`, m, m, keepN); err != nil {
-			return total, fmt.Errorf("store: prune processes %s: %w", m, err)
-		}
-		// Delete snapshot_apps for the to-be-pruned snapshots first (FK constraint).
-		if _, err := s.db.ExecContext(ctx, `
-			DELETE FROM snapshot_apps
-			WHERE snapshot_id IN (
-			  SELECT id FROM snapshots
-			  WHERE kind='live' AND machine_uuid=?
-			    AND id NOT IN (
-			      SELECT id FROM snapshots
-			      WHERE kind='live' AND machine_uuid=?
-			      ORDER BY taken_at DESC
-			      LIMIT ?
-			    )
-			)`, m, m, keepN); err != nil {
-			return total, fmt.Errorf("store: prune apps %s: %w", m, err)
+		// Delete child rows for to-be-pruned snapshots first (FK constraints).
+		pruneSubquery := `SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=?
+			AND id NOT IN (SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
+		for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
+			if _, err := s.db.ExecContext(ctx,
+				`DELETE FROM `+table+` WHERE snapshot_id IN (`+pruneSubquery+`)`,
+				m, m, keepN); err != nil {
+				return total, fmt.Errorf("store: prune %s %s: %w", table, m, err)
+			}
 		}
 		res, err := s.db.ExecContext(ctx, `
 			DELETE FROM snapshots
