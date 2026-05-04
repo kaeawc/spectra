@@ -147,3 +147,82 @@ func TestTotalRSSEmpty(t *testing.T) {
 		t.Error("TotalRSS(nil) should be 0")
 	}
 }
+
+func TestBuildTreeEmpty(t *testing.T) {
+	roots := BuildTree(nil)
+	if len(roots) != 0 {
+		t.Errorf("BuildTree(nil) = %d roots, want 0", len(roots))
+	}
+}
+
+func TestBuildTreeSingleRoot(t *testing.T) {
+	procs := []Info{{PID: 1, PPID: 0, Command: "launchd"}}
+	roots := BuildTree(procs)
+	if len(roots) != 1 {
+		t.Fatalf("roots = %d, want 1", len(roots))
+	}
+	if roots[0].Info.PID != 1 {
+		t.Errorf("root PID = %d, want 1", roots[0].Info.PID)
+	}
+	if len(roots[0].Children) != 0 {
+		t.Errorf("unexpected children on root")
+	}
+}
+
+func TestBuildTreeParentChild(t *testing.T) {
+	procs := []Info{
+		{PID: 1, PPID: 0, Command: "launchd"},
+		{PID: 10, PPID: 1, Command: "bash"},
+		{PID: 20, PPID: 10, Command: "go"},
+	}
+	roots := BuildTree(procs)
+	if len(roots) != 1 {
+		t.Fatalf("roots = %d, want 1", len(roots))
+	}
+	if len(roots[0].Children) != 1 {
+		t.Fatalf("launchd children = %d, want 1", len(roots[0].Children))
+	}
+	bash := roots[0].Children[0]
+	if bash.Info.PID != 10 {
+		t.Errorf("child PID = %d, want 10", bash.Info.PID)
+	}
+	if len(bash.Children) != 1 || bash.Children[0].Info.PID != 20 {
+		t.Errorf("bash child = %v, want PID 20", bash.Children)
+	}
+}
+
+func TestBuildTreeSelfReferentialBecomesRoot(t *testing.T) {
+	procs := []Info{
+		{PID: 0, PPID: 0, Command: "kernel"},
+		{PID: 1, PPID: 0, Command: "launchd"},
+	}
+	roots := BuildTree(procs)
+	// PID 0 is self-referential; PID 1's parent (PID 0) is in the map
+	// but PID 0 is itself a root, so PID 1 should be a child of PID 0.
+	found := false
+	for _, r := range roots {
+		if r.Info.PID == 0 {
+			found = true
+			if len(r.Children) != 1 || r.Children[0].Info.PID != 1 {
+				t.Errorf("kernel children = %v, want [launchd]", r.Children)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected PID 0 (kernel) as a root")
+	}
+}
+
+func TestBuildTreeOrphanBecomesRoot(t *testing.T) {
+	// Parent PID not in the list → child becomes a root.
+	procs := []Info{
+		{PID: 100, PPID: 999, Command: "orphan"},
+	}
+	roots := BuildTree(procs)
+	if len(roots) != 1 {
+		t.Fatalf("roots = %d, want 1", len(roots))
+	}
+	if roots[0].Info.PID != 100 {
+		t.Errorf("root PID = %d, want 100", roots[0].Info.PID)
+	}
+}

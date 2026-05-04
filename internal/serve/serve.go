@@ -425,6 +425,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}), nil
 	})
 
+	// process.tree — process list arranged as a parent-child tree.
+	d.Register("process.tree", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Bundles []string `json:"bundles"`
+		}
+		_ = json.Unmarshal(params, &p)
+		procs := process.CollectAll(context.Background(), process.CollectOptions{
+			BundlePaths: p.Bundles,
+		})
+		return process.BuildTree(procs), nil
+	})
+
 	// storage.system — disk volumes + ~/Library usage summary.
 	d.Register("storage.system", func(_ json.RawMessage) (any, error) {
 		return storagestate.Collect(storagestate.CollectOptions{}), nil
