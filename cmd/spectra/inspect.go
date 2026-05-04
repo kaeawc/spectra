@@ -235,13 +235,23 @@ func printMeta(r detect.Result) {
 	if len(r.LoginItems) > 0 {
 		labels := make([]string, len(r.LoginItems))
 		for i, li := range r.LoginItems {
-			suffix := ""
+			var flags []string
 			if li.Daemon {
-				suffix = " (daemon)"
+				flags = append(flags, "daemon")
 			} else if li.Scope == "system" {
-				suffix = " (system)"
+				flags = append(flags, "system")
 			}
-			labels[i] = li.Label + suffix
+			if li.RunAtLoad {
+				flags = append(flags, "run-at-load")
+			}
+			if li.KeepAlive {
+				flags = append(flags, "keep-alive")
+			}
+			if len(flags) > 0 {
+				labels[i] = li.Label + " (" + strings.Join(flags, ", ") + ")"
+			} else {
+				labels[i] = li.Label
+			}
 		}
 		fmt.Printf("    login items (%d): %s\n", len(labels), strings.Join(labels, ", "))
 	}

@@ -101,10 +101,12 @@ type Helpers struct {
 
 // LoginItem is one launchd plist installed for this bundle.
 type LoginItem struct {
-	Path  string // full path to the plist
-	Label string // launchd Label (typically the bundle ID + suffix)
-	Scope string // user | system
-	Daemon bool  // true for /Library/LaunchDaemons
+	Path       string // full path to the plist
+	Label      string // launchd Label (typically the bundle ID + suffix)
+	Scope      string // user | system
+	Daemon     bool   // true for /Library/LaunchDaemons
+	RunAtLoad  bool   // plist RunAtLoad key
+	KeepAlive  bool   // plist KeepAlive key (simple true/false form)
 }
 
 // ProcessInfo is one running process belonging to this bundle.
@@ -1207,7 +1209,15 @@ func scanLoginItems(appPath, bundleID string) []LoginItem {
 				}
 			}
 			if matched {
-				items = append(items, LoginItem{Path: full, Label: label, Scope: d.scope, Daemon: d.daemon})
+				runAtLoad, keepAlive := parsePlistLaunchFlags(full)
+				items = append(items, LoginItem{
+					Path:      full,
+					Label:     label,
+					Scope:     d.scope,
+					Daemon:    d.daemon,
+					RunAtLoad: runAtLoad,
+					KeepAlive: keepAlive,
+				})
 			}
 		}
 	}
@@ -1233,6 +1243,32 @@ func plistMentionsAppPath(plistPath, appPath string) bool {
 		return false
 	}
 	return bytes.Contains(out, []byte(appPath))
+}
+
+// parsePlistXMLBool returns true if the converted XML for plistPath contains
+// the given key immediately followed by a <true/> element.
+// It reads the plist once and checks both RunAtLoad and KeepAlive so the
+// caller gets both flags from a single plutil invocation.
+func parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
+	out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", plistPath).Output()
+	if err != nil {
+		return
+	}
+	runAtLoad = plistXMLBool(out, "RunAtLoad")
+	keepAlive = plistXMLBool(out, "KeepAlive")
+	return
+}
+
+// plistXMLBool returns true when the XML payload contains <key>name</key>
+// followed (possibly with whitespace) by <true/>.
+func plistXMLBool(xml []byte, name string) bool {
+	key := []byte("<key>" + name + "</key>")
+	idx := bytes.Index(xml, key)
+	if idx < 0 {
+		return false
+	}
+	rest := bytes.TrimSpace(xml[idx+len(key):])
+	return bytes.HasPrefix(rest, []byte("<true/>"))
 }
 
 func home() string {
