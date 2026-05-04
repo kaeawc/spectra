@@ -372,3 +372,82 @@ func TestParseGatekeeperOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestPlistXMLBool(t *testing.T) {
+	cases := []struct {
+		xml  string
+		key  string
+		want bool
+	}{
+		{"<key>RunAtLoad</key>\n<true/>", "RunAtLoad", true},
+		{"<key>RunAtLoad</key>\n<false/>", "RunAtLoad", false},
+		{"<key>RunAtLoad</key><true/>", "RunAtLoad", true},
+		{"<key>KeepAlive</key>\n\t<true/>", "KeepAlive", true},
+		{"<key>KeepAlive</key>\n\t<false/>", "KeepAlive", false},
+		{"<key>Other</key><true/>", "RunAtLoad", false},
+		{"", "RunAtLoad", false},
+	}
+	for _, tc := range cases {
+		got := plistXMLBool([]byte(tc.xml), tc.key)
+		if got != tc.want {
+			t.Errorf("plistXMLBool(%q, %q) = %v, want %v", tc.xml, tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
+	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.example.agent</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/example</string>
+	</array>
+</dict>
+</plist>`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "com.example.agent.plist")
+	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
+	if !runAtLoad {
+		t.Error("RunAtLoad: got false, want true")
+	}
+	if keepAlive {
+		t.Error("KeepAlive: got true, want false")
+	}
+}
+
+func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
+	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.example.daemon</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+</dict>
+</plist>`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "com.example.daemon.plist")
+	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
+	if !runAtLoad {
+		t.Error("RunAtLoad: got false, want true")
+	}
+	if !keepAlive {
+		t.Error("KeepAlive: got false, want true")
+	}
+}
