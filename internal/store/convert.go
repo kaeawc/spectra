@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 
@@ -21,6 +22,8 @@ func FromSnapshot(s snapshot.Snapshot) SnapshotInput {
 		apps[i] = fromResult(r)
 	}
 
+	snapJSON, _ := json.Marshal(s)
+
 	return SnapshotInput{
 		ID:           s.ID,
 		MachineUUID:  uuid,
@@ -36,6 +39,7 @@ func FromSnapshot(s snapshot.Snapshot) SnapshotInput {
 		RAMBytes:     s.Host.RAMBytes,
 		Architecture: s.Host.Architecture,
 		Apps:         apps,
+		SnapshotJSON: snapJSON,
 	}
 }
 

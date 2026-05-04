@@ -75,9 +75,14 @@ func (s *DB) applyPragmas() error {
 }
 
 // migrate creates tables that don't yet exist. Idempotent.
+// Also adds new columns to existing tables when the schema evolves.
 func (s *DB) migrate() error {
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Add snapshot_json column if this is an existing DB without it.
+	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN snapshot_json TEXT`)
+	return nil
 }
 
 const schema = `
@@ -102,6 +107,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     kind          TEXT NOT NULL DEFAULT 'live',
     spectra_ver   TEXT,
     app_count     INTEGER NOT NULL DEFAULT 0,
+    snapshot_json TEXT,
     FOREIGN KEY (machine_uuid) REFERENCES hosts(machine_uuid)
 );
 
@@ -183,11 +189,18 @@ func upsertHost(tx *sql.Tx, s SnapshotInput) error {
 
 func insertSnapshot(tx *sql.Tx, s SnapshotInput) error {
 	_, err := tx.Exec(`
-		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, spectra_ver, app_count)
-		VALUES (?,?,?,?,?,?)`,
-		s.ID, s.MachineUUID, s.TakenAt, s.Kind, s.SpectraVer, len(s.Apps),
+		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, spectra_ver, app_count, snapshot_json)
+		VALUES (?,?,?,?,?,?,?)`,
+		s.ID, s.MachineUUID, s.TakenAt, s.Kind, s.SpectraVer, len(s.Apps), nullableJSON(s.SnapshotJSON),
 	)
 	return err
+}
+
+func nullableJSON(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
 }
 
 func insertApp(tx *sql.Tx, snapID string, a AppInput) error {
@@ -252,6 +265,26 @@ func (s *DB) GetSnapshot(ctx context.Context, id string) (SnapshotRow, error) {
 	return r, nil
 }
 
+// GetSnapshotJSON returns the full snapshot JSON blob for id, or ErrNotFound
+// if absent. Returns nil (not ErrNotFound) if the row exists but was saved
+// without a JSON blob (older rows).
+func (s *DB) GetSnapshotJSON(ctx context.Context, id string) ([]byte, error) {
+	var raw sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT snapshot_json FROM snapshots WHERE id=?`, id,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !raw.Valid {
+		return nil, nil
+	}
+	return []byte(raw.String), nil
+}
+
 // GetSnapshotApps returns the per-app rows for a snapshot.
 func (s *DB) GetSnapshotApps(ctx context.Context, snapID string) ([]AppRow, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -290,20 +323,23 @@ var ErrNotFound = errors.New("store: not found")
 
 // SnapshotInput carries the data needed to persist a snapshot.
 type SnapshotInput struct {
-	ID          string
-	MachineUUID string
-	TakenAt     time.Time
-	Kind        string
-	SpectraVer  string
-	Hostname    string
-	OSName      string
-	OSVersion   string
-	OSBuild     string
-	CPUBrand    string
-	CPUCores    int
-	RAMBytes    uint64
+	ID           string
+	MachineUUID  string
+	TakenAt      time.Time
+	Kind         string
+	SpectraVer   string
+	Hostname     string
+	OSName       string
+	OSVersion    string
+	OSBuild      string
+	CPUBrand     string
+	CPUCores     int
+	RAMBytes     uint64
 	Architecture string
-	Apps        []AppInput
+	Apps         []AppInput
+	// SnapshotJSON is the full snapshot marshalled to JSON. Stored as a blob
+	// so diff and rules can reconstruct the complete Snapshot without re-running collectors.
+	SnapshotJSON []byte
 }
 
 // AppInput carries the per-app data to store.
