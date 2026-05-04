@@ -10,9 +10,12 @@ import (
 
 func TestBuildHostOnly(t *testing.T) {
 	// Use a sentinel non-existent path so collectApps does no real work.
+	// Skip slow collectors (process list, ~/Library walk) for test speed.
 	snap := Build(context.Background(), Options{
 		SpectraVersion: "test",
 		AppPaths:       []string{"/dev/null/__skip__"},
+		SkipProcesses:  true,
+		SkipStorage:    true,
 	})
 
 	if snap.ID == "" {

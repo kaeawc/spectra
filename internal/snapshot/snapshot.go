@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -34,14 +35,14 @@ type Snapshot struct {
 	Apps       []detect.Result      `json:"apps"`
 	Processes  []process.Info       `json:"processes,omitempty"`
 	Toolchains toolchain.Toolchains `json:"toolchains"`
-	Power      sysinfo.PowerState   `json:"power"`
-	Sysctls    map[string]string    `json:"sysctls,omitempty"`
-	Network    netstate.State       `json:"network"`
+	Power      sysinfo.PowerState    `json:"power"`
+	Sysctls    map[string]string     `json:"sysctls,omitempty"`
+	Network    netstate.State        `json:"network"`
+	Storage    storagestate.State    `json:"storage"`
 
 	// Placeholders for upcoming collectors. Empty until implemented.
 	// See docs/design/system-inventory.md.
-	// JVMs    []JVMInfo
-	// Storage *StorageState
+	// JVMs []JVMInfo
 }
 
 // Options configure a snapshot Build.
@@ -67,6 +68,10 @@ type Options struct {
 	// SkipProcesses disables the process collector (faster for tests).
 	SkipProcesses bool
 
+	// SkipStorage disables the storage state collector (faster for tests;
+	// walking ~/Library can take seconds on a full machine).
+	SkipStorage bool
+
 	// SysinfoCmdRunner is forwarded to sysinfo collectors (sysctls + power).
 	// Zero value uses the real commands.
 	SysinfoCmdRunner sysinfo.CmdRunner
@@ -74,6 +79,10 @@ type Options struct {
 	// NetCmdRunner is forwarded to the network state collector.
 	// Zero value uses the real commands.
 	NetCmdRunner netstate.CmdRunner
+
+	// StorageOpts are forwarded to the storage state collector.
+	// Zero value uses live filesystem paths.
+	StorageOpts storagestate.CollectOptions
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -98,7 +107,10 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	var wg sync.WaitGroup
 	collectors := 6 // host, apps, toolchains, power, sysctls, network
 	if !opts.SkipProcesses {
-		collectors = 7
+		collectors++
+	}
+	if !opts.SkipStorage {
+		collectors++
 	}
 	wg.Add(collectors)
 
@@ -126,6 +138,12 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		defer wg.Done()
 		s.Network = netstate.Collect(netRun)
 	}()
+	if !opts.SkipStorage {
+		go func() {
+			defer wg.Done()
+			s.Storage = storagestate.Collect(opts.StorageOpts)
+		}()
+	}
 
 	if !opts.SkipProcesses {
 		go func() {
