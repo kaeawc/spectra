@@ -42,8 +42,9 @@ func DefaultSockPath() (string, error) {
 type Options struct {
 	SockPath       string
 	SpectraVersion string
-	DBPath         string        // empty = store.DefaultPath()
+	DBPath         string          // empty = store.DefaultPath()
 	CacheRegistry  *cache.Registry // nil = cache.Default
+	DetectStore    *cache.ShardedStore // nil = no detect caching
 }
 
 // Run starts the daemon: listens on the Unix socket and serves requests until
@@ -107,7 +108,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg)
+	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore)
 
 	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
@@ -173,7 +174,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 }
 
 // registerHandlers wires all JSON-RPC methods into d.
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "version": version}, nil
 	})
@@ -205,6 +206,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		snap := snapshot.Build(context.Background(), snapshot.Options{
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
+			DetectStore:    detectStore,
 		})
 		if err := db.SaveSnapshot(context.Background(), store.FromSnapshot(snap)); err != nil {
 			return nil, err
@@ -339,6 +341,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			snap = snapshot.Build(context.Background(), snapshot.Options{
 				SpectraVersion: version,
 				DetectOpts:     detect.Options{},
+				DetectStore:    detectStore,
 			})
 		}
 		return rules.Evaluate(snap, rules.V1Catalog()), nil

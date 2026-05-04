@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -95,6 +96,11 @@ type Options struct {
 	// host-only snapshots where app data is not needed (e.g. daemon
 	// periodic captures).
 	SkipApps bool
+
+	// DetectStore is the sharded cache for detect.Result JSON. When non-nil,
+	// collectApps serves cached results keyed by Info.plist + main-exe hash and
+	// stores new results on miss.
+	DetectStore *cache.ShardedStore
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -215,7 +221,7 @@ func collectApps(_ context.Context, opts Options) []detect.Result {
 		go func() {
 			defer wg.Done()
 			for i := range in {
-				r, err := detect.DetectWith(paths[i], opts.DetectOpts)
+				r, err := detectWithCache(paths[i], opts.DetectOpts, opts.DetectStore)
 				out <- job{i: i, res: r, err: err}
 			}
 		}()

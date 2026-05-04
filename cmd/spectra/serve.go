@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/serve"
 )
@@ -36,9 +37,14 @@ func runServe(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "spectra serve: listening on %s\n", sock)
 
+	var detectStore *cache.ShardedStore
+	if cacheStores != nil {
+		detectStore = cacheStores.Detect
+	}
 	if err := serve.Run(ctx, serve.Options{
 		SockPath:       sock,
 		SpectraVersion: version,
+		DetectStore:    detectStore,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

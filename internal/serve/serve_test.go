@@ -37,7 +37,7 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 	t.Cleanup(func() { db.Close() })
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
