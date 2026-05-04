@@ -34,12 +34,16 @@ func subcommandList() []subcommand {
 	return []subcommand{
 		{"inspect", "Inspect .app bundles (default; runs when no subcommand given)", runInspect},
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
+		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},
 	}
 }
 
-func main() { os.Exit(dispatch(os.Args[1:])) }
+func main() {
+	initCacheStores()
+	os.Exit(dispatch(os.Args[1:]))
+}
 
 // dispatch routes args to a subcommand handler. The first non-flag arg
 // matching a known subcommand name selects that subcommand; otherwise
