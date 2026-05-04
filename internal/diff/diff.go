@@ -62,6 +62,7 @@ func Compare(a, b snapshot.Snapshot) Result {
 			diffJDKs(a, b),
 			diffBrewFormulae(a, b),
 			diffListeningPorts(a, b),
+			diffVPN(a, b),
 			diffPathDirs(a, b),
 			diffSysctls(a, b),
 		},
@@ -222,6 +223,23 @@ func diffListeningPorts(a, b snapshot.Snapshot) Section {
 		}
 	}
 	return Section{Name: "listening_ports", Changes: changes}
+}
+
+// diffVPN reports when VPN active state changes between snapshots.
+func diffVPN(a, b snapshot.Snapshot) Section {
+	var changes []Change
+	aActive, bActive := a.Network.VPNActive, b.Network.VPNActive
+	if aActive != bActive {
+		before, after := "false", "false"
+		if aActive {
+			before = "true"
+		}
+		if bActive {
+			after = "true"
+		}
+		changes = append(changes, Change{Kind: Changed, Key: "vpn_active", Before: before, After: after})
+	}
+	return Section{Name: "vpn", Changes: changes}
 }
 
 // diffPathDirs sequence-compares PATH dirs (order matters for shadowing).
