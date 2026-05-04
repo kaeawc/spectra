@@ -253,6 +253,31 @@ func TestDaemonIssuesFixListMissingIssueID(t *testing.T) {
 	}
 }
 
+func TestDaemonJDKListReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 16, "jdk.list", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("jdk.list: %v", resp.Error)
+	}
+}
+
+func TestDaemonToolchainScanReturnsObject(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 17, "toolchain.scan", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("toolchain.scan: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if m["brew"] == nil {
+		t.Error("toolchain.scan: expected brew field in result")
+	}
+}
+
 func TestDaemonSnapshotDiffMissingIDs(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()

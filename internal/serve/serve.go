@@ -16,11 +16,13 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
@@ -375,5 +377,31 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("issues.fix.list requires {\"issue_id\": \"...\"}")
 		}
 		return db.ListAppliedFixes(context.Background(), p.IssueID)
+	})
+
+	// jvm.list — list all running JVM processes.
+	// Optional: { "pid": 1234 } to inspect a single PID.
+	d.Register("jvm.list", func(params json.RawMessage) (any, error) {
+		var p struct{ PID int `json:"pid"` }
+		_ = json.Unmarshal(params, &p)
+		if p.PID != 0 {
+			info := jvm.InspectPID(context.Background(), p.PID, jvm.CollectOptions{})
+			if info == nil {
+				return nil, fmt.Errorf("JVM PID %d not found", p.PID)
+			}
+			return info, nil
+		}
+		return jvm.CollectAll(context.Background(), jvm.CollectOptions{}), nil
+	})
+
+	// jdk.list — enumerate installed JDK toolchains.
+	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
+		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		return tc.JDKs, nil
+	})
+
+	// toolchain.scan — full toolchain inventory (brew, JDKs, Node, Python, Go, etc.).
+	d.Register("toolchain.scan", func(_ json.RawMessage) (any, error) {
+		return toolchain.Collect(context.Background(), toolchain.CollectOptions{}), nil
 	})
 }
