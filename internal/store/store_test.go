@@ -433,3 +433,62 @@ func TestAppName(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveAndGetSnapshotProcesses(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	snap := SnapshotInput{
+		ID:          "proc-snap-1",
+		MachineUUID: "test-machine",
+		TakenAt:     time.Now(),
+		Kind:        "live",
+	}
+	if err := db.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	procs := []ProcessSnapshotRow{
+		{PID: 412, PPID: 1, Command: "Slack", RSSKiB: 184320, CPUPct: 1.2, AppPath: "/Applications/Slack.app"},
+		{PID: 1, PPID: 0, Command: "launchd", RSSKiB: 4096, CPUPct: 0.0},
+	}
+	if err := db.SaveSnapshotProcesses(ctx, "proc-snap-1", procs); err != nil {
+		t.Fatalf("SaveSnapshotProcesses: %v", err)
+	}
+
+	got, err := db.GetSnapshotProcesses(ctx, "proc-snap-1")
+	if err != nil {
+		t.Fatalf("GetSnapshotProcesses: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	// Ordered by rss_kib DESC → Slack first.
+	if got[0].Command != "Slack" {
+		t.Errorf("first = %q, want Slack", got[0].Command)
+	}
+	if got[0].AppPath != "/Applications/Slack.app" {
+		t.Errorf("AppPath = %q, want /Applications/Slack.app", got[0].AppPath)
+	}
+}
+
+func TestSaveSnapshotProcessesIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	snap := SnapshotInput{
+		ID: "proc-snap-2", MachineUUID: "m", TakenAt: time.Now(), Kind: "live",
+	}
+	if err := db.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	procs := []ProcessSnapshotRow{{PID: 1, Command: "launchd"}}
+	if err := db.SaveSnapshotProcesses(ctx, "proc-snap-2", procs); err != nil {
+		t.Fatal(err)
+	}
+	// Second call must not error (INSERT OR IGNORE).
+	if err := db.SaveSnapshotProcesses(ctx, "proc-snap-2", procs); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}

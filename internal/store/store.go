@@ -133,6 +133,21 @@ CREATE TABLE IF NOT EXISTS snapshot_apps (
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_apps_bundle ON snapshot_apps(bundle_id);
 
+CREATE TABLE IF NOT EXISTS snapshot_processes (
+    snapshot_id TEXT NOT NULL,
+    pid         INTEGER NOT NULL,
+    ppid        INTEGER NOT NULL DEFAULT 0,
+    command     TEXT NOT NULL DEFAULT '',
+    rss_kib     INTEGER NOT NULL DEFAULT 0,
+    cpu_pct     REAL NOT NULL DEFAULT 0,
+    app_path    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (snapshot_id, pid),
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_processes_snap ON snapshot_processes(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_snapshot_processes_app  ON snapshot_processes(app_path) WHERE app_path != '';
+
 CREATE TABLE IF NOT EXISTS process_metrics (
     pid          INTEGER NOT NULL,
     minute_at    DATETIME NOT NULL,
@@ -367,6 +382,59 @@ type AppRow struct {
 	AppVersion string
 }
 
+// ProcessSnapshotRow is one row from snapshot_processes.
+type ProcessSnapshotRow struct {
+	PID     int
+	PPID    int
+	Command string
+	RSSKiB  int64
+	CPUPct  float64
+	AppPath string
+}
+
+// SaveSnapshotProcesses inserts process rows for snapID. Uses INSERT OR IGNORE
+// to be idempotent (safe to call multiple times for the same snapshot).
+func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []ProcessSnapshotRow) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, p := range procs {
+		_, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO snapshot_processes
+			  (snapshot_id, pid, ppid, command, rss_kib, cpu_pct, app_path)
+			VALUES (?,?,?,?,?,?,?)`,
+			snapID, p.PID, p.PPID, p.Command, p.RSSKiB, p.CPUPct, p.AppPath,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetSnapshotProcesses returns all process rows for snapID.
+func (s *DB) GetSnapshotProcesses(ctx context.Context, snapID string) ([]ProcessSnapshotRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT pid, ppid, command, rss_kib, cpu_pct, app_path
+		 FROM snapshot_processes WHERE snapshot_id=? ORDER BY rss_kib DESC`, snapID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProcessSnapshotRow
+	for rows.Next() {
+		var r ProcessSnapshotRow
+		if err := rows.Scan(&r.PID, &r.PPID, &r.Command, &r.RSSKiB, &r.CPUPct, &r.AppPath); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // SaveProcessMetrics persists a batch of 1-minute aggregates from the ring
 // buffer. Uses INSERT OR IGNORE so duplicate (pid, minute_at) rows are skipped.
 func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) error {
@@ -490,6 +558,21 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 
 	var total int64
 	for _, m := range machines {
+		// Delete snapshot_processes for the to-be-pruned snapshots first (FK constraint).
+		if _, err := s.db.ExecContext(ctx, `
+			DELETE FROM snapshot_processes
+			WHERE snapshot_id IN (
+			  SELECT id FROM snapshots
+			  WHERE kind='live' AND machine_uuid=?
+			    AND id NOT IN (
+			      SELECT id FROM snapshots
+			      WHERE kind='live' AND machine_uuid=?
+			      ORDER BY taken_at DESC
+			      LIMIT ?
+			    )
+			)`, m, m, keepN); err != nil {
+			return total, fmt.Errorf("store: prune processes %s: %w", m, err)
+		}
 		// Delete snapshot_apps for the to-be-pruned snapshots first (FK constraint).
 		if _, err := s.db.ExecContext(ctx, `
 			DELETE FROM snapshot_apps
