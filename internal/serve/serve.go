@@ -96,6 +96,9 @@ func Run(ctx context.Context, opts Options) error {
 	// Flush aggregates to SQLite every minute.
 	go flushMetricsLoop(ctx, collector, db)
 
+	// Capture a live snapshot every minute; prune to the last 100 live snapshots.
+	go snapshotLoop(ctx, opts.SpectraVersion, db)
+
 	d := rpc.NewDispatcher()
 	registerHandlers(d, opts.SpectraVersion, db, collector)
 
@@ -135,6 +138,29 @@ func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
 				}
 			}
 			_ = db.SaveProcessMetrics(ctx, rows)
+		}
+	}
+}
+
+// snapshotLoop captures a live host-only snapshot every minute and prunes the
+// live snapshot history to the last 100 entries. Apps, storage, and JVMs are
+// skipped to keep the per-tick cost low (~50ms vs seconds for a full snapshot).
+func snapshotLoop(ctx context.Context, version string, db *store.DB) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			snap := snapshot.Build(ctx, snapshot.Options{
+				SpectraVersion: version,
+				SkipApps:       true,
+				SkipStorage:    true,
+				SkipJVMs:       true,
+			})
+			_ = db.SaveSnapshot(ctx, store.FromSnapshot(snap))
+			_, _ = db.PruneSnapshots(ctx, 100)
 		}
 	}
 }
