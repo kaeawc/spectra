@@ -137,6 +137,46 @@ func TestParseLSOFListenEmpty(t *testing.T) {
 	}
 }
 
+const ifconfigWithVPN = `lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+	inet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	inet 192.168.1.42 netmask 0xffffff00 broadcast 192.168.1.255
+utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
+	inet6 fe80::1%utun0 prefixlen 64 scopeid 0xa
+utun3: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.64.0.1 --> 100.64.0.1 netmask 0xffffffff
+`
+
+const ifconfigNoVPN = `lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+	inet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	inet 192.168.1.42 netmask 0xffffff00 broadcast 192.168.1.255
+utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
+	inet6 fe80::1%utun0 prefixlen 64 scopeid 0xa
+`
+
+func TestParseVPNInterfacesActive(t *testing.T) {
+	ifaces := parseVPNInterfaces(ifconfigWithVPN)
+	if len(ifaces) != 1 || ifaces[0] != "utun3" {
+		t.Errorf("got %v, want [utun3]", ifaces)
+	}
+}
+
+func TestParseVPNInterfacesNoInet(t *testing.T) {
+	// utun0 only has inet6, not inet — should not count.
+	ifaces := parseVPNInterfaces(ifconfigNoVPN)
+	if len(ifaces) != 0 {
+		t.Errorf("got %v, want empty (no inet on utun)", ifaces)
+	}
+}
+
+func TestParseVPNInterfacesEmpty(t *testing.T) {
+	ifaces := parseVPNInterfaces("")
+	if len(ifaces) != 0 {
+		t.Errorf("got %v, want empty", ifaces)
+	}
+}
+
 func TestCollect(t *testing.T) {
 	stub := func(name string, args ...string) ([]byte, error) {
 		switch name {
@@ -149,6 +189,8 @@ func TestCollect(t *testing.T) {
 			return []byte("HTTPEnable : 0\n"), nil
 		case "lsof":
 			return []byte(lsofOutput), nil
+		case "ifconfig":
+			return []byte(ifconfigWithVPN), nil
 		}
 		return nil, errors.New("unexpected command")
 	}
@@ -163,6 +205,28 @@ func TestCollect(t *testing.T) {
 	if len(s.ListeningPorts) != 2 {
 		t.Errorf("ListeningPorts = %d", len(s.ListeningPorts))
 	}
+	if !s.VPNActive {
+		t.Error("VPNActive should be true")
+	}
+	if len(s.VPNInterfaces) != 1 || s.VPNInterfaces[0] != "utun3" {
+		t.Errorf("VPNInterfaces = %v, want [utun3]", s.VPNInterfaces)
+	}
+}
+
+func TestCollectNoVPN(t *testing.T) {
+	stub := func(name string, args ...string) ([]byte, error) {
+		switch name {
+		case "route", "scutil", "lsof":
+			return []byte(""), nil
+		case "ifconfig":
+			return []byte(ifconfigNoVPN), nil
+		}
+		return nil, errors.New("unexpected command")
+	}
+	s := Collect(stub)
+	if s.VPNActive {
+		t.Error("VPNActive should be false when no utun has inet")
+	}
 }
 
 func TestCollectAllFail(t *testing.T) {
@@ -172,5 +236,8 @@ func TestCollectAllFail(t *testing.T) {
 	s := Collect(stub)
 	if s.DefaultRouteIface != "" || len(s.DNSServers) != 0 {
 		t.Errorf("expected zero value on all-fail: %+v", s)
+	}
+	if s.VPNActive {
+		t.Error("VPNActive should be false when ifconfig fails")
 	}
 }

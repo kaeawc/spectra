@@ -15,12 +15,18 @@ import (
 
 // State is the NetworkState slice of a Spectra snapshot.
 type State struct {
-	DefaultRouteIface string            `json:"default_route_iface,omitempty"`
-	DefaultRouteGW    string            `json:"default_route_gw,omitempty"`
-	DNSServers        []string          `json:"dns_servers,omitempty"`
-	Proxy             ProxyConfig       `json:"proxy"`
-	HostsOverrides    []HostsEntry      `json:"hosts_overrides,omitempty"`
-	ListeningPorts    []ListeningPort   `json:"listening_ports,omitempty"`
+	DefaultRouteIface string          `json:"default_route_iface,omitempty"`
+	DefaultRouteGW    string          `json:"default_route_gw,omitempty"`
+	DNSServers        []string        `json:"dns_servers,omitempty"`
+	Proxy             ProxyConfig     `json:"proxy"`
+	HostsOverrides    []HostsEntry    `json:"hosts_overrides,omitempty"`
+	ListeningPorts    []ListeningPort `json:"listening_ports,omitempty"`
+
+	// VPNActive is true when at least one tunnel interface (utun*) is UP with
+	// an assigned address. macOS uses utun interfaces for all VPN types:
+	// Tailscale, Cisco AnyConnect, WireGuard, OpenVPN, and built-in IKEv2.
+	VPNActive     bool     `json:"vpn_active"`
+	VPNInterfaces []string `json:"vpn_interfaces,omitempty"`
 }
 
 // ProxyConfig is the system HTTP/HTTPS/SOCKS proxy configuration.
@@ -68,6 +74,10 @@ func Collect(run CmdRunner) State {
 	s.HostsOverrides = readHostsOverrides("/etc/hosts")
 	if out, err := run("lsof", "-i", "-P", "-n", "-sTCP:LISTEN"); err == nil {
 		s.ListeningPorts = parseLSOFListen(string(out))
+	}
+	if out, err := run("ifconfig"); err == nil {
+		s.VPNInterfaces = parseVPNInterfaces(string(out))
+		s.VPNActive = len(s.VPNInterfaces) > 0
 	}
 	return s
 }
@@ -254,4 +264,48 @@ func parsePort(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// parseVPNInterfaces scans `ifconfig` output for active utun interfaces.
+// macOS assigns a utun* name to every VPN tunnel (IKEv2, Tailscale,
+// AnyConnect, WireGuard, OpenVPN). An interface counts as active when
+// its block contains an "inet" address line, meaning the tunnel is
+// established and has an assigned IP.
+//
+// Example block that matches:
+//
+//	utun3: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+//	        inet 100.64.0.1 --> 100.64.0.1 netmask 0xffffffff
+func parseVPNInterfaces(out string) []string {
+	var active []string
+	var current string
+	hasInet := false
+
+	commit := func() {
+		if current != "" && hasInet {
+			active = append(active, current)
+		}
+		current = ""
+		hasInet = false
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		// Interface header: name followed by colon, at column 0.
+		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			commit()
+			if idx := strings.Index(line, ":"); idx > 0 {
+				name := line[:idx]
+				if strings.HasPrefix(name, "utun") {
+					current = name
+				}
+			}
+			continue
+		}
+		// Continuation line inside the current interface block.
+		if current != "" && strings.Contains(line, "inet ") {
+			hasInet = true
+		}
+	}
+	commit()
+	return active
 }
