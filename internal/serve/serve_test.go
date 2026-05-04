@@ -481,3 +481,39 @@ func TestDaemonProcessSampleRequiresPID(t *testing.T) {
 		t.Error("expected error when pid=0")
 	}
 }
+
+func TestDaemonHelperHealthWhenUnavailable(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	// Helper is not running in tests; should return ok=false, not an error.
+	resp := rpcCall(t, enc, dec, 54, "helper.health", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("helper.health: unexpected RPC error: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("helper.health: result type %T, want map", resp.Result)
+	}
+	if m["helper"] != false {
+		t.Errorf("helper.health: helper field = %v, want false", m["helper"])
+	}
+}
+
+func TestDaemonHelperPowermetricsRequiresHelper(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	// Helper not running → should return an error (not a silent no-op).
+	resp := rpcCall(t, enc, dec, 55, "helper.powermetrics.sample", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when helper not running")
+	}
+}
+
+func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 56, "helper.tcc.system.query", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when bundle_id missing")
+	}
+}

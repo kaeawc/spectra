@@ -19,6 +19,7 @@ import (
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -691,6 +692,52 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return map[string]any{"cleared": "all"}, nil
 		}
 		return map[string]any{"cleared": p.Kind}, nil
+	})
+
+	// helper.* — proxy to the privileged helper when available.
+	hc := helperclient.New()
+
+	d.Register("helper.health", func(_ json.RawMessage) (any, error) {
+		result, err := hc.Health()
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return map[string]any{"ok": false, "helper": false, "reason": "helper not running"}, nil
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
+	d.Register("helper.powermetrics.sample", func(params json.RawMessage) (any, error) {
+		var p struct {
+			DurationMS int `json:"duration_ms"`
+		}
+		_ = json.Unmarshal(params, &p)
+		result, err := hc.PowermetricsSample(p.DurationMS)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
+	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
+		var p struct {
+			BundleID string `json:"bundle_id"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.BundleID == "" {
+			return nil, fmt.Errorf("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
+		}
+		result, err := hc.TCCSystemQuery(p.BundleID)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
 	})
 }
 
