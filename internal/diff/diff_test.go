@@ -231,3 +231,34 @@ func hasChange(changes []Change, kind ChangeKind, key string) bool {
 	}
 	return false
 }
+
+func TestDiffVPN(t *testing.T) {
+	a := base()
+	b := base()
+	b.Network = netstate.State{VPNActive: true, VPNInterfaces: []string{"utun3"}}
+
+	r := Compare(a, b)
+	sec := findSection(r, "vpn")
+	if sec == nil {
+		t.Fatal("vpn section missing")
+	}
+	if !hasChange(sec.Changes, Changed, "vpn_active") {
+		t.Errorf("expected vpn_active Changed, got %+v", sec.Changes)
+	}
+}
+
+func TestDiffVPNNoChange(t *testing.T) {
+	a := base()
+	a.Network = netstate.State{VPNActive: true}
+	b := base()
+	b.Network = netstate.State{VPNActive: true}
+
+	r := Compare(a, b)
+	sec := findSection(r, "vpn")
+	if sec == nil {
+		t.Fatal("vpn section missing")
+	}
+	if len(sec.Changes) != 0 {
+		t.Errorf("expected no vpn changes, got %+v", sec.Changes)
+	}
+}
