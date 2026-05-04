@@ -24,6 +24,7 @@ import (
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -421,6 +422,25 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		_ = json.Unmarshal(params, &p)
 		return process.CollectAll(context.Background(), process.CollectOptions{
 			BundlePaths: p.Bundles,
+		}), nil
+	})
+
+	// storage.system — disk volumes + ~/Library usage summary.
+	d.Register("storage.system", func(_ json.RawMessage) (any, error) {
+		return storagestate.Collect(storagestate.CollectOptions{}), nil
+	})
+
+	// storage.byApp — per-app ~/Library usage.
+	// { "paths": ["/Applications/Foo.app", ...] }
+	d.Register("storage.byApp", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Paths []string `json:"paths"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || len(p.Paths) == 0 {
+			return nil, fmt.Errorf("storage.byApp requires {\"paths\": [...]}")
+		}
+		return storagestate.Collect(storagestate.CollectOptions{
+			AppPaths: p.Paths,
 		}), nil
 	})
 }
