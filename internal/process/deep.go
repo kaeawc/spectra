@@ -26,10 +26,11 @@ func enrichDeep(procs []Info, run func(string, ...string) ([]byte, error)) {
 	parseLSOFDeep(procs, string(out))
 }
 
-// fdCounts and listenPorts accumulate results keyed by PID during parsing.
+// deepResult accumulates per-PID results during lsof parsing.
 type deepResult struct {
 	fdCount      int
 	listenPorts  []int
+	outboundConns []string
 }
 
 // parseLSOFDeep merges lsof output into the procs slice in-place.
@@ -75,17 +76,27 @@ func parseLSOFDeep(procs []Info, out string) {
 		}
 
 		// Listening port detection: NODE=TCP, NAME contains "(LISTEN)".
+		// Outbound connection: NODE=TCP, NAME contains "->", no "(LISTEN)".
 		if len(fields) >= 9 {
 			node := strings.ToUpper(fields[7])
 			if node == "TCP" {
 				name := strings.Join(fields[8:], " ")
 				if strings.Contains(name, "(LISTEN)") {
 					// Extract port from "host:port (LISTEN)".
-					name = strings.TrimSuffix(name, " (LISTEN)")
-					if colon := strings.LastIndex(name, ":"); colon >= 0 {
-						if port, err := strconv.Atoi(name[colon+1:]); err == nil && port > 0 {
+					addr := strings.TrimSuffix(name, " (LISTEN)")
+					if colon := strings.LastIndex(addr, ":"); colon >= 0 {
+						if port, err := strconv.Atoi(addr[colon+1:]); err == nil && port > 0 {
 							r.listenPorts = append(r.listenPorts, port)
 						}
+					}
+				} else if idx2 := strings.Index(name, "->"); idx2 >= 0 {
+					// "local->remote (STATE)" — record the remote address.
+					remote := name[idx2+2:]
+					if sp := strings.Index(remote, " "); sp >= 0 {
+						remote = remote[:sp]
+					}
+					if remote != "" {
+						r.outboundConns = append(r.outboundConns, remote)
 					}
 				}
 			}
@@ -99,6 +110,10 @@ func parseLSOFDeep(procs []Info, out string) {
 		if len(r.listenPorts) > 0 {
 			sort.Ints(r.listenPorts)
 			procs[i].ListeningPorts = r.listenPorts
+		}
+		if len(r.outboundConns) > 0 {
+			sort.Strings(r.outboundConns)
+			procs[i].OutboundConnections = r.outboundConns
 		}
 	}
 }

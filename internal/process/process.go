@@ -30,8 +30,9 @@ type Info struct {
 	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
 
 	// Deep fields — populated only when CollectOptions.Deep is true.
-	OpenFDs        int   `json:"open_fds,omitempty"`        // open file descriptor count
-	ListeningPorts []int `json:"listening_ports,omitempty"` // TCP ports this process listens on
+	OpenFDs             int      `json:"open_fds,omitempty"`             // open file descriptor count
+	ListeningPorts      []int    `json:"listening_ports,omitempty"`      // TCP ports this process listens on
+	OutboundConnections []string `json:"outbound_connections,omitempty"` // active TCP remote addresses (host:port)
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
