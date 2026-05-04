@@ -19,11 +19,12 @@ func runProcess(args []string) int {
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	sortBy := fs.String("sort", "rss", "Sort by: rss, pid, or cmd")
 	topN := fs.Int("top", 0, "Show only top N processes (0 = all)")
+	deep := fs.Bool("deep", false, "Enrich with open FD count and listening ports via lsof (slower)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	procs := process.CollectAll(context.Background(), process.CollectOptions{})
+	procs := process.CollectAll(context.Background(), process.CollectOptions{Deep: *deep})
 	if len(procs) == 0 {
 		fmt.Fprintln(os.Stderr, "no processes found")
 		return 0
@@ -49,8 +50,13 @@ func runProcess(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("%-7s  %-6s  %-10s  %-10s  %s\n", "PID", "THR", "RSS", "CPU%", "COMMAND")
-	fmt.Println(strings.Repeat("-", 76))
+	if *deep {
+		fmt.Printf("%-7s  %-6s  %-10s  %-10s  %-5s  %s\n", "PID", "THR", "RSS", "CPU%", "FDS", "COMMAND")
+		fmt.Println(strings.Repeat("-", 82))
+	} else {
+		fmt.Printf("%-7s  %-6s  %-10s  %-10s  %s\n", "PID", "THR", "RSS", "CPU%", "COMMAND")
+		fmt.Println(strings.Repeat("-", 76))
+	}
 	for _, p := range procs {
 		thr := "-"
 		if p.ThreadCount > 0 {
@@ -60,8 +66,17 @@ func runProcess(args []string) int {
 		if p.CPUPct > 0 {
 			cpu = fmt.Sprintf("%.1f%%", p.CPUPct)
 		}
-		fmt.Printf("%-7d  %-6s  %-10s  %-10s  %s\n",
-			p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, truncate(p.Command, 45))
+		if *deep {
+			fds := "-"
+			if p.OpenFDs > 0 {
+				fds = strconv.Itoa(p.OpenFDs)
+			}
+			fmt.Printf("%-7d  %-6s  %-10s  %-10s  %-5s  %s\n",
+				p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, fds, truncate(p.Command, 45))
+		} else {
+			fmt.Printf("%-7d  %-6s  %-10s  %-10s  %s\n",
+				p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, truncate(p.Command, 45))
+		}
 	}
 	return 0
 }
