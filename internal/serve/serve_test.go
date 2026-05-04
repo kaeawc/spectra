@@ -355,3 +355,48 @@ func TestDaemonProcessTreeReturnsSlice(t *testing.T) {
 		t.Fatalf("result type %T, want []any", resp.Result)
 	}
 }
+
+func TestDaemonJVMThreadDumpMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 30, "jvm.thread_dump", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMHeapHistogramMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 31, "jvm.heap_histogram", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMGCStatsMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 32, "jvm.gc_stats", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJFRStartMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 33, "jvm.jfr.start", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJFRStopMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 34, "jvm.jfr.stop", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}

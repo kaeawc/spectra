@@ -423,6 +423,85 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return jvm.CollectAll(context.Background(), jvm.CollectOptions{}), nil
 	})
 
+	// jvm.thread_dump — run `jcmd <pid> Thread.print` and return the raw text.
+	d.Register("jvm.thread_dump", func(params json.RawMessage) (any, error) {
+		var p struct{ PID int `json:"pid"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.thread_dump requires {\"pid\": <pid>}")
+		}
+		out, err := jvm.ThreadDump(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("thread dump pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	})
+
+	// jvm.heap_histogram — run `jcmd <pid> GC.class_histogram` and return the raw text.
+	d.Register("jvm.heap_histogram", func(params json.RawMessage) (any, error) {
+		var p struct{ PID int `json:"pid"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.heap_histogram requires {\"pid\": <pid>}")
+		}
+		out, err := jvm.HeapHistogram(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("heap histogram pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	})
+
+	// jvm.gc_stats — run `jstat -gc <pid>` and return parsed GC counters.
+	d.Register("jvm.gc_stats", func(params json.RawMessage) (any, error) {
+		var p struct{ PID int `json:"pid"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.gc_stats requires {\"pid\": <pid>}")
+		}
+		stats, err := jvm.CollectGCStats(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("gc stats pid %d: %w", p.PID, err)
+		}
+		return stats, nil
+	})
+
+	// jvm.jfr.start — start a JFR recording on a JVM process.
+	// Required: {"pid": <pid>}. Optional: {"name": "spectra"}.
+	d.Register("jvm.jfr.start", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID  int    `json:"pid"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.jfr.start requires {\"pid\": <pid>}")
+		}
+		name := p.Name
+		if name == "" {
+			name = "spectra"
+		}
+		if err := jvm.JFRStart(p.PID, name, nil); err != nil {
+			return nil, fmt.Errorf("jfr start pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "name": name, "started": true}, nil
+	})
+
+	// jvm.jfr.stop — stop a JFR recording. Optional: {"dest": "/path/to/out.jfr"}.
+	d.Register("jvm.jfr.stop", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID  int    `json:"pid"`
+			Name string `json:"name"`
+			Dest string `json:"dest"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.jfr.stop requires {\"pid\": <pid>}")
+		}
+		name := p.Name
+		if name == "" {
+			name = "spectra"
+		}
+		if err := jvm.JFRStop(p.PID, name, p.Dest, nil); err != nil {
+			return nil, fmt.Errorf("jfr stop pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "stopped": true}, nil
+	})
+
 	// jdk.list — enumerate installed JDK toolchains.
 	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
 		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
