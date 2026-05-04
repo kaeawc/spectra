@@ -9,10 +9,18 @@ import (
 // PowerState captures battery and thermal facts.
 // See docs/design/system-inventory.md#powerstate.
 type PowerState struct {
-	OnBattery       bool    `json:"on_battery"`
-	BatteryPct      int     `json:"battery_pct"`
-	ThermalPressure string  `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
+	OnBattery       bool           `json:"on_battery"`
+	BatteryPct      int            `json:"battery_pct"`
+	ThermalPressure string         `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
 	Assertions      []PowerAssertion `json:"assertions,omitempty"`
+	EnergyTopUsers  []EnergyUser   `json:"energy_top_users,omitempty"`
+}
+
+// EnergyUser is one entry from `top -l 1 -o power`.
+type EnergyUser struct {
+	PID           int     `json:"pid"`
+	EnergyImpact  float64 `json:"energy_impact"`
+	Command       string  `json:"command"`
 }
 
 // PowerAssertion is one pmset sleep/display assertion.
@@ -36,8 +44,35 @@ func CollectPower(run CmdRunner) PowerState {
 	if out, err := run("pmset", "-g", "assertions"); err == nil {
 		ps.Assertions = parseAssertions(string(out))
 	}
+	if out, err := run("top", "-l", "1", "-n", "10", "-o", "power", "-stats", "pid,power,command"); err == nil {
+		ps.EnergyTopUsers = parseEnergyTop(string(out))
+	}
 
 	return ps
+}
+
+// parseEnergyTop parses `top -l 1 -n 10 -o power -stats pid,power,command` output.
+func parseEnergyTop(out string) []EnergyUser {
+	var result []EnergyUser
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[0] == "PID" {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		impact, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		result = append(result, EnergyUser{PID: pid, EnergyImpact: impact, Command: fields[2]})
+	}
+	return result
 }
 
 // parseBatt extracts OnBattery + BatteryPct from `pmset -g batt` output.

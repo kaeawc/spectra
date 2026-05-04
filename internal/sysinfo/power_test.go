@@ -31,8 +31,20 @@ Listed by owning process:
  pid 412(Slack): [0x000165b8000002f1] 00:00:04 PreventUserIdleSleep named: "playing audio"
 `
 
-func stubPmset(batt, therm, assertions string) CmdRunner {
+const topEnergyOutput = `PID    POWER  COMMAND
+99647  12.5   Slack
+412    3.2    com.apple.WebKit
+1      0.0    launchd
+`
+
+func stubPower(batt, therm, assertions, topEnergy string) CmdRunner {
 	return func(name string, args ...string) ([]byte, error) {
+		if name == "top" {
+			if topEnergy == "" {
+				return nil, errors.New("no top")
+			}
+			return []byte(topEnergy), nil
+		}
 		if name != "pmset" || len(args) < 2 {
 			return nil, errors.New("unexpected")
 		}
@@ -55,6 +67,10 @@ func stubPmset(batt, therm, assertions string) CmdRunner {
 		}
 		return nil, errors.New("unknown pmset arg")
 	}
+}
+
+func stubPmset(batt, therm, assertions string) CmdRunner {
+	return stubPower(batt, therm, assertions, "")
 }
 
 func TestCollectPowerOnBattery(t *testing.T) {
@@ -112,5 +128,34 @@ func TestCollectPowerAllFail(t *testing.T) {
 	// Should not panic; returns zero value.
 	if ps.OnBattery || ps.BatteryPct != 0 {
 		t.Errorf("expected zero value on all-fail: %+v", ps)
+	}
+}
+
+func TestParseEnergyTop(t *testing.T) {
+	users := parseEnergyTop(topEnergyOutput)
+	if len(users) != 3 {
+		t.Fatalf("len = %d, want 3", len(users))
+	}
+	if users[0].PID != 99647 {
+		t.Errorf("PID = %d, want 99647", users[0].PID)
+	}
+	if users[0].EnergyImpact != 12.5 {
+		t.Errorf("EnergyImpact = %v, want 12.5", users[0].EnergyImpact)
+	}
+	if users[0].Command != "Slack" {
+		t.Errorf("Command = %q, want Slack", users[0].Command)
+	}
+	if users[2].EnergyImpact != 0.0 {
+		t.Errorf("EnergyImpact = %v, want 0.0 for launchd", users[2].EnergyImpact)
+	}
+}
+
+func TestCollectPowerEnergyTopUsers(t *testing.T) {
+	ps := CollectPower(stubPower("", "", "", topEnergyOutput))
+	if len(ps.EnergyTopUsers) != 3 {
+		t.Fatalf("EnergyTopUsers = %d, want 3", len(ps.EnergyTopUsers))
+	}
+	if ps.EnergyTopUsers[1].PID != 412 {
+		t.Errorf("second PID = %d, want 412", ps.EnergyTopUsers[1].PID)
 	}
 }
