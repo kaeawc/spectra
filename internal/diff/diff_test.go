@@ -96,6 +96,59 @@ func TestDiffAppsVersionChanged(t *testing.T) {
 	}
 }
 
+func TestDiffAppsHardenedRuntimeChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.Apps = []detect.Result{{BundleID: "com.example.app", TeamID: "TEAM1", HardenedRuntime: true}}
+	b.Apps = []detect.Result{{BundleID: "com.example.app", TeamID: "TEAM1", HardenedRuntime: false}}
+
+	r := Compare(a, b)
+	sec := findSection(r, "apps")
+	if !hasChange(sec.Changes, Changed, "com.example.app:hardened-runtime") {
+		t.Errorf("expected hardened-runtime change, got %+v", sec.Changes)
+	}
+}
+
+func TestDiffAppsGatekeeperChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.Apps = []detect.Result{{BundleID: "com.example.app", GatekeeperStatus: "accepted"}}
+	b.Apps = []detect.Result{{BundleID: "com.example.app", GatekeeperStatus: "rejected"}}
+
+	r := Compare(a, b)
+	sec := findSection(r, "apps")
+	if !hasChange(sec.Changes, Changed, "com.example.app:gatekeeper") {
+		t.Errorf("expected gatekeeper change, got %+v", sec.Changes)
+	}
+}
+
+func TestDiffAppsTeamIDChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.Apps = []detect.Result{{BundleID: "com.example.app", TeamID: ""}}
+	b.Apps = []detect.Result{{BundleID: "com.example.app", TeamID: "NEWTEAM"}}
+
+	r := Compare(a, b)
+	sec := findSection(r, "apps")
+	if !hasChange(sec.Changes, Changed, "com.example.app:team-id") {
+		t.Errorf("expected team-id change, got %+v", sec.Changes)
+	}
+}
+
+func TestDiffAppsGatekeeperUnknownNotReported(t *testing.T) {
+	// Empty string means spctl was unavailable — don't report as a change.
+	a := base()
+	b := base()
+	a.Apps = []detect.Result{{BundleID: "com.example.app", GatekeeperStatus: ""}}
+	b.Apps = []detect.Result{{BundleID: "com.example.app", GatekeeperStatus: "accepted"}}
+
+	r := Compare(a, b)
+	sec := findSection(r, "apps")
+	if hasChange(sec.Changes, Changed, "com.example.app:gatekeeper") {
+		t.Errorf("should not report gatekeeper change when one side is empty: %+v", sec.Changes)
+	}
+}
+
 func TestDiffJDKsAddedRemoved(t *testing.T) {
 	a := base()
 	b := base()

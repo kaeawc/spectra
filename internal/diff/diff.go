@@ -96,10 +96,15 @@ func diffHost(a, b snapshot.Snapshot) Section {
 }
 
 // diffApps matches by bundle ID (falling back to path when bundle ID is empty).
-// Reports added, removed, and version-changed apps.
+// Reports added, removed, version-changed, and security-changed apps.
 func diffApps(a, b snapshot.Snapshot) Section {
-	type appKey struct{ bundleID, path string }
-	type appInfo struct{ version, path string }
+	type appInfo struct {
+		version          string
+		path             string
+		hardenedRuntime  bool
+		gatekeeperStatus string
+		teamID           string
+	}
 
 	mapA := make(map[string]appInfo, len(a.Apps))
 	for _, r := range a.Apps {
@@ -107,7 +112,12 @@ func diffApps(a, b snapshot.Snapshot) Section {
 		if k == "" {
 			k = r.Path
 		}
-		mapA[k] = appInfo{version: r.AppVersion, path: r.Path}
+		mapA[k] = appInfo{
+			version: r.AppVersion, path: r.Path,
+			hardenedRuntime:  r.HardenedRuntime,
+			gatekeeperStatus: r.GatekeeperStatus,
+			teamID:           r.TeamID,
+		}
 	}
 	mapB := make(map[string]appInfo, len(b.Apps))
 	for _, r := range b.Apps {
@@ -115,15 +125,49 @@ func diffApps(a, b snapshot.Snapshot) Section {
 		if k == "" {
 			k = r.Path
 		}
-		mapB[k] = appInfo{version: r.AppVersion, path: r.Path}
+		mapB[k] = appInfo{
+			version: r.AppVersion, path: r.Path,
+			hardenedRuntime:  r.HardenedRuntime,
+			gatekeeperStatus: r.GatekeeperStatus,
+			teamID:           r.TeamID,
+		}
+	}
+
+	boolStr := func(v bool) string {
+		if v {
+			return "true"
+		}
+		return "false"
 	}
 
 	var changes []Change
 	for k, ia := range mapA {
-		if ib, ok := mapB[k]; !ok {
+		ib, ok := mapB[k]
+		if !ok {
 			changes = append(changes, Change{Kind: Removed, Key: k, Before: ia.version})
-		} else if ia.version != ib.version {
+			continue
+		}
+		if ia.version != ib.version {
 			changes = append(changes, Change{Kind: Changed, Key: k, Before: ia.version, After: ib.version})
+		}
+		if ia.hardenedRuntime != ib.hardenedRuntime {
+			changes = append(changes, Change{Kind: Changed, Key: k + ":hardened-runtime",
+				Before: boolStr(ia.hardenedRuntime), After: boolStr(ib.hardenedRuntime)})
+		}
+		if ia.gatekeeperStatus != ib.gatekeeperStatus && ia.gatekeeperStatus != "" && ib.gatekeeperStatus != "" {
+			changes = append(changes, Change{Kind: Changed, Key: k + ":gatekeeper",
+				Before: ia.gatekeeperStatus, After: ib.gatekeeperStatus})
+		}
+		if ia.teamID != ib.teamID {
+			before, after := ia.teamID, ib.teamID
+			if before == "" {
+				before = "(unsigned)"
+			}
+			if after == "" {
+				after = "(unsigned)"
+			}
+			changes = append(changes, Change{Kind: Changed, Key: k + ":team-id",
+				Before: before, After: after})
 		}
 	}
 	for k, ib := range mapB {
