@@ -353,3 +353,22 @@ func TestDetectRejectsNonBundle(t *testing.T) {
 		t.Errorf("expected error for non-.app path")
 	}
 }
+
+func TestParseGatekeeperOutput(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"/Applications/Foo.app: accepted\n", "accepted"},
+		{"/Applications/Foo.app: rejected\n", "rejected"},
+		{"", ""},
+		{"error: some other failure\n", ""},
+		{"/Applications/Foo.app: accepted source=Apple\n", "accepted"},
+	}
+	for _, tc := range cases {
+		got := parseGatekeeperOutput(tc.input)
+		if got != tc.want {
+			t.Errorf("parseGatekeeperOutput(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
