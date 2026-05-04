@@ -316,3 +316,16 @@ func TestDaemonNetworkStateReturnsObject(t *testing.T) {
 		t.Error("network.state: expected vpn_active field in result")
 	}
 }
+
+func TestDaemonProcessListReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 19, "process.list", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("process.list: %v", resp.Error)
+	}
+	// Result should be a JSON array (slice).
+	if _, ok := resp.Result.([]any); !ok {
+		t.Fatalf("result type %T, want []any", resp.Result)
+	}
+}

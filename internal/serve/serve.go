@@ -19,6 +19,7 @@ import (
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/netstate"
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -409,5 +410,17 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// network.state — current network configuration snapshot.
 	d.Register("network.state", func(_ json.RawMessage) (any, error) {
 		return netstate.Collect(netstate.DefaultRunner), nil
+	})
+
+	// process.list — snapshot of all running processes via ps.
+	// Optional: { "bundles": ["/Applications/Foo.app"] } to enable app attribution.
+	d.Register("process.list", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Bundles []string `json:"bundles"`
+		}
+		_ = json.Unmarshal(params, &p)
+		return process.CollectAll(context.Background(), process.CollectOptions{
+			BundlePaths: p.Bundles,
+		}), nil
 	})
 }
