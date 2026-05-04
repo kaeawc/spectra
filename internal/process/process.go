@@ -156,3 +156,29 @@ func TotalRSS(procs []Info) int64 {
 	}
 	return total
 }
+
+// TreeNode represents one process in the parent-child hierarchy.
+type TreeNode struct {
+	Info     Info        `json:"info"`
+	Children []*TreeNode `json:"children,omitempty"`
+}
+
+// BuildTree constructs a parent-child tree from a flat process list.
+// Processes whose parent PID is unknown (not in the list) or self-referential
+// become roots.
+func BuildTree(procs []Info) []*TreeNode {
+	nodes := make(map[int]*TreeNode, len(procs))
+	for i := range procs {
+		nodes[procs[i].PID] = &TreeNode{Info: procs[i]}
+	}
+	var roots []*TreeNode
+	for _, p := range procs {
+		node := nodes[p.PID]
+		if parent, ok := nodes[p.PPID]; ok && p.PPID != p.PID {
+			parent.Children = append(parent.Children, node)
+		} else {
+			roots = append(roots, node)
+		}
+	}
+	return roots
+}

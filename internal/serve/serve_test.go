@@ -342,3 +342,16 @@ func TestDaemonStorageByAppEmptyPaths(t *testing.T) {
 		t.Error("expected error for empty paths")
 	}
 }
+
+func TestDaemonProcessTreeReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 22, "process.tree", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("process.tree: %v", resp.Error)
+	}
+	// Result should be a JSON array (slice of tree roots).
+	if _, ok := resp.Result.([]any); !ok {
+		t.Fatalf("result type %T, want []any", resp.Result)
+	}
+}
