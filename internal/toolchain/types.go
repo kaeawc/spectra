@@ -13,7 +13,15 @@ type Toolchains struct {
 	Ruby        []RuntimeInstall `json:"ruby,omitempty"`
 	Rust        []RustToolchain  `json:"rust,omitempty"`
 	JVMManagers []string         `json:"jvm_managers,omitempty"` // "sdkman", "asdf", "mise", "jenv"
+	BuildTools  []BuildTool      `json:"build_tools,omitempty"`
 	Env         EnvSnapshot      `json:"env"`
+}
+
+// BuildTool is one JVM-ecosystem build tool installation (Maven, Gradle, Bazel, Make, CMake).
+type BuildTool struct {
+	Name    string `json:"name"`    // "maven", "gradle", "bazel", "make", "cmake"
+	Version string `json:"version"` // raw version string
+	Source  string `json:"source"`  // "brew", "system", "wrapper"
 }
 
 // BrewInventory holds installed Homebrew formulae, casks, and taps.

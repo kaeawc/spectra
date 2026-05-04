@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -240,5 +241,67 @@ func TestDiscoverJVMManagersMultiple(t *testing.T) {
 	}
 	if !found["asdf"] || !found["jenv"] {
 		t.Errorf("expected asdf and jenv in %v", managers)
+	}
+}
+
+func TestDiscoverBuildToolsNone(t *testing.T) {
+	home := t.TempDir()
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 0 {
+		t.Errorf("expected no tools, got %v", tools)
+	}
+}
+
+func TestDiscoverBuildToolsMavenFromBrew(t *testing.T) {
+	home := t.TempDir()
+	cellar := filepath.Join(home, "Cellar")
+	mavenDir := filepath.Join(cellar, "maven", "3.9.6")
+	if err := os.MkdirAll(mavenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{cellar},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "maven" {
+		t.Errorf("expected [maven], got %v", tools)
+	}
+	if tools[0].Version != "3.9.6" {
+		t.Errorf("version = %q, want 3.9.6", tools[0].Version)
+	}
+	if tools[0].Source != "brew" {
+		t.Errorf("source = %q, want brew", tools[0].Source)
+	}
+}
+
+func TestDiscoverBuildToolsGradleFromCmd(t *testing.T) {
+	home := t.TempDir()
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "gradle" {
+				return []byte("Gradle 8.5\n..."), nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "gradle" {
+		t.Errorf("expected [gradle], got %v", tools)
+	}
+	if tools[0].Version != "8.5" {
+		t.Errorf("version = %q, want 8.5", tools[0].Version)
 	}
 }

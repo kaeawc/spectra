@@ -3,6 +3,8 @@ package toolchain
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -264,4 +266,89 @@ func discoverJVMManagers(home string) []string {
 		}
 	}
 	return found
+}
+
+// discoverBuildTools finds installed Maven, Gradle, Bazel, Make, and CMake.
+// Uses brew cellar presence (fast, no forking) as primary detection;
+// falls back to version commands for tools not managed by brew.
+func discoverBuildTools(opts CollectOptions) []BuildTool {
+	var tools []BuildTool
+
+	add := func(name, version, source string) {
+		if version != "" {
+			tools = append(tools, BuildTool{Name: name, Version: version, Source: source})
+		}
+	}
+
+	// Maven — check brew cellar first, then mvn --version.
+	if v := brewVersion(opts.BrewCellars, "maven"); v != "" {
+		add("maven", v, "brew")
+	} else if v := versionFromCmd(opts.CmdRunner, "mvn", "--version"); v != "" {
+		add("maven", v, "system")
+	}
+
+	// Gradle — check brew cellar first, then gradle --version.
+	if v := brewVersion(opts.BrewCellars, "gradle"); v != "" {
+		add("gradle", v, "brew")
+	} else if v := versionFromCmd(opts.CmdRunner, "gradle", "--version"); v != "" {
+		add("gradle", v, "system")
+	}
+
+	// Bazel — check brew cellar first, then bazel version.
+	if v := brewVersion(opts.BrewCellars, "bazel"); v != "" {
+		add("bazel", v, "brew")
+	} else if v := brewVersion(opts.BrewCellars, "bazelbuild/tap/bazel"); v != "" {
+		add("bazel", v, "brew")
+	} else if v := versionFromCmd(opts.CmdRunner, "bazel", "version"); v != "" {
+		add("bazel", v, "system")
+	}
+
+	// CMake — check brew cellar first.
+	if v := brewVersion(opts.BrewCellars, "cmake"); v != "" {
+		add("cmake", v, "brew")
+	} else if v := versionFromCmd(opts.CmdRunner, "cmake", "--version"); v != "" {
+		add("cmake", v, "system")
+	}
+
+	return tools
+}
+
+// brewVersion returns the installed version of a formula by scanning
+// the Cellar directory (no subprocess). Returns "" if not installed.
+func brewVersion(cellars []string, formula string) string {
+	base := filepath.Base(formula)
+	for _, cellar := range cellars {
+		dir := filepath.Join(cellar, base)
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		// Sort and return the last (highest) version directory.
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			return names[len(names)-1]
+		}
+	}
+	return ""
+}
+
+// versionFromCmd runs cmd args and extracts the first version-like token.
+func versionFromCmd(run CmdRunner, cmd string, args ...string) string {
+	out, err := run(cmd, args...)
+	if err != nil {
+		return ""
+	}
+	// Look for first token matching "X.Y.Z" or similar.
+	re := regexp.MustCompile(`\d+\.\d+[\.\d]*`)
+	m := re.Find(out)
+	if m == nil {
+		return ""
+	}
+	return string(m)
 }
