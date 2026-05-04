@@ -25,6 +25,7 @@ func V1Catalog() []Rule {
 		ruleLoginItemDangling(),
 		rulePermissionMismatch(),
 		ruleSparseFileInflation(),
+		ruleGatekeeperRejected(),
 	}
 }
 
@@ -439,4 +440,30 @@ func atoi(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// ruleGatekeeperRejected fires when spctl --assess explicitly rejects an app.
+// A "rejected" verdict means Gatekeeper would block the app from running on
+// an unmodified macOS 10.15+ system.
+func ruleGatekeeperRejected() Rule {
+	return Rule{
+		ID:       "app-gatekeeper-rejected",
+		Severity: SeverityHigh,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				if app.GatekeeperStatus != "rejected" {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "app-gatekeeper-rejected",
+					Severity: SeverityHigh,
+					Subject:  appDisplayName(app.Path),
+					Message:  fmt.Sprintf("%s is rejected by Gatekeeper — it would be blocked from running on an unmodified macOS system.", appDisplayName(app.Path)),
+					Fix:      "Re-sign and notarize the app with a valid Apple Developer ID certificate, or remove it if it is no longer needed.",
+				})
+			}
+			return findings
+		},
+	}
 }

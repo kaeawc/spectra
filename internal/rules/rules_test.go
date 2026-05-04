@@ -466,3 +466,44 @@ func TestEvaluateSortOrder(t *testing.T) {
 		t.Errorf("first finding severity = %q, want high", findings[0].Severity)
 	}
 }
+
+// --- ruleGatekeeperRejected ---
+
+func TestGatekeeperRejectedFires(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/BadApp.app", GatekeeperStatus: "rejected", TeamID: "ABC123"},
+	}
+	findings := ruleGatekeeperRejected().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "app-gatekeeper-rejected" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+	if findings[0].Severity != SeverityHigh {
+		t.Errorf("severity = %q, want high", findings[0].Severity)
+	}
+}
+
+func TestGatekeeperRejectedNoFireAccepted(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/GoodApp.app", GatekeeperStatus: "accepted"},
+	}
+	findings := ruleGatekeeperRejected().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for accepted app, got %d", len(findings))
+	}
+}
+
+func TestGatekeeperRejectedNoFireUnknown(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/UnknownApp.app", GatekeeperStatus: ""},
+	}
+	findings := ruleGatekeeperRejected().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for unknown status, got %d", len(findings))
+	}
+}

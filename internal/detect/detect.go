@@ -83,6 +83,13 @@ type Result struct {
 	// per-user TCC.db is readable as long as the user runs the tool as
 	// themselves. Empty when neither database is accessible.
 	GrantedPermissions []string
+
+	// GatekeeperStatus is the result of `spctl --assess --type exec` on
+	// the bundle: "accepted", "rejected", or "" when spctl is unavailable
+	// or the assessment could not be completed. "accepted" means the app
+	// passes Gatekeeper's notarization / Developer ID check; "rejected"
+	// means it would be blocked by Gatekeeper on macOS 10.15+.
+	GatekeeperStatus string
 }
 
 // Helpers groups sub-bundles found inside the .app.
@@ -204,6 +211,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.LoginItems = scanLoginItems(appPath, r.BundleID)
 	r.RunningProcesses = scanRunningProcesses(appPath)
 	r.GrantedPermissions = scanGrantedPermissions(r.BundleID)
+	r.GatekeeperStatus = readGatekeeperStatus(appPath)
 	if opts.ScanNetwork {
 		r.NetworkEndpoints = scanNetworkEndpoints(appPath, exe)
 	}
@@ -374,6 +382,33 @@ func readSigning(appPath string) (teamID string, hardened bool) {
 // readEntitlements asks codesign for the bundle's entitlements plist
 // (XML form) and extracts the boolean ones set to true. The full set
 // is large and noisy; we keep a curated allowlist of notable ones.
+// readGatekeeperStatus runs `spctl --assess --type exec <appPath>` and
+// returns "accepted", "rejected", or "" when spctl is unavailable or the
+// assessment cannot be completed. spctl writes its verdict to stderr
+// regardless of exit code, so we parse stderr for the verdict string.
+func readGatekeeperStatus(appPath string) string {
+	cmd := exec.Command("spctl", "--assess", "--type", "exec", appPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	_ = cmd.Run()
+	return parseGatekeeperOutput(stderr.String())
+}
+
+// parseGatekeeperOutput extracts the Gatekeeper verdict from spctl stderr.
+// Expected formats:
+//
+//	"/Applications/Foo.app: accepted"
+//	"/Applications/Foo.app: rejected"
+func parseGatekeeperOutput(out string) string {
+	if strings.Contains(out, "accepted") {
+		return "accepted"
+	}
+	if strings.Contains(out, "rejected") {
+		return "rejected"
+	}
+	return ""
+}
+
 func readEntitlements(appPath string) (sandboxed bool, notable []string) {
 	out, err := exec.Command("codesign", "-d", "--entitlements", ":-", appPath).Output()
 	if err != nil || len(out) == 0 {
