@@ -36,6 +36,8 @@ func subcommandList() []subcommand {
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
 		{"jvm", "List or inspect running JVM processes", runJVM},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
+		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
+		{"status", "Check whether the local daemon is running", runStatus},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},
