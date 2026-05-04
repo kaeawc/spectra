@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/process"
@@ -48,12 +49,19 @@ func runProcess(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("%-7s  %-10s  %-10s  %s\n", "PID", "RSS", "VSIZE", "COMMAND")
-	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("%-7s  %-6s  %-10s  %-10s  %s\n", "PID", "THR", "RSS", "CPU%", "COMMAND")
+	fmt.Println(strings.Repeat("-", 76))
 	for _, p := range procs {
-		fmt.Printf("%-7d  %-10s  %-10s  %s\n",
-			p.PID, humanSizeKiB(p.RSSKiB), humanSizeKiB(p.VSizeKiB),
-			truncate(p.Command, 50))
+		thr := "-"
+		if p.ThreadCount > 0 {
+			thr = strconv.Itoa(p.ThreadCount)
+		}
+		cpu := "-"
+		if p.CPUPct > 0 {
+			cpu = fmt.Sprintf("%.1f%%", p.CPUPct)
+		}
+		fmt.Printf("%-7d  %-6s  %-10s  %-10s  %s\n",
+			p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, truncate(p.Command, 45))
 	}
 	return 0
 }
