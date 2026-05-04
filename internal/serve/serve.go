@@ -290,4 +290,75 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		return rules.Evaluate(snap, rules.V1Catalog()), nil
 	})
+
+	// issues.list — { "machine_uuid": "...", "status": "open" }
+	// status is optional; omit to return all statuses.
+	d.Register("issues.list", func(params json.RawMessage) (any, error) {
+		var p struct {
+			MachineUUID string `json:"machine_uuid"`
+			Status      string `json:"status"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.MachineUUID == "" {
+			return nil, fmt.Errorf("issues.list requires {\"machine_uuid\": \"...\"}")
+		}
+		return db.ListIssues(context.Background(), p.MachineUUID, store.IssueStatus(p.Status))
+	})
+
+	// issues.record — persist findings from a snapshot evaluation into the issues table.
+	// { "machine_uuid": "...", "snapshot_id": "...", "findings": [...] }
+	d.Register("issues.record", func(params json.RawMessage) (any, error) {
+		var p struct {
+			MachineUUID string              `json:"machine_uuid"`
+			SnapshotID  string              `json:"snapshot_id"`
+			Findings    []store.FindingInput `json:"findings"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.MachineUUID == "" || p.SnapshotID == "" {
+			return nil, fmt.Errorf("issues.record requires {\"machine_uuid\": \"...\", \"snapshot_id\": \"...\", \"findings\": [...]}")
+		}
+		ids, err := db.UpsertIssues(context.Background(), p.MachineUUID, p.SnapshotID, p.Findings)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"upserted": len(ids), "ids": ids}, nil
+	})
+
+	// issues.update — change an issue's status.
+	// { "id": "...", "status": "acknowledged" }
+	d.Register("issues.update", func(params json.RawMessage) (any, error) {
+		var p struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Status == "" {
+			return nil, fmt.Errorf("issues.update requires {\"id\": \"...\", \"status\": \"...\"}")
+		}
+		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueStatus(p.Status)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": p.ID, "status": p.Status}, nil
+	})
+
+	// issues.fix.record — log a fix attempt against an issue.
+	// { "issue_id": "...", "applied_by": "user", "command": "...", "output": "...", "exit_code": 0 }
+	d.Register("issues.fix.record", func(params json.RawMessage) (any, error) {
+		var p store.AppliedFixInput
+		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
+			return nil, fmt.Errorf("issues.fix.record requires {\"issue_id\": \"...\"}")
+		}
+		id, err := db.RecordAppliedFix(context.Background(), p)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": id}, nil
+	})
+
+	// issues.fix.list — list fix attempts for one issue.
+	// { "issue_id": "..." }
+	d.Register("issues.fix.list", func(params json.RawMessage) (any, error) {
+		var p struct{ IssueID string `json:"issue_id"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
+			return nil, fmt.Errorf("issues.fix.list requires {\"issue_id\": \"...\"}")
+		}
+		return db.ListAppliedFixes(context.Background(), p.IssueID)
+	})
 }

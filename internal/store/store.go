@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -143,6 +144,38 @@ CREATE TABLE IF NOT EXISTS process_metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_process_metrics_pid ON process_metrics(pid, minute_at DESC);
+
+CREATE TABLE IF NOT EXISTS issues (
+    id                     TEXT PRIMARY KEY,
+    rule_id                TEXT NOT NULL,
+    machine_uuid           TEXT NOT NULL,
+    subject                TEXT NOT NULL DEFAULT '',
+    severity               TEXT NOT NULL,
+    message                TEXT NOT NULL,
+    fix                    TEXT NOT NULL DEFAULT '',
+    status                 TEXT NOT NULL DEFAULT 'open',
+    first_seen_snapshot_id TEXT,
+    last_seen_snapshot_id  TEXT,
+    created_at             DATETIME NOT NULL,
+    updated_at             DATETIME NOT NULL,
+    FOREIGN KEY (machine_uuid) REFERENCES hosts(machine_uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_issues_machine ON issues(machine_uuid, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_rule ON issues(rule_id, status);
+
+CREATE TABLE IF NOT EXISTS applied_fixes (
+    id         TEXT PRIMARY KEY,
+    issue_id   TEXT NOT NULL,
+    applied_at DATETIME NOT NULL,
+    applied_by TEXT NOT NULL DEFAULT '',
+    command    TEXT NOT NULL DEFAULT '',
+    output     TEXT NOT NULL DEFAULT '',
+    exit_code  INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (issue_id) REFERENCES issues(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_applied_fixes_issue ON applied_fixes(issue_id, applied_at DESC);
 `
 
 // SnapshotRow is a lightweight summary row from the snapshots table.
@@ -461,4 +494,222 @@ type AppInput struct {
 	AppVersion    string
 	Architectures []string
 	ResultJSON    any // the full detect.Result, marshalled to JSON
+}
+
+// IssueStatus enumerates the lifecycle states for an issue.
+type IssueStatus string
+
+const (
+	IssueOpen         IssueStatus = "open"
+	IssueAcknowledged IssueStatus = "acknowledged"
+	IssueDismissed    IssueStatus = "dismissed"
+	IssueFixed        IssueStatus = "fixed"
+	IssueClosed       IssueStatus = "closed"
+)
+
+// IssueRow is one row from the issues table.
+type IssueRow struct {
+	ID                  string
+	RuleID              string
+	MachineUUID         string
+	Subject             string
+	Severity            string
+	Message             string
+	Fix                 string
+	Status              IssueStatus
+	FirstSeenSnapshotID string
+	LastSeenSnapshotID  string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// AppliedFixRow is one row from the applied_fixes table.
+type AppliedFixRow struct {
+	ID        string
+	IssueID   string
+	AppliedAt time.Time
+	AppliedBy string
+	Command   string
+	Output    string
+	ExitCode  int
+}
+
+// UpsertIssues reconciles a slice of findings against the issues table.
+// For each finding, it looks up an existing open/acknowledged issue by
+// (rule_id, machine_uuid, subject). If found, last_seen_snapshot_id and
+// updated_at are refreshed. If not found, a new open issue is inserted.
+// Returns the IDs of all touched (inserted or updated) issues.
+func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, findings []FindingInput) ([]string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	var ids []string
+	for _, f := range findings {
+		var existingID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT id FROM issues
+			WHERE rule_id=? AND machine_uuid=? AND subject=?
+			  AND status IN ('open','acknowledged')
+			LIMIT 1`,
+			f.RuleID, machineUUID, f.Subject,
+		).Scan(&existingID)
+
+		if err == nil {
+			// Existing active issue — refresh last_seen.
+			_, err = tx.ExecContext(ctx, `
+				UPDATE issues SET last_seen_snapshot_id=?, updated_at=? WHERE id=?`,
+				snapshotID, now, existingID)
+			if err != nil {
+				return nil, fmt.Errorf("store: update issue: %w", err)
+			}
+			ids = append(ids, existingID)
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: lookup issue: %w", err)
+		}
+
+		// New issue.
+		id := newID()
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO issues
+			    (id, rule_id, machine_uuid, subject, severity, message, fix,
+			     status, first_seen_snapshot_id, last_seen_snapshot_id, created_at, updated_at)
+			VALUES (?,?,?,?,?,?,?,'open',?,?,?,?)`,
+			id, f.RuleID, machineUUID, f.Subject, f.Severity, f.Message, f.Fix,
+			snapshotID, snapshotID, now, now,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: insert issue: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, tx.Commit()
+}
+
+// FindingInput is the data from a rules engine finding used to upsert an issue.
+type FindingInput struct {
+	RuleID   string
+	Subject  string
+	Severity string
+	Message  string
+	Fix      string
+}
+
+// ListIssues returns issues for the given machine, optionally filtered by status.
+// Pass status="" to return all statuses. Results are ordered newest-updated first.
+func (s *DB) ListIssues(ctx context.Context, machineUUID string, status IssueStatus) ([]IssueRow, error) {
+	q := `SELECT id, rule_id, machine_uuid, subject, severity, message, fix, status,
+	             COALESCE(first_seen_snapshot_id,''), COALESCE(last_seen_snapshot_id,''),
+	             created_at, updated_at
+	      FROM issues WHERE machine_uuid=?`
+	args := []any{machineUUID}
+	if status != "" {
+		q += ` AND status=?`
+		args = append(args, string(status))
+	}
+	q += ` ORDER BY updated_at DESC LIMIT 500`
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIssueRows(rows)
+}
+
+// UpdateIssueStatus transitions an issue to a new status.
+func (s *DB) UpdateIssueStatus(ctx context.Context, id string, status IssueStatus) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE issues SET status=?, updated_at=? WHERE id=?`,
+		string(status), now, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RecordAppliedFix inserts a new applied_fixes row.
+func (s *DB) RecordAppliedFix(ctx context.Context, fix AppliedFixInput) (string, error) {
+	id := newID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO applied_fixes (id, issue_id, applied_at, applied_by, command, output, exit_code)
+		VALUES (?,?,?,?,?,?,?)`,
+		id, fix.IssueID, now, fix.AppliedBy, fix.Command, fix.Output, fix.ExitCode,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// AppliedFixInput carries the data for recording a fix attempt.
+type AppliedFixInput struct {
+	IssueID   string
+	AppliedBy string
+	Command   string
+	Output    string
+	ExitCode  int
+}
+
+// ListAppliedFixes returns the fix history for one issue.
+func (s *DB) ListAppliedFixes(ctx context.Context, issueID string) ([]AppliedFixRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, issue_id, applied_at, applied_by, command, output, exit_code
+		FROM applied_fixes WHERE issue_id=? ORDER BY applied_at DESC`, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AppliedFixRow
+	for rows.Next() {
+		var r AppliedFixRow
+		var appliedAt string
+		if err := rows.Scan(&r.ID, &r.IssueID, &appliedAt, &r.AppliedBy, &r.Command, &r.Output, &r.ExitCode); err != nil {
+			return nil, err
+		}
+		r.AppliedAt, _ = time.Parse(time.RFC3339, appliedAt)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func scanIssueRows(rows *sql.Rows) ([]IssueRow, error) {
+	var out []IssueRow
+	for rows.Next() {
+		var r IssueRow
+		var status, createdAt, updatedAt string
+		if err := rows.Scan(&r.ID, &r.RuleID, &r.MachineUUID, &r.Subject,
+			&r.Severity, &r.Message, &r.Fix, &status,
+			&r.FirstSeenSnapshotID, &r.LastSeenSnapshotID,
+			&createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		r.Status = IssueStatus(status)
+		r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		r.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// newID generates a unique ID for a new record. Uses random to avoid
+// importing the idgen package and creating a cycle.
+func newID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use timestamp nano as hex.
+		return fmt.Sprintf("%016x", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%016x", b)
 }

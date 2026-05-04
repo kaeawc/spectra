@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,8 +18,14 @@ import (
 // temp Unix socket, and returns a connected RPC client.
 func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc) {
 	t.Helper()
-	dir := t.TempDir()
-	// Use a short socket name: macOS limits Unix socket paths to 104 bytes.
+	// Use os.MkdirTemp with a short prefix under /tmp: macOS limits Unix socket
+	// paths to 104 bytes and t.TempDir() embeds the full test name which can
+	// exceed that limit for long test names.
+	dir, err := os.MkdirTemp("", "sp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	sockPath := filepath.Join(dir, "s.sock")
 	dbPath := filepath.Join(dir, "t.db")
 
@@ -172,6 +179,77 @@ func TestDaemonInspectHost(t *testing.T) {
 	// HostInfo should have at least a hostname field.
 	if m["hostname"] == nil && m["Hostname"] == nil {
 		t.Error("inspect.host: expected hostname in result")
+	}
+}
+
+func rpcCall(t *testing.T, enc *json.Encoder, dec *json.Decoder, id int, method string, params string) rpc.Response {
+	t.Helper()
+	type req struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      int             `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}
+	_ = enc.Encode(req{JSONRPC: "2.0", ID: id, Method: method, Params: json.RawMessage(params)})
+	var resp rpc.Response
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("rpcCall %s: decode: %v", method, err)
+	}
+	return resp
+}
+
+func TestDaemonIssuesListMissingMachine(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 10, "issues.list", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when machine_uuid missing")
+	}
+}
+
+func TestDaemonIssuesRecordEmpty(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+
+	// issues.record with empty findings should succeed (0 upserts).
+	resp := rpcCall(t, enc, dec, 11, "issues.record",
+		`{"machine_uuid":"TEST-1","snapshot_id":"snap-X","findings":[]}`)
+	if resp.Error != nil {
+		t.Fatalf("issues.record (empty): %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T", resp.Result)
+	}
+	if m["upserted"].(float64) != 0 {
+		t.Errorf("upserted = %v, want 0", m["upserted"])
+	}
+}
+
+func TestDaemonIssuesUpdateMissingStatus(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 12, "issues.update", `{"id":"x"}`)
+	if resp.Error == nil {
+		t.Error("expected error when status missing")
+	}
+}
+
+func TestDaemonIssuesFixRecordMissingIssueID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 13, "issues.fix.record", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when issue_id missing")
+	}
+}
+
+func TestDaemonIssuesFixListMissingIssueID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 14, "issues.fix.list", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when issue_id missing")
 	}
 }
 
