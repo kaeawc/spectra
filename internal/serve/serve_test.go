@@ -441,3 +441,34 @@ func TestDaemonCacheClearUnknownKindReturnsError(t *testing.T) {
 		t.Error("expected error for unregistered cache kind")
 	}
 }
+
+func TestDaemonJVMInspectRequiresPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 50, "jvm.inspect", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid=0")
+	}
+}
+
+func TestDaemonNetworkByAppReturnsMap(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 51, "network.byApp", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("network.byApp: %v", resp.Error)
+	}
+	// Result should be a map (may be empty if no connections, but must be a map).
+	if _, ok := resp.Result.(map[string]any); !ok {
+		t.Fatalf("network.byApp: result type %T, want map", resp.Result)
+	}
+}
+
+func TestDaemonJVMHeapDumpRequiresPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 52, "jvm.heap_dump", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid=0")
+	}
+}

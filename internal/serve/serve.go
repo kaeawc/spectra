@@ -512,6 +512,39 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "stopped": true}, nil
 	})
 
+	// jvm.inspect — structured inspection of one JVM process.
+	// Required: {"pid": <pid>}
+	d.Register("jvm.inspect", func(params json.RawMessage) (any, error) {
+		var p struct{ PID int `json:"pid"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.inspect requires {\"pid\": <pid>}")
+		}
+		info := jvm.InspectPID(context.Background(), p.PID, jvm.CollectOptions{})
+		if info == nil {
+			return nil, fmt.Errorf("JVM PID %d not found or not a Java process", p.PID)
+		}
+		return info, nil
+	})
+
+	// jvm.heap_dump — trigger jcmd GC.heap_dump and return the destination path.
+	// Required: {"pid": <pid>}. Optional: {"dest": "/path/to/out.hprof"}.
+	d.Register("jvm.heap_dump", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID  int    `json:"pid"`
+			Dest string `json:"dest"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.heap_dump requires {\"pid\": <pid>}")
+		}
+		if p.Dest == "" {
+			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
+		}
+		if err := jvm.HeapDump(p.PID, p.Dest, nil); err != nil {
+			return nil, fmt.Errorf("heap dump pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "dest": p.Dest}, nil
+	})
+
 	// jdk.list — enumerate installed JDK toolchains.
 	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
 		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
@@ -531,6 +564,39 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// network.connections — active TCP/UDP sockets (non-LISTEN).
 	d.Register("network.connections", func(_ json.RawMessage) (any, error) {
 		return netstate.CollectConnections(netstate.DefaultRunner), nil
+	})
+
+	// network.byApp — active connections grouped by app bundle path.
+	// Runs CollectConnections + CollectAll and joins on PID.
+	// Optional: {"bundles": ["/Applications/Foo.app"]} to scope app attribution.
+	d.Register("network.byApp", func(params json.RawMessage) (any, error) {
+		var p struct{ Bundles []string `json:"bundles"` }
+		_ = json.Unmarshal(params, &p)
+
+		conns := netstate.CollectConnections(netstate.DefaultRunner)
+		procs := process.CollectAll(context.Background(), process.CollectOptions{
+			BundlePaths: p.Bundles,
+		})
+
+		// Build PID → AppPath map.
+		pidApp := make(map[int]string, len(procs))
+		for _, pr := range procs {
+			if pr.AppPath != "" {
+				pidApp[pr.PID] = pr.AppPath
+			}
+		}
+
+		// Group connections by AppPath ("" for unattributed).
+		type connWithApp struct {
+			netstate.Connection
+			AppPath string `json:"app_path,omitempty"`
+		}
+		grouped := make(map[string][]connWithApp)
+		for _, c := range conns {
+			app := pidApp[c.PID]
+			grouped[app] = append(grouped[app], connWithApp{Connection: c, AppPath: app})
+		}
+		return grouped, nil
 	})
 
 	// process.list — snapshot of all running processes via ps.
