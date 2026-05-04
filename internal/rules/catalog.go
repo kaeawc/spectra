@@ -25,6 +25,7 @@ func V1Catalog() []Rule {
 		ruleLoginItemDangling(),
 		ruleBrewDeprecatedFormula(),
 		ruleBrewStalePinned(),
+		rulePathShadowsActiveRuntime(),
 		rulePermissionMismatch(),
 		ruleSparseFileInflation(),
 		ruleGatekeeperRejected(),
@@ -464,6 +465,62 @@ func ruleGatekeeperRejected() Rule {
 					Message:  fmt.Sprintf("%s is rejected by Gatekeeper — it would be blocked from running on an unmodified macOS system.", appDisplayName(app.Path)),
 					Fix:      "Re-sign and notarize the app with a valid Apple Developer ID certificate, or remove it if it is no longer needed.",
 				})
+			}
+			return findings
+		},
+	}
+}
+
+// rulePathShadowsActiveRuntime fires when a language-manager install (nvm,
+// pyenv, rbenv, goenv, asdf, mise) is present but the active binary for that
+// language resolves to a system or brew install instead — indicating that
+// PATH is not configured to use the version manager.
+func rulePathShadowsActiveRuntime() Rule {
+	return Rule{
+		ID:       "path-shadows-active-runtime",
+		Severity: SeverityLow,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			tc := s.Toolchains
+			groups := []struct {
+				lang     string
+				runtimes []toolchain.RuntimeInstall
+			}{
+				{"node", tc.Node},
+				{"python", tc.Python},
+				{"go", tc.Go},
+				{"ruby", tc.Ruby},
+			}
+			managerSources := map[string]bool{
+				"nvm": true, "fnm": true, "volta": true,
+				"pyenv": true, "uv": true,
+				"goenv": true,
+				"rbenv": true,
+				"asdf": true, "mise": true,
+			}
+			var findings []Finding
+			for _, g := range groups {
+				if len(g.runtimes) == 0 {
+					continue
+				}
+				hasManager := false
+				activeSource := ""
+				for _, r := range g.runtimes {
+					if managerSources[r.Source] {
+						hasManager = true
+					}
+					if r.Active {
+						activeSource = r.Source
+					}
+				}
+				if hasManager && (activeSource == "system" || activeSource == "brew") {
+					findings = append(findings, Finding{
+						RuleID:   "path-shadows-active-runtime",
+						Severity: SeverityLow,
+						Subject:  g.lang,
+						Message:  fmt.Sprintf("A version manager is installed for %s but the active binary resolves to a %s install — PATH is not configured to use the version manager.", g.lang, activeSource),
+						Fix:      fmt.Sprintf("Add the version manager's shim directory to the front of $PATH in your shell profile, or use `%s` to manage the active version.", activeSource),
+					})
+				}
 			}
 			return findings
 		},

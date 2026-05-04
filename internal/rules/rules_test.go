@@ -590,3 +590,71 @@ func TestV1CatalogContainsBrewRules(t *testing.T) {
 		}
 	}
 }
+
+func TestPathShadowsActiveRuntimeFires(t *testing.T) {
+	s := baseSnap()
+	// nvm is installed but system node is active
+	s.Toolchains.Node = []toolchain.RuntimeInstall{
+		{Version: "v18.20.4", Source: "nvm", Path: "/home/user/.nvm/versions/node/v18.20.4/bin/node", Active: false},
+		{Version: "system", Source: "system", Path: "/usr/bin/node", Active: true},
+	}
+	findings := rulePathShadowsActiveRuntime().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "path-shadows-active-runtime" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+	if findings[0].Subject != "node" {
+		t.Errorf("subject = %q, want node", findings[0].Subject)
+	}
+}
+
+func TestPathShadowsActiveRuntimeNoFireManagerActive(t *testing.T) {
+	s := baseSnap()
+	// nvm is installed AND nvm-managed version is active — no finding
+	s.Toolchains.Node = []toolchain.RuntimeInstall{
+		{Version: "v18.20.4", Source: "nvm", Path: "/home/user/.nvm/versions/node/v18.20.4/bin/node", Active: true},
+		{Version: "system", Source: "system", Path: "/usr/bin/node", Active: false},
+	}
+	findings := rulePathShadowsActiveRuntime().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestPathShadowsActiveRuntimeNoFireOnlySystem(t *testing.T) {
+	s := baseSnap()
+	// only system install, no manager — not a problem
+	s.Toolchains.Node = []toolchain.RuntimeInstall{
+		{Version: "system", Source: "system", Path: "/usr/bin/node", Active: true},
+	}
+	findings := rulePathShadowsActiveRuntime().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestPathShadowsActiveRuntimeMultipleLanguages(t *testing.T) {
+	s := baseSnap()
+	// pyenv installed but brew python active; goenv installed but brew go active
+	s.Toolchains.Python = []toolchain.RuntimeInstall{
+		{Version: "3.12.3", Source: "pyenv", Active: false},
+		{Version: "system", Source: "brew", Active: true},
+	}
+	s.Toolchains.Go = []toolchain.RuntimeInstall{
+		{Version: "1.22.3", Source: "goenv", Active: false},
+		{Version: "system", Source: "brew", Active: true},
+	}
+	findings := rulePathShadowsActiveRuntime().MatchFn(s)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+	langs := map[string]bool{}
+	for _, f := range findings {
+		langs[f.Subject] = true
+	}
+	if !langs["python"] || !langs["go"] {
+		t.Errorf("expected python and go in findings: %v", langs)
+	}
+}
