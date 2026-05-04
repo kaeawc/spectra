@@ -129,6 +129,70 @@ JNI global refs: 42, weak refs: 1
 	}
 }
 
+// --- ThreadDump / HeapHistogram / HeapDump ---
+
+func TestThreadDumpFakeRunner(t *testing.T) {
+	want := "\"main\" #1 prio=5\n\"GC\" #2\n"
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "jcmd" && len(args) == 2 && args[1] == "Thread.print" {
+			return []byte(want), nil
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+	got, err := ThreadDump(42, run)
+	if err != nil {
+		t.Fatalf("ThreadDump: %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHeapHistogramFakeRunner(t *testing.T) {
+	want := " num     #instances         #bytes  class name\n   1:          1234       9876543  [B\n"
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "jcmd" && len(args) == 2 && args[1] == "GC.class_histogram" {
+			return []byte(want), nil
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+	got, err := HeapHistogram(42, run)
+	if err != nil {
+		t.Fatalf("HeapHistogram: %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHeapDumpFakeRunner(t *testing.T) {
+	var capturedArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "jcmd" {
+			capturedArgs = args
+			return []byte("Heap dump file created"), nil
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+	if err := HeapDump(42, "/tmp/test.hprof", run); err != nil {
+		t.Fatalf("HeapDump: %v", err)
+	}
+	if len(capturedArgs) != 3 || capturedArgs[1] != "GC.heap_dump" || capturedArgs[2] != "/tmp/test.hprof" {
+		t.Errorf("unexpected jcmd args: %v", capturedArgs)
+	}
+}
+
+func TestThreadDumpNilDefaultRunner(t *testing.T) {
+	// nil runner should not panic (uses DefaultRunner which may fail if no jcmd).
+	// We just verify it doesn't panic — error is expected on machines without a JDK.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("ThreadDump panicked: %v", r)
+		}
+	}()
+	_, _ = ThreadDump(0, nil)
+}
+
 // --- CollectAll with fake runner ---
 
 func TestCollectAllNoJPS(t *testing.T) {

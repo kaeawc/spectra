@@ -14,6 +14,10 @@ import (
 // Stores register themselves; the CLI queries this registry for stats/clear.
 var cacheRegistry = cache.Default
 
+// cacheStores holds the concrete ShardedStore instances once initCacheStores
+// has run. Used by subcommands that need direct cache access (e.g. jvm thread-dump).
+var cacheStores *cache.Stores
+
 // initCacheStores initialises all ShardedStores into the default registry.
 // Called from main before dispatching so every subcommand sees a populated
 // registry. Failures are non-fatal: if the cache root can't be created, the
@@ -23,7 +27,7 @@ func initCacheStores() {
 	if err != nil {
 		return
 	}
-	cache.NewStores(root, cacheRegistry)
+	cacheStores = cache.NewStores(root, cacheRegistry)
 }
 
 func runCache(args []string) int {
