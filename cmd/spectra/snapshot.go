@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
 )
@@ -20,6 +21,7 @@ func snapshotSubcommands() []subcommand {
 	return []subcommand{
 		{"list", "List stored snapshots", runSnapshotList},
 		{"show", "Show details of one snapshot by ID", runSnapshotShow},
+		{"diff", "Diff two stored snapshots", runSnapshotDiff},
 	}
 }
 
@@ -242,5 +244,103 @@ func sortStrings(s []string) {
 		for j := i; j > 0 && s[j-1] > s[j]; j-- {
 			s[j-1], s[j] = s[j], s[j-1]
 		}
+	}
+}
+
+// runSnapshotDiff loads two snapshots by ID and prints a structured diff.
+func runSnapshotDiff(args []string) int {
+	fs := flag.NewFlagSet("spectra snapshot diff", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b>")
+		return 2
+	}
+	idA, idB := fs.Arg(0), fs.Arg(1)
+
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	snapA, err := loadSnapshotFromDB(ctx, db, idA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idA, err)
+		return 1
+	}
+	snapB, err := loadSnapshotFromDB(ctx, db, idB)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idB, err)
+		return 1
+	}
+
+	result := diff.Compare(*snapA, *snapB)
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+
+	printDiff(result)
+	return 0
+}
+
+// loadSnapshotFromDB retrieves the full snapshot JSON blob for id and unmarshals
+// it into a snapshot.Snapshot. Returns an error if the snapshot is not found or
+// was saved without a JSON blob (pre-v0.8 rows).
+func loadSnapshotFromDB(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+	raw, err := db.GetSnapshotJSON(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("snapshot exists but has no JSON blob (was it taken before this version?)")
+	}
+	var s snapshot.Snapshot
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return &s, nil
+}
+
+// printDiff renders a diff.Result as a human-readable table.
+func printDiff(r diff.Result) {
+	if !r.HasChanges() {
+		fmt.Println("no differences")
+		return
+	}
+	fmt.Printf("diff  %s  →  %s\n\n", r.AID, r.BID)
+	for _, sec := range r.Sections {
+		if len(sec.Changes) == 0 {
+			continue
+		}
+		fmt.Printf("=== %s ===\n", sec.Name)
+		for _, c := range sec.Changes {
+			switch c.Kind {
+			case diff.Added:
+				fmt.Printf("  + %-40s  %s\n", c.Key, c.After)
+			case diff.Removed:
+				fmt.Printf("  - %-40s  %s\n", c.Key, c.Before)
+			case diff.Changed:
+				fmt.Printf("  ~ %-40s  %s  →  %s\n", c.Key, c.Before, c.After)
+			}
+		}
+		fmt.Println()
 	}
 }
