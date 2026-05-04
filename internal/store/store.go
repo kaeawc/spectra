@@ -458,6 +458,68 @@ type ProcessMetricRow struct {
 	SampleCount int
 }
 
+// PruneSnapshots deletes live snapshots beyond the retention limit for each
+// machine. Baselines (kind != "live") are never deleted. The default limit
+// is 100 live snapshots per machine UUID.
+func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
+	if keepN <= 0 {
+		keepN = 100
+	}
+	// Find all machine UUIDs that have live snapshots.
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT machine_uuid FROM snapshots WHERE kind='live'`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var machines []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return 0, err
+		}
+		machines = append(machines, m)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	rows.Close()
+
+	var total int64
+	for _, m := range machines {
+		// Delete snapshot_apps for the to-be-pruned snapshots first (FK constraint).
+		if _, err := s.db.ExecContext(ctx, `
+			DELETE FROM snapshot_apps
+			WHERE snapshot_id IN (
+			  SELECT id FROM snapshots
+			  WHERE kind='live' AND machine_uuid=?
+			    AND id NOT IN (
+			      SELECT id FROM snapshots
+			      WHERE kind='live' AND machine_uuid=?
+			      ORDER BY taken_at DESC
+			      LIMIT ?
+			    )
+			)`, m, m, keepN); err != nil {
+			return total, fmt.Errorf("store: prune apps %s: %w", m, err)
+		}
+		res, err := s.db.ExecContext(ctx, `
+			DELETE FROM snapshots
+			WHERE kind='live' AND machine_uuid=?
+			  AND id NOT IN (
+			    SELECT id FROM snapshots
+			    WHERE kind='live' AND machine_uuid=?
+			    ORDER BY taken_at DESC
+			    LIMIT ?
+			  )`, m, m, keepN)
+		if err != nil {
+			return total, fmt.Errorf("store: prune %s: %w", m, err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
+}
+
 // ErrNotFound is returned when a requested record doesn't exist.
 var ErrNotFound = errors.New("store: not found")
 

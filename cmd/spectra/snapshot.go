@@ -22,6 +22,7 @@ func snapshotSubcommands() []subcommand {
 		{"list", "List stored snapshots", runSnapshotList},
 		{"show", "Show details of one snapshot by ID", runSnapshotShow},
 		{"diff", "Diff two stored snapshots", runSnapshotDiff},
+		{"prune", "Delete live snapshots beyond the retention limit (default: keep 100)", runSnapshotPrune},
 	}
 }
 
@@ -75,7 +76,8 @@ func runSnapshot(args []string) int {
 	return 0
 }
 
-// saveSnapshot opens the default DB and persists snap.
+// saveSnapshot opens the default DB, persists snap, and prunes old live
+// snapshots beyond the default retention limit (100 per machine).
 func saveSnapshot(snap snapshot.Snapshot) error {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
@@ -86,7 +88,12 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 		return err
 	}
 	defer db.Close()
-	return db.SaveSnapshot(context.Background(), store.FromSnapshot(snap))
+	ctx := context.Background()
+	if err := db.SaveSnapshot(ctx, store.FromSnapshot(snap)); err != nil {
+		return err
+	}
+	_, _ = db.PruneSnapshots(ctx, 100) // best-effort; ignore prune errors
+	return nil
 }
 
 // runSnapshotList prints stored snapshots in a summary table.
@@ -317,6 +324,40 @@ func loadSnapshotFromDB(ctx context.Context, db *store.DB, id string) (*snapshot
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return &s, nil
+}
+
+// runSnapshotPrune deletes live snapshots beyond the retention limit.
+func runSnapshotPrune(args []string) int {
+	fs := flag.NewFlagSet("spectra snapshot prune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	keepN := fs.Int("keep", 100, "Number of live snapshots to retain per machine")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	deleted, err := db.PruneSnapshots(context.Background(), *keepN)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if deleted == 0 {
+		fmt.Printf("nothing to prune (≤%d live snapshots)\n", *keepN)
+	} else {
+		fmt.Printf("pruned %d live snapshot(s) (keeping last %d per machine)\n", deleted, *keepN)
+	}
+	return 0
 }
 
 // printDiff renders a diff.Result as a human-readable table.

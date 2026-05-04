@@ -268,6 +268,21 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return diff.Compare(*snapA, *snapB), nil
 	})
 
+	// snapshot.prune — delete live snapshots beyond retention limit.
+	// Optional: { "keep": 100 }
+	d.Register("snapshot.prune", func(params json.RawMessage) (any, error) {
+		var p struct{ Keep int `json:"keep"` }
+		_ = json.Unmarshal(params, &p)
+		if p.Keep <= 0 {
+			p.Keep = 100
+		}
+		deleted, err := db.PruneSnapshots(context.Background(), p.Keep)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"deleted": deleted, "keep": p.Keep}, nil
+	})
+
 	d.Register("rules.check", func(params json.RawMessage) (any, error) {
 		// Optional: { "snapshot_id": "snap-..." } to evaluate against stored snapshot.
 		var p struct{ SnapshotID string `json:"snapshot_id"` }

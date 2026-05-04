@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -159,6 +160,77 @@ func TestListSnapshotsByMachine(t *testing.T) {
 	rows, _ := db.ListSnapshots(ctx, "UUID-A")
 	if len(rows) != 1 || rows[0].ID != "snap-A" {
 		t.Errorf("filtered list: %+v", rows)
+	}
+}
+
+// --- Snapshot retention / pruning ---
+
+func TestPruneSnapshotsKeepsBaselines(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	// Insert 3 live + 1 baseline.
+	for i := 1; i <= 3; i++ {
+		in := sampleInput()
+		in.ID = fmt.Sprintf("snap-live-%02d", i)
+		in.Kind = "live"
+		_ = db.SaveSnapshot(ctx, in)
+	}
+	baseline := sampleInput()
+	baseline.ID = "snap-baseline-01"
+	baseline.Kind = "baseline"
+	_ = db.SaveSnapshot(ctx, baseline)
+
+	// Prune keeping 2 live.
+	deleted, err := db.PruneSnapshots(ctx, 2)
+	if err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	// Baseline must still exist.
+	row, err := db.GetSnapshot(ctx, "snap-baseline-01")
+	if err != nil {
+		t.Fatalf("baseline gone after prune: %v", err)
+	}
+	if row.Kind != "baseline" {
+		t.Errorf("kind = %q, want baseline", row.Kind)
+	}
+}
+
+func TestPruneSnapshotsNoOp(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	// Only 1 live snapshot — pruning with keep=100 should delete nothing.
+	_ = db.SaveSnapshot(ctx, sampleInput())
+	deleted, err := db.PruneSnapshots(ctx, 100)
+	if err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("expected 0 deleted, got %d", deleted)
+	}
+}
+
+func TestPruneSnapshotsZeroKeepDefaultsTo100(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	// 5 snapshots, prune with keep=0 (should default to 100, so none deleted).
+	for i := 1; i <= 5; i++ {
+		in := sampleInput()
+		in.ID = fmt.Sprintf("snap-%02d", i)
+		_ = db.SaveSnapshot(ctx, in)
+	}
+	deleted, err := db.PruneSnapshots(ctx, 0)
+	if err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("keep=0 should default to 100 and delete nothing; got %d", deleted)
 	}
 }
 
