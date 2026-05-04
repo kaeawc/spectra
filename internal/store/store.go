@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     machine_uuid  TEXT NOT NULL,
     taken_at      DATETIME NOT NULL,
     kind          TEXT NOT NULL DEFAULT 'live',
+    name          TEXT,
     spectra_ver   TEXT,
     app_count     INTEGER NOT NULL DEFAULT 0,
     snapshot_json TEXT,
@@ -184,6 +185,7 @@ type SnapshotRow struct {
 	MachineUUID string
 	TakenAt     time.Time
 	Kind        string
+	Name        string // optional human label, used for baselines
 	SpectraVer  string
 	AppCount    int
 }
@@ -234,10 +236,11 @@ func upsertHost(tx *sql.Tx, s SnapshotInput) error {
 }
 
 func insertSnapshot(tx *sql.Tx, s SnapshotInput) error {
+	name := sql.NullString{String: s.Name, Valid: s.Name != ""}
 	_, err := tx.Exec(`
-		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, spectra_ver, app_count, snapshot_json)
-		VALUES (?,?,?,?,?,?,?)`,
-		s.ID, s.MachineUUID, s.TakenAt, s.Kind, s.SpectraVer, len(s.Apps), nullableJSON(s.SnapshotJSON),
+		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, name, spectra_ver, app_count, snapshot_json)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		s.ID, s.MachineUUID, s.TakenAt, s.Kind, name, s.SpectraVer, len(s.Apps), nullableJSON(s.SnapshotJSON),
 	)
 	return err
 }
@@ -265,13 +268,13 @@ func insertApp(tx *sql.Tx, snapID string, a AppInput) error {
 }
 
 // ListSnapshots returns summary rows ordered newest-first.
-// Pass machine_uuid="" to list all hosts.
+// Pass machine_uuid="" to list all hosts. Pass kind="" to list all kinds.
 func (s *DB) ListSnapshots(ctx context.Context, machineUUID string) ([]SnapshotRow, error) {
-	q := `SELECT id, machine_uuid, taken_at, kind, COALESCE(spectra_ver,''), app_count
+	q := `SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 	      FROM snapshots ORDER BY taken_at DESC LIMIT 100`
 	args := []any{}
 	if machineUUID != "" {
-		q = `SELECT id, machine_uuid, taken_at, kind, COALESCE(spectra_ver,''), app_count
+		q = `SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 		     FROM snapshots WHERE machine_uuid=? ORDER BY taken_at DESC LIMIT 100`
 		args = append(args, machineUUID)
 	}
@@ -284,7 +287,7 @@ func (s *DB) ListSnapshots(ctx context.Context, machineUUID string) ([]SnapshotR
 	for rows.Next() {
 		var r SnapshotRow
 		var takenAt string
-		if err := rows.Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.SpectraVer, &r.AppCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Name, &r.SpectraVer, &r.AppCount); err != nil {
 			return nil, err
 		}
 		r.TakenAt, _ = time.Parse(time.RFC3339, takenAt)
@@ -298,9 +301,9 @@ func (s *DB) GetSnapshot(ctx context.Context, id string) (SnapshotRow, error) {
 	var r SnapshotRow
 	var takenAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, machine_uuid, taken_at, kind, COALESCE(spectra_ver,''), app_count
+		`SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 		 FROM snapshots WHERE id=?`, id,
-	).Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.SpectraVer, &r.AppCount)
+	).Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Name, &r.SpectraVer, &r.AppCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -529,6 +532,7 @@ type SnapshotInput struct {
 	MachineUUID  string
 	TakenAt      time.Time
 	Kind         string
+	Name         string // optional label for baselines
 	SpectraVer   string
 	Hostname     string
 	OSName       string
