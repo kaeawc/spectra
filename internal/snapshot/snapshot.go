@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -29,11 +30,11 @@ type Snapshot struct {
 	Kind       Kind                 `json:"kind"`
 	Host       HostInfo             `json:"host"`
 	Apps       []detect.Result      `json:"apps"`
+	Processes  []process.Info       `json:"processes,omitempty"`
 	Toolchains toolchain.Toolchains `json:"toolchains"`
 
 	// Placeholders for upcoming collectors. Empty until implemented.
 	// See docs/design/system-inventory.md.
-	// Processes  []ProcessInfo
 	// JVMs       []JVMInfo
 	// Network    *NetworkState
 	// Storage    *StorageState
@@ -43,8 +44,7 @@ type Snapshot struct {
 
 // Options configure a snapshot Build.
 type Options struct {
-	// SpectraVersion is recorded on HostInfo. Plumbed in from main so a
-	// library import doesn't need to know about main.version.
+	// SpectraVersion is recorded on HostInfo.
 	SpectraVersion string
 
 	// AppPaths are the .app bundles to include. When empty, Build scans
@@ -57,6 +57,13 @@ type Options struct {
 	// ToolchainOpts are forwarded to the toolchain collector.
 	// Zero value uses production defaults (live machine paths).
 	ToolchainOpts toolchain.CollectOptions
+
+	// ProcessOpts are forwarded to the process collector.
+	// Zero value uses the real ps command.
+	ProcessOpts process.CollectOptions
+
+	// SkipProcesses disables the process collector (faster for tests).
+	SkipProcesses bool
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -70,7 +77,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	collectors := 3
+	if !opts.SkipProcesses {
+		collectors = 4
+	}
+	wg.Add(collectors)
 
 	go func() {
 		defer wg.Done()
@@ -86,6 +97,18 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		defer wg.Done()
 		s.Toolchains = toolchain.Collect(ctx, opts.ToolchainOpts)
 	}()
+
+	if !opts.SkipProcesses {
+		go func() {
+			defer wg.Done()
+			// Pass app paths for bundle attribution after apps are known.
+			// Since we're parallel, we collect all processes without attribution
+			// and attribute post-hoc once apps are resolved. For now, we skip
+			// attribution during the snapshot build (it can be added in a follow-up
+			// once the two collectors are sequenced or apps is pre-populated).
+			s.Processes = process.CollectAll(ctx, opts.ProcessOpts)
+		}()
+	}
 
 	wg.Wait()
 	return s
