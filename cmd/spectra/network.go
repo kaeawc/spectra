@@ -95,6 +95,10 @@ func printNetworkState(s netstate.State) {
 		fmt.Printf("default route: %s via %s\n", s.DefaultRouteIface, s.DefaultRouteGW)
 	}
 
+	if s.EstablishedConnectionsCount > 0 {
+		fmt.Printf("connections:   %d established\n", s.EstablishedConnectionsCount)
+	}
+
 	if s.VPNActive {
 		fmt.Printf("vpn:           active (%s)\n", strings.Join(s.VPNInterfaces, ", "))
 	} else {
