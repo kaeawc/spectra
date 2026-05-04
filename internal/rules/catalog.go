@@ -23,6 +23,8 @@ func V1Catalog() []Rule {
 		ruleAppNoHardenedRuntime(),
 		ruleAppUnsigned(),
 		ruleLoginItemDangling(),
+		ruleBrewDeprecatedFormula(),
+		ruleBrewStalePinned(),
 		rulePermissionMismatch(),
 		ruleSparseFileInflation(),
 		ruleGatekeeperRejected(),
@@ -461,6 +463,56 @@ func ruleGatekeeperRejected() Rule {
 					Subject:  appDisplayName(app.Path),
 					Message:  fmt.Sprintf("%s is rejected by Gatekeeper — it would be blocked from running on an unmodified macOS system.", appDisplayName(app.Path)),
 					Fix:      "Re-sign and notarize the app with a valid Apple Developer ID certificate, or remove it if it is no longer needed.",
+				})
+			}
+			return findings
+		},
+	}
+}
+
+// ruleBrewDeprecatedFormula fires for each Homebrew formula that is marked
+// deprecated by its tap maintainer.
+func ruleBrewDeprecatedFormula() Rule {
+	return Rule{
+		ID:       "brew-deprecated-formula",
+		Severity: SeverityLow,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, f := range s.Toolchains.Brew.Formulae {
+				if !f.Deprecated {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "brew-deprecated-formula",
+					Severity: SeverityLow,
+					Subject:  f.Name,
+					Message:  fmt.Sprintf("Homebrew formula %q is deprecated — the tap maintainer has marked it for removal.", f.Name),
+					Fix:      fmt.Sprintf("Run `brew info %s` to see the recommended replacement, then uninstall this formula.", f.Name),
+				})
+			}
+			return findings
+		},
+	}
+}
+
+// ruleBrewStalePinned fires for each Homebrew formula that is pinned,
+// which prevents security and bug-fix updates from being applied.
+func ruleBrewStalePinned() Rule {
+	return Rule{
+		ID:       "brew-stale-pinned",
+		Severity: SeverityLow,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, f := range s.Toolchains.Brew.Formulae {
+				if !f.Pinned {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "brew-stale-pinned",
+					Severity: SeverityLow,
+					Subject:  f.Name,
+					Message:  fmt.Sprintf("Homebrew formula %q is pinned at version %s — security and bug-fix updates will not be applied.", f.Name, f.Version),
+					Fix:      fmt.Sprintf("Run `brew unpin %s` to allow updates, or verify the pin is still intentional.", f.Name),
 				})
 			}
 			return findings

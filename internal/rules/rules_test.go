@@ -507,3 +507,86 @@ func TestGatekeeperRejectedNoFireUnknown(t *testing.T) {
 		t.Errorf("expected 0 findings for unknown status, got %d", len(findings))
 	}
 }
+
+func TestBrewDeprecatedFormulaFires(t *testing.T) {
+	s := baseSnap()
+	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{
+		{Name: "wget", Version: "1.21.4", Deprecated: false},
+		{Name: "ossp-uuid", Version: "1.6.2", Deprecated: true},
+	}
+	findings := ruleBrewDeprecatedFormula().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "brew-deprecated-formula" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+	if findings[0].Subject != "ossp-uuid" {
+		t.Errorf("subject = %q, want ossp-uuid", findings[0].Subject)
+	}
+}
+
+func TestBrewDeprecatedFormulaNoFire(t *testing.T) {
+	s := baseSnap()
+	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{
+		{Name: "git", Version: "2.44.0", Deprecated: false},
+	}
+	findings := ruleBrewDeprecatedFormula().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestBrewStalePinnedFires(t *testing.T) {
+	s := baseSnap()
+	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{
+		{Name: "node@18", Version: "18.20.4", Pinned: true},
+		{Name: "python@3.12", Version: "3.12.3", Pinned: false},
+	}
+	findings := ruleBrewStalePinned().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "brew-stale-pinned" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+	if findings[0].Subject != "node@18" {
+		t.Errorf("subject = %q, want node@18", findings[0].Subject)
+	}
+}
+
+func TestBrewStalePinnedNoFire(t *testing.T) {
+	s := baseSnap()
+	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{
+		{Name: "wget", Version: "1.21.4", Pinned: false},
+	}
+	findings := ruleBrewStalePinned().MatchFn(s)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestBrewStalePinnedMultiple(t *testing.T) {
+	s := baseSnap()
+	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{
+		{Name: "node@18", Version: "18.20.4", Pinned: true},
+		{Name: "maven", Version: "3.9.6", Pinned: true},
+	}
+	findings := ruleBrewStalePinned().MatchFn(s)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+}
+
+func TestV1CatalogContainsBrewRules(t *testing.T) {
+	catalog := V1Catalog()
+	ruleIDs := make(map[string]bool)
+	for _, r := range catalog {
+		ruleIDs[r.ID] = true
+	}
+	for _, want := range []string{"brew-deprecated-formula", "brew-stale-pinned"} {
+		if !ruleIDs[want] {
+			t.Errorf("V1Catalog missing rule %q", want)
+		}
+	}
+}
