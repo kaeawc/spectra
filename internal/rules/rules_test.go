@@ -1,8 +1,11 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
@@ -196,6 +199,130 @@ func TestStorageFootprintNoFire(t *testing.T) {
 	s.Storage = storagestate.State{UserLibraryBytes: 2 * 1024 * 1024 * 1024} // 2 GiB
 	if findings := ruleStorageFootprint().MatchFn(s); len(findings) != 0 {
 		t.Errorf("expected no finding for 2 GiB ~/Library, got %v", findings)
+	}
+}
+
+// --- app-no-hardened-runtime ---
+
+func TestAppNoHardenedRuntimeFires(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Signed.app", TeamID: "TEAMID123", HardenedRuntime: false, MASReceipt: false},
+	}
+	findings := ruleAppNoHardenedRuntime().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].RuleID != "app-no-hardened-runtime" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+}
+
+func TestAppNoHardenedRuntimeMASExcluded(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/MASApp.app", TeamID: "TEAMID123", HardenedRuntime: false, MASReceipt: true},
+	}
+	if findings := ruleAppNoHardenedRuntime().MatchFn(s); len(findings) != 0 {
+		t.Errorf("MAS apps should be excluded, got %v", findings)
+	}
+}
+
+func TestAppNoHardenedRuntimeUnsignedExcluded(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Unsigned.app", TeamID: "", HardenedRuntime: false},
+	}
+	if findings := ruleAppNoHardenedRuntime().MatchFn(s); len(findings) != 0 {
+		t.Errorf("unsigned apps should be excluded (caught by app-unsigned), got %v", findings)
+	}
+}
+
+func TestAppNoHardenedRuntimeAlreadyHardened(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Good.app", TeamID: "TEAMID123", HardenedRuntime: true},
+	}
+	if findings := ruleAppNoHardenedRuntime().MatchFn(s); len(findings) != 0 {
+		t.Errorf("hardened app should produce no findings, got %v", findings)
+	}
+}
+
+// --- app-unsigned ---
+
+func TestAppUnsignedFires(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/NoSig.app", TeamID: ""},
+	}
+	findings := ruleAppUnsigned().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestAppUnsignedNoFire(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Signed.app", TeamID: "TEAMID123"},
+	}
+	if findings := ruleAppUnsigned().MatchFn(s); len(findings) != 0 {
+		t.Errorf("signed app should produce no findings, got %v", findings)
+	}
+}
+
+// --- login-item-dangling ---
+
+func TestLoginItemDanglingFires(t *testing.T) {
+	dir := t.TempDir()
+	// Create a plist file in the temp dir (exists on disk) but the app bundle does not.
+	plistPath := filepath.Join(dir, "com.dead.app.plist")
+	if err := os.WriteFile(plistPath, []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appPath := filepath.Join(dir, "DeadApp.app") // does NOT exist
+
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{
+			Path: appPath,
+			LoginItems: []detect.LoginItem{
+				{Path: plistPath, Label: "com.dead.app", Scope: "system"},
+			},
+		},
+	}
+	findings := ruleLoginItemDangling().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 dangling finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].RuleID != "login-item-dangling" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+}
+
+func TestLoginItemDanglingAppExists(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.alive.app.plist")
+	if err := os.WriteFile(plistPath, []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// App bundle exists.
+	appPath := filepath.Join(dir, "AliveApp.app")
+	if err := os.Mkdir(appPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{
+			Path: appPath,
+			LoginItems: []detect.LoginItem{
+				{Path: plistPath, Label: "com.alive.app", Scope: "user"},
+			},
+		},
+	}
+	if findings := ruleLoginItemDangling().MatchFn(s); len(findings) != 0 {
+		t.Errorf("live app should produce no dangling finding, got %v", findings)
 	}
 }
 

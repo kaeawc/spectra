@@ -2,6 +2,8 @@ package rules
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,6 +20,9 @@ func V1Catalog() []Rule {
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
+		ruleAppNoHardenedRuntime(),
+		ruleAppUnsigned(),
+		ruleLoginItemDangling(),
 	}
 }
 
@@ -183,6 +188,104 @@ func ruleStorageFootprint() Rule {
 			}}
 		},
 	}
+}
+
+// ruleAppNoHardenedRuntime fires for Developer ID-signed apps that lack the
+// hardened runtime entitlement. Hardened runtime is required for notarization
+// and provides exploit-mitigation controls. MAS and unsigned apps are excluded.
+func ruleAppNoHardenedRuntime() Rule {
+	return Rule{
+		ID:       "app-no-hardened-runtime",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				// Skip unsigned (will be caught by app-unsigned) and MAS apps.
+				if app.TeamID == "" || app.MASReceipt {
+					continue
+				}
+				if !app.HardenedRuntime {
+					findings = append(findings, Finding{
+						RuleID:   "app-no-hardened-runtime",
+						Severity: SeverityMedium,
+						Subject:  appDisplayName(app.Path),
+						Message:  fmt.Sprintf("%s is signed (team %s) but lacks hardened runtime — cannot be notarized and disables key exploit mitigations.", appDisplayName(app.Path), app.TeamID),
+						Fix:      "Enable the Hardened Runtime capability in Xcode signing settings.",
+					})
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleAppUnsigned fires for apps with no Team ID (not code-signed by a
+// Developer ID or Apple certificate). Unsigned apps bypass Gatekeeper.
+func ruleAppUnsigned() Rule {
+	return Rule{
+		ID:       "app-unsigned",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				if app.TeamID == "" {
+					findings = append(findings, Finding{
+						RuleID:   "app-unsigned",
+						Severity: SeverityMedium,
+						Subject:  appDisplayName(app.Path),
+						Message:  fmt.Sprintf("%s has no code-signing Team ID — it is unsigned and bypasses Gatekeeper's signature checks.", appDisplayName(app.Path)),
+						Fix:      "Only install apps from trusted, signed sources. If this app is expected to be unsigned, dismiss this finding.",
+					})
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleLoginItemDangling fires when a login-item plist exists on disk but the
+// ProgramArguments executable it references no longer exists. This is the
+// classic zombie-process pattern left behind after uninstalling an app.
+func ruleLoginItemDangling() Rule {
+	return Rule{
+		ID:       "login-item-dangling",
+		Severity: SeverityInfo,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				for _, item := range app.LoginItems {
+					if item.Path == "" {
+						continue
+					}
+					// The plist must still exist; if it doesn't, launchd won't load it anyway.
+					if _, err := os.Stat(item.Path); err != nil {
+						continue
+					}
+					// We flag this item as dangling when the plist references a path that
+					// can't be resolved back to an existing app bundle.
+					// Heuristic: if the plist's app bundle path doesn't exist, it's orphaned.
+					if !strings.HasPrefix(item.Path, app.Path) {
+						// Plist isn't inside the app bundle — check if the app bundle still exists.
+						if _, err := os.Stat(app.Path); err != nil {
+							findings = append(findings, Finding{
+								RuleID:   "login-item-dangling",
+								Severity: SeverityInfo,
+								Subject:  item.Label,
+								Message:  fmt.Sprintf("Login item %q (%s) references app %q which no longer exists.", item.Label, item.Path, app.Path),
+								Fix:      fmt.Sprintf("Remove the plist: sudo rm %q", item.Path),
+							})
+						}
+					}
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// appDisplayName returns the human-readable app name from its .app bundle path.
+func appDisplayName(appPath string) string {
+	return strings.TrimSuffix(filepath.Base(appPath), ".app")
 }
 
 // parseMajor extracts the major version number from a Java version string.
