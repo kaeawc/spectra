@@ -92,6 +92,35 @@ func collectThreadCount(pid int, run CmdRunner) int {
 	return countThreads(string(out))
 }
 
+// ThreadDump runs `jcmd <pid> Thread.print` and returns the raw output.
+// Pass nil for run to use the default system runner.
+func ThreadDump(pid int, run CmdRunner) ([]byte, error) {
+	if run == nil {
+		run = DefaultRunner
+	}
+	return run("jcmd", fmt.Sprint(pid), "Thread.print")
+}
+
+// HeapHistogram runs `jcmd <pid> GC.class_histogram` and returns the raw
+// output. The result can be large for apps with many loaded classes.
+// Pass nil for run to use the default system runner.
+func HeapHistogram(pid int, run CmdRunner) ([]byte, error) {
+	if run == nil {
+		run = DefaultRunner
+	}
+	return run("jcmd", fmt.Sprint(pid), "GC.class_histogram")
+}
+
+// HeapDump runs `jcmd <pid> GC.heap_dump <destPath>` to write a .hprof file.
+// Pass nil for run to use the default system runner.
+func HeapDump(pid int, destPath string, run CmdRunner) error {
+	if run == nil {
+		run = DefaultRunner
+	}
+	_, err := run("jcmd", fmt.Sprint(pid), "GC.heap_dump", destPath)
+	return err
+}
+
 // countThreads counts threads in `jcmd Thread.print` output.
 //
 // Thread entries begin with a line like:
