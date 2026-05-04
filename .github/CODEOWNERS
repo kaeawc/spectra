@@ -1,0 +1,7 @@
+# Default owner for everything
+* @kaeawc
+
+# CI / release
+.github/         @kaeawc
+ci/              @kaeawc
+scripts/         @kaeawc

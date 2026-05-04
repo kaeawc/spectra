@@ -1,0 +1,105 @@
+# pip install mkdocs mkdocs-material
+# mkdocs serve
+# mkdocs gh-deploy
+
+site_name: Spectra
+repo_name: spectra
+repo_url: https://github.com/kaeawc/spectra
+site_description: "macOS app diagnostics, JVM-aware remote debugging portal"
+site_author: Jason Pearson
+remote_branch: gh-pages
+use_directory_urls: true
+
+copyright: 'Copyright &copy; 2026 Jason Pearson'
+
+plugins:
+  - search
+
+theme:
+  name: 'material'
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: 'white'
+      accent: 'green'
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: 'black'
+      accent: 'green'
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: 'Inter'
+    code: 'Fira Code'
+  features:
+    - content.code.copy
+    - content.code.select
+    - navigation.sections
+    - navigation.expand
+
+markdown_extensions:
+  - smarty
+  - codehilite:
+      guess_lang: false
+  - footnotes
+  - meta
+  - toc:
+      permalink: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.inlinehilite
+  - pymdownx.magiclink
+  - pymdownx.smartsymbols
+  - pymdownx.superfences
+  - pymdownx.tasklist
+  - pymdownx.tilde
+  - admonition
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Install: install.md
+  - Design:
+      - Architecture: design/architecture.md
+      - Distribution: design/distribution.md
+      - Storage: design/storage.md
+      - System inventory: design/system-inventory.md
+      - Remote portal: design/remote-portal.md
+      - Privileged helper: design/privileged-helper.md
+      - Threat model: design/threat-model.md
+      - Recommendations engine: design/recommendations-engine.md
+  - Detection:
+      - Overview: detection/overview.md
+      - Framework signal table: detection/frameworks.md
+      - Mac Catalyst: detection/catalyst.md
+      - Native modules: detection/native-modules.md
+  - Inspection:
+      - Metadata: inspection/metadata.md
+      - Security: inspection/security.md
+      - Storage footprint: inspection/storage-footprint.md
+      - Network endpoints: inspection/network-endpoints.md
+      - Helpers and XPC: inspection/helpers-and-xpc.md
+      - Login items: inspection/login-items.md
+      - Running processes: inspection/running-processes.md
+      - Toolchains (planned): inspection/toolchains.md
+      - JVM (planned): inspection/jvm.md
+      - Live data sources: inspection/live-data-sources.md
+  - Operations:
+      - CLI: operations/cli.md
+      - Daemon (planned): operations/daemon.md
+      - Remote (planned): operations/remote.md
+      - Caching (planned): operations/caching.md
+  - Reference:
+      - Result schema: reference/result-schema.md
+      - Glossary: reference/glossary.md
+  - Development:
+      - Building: development/building.md
+      - Testing: development/testing.md
+      - Documentation tooling: development/docs.md
+      - Upstream patterns: development/upstream-patterns.md
+      - Contributing: development/contributing.md

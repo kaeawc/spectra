@@ -1,0 +1,55 @@
+# Lychee link checker configuration
+# https://lychee.cli.rs/
+
+# Maximum number of concurrent network requests
+max_concurrency = 10
+
+# Exclude URL patterns (regex)
+exclude = [
+    # Localhost
+    "^http://localhost",
+    "^http://127\\.0\\.0\\.1",
+    # Example domains
+    "^https?://example\\.com",
+    "^https?://example\\.org",
+    # Tailscale MagicDNS examples in docs
+    "\\.ts\\.net",
+    # Hub.docker.com returns transient 500s
+    "^https://hub\\.docker\\.com/",
+    # Apple developer pages sometimes block automated checkers
+    "^https://developer\\.apple\\.com/",
+]
+
+# Exclude specific paths
+exclude_path = [
+    "site/",
+    "build/",
+    "dist/",
+    "node_modules/",
+    ".git/",
+    "spectra",            # the built binary
+]
+
+# Accept status codes
+accept = [
+    "200..=299",  # 2xx success
+    "403",        # auth-protected URLs
+    "429",        # rate-limited
+    "502",        # transient gateway errors
+    "503",        # service unavailable
+]
+
+# Timeout per request (seconds)
+timeout = 20
+
+# Retries per link
+max_retries = 3
+
+# HTTP method
+method = "get"
+
+# User agent
+user_agent = "Mozilla/5.0 (compatible; lychee/Spectra)"
+
+# Cache results
+cache = true

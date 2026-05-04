@@ -1,0 +1,71 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+  settings:
+    errorlint:
+      errorf: true
+    gocyclo:
+      min-complexity: 15
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+    gosec:
+      excludes:
+        - G104  # best-effort cleanup is intentional
+        - G304  # path is caller input by design (Detect, scanStorage)
+        - G602  # false positive on UintN(256) → byte
+        - G703  # same path-as-input rationale as G304
+        - G704  # URL-as-input is by design
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocyclo
+          - gosec
+          - noctx
+          - revive
+          - unconvert
+          - unparam
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

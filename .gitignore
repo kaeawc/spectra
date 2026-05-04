@@ -1,0 +1,9 @@
+/spectra
+/dist/
+*.test
+*.out
+.DS_Store
+.lycheecache
+junit-report.xml
+gosec-report.xml
+site/
