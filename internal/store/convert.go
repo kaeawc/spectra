@@ -43,6 +43,23 @@ func FromSnapshot(s snapshot.Snapshot) SnapshotInput {
 	}
 }
 
+// ProcessesFromSnapshot converts a snapshot's Processes into ProcessSnapshotRows
+// ready for SaveSnapshotProcesses.
+func ProcessesFromSnapshot(s snapshot.Snapshot) []ProcessSnapshotRow {
+	rows := make([]ProcessSnapshotRow, len(s.Processes))
+	for i, p := range s.Processes {
+		rows[i] = ProcessSnapshotRow{
+			PID:     p.PID,
+			PPID:    p.PPID,
+			Command: p.Command,
+			RSSKiB:  p.RSSKiB,
+			CPUPct:  p.CPUPct,
+			AppPath: p.AppPath,
+		}
+	}
+	return rows
+}
+
 func fromResult(r detect.Result) AppInput {
 	name := appName(r.Path)
 	return AppInput{

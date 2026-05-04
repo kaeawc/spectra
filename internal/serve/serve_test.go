@@ -517,3 +517,12 @@ func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
 		t.Error("expected error when bundle_id missing")
 	}
 }
+
+func TestDaemonSnapshotProcessesRequiresID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 57, "snapshot.processes", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when id missing")
+	}
+}

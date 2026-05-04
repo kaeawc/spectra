@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
 func openTestDB(t *testing.T) *DB {
@@ -490,5 +493,26 @@ func TestSaveSnapshotProcessesIdempotent(t *testing.T) {
 	// Second call must not error (INSERT OR IGNORE).
 	if err := db.SaveSnapshotProcesses(ctx, "proc-snap-2", procs); err != nil {
 		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestProcessesFromSnapshot(t *testing.T) {
+	snap := snapshot.Snapshot{
+		ID: "test-snap",
+		Processes: []process.Info{
+			{PID: 1, PPID: 0, Command: "launchd", RSSKiB: 4096, CPUPct: 0.0},
+			{PID: 412, PPID: 1, Command: "Slack", RSSKiB: 184320, CPUPct: 1.2, AppPath: "/Applications/Slack.app"},
+		},
+	}
+	rows := ProcessesFromSnapshot(snap)
+	if len(rows) != 2 {
+		t.Fatalf("len = %d, want 2", len(rows))
+	}
+	found := map[int]bool{}
+	for _, r := range rows {
+		found[r.PID] = true
+	}
+	if !found[1] || !found[412] {
+		t.Errorf("pids = %v, want {1, 412}", found)
 	}
 }
