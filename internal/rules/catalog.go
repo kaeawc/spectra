@@ -23,6 +23,8 @@ func V1Catalog() []Rule {
 		ruleAppNoHardenedRuntime(),
 		ruleAppUnsigned(),
 		ruleLoginItemDangling(),
+		rulePermissionMismatch(),
+		ruleSparseFileInflation(),
 	}
 }
 
@@ -277,6 +279,97 @@ func ruleLoginItemDangling() Rule {
 						}
 					}
 				}
+			}
+			return findings
+		},
+	}
+}
+
+// rulePermissionMismatch fires when an app has a TCC-granted permission
+// that has no corresponding NS*UsageDescription in its Info.plist. Apps
+// that silently receive TCC access without declaring why are a security
+// concern and cannot pass App Review.
+func rulePermissionMismatch() Rule {
+	// Maps the human-readable TCC service name (kTCCService prefix stripped)
+	// to the NS*UsageDescription key the app is expected to declare.
+	// Services without a required NS key (e.g. SystemPolicyAllFiles, Accessibility)
+	// are omitted — they don't require a usage description in Info.plist.
+	tccToNSKey := map[string]string{
+		"Camera":                 "NSCameraUsageDescription",
+		"Microphone":             "NSMicrophoneUsageDescription",
+		"Contacts":               "NSContactsUsageDescription",
+		"PhotoLibrary":           "NSPhotoLibraryUsageDescription",
+		"PhotoLibraryAdd":        "NSPhotoLibraryAddUsageDescription",
+		"Calendar":               "NSCalendarsUsageDescription",
+		"Reminders":              "NSRemindersUsageDescription",
+		"Bluetooth":              "NSBluetoothAlwaysUsageDescription",
+		"SpeechRecognition":      "NSSpeechRecognitionUsageDescription",
+		"FaceID":                 "NSFaceIDUsageDescription",
+		"Motion":                 "NSMotionUsageDescription",
+		"HealthShare":            "NSHealthShareUsageDescription",
+		"HealthUpdate":           "NSHealthUpdateUsageDescription",
+		"HomeKit":                "NSHomeKitUsageDescription",
+		"NearbyInteraction":      "NSNearbyInteractionUsageDescription",
+		"UserTracking":           "NSUserTrackingUsageDescription",
+		"FocusStatus":            "NSFocusStatusUsageDescription",
+		"LocalNetwork":           "NSLocalNetworkUsageDescription",
+	}
+
+	return Rule{
+		ID:       "permission-mismatch",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				for _, svc := range app.GrantedPermissions {
+					nsKey, known := tccToNSKey[svc]
+					if !known {
+						continue
+					}
+					if _, declared := app.PrivacyDescriptions[nsKey]; !declared {
+						findings = append(findings, Finding{
+							RuleID:   "permission-mismatch",
+							Severity: SeverityMedium,
+							Subject:  appDisplayName(app.Path),
+							Message:  fmt.Sprintf("%s has %s granted (TCC) but no %s in Info.plist.", appDisplayName(app.Path), svc, nsKey),
+							Fix:      fmt.Sprintf("Add %s to %s/Contents/Info.plist, or revoke the TCC grant if this permission is unintended.", nsKey, app.Path),
+						})
+					}
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleSparseFileInflation fires when an app bundle's apparent (logical) size
+// exceeds its actual on-disk allocation by more than 10×. This is the
+// signature of sparse disk images such as Docker Desktop's VM disk
+// (~/Library/Containers/com.docker.docker/…/Docker.raw), which may
+// appear as tens of GiB while occupying much less real space.
+func ruleSparseFileInflation() Rule {
+	const inflationFactor = 10
+
+	return Rule{
+		ID:       "sparse-file-inflation",
+		Severity: SeverityInfo,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				actual := app.BundleSizeBytes
+				apparent := app.ApparentSizeBytes
+				// Only fire when actual is non-trivial (>1 MiB) to avoid
+				// divide-by-zero and noise from empty bundles.
+				if actual < 1024*1024 || apparent <= actual*inflationFactor {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "sparse-file-inflation",
+					Severity: SeverityInfo,
+					Subject:  appDisplayName(app.Path),
+					Message:  fmt.Sprintf("%s apparent size %.1f GiB vs %.1f GiB actual (%.0f×) — likely a sparse disk image.", appDisplayName(app.Path), float64(apparent)/(1<<30), float64(actual)/(1<<30), float64(apparent)/float64(actual)),
+					Fix:      "If this is a Docker or VM disk image, run `docker system prune` or compact the image to reclaim logical space.",
+				})
 			}
 			return findings
 		},

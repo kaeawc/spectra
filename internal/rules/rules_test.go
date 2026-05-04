@@ -326,6 +326,127 @@ func TestLoginItemDanglingAppExists(t *testing.T) {
 	}
 }
 
+// --- permission-mismatch ---
+
+func TestPermissionMismatchFires(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{
+			Path:               "/Applications/Sneaky.app",
+			TeamID:             "TEAM1",
+			GrantedPermissions: []string{"Camera", "Microphone"},
+			PrivacyDescriptions: map[string]string{
+				// NSCameraUsageDescription declared, NSMicrophoneUsageDescription missing
+				"NSCameraUsageDescription": "Used for video calls",
+			},
+		},
+	}
+	findings := rulePermissionMismatch().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding (Microphone missing NS key), got %d: %v", len(findings), findings)
+	}
+	if findings[0].RuleID != "permission-mismatch" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+}
+
+func TestPermissionMismatchBothDeclared(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{
+			Path:               "/Applications/GoodApp.app",
+			TeamID:             "TEAM1",
+			GrantedPermissions: []string{"Camera", "Microphone"},
+			PrivacyDescriptions: map[string]string{
+				"NSCameraUsageDescription":     "Video calls",
+				"NSMicrophoneUsageDescription": "Audio calls",
+			},
+		},
+	}
+	if findings := rulePermissionMismatch().MatchFn(s); len(findings) != 0 {
+		t.Errorf("all NS keys declared — expected no findings, got %v", findings)
+	}
+}
+
+func TestPermissionMismatchUnknownServiceIgnored(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{
+			Path:               "/Applications/FDA.app",
+			TeamID:             "TEAM1",
+			GrantedPermissions: []string{"SystemPolicyAllFiles", "Accessibility"},
+			PrivacyDescriptions: map[string]string{},
+		},
+	}
+	// SystemPolicyAllFiles and Accessibility have no required NS key — rule must be silent.
+	if findings := rulePermissionMismatch().MatchFn(s); len(findings) != 0 {
+		t.Errorf("services with no NS requirement should be ignored, got %v", findings)
+	}
+}
+
+func TestPermissionMismatchNoGrantedPermissions(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Plain.app", TeamID: "TEAM1"},
+	}
+	if findings := rulePermissionMismatch().MatchFn(s); len(findings) != 0 {
+		t.Errorf("app with no granted permissions should produce no findings, got %v", findings)
+	}
+}
+
+// --- sparse-file-inflation ---
+
+func TestSparseFileInflationFires(t *testing.T) {
+	s := baseSnap()
+	actual := int64(5 * 1024 * 1024 * 1024)   // 5 GiB real
+	apparent := int64(60 * 1024 * 1024 * 1024) // 60 GiB logical (12×)
+	s.Apps = []detect.Result{
+		{
+			Path:              "/Applications/Docker.app",
+			BundleSizeBytes:   actual,
+			ApparentSizeBytes: apparent,
+		},
+	}
+	findings := ruleSparseFileInflation().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 inflation finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].RuleID != "sparse-file-inflation" {
+		t.Errorf("rule ID = %q", findings[0].RuleID)
+	}
+}
+
+func TestSparseFileInflationBelowThreshold(t *testing.T) {
+	s := baseSnap()
+	actual := int64(10 * 1024 * 1024 * 1024) // 10 GiB
+	apparent := int64(15 * 1024 * 1024 * 1024) // 15 GiB (1.5×)
+	s.Apps = []detect.Result{
+		{
+			Path:              "/Applications/BigApp.app",
+			BundleSizeBytes:   actual,
+			ApparentSizeBytes: apparent,
+		},
+	}
+	if findings := ruleSparseFileInflation().MatchFn(s); len(findings) != 0 {
+		t.Errorf("1.5× inflation is below threshold — expected no findings, got %v", findings)
+	}
+}
+
+func TestSparseFileInflationSmallBundle(t *testing.T) {
+	s := baseSnap()
+	// Bundle < 1 MiB actual — rule should stay silent to avoid noise.
+	s.Apps = []detect.Result{
+		{
+			Path:              "/Applications/Tiny.app",
+			BundleSizeBytes:   100 * 1024,            // 100 KiB actual
+			ApparentSizeBytes: 100 * 1024 * 1024 * 1024, // 100 GiB apparent (absurd edge case)
+		},
+	}
+	if findings := ruleSparseFileInflation().MatchFn(s); len(findings) != 0 {
+		t.Errorf("small actual size should suppress firing, got %v", findings)
+	}
+}
+
 // --- Evaluate (engine) ---
 
 func TestEvaluateSortOrder(t *testing.T) {

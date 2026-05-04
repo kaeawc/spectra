@@ -39,7 +39,8 @@ type Result struct {
 	BuildNumber      string   // CFBundleVersion
 	ElectronVersion  string   // version of bundled Electron Framework, if any
 	Architectures    []string // arm64, x86_64
-	BundleSizeBytes  int64    // total disk usage of the .app
+	BundleSizeBytes  int64    // total disk usage of the .app (sparse-aware: Blocks*512)
+	ApparentSizeBytes int64   // logical size of the .app (fi.Size() sum; may be >> BundleSizeBytes for sparse images)
 	TeamID           string   // code-sign team identifier
 	SparkleFeedURL   string   // SUFeedURL from Info.plist, if present
 	MASReceipt       bool     // Mac App Store receipt is embedded
@@ -227,7 +228,7 @@ func populateMetadata(appPath, exe string, r *Result) {
 	if exe != "" {
 		r.Architectures = readArchitectures(exe)
 	}
-	r.BundleSizeBytes = bundleSize(appPath)
+	r.BundleSizeBytes, r.ApparentSizeBytes = bundleSizes(appPath)
 	r.TeamID, r.HardenedRuntime = readSigning(appPath)
 	r.Sandboxed, r.Entitlements = readEntitlements(appPath)
 	r.MASReceipt = exists(filepath.Join(appPath, "Contents", "_MASReceipt"))
@@ -321,13 +322,12 @@ func readArchitectures(exe string) []string {
 	return arches
 }
 
-// bundleSize sums the actual on-disk size (not apparent size) of every
-// regular file under appPath. We use Stat_t.Blocks * 512 so sparse files
-// — most notably Docker's VM disk image at ~/Library/Containers/com.docker
-// .docker — report the real space used rather than their virtual ceiling.
-// Errors are ignored; partial sums are fine.
-func bundleSize(appPath string) int64 {
-	var total int64
+// bundleSizes walks appPath once and returns (actual, apparent) byte counts
+// for all regular files. actual uses Stat_t.Blocks*512 so sparse files report
+// real allocation; apparent uses fi.Size() (the logical ceiling). For
+// non-sparse files they are equal; a Docker VM disk image may show
+// apparent 60 GiB vs actual 4 GiB. Errors are ignored; partial sums are fine.
+func bundleSizes(appPath string) (actual, apparent int64) {
 	_ = filepath.WalkDir(appPath, func(_ string, d os.DirEntry, err error) error {
 		if err != nil || d == nil || d.IsDir() {
 			return nil
@@ -336,10 +336,18 @@ func bundleSize(appPath string) int64 {
 		if err != nil || !fi.Mode().IsRegular() {
 			return nil
 		}
-		total += diskBytes(fi)
+		actual += diskBytes(fi)
+		apparent += fi.Size()
 		return nil
 	})
-	return total
+	return actual, apparent
+}
+
+// bundleSize returns the actual (sparse-aware) disk usage for appPath.
+// Deprecated: prefer bundleSizes when you also need apparent size.
+func bundleSize(appPath string) int64 {
+	a, _ := bundleSizes(appPath)
+	return a
 }
 
 // readSigning parses `codesign -dv` stderr for the team identifier and
