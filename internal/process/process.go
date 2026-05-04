@@ -17,14 +17,16 @@ import (
 
 // Info is one running process at snapshot time.
 type Info struct {
-	PID             int    `json:"pid"`
-	PPID            int    `json:"ppid"`
-	UID             int    `json:"uid"`
-	User            string `json:"user,omitempty"`
-	Command         string `json:"command"`         // short (comm) — just the exe name
-	FullCommandLine string `json:"full_command_line"` // full argv[0...] string
-	RSSKiB          int64  `json:"rss_kib"`
-	VSizeKiB        int64  `json:"vsize_kib"`
+	PID             int     `json:"pid"`
+	PPID            int     `json:"ppid"`
+	UID             int     `json:"uid"`
+	User            string  `json:"user,omitempty"`
+	Command         string  `json:"command"`          // short (comm) — just the exe name
+	FullCommandLine string  `json:"full_command_line"` // full argv[0...] string
+	RSSKiB          int64   `json:"rss_kib"`
+	VSizeKiB        int64   `json:"vsize_kib"`
+	ThreadCount     int     `json:"thread_count"`      // number of threads (nlwp)
+	CPUPct          float64 `json:"cpu_pct"`           // CPU % at sample time (pcpu)
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
@@ -49,9 +51,10 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	if run == nil {
 		run = defaultRunner
 	}
-	// Omit comm= (can contain spaces); derive a short name from command=.
-	// Column order: pid ppid rss vsz uid user command...
-	out, err := run("ps", "-axwwo", "pid=,ppid=,rss=,vsz=,uid=,user=,command=")
+	// Column order: pid ppid pcpu rss vsz uid user command...
+	// macOS ps does not support nlwp; ThreadCount is populated by separate
+	// collectors when available.
+	out, err := run("ps", "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,command=")
 	if err != nil {
 		return nil
 	}
@@ -87,26 +90,28 @@ func parsePS(raw string) []Info {
 }
 
 func parseRow(line string) Info {
-	// Order: pid ppid rss vsz uid user command...
-	// The first 6 fields have no spaces. Everything from field 7 onward is
+	// Order: pid ppid pcpu rss vsz uid user command...
+	// The first 7 fields have no spaces. Everything from field 8 onward is
 	// the full argv string (may contain spaces).
 	fields := strings.Fields(line)
-	if len(fields) < 7 {
+	if len(fields) < 8 {
 		return Info{}
 	}
 	pid, _ := strconv.Atoi(fields[0])
 	ppid, _ := strconv.Atoi(fields[1])
-	rss, _ := strconv.ParseInt(fields[2], 10, 64)
-	vsz, _ := strconv.ParseInt(fields[3], 10, 64)
-	uid, _ := strconv.Atoi(fields[4])
-	full := strings.Join(fields[6:], " ")
+	cpu, _ := strconv.ParseFloat(fields[2], 64)
+	rss, _ := strconv.ParseInt(fields[3], 10, 64)
+	vsz, _ := strconv.ParseInt(fields[4], 10, 64)
+	uid, _ := strconv.Atoi(fields[5])
+	full := strings.Join(fields[7:], " ")
 	return Info{
 		PID:             pid,
 		PPID:            ppid,
+		CPUPct:          cpu,
 		RSSKiB:          rss,
 		VSizeKiB:        vsz,
 		UID:             uid,
-		User:            fields[5],
+		User:            fields[6],
 		Command:         shortName(full),
 		FullCommandLine: full,
 	}

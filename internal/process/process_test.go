@@ -15,10 +15,11 @@ func fakePS(output string) func(string, ...string) ([]byte, error) {
 
 // Synthetic ps output: pid ppid rss vsz uid user command...
 // Matches the format from `ps -axwwo pid=,ppid=,rss=,vsz=,uid=,user=,command=`
-const psFixture = `1      0    4096    8192 0 root /sbin/launchd
-412   1    184320  409600 501 alice /Applications/Slack.app/Contents/MacOS/Slack --some-flag
-415   412  92160   204800 501 alice /Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper --type=renderer
-999   1    2048    4096 501 alice /bin/bash -l
+// psFixture matches the ps format: pid ppid pcpu rss vsz uid user command
+const psFixture = `1      0   0.0   4096    8192 0 root /sbin/launchd
+412   1    1.2  184320  409600 501 alice /Applications/Slack.app/Contents/MacOS/Slack --some-flag
+415   412  0.5  92160   204800 501 alice /Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper --type=renderer
+999   1    0.0  2048    4096 501 alice /bin/bash -l
 `
 
 func TestParsePS(t *testing.T) {
@@ -36,6 +37,12 @@ func TestParsePSFields(t *testing.T) {
 	}
 	if slack.PPID != 1 {
 		t.Errorf("PPID = %d, want 1", slack.PPID)
+	}
+	if slack.ThreadCount != 0 {
+		t.Errorf("ThreadCount = %d, want 0 (nlwp not available on macOS)", slack.ThreadCount)
+	}
+	if slack.CPUPct != 1.2 {
+		t.Errorf("CPUPct = %v, want 1.2", slack.CPUPct)
 	}
 	if slack.RSSKiB != 184320 {
 		t.Errorf("RSSKiB = %d, want 184320", slack.RSSKiB)
@@ -62,7 +69,8 @@ func TestParsePSEmptyLines(t *testing.T) {
 }
 
 func TestParsePSShortRow(t *testing.T) {
-	procs := parsePS("412 1 100")
+	// Fewer than 9 fields → skipped.
+	procs := parsePS("412 1 1 0.0 100")
 	if len(procs) != 0 {
 		t.Errorf("expected empty for short row, got %d", len(procs))
 	}
