@@ -13,13 +13,12 @@ func fakePS(output string) func(string, ...string) ([]byte, error) {
 	}
 }
 
-// Synthetic ps output: pid ppid rss vsz uid user command...
-// Matches the format from `ps -axwwo pid=,ppid=,rss=,vsz=,uid=,user=,command=`
-// psFixture matches the ps format: pid ppid pcpu rss vsz uid user command
-const psFixture = `1      0   0.0   4096    8192 0 root /sbin/launchd
-412   1    1.2  184320  409600 501 alice /Applications/Slack.app/Contents/MacOS/Slack --some-flag
-415   412  0.5  92160   204800 501 alice /Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper --type=renderer
-999   1    0.0  2048    4096 501 alice /bin/bash -l
+// psFixture matches the ps format: pid ppid pcpu rss vsz uid user lstart(5) command
+// lstart is "Dow Mon DD HH:MM:SS YYYY" — always 5 tokens after Fields().
+const psFixture = `1      0   0.0   4096    8192 0 root Sat May  2 22:37:01 2026 /sbin/launchd
+412   1    1.2  184320  409600 501 alice Sat May  2 22:40:00 2026 /Applications/Slack.app/Contents/MacOS/Slack --some-flag
+415   412  0.5  92160   204800 501 alice Sat May  2 22:40:05 2026 /Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper --type=renderer
+999   1    0.0  2048    4096 501 alice Sat May  2 23:00:00 2026 /bin/bash -l
 `
 
 func TestParsePS(t *testing.T) {
@@ -69,10 +68,24 @@ func TestParsePSEmptyLines(t *testing.T) {
 }
 
 func TestParsePSShortRow(t *testing.T) {
-	// Fewer than 9 fields → skipped.
+	// Fewer than 13 fields (7 fixed + 5 lstart + 1 command) → skipped.
 	procs := parsePS("412 1 1 0.0 100")
 	if len(procs) != 0 {
 		t.Errorf("expected empty for short row, got %d", len(procs))
+	}
+}
+
+func TestParsePSStartTime(t *testing.T) {
+	procs := parsePS(psFixture)
+	slack := procs[1]
+	if slack.StartTime.IsZero() {
+		t.Error("StartTime should not be zero for Slack process")
+	}
+	if slack.StartTime.Month().String() != "May" {
+		t.Errorf("StartTime month = %v, want May", slack.StartTime.Month())
+	}
+	if slack.StartTime.Year() != 2026 {
+		t.Errorf("StartTime year = %d, want 2026", slack.StartTime.Year())
 	}
 }
 
