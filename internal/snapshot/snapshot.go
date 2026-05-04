@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -35,11 +36,11 @@ type Snapshot struct {
 	Toolchains toolchain.Toolchains `json:"toolchains"`
 	Power      sysinfo.PowerState   `json:"power"`
 	Sysctls    map[string]string    `json:"sysctls,omitempty"`
+	Network    netstate.State       `json:"network"`
 
 	// Placeholders for upcoming collectors. Empty until implemented.
 	// See docs/design/system-inventory.md.
 	// JVMs    []JVMInfo
-	// Network *NetworkState
 	// Storage *StorageState
 }
 
@@ -69,6 +70,10 @@ type Options struct {
 	// SysinfoCmdRunner is forwarded to sysinfo collectors (sysctls + power).
 	// Zero value uses the real commands.
 	SysinfoCmdRunner sysinfo.CmdRunner
+
+	// NetCmdRunner is forwarded to the network state collector.
+	// Zero value uses the real commands.
+	NetCmdRunner netstate.CmdRunner
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -85,11 +90,15 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if siRun == nil {
 		siRun = sysinfo.DefaultRunner
 	}
+	netRun := opts.NetCmdRunner
+	if netRun == nil {
+		netRun = netstate.DefaultRunner
+	}
 
 	var wg sync.WaitGroup
-	collectors := 5 // host, apps, toolchains, power, sysctls
+	collectors := 6 // host, apps, toolchains, power, sysctls, network
 	if !opts.SkipProcesses {
-		collectors = 6
+		collectors = 7
 	}
 	wg.Add(collectors)
 
@@ -112,6 +121,10 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	go func() {
 		defer wg.Done()
 		s.Sysctls = sysinfo.CollectSysctls(siRun)
+	}()
+	go func() {
+		defer wg.Done()
+		s.Network = netstate.Collect(netRun)
 	}()
 
 	if !opts.SkipProcesses {
