@@ -528,6 +528,11 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return netstate.Collect(netstate.DefaultRunner), nil
 	})
 
+	// network.connections — active TCP/UDP sockets (non-LISTEN).
+	d.Register("network.connections", func(_ json.RawMessage) (any, error) {
+		return netstate.CollectConnections(netstate.DefaultRunner), nil
+	})
+
 	// process.list — snapshot of all running processes via ps.
 	// Optional: { "bundles": ["/Applications/Foo.app"] } to enable app attribution.
 	d.Register("process.list", func(params json.RawMessage) (any, error) {

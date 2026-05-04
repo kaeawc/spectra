@@ -12,6 +12,10 @@ import (
 )
 
 func runNetwork(args []string) int {
+	if len(args) > 0 && args[0] == "connections" {
+		return runNetworkConnections(args[1:])
+	}
+
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
@@ -29,6 +33,58 @@ func runNetwork(args []string) int {
 	}
 
 	printNetworkState(state)
+	return 0
+}
+
+func runNetworkConnections(args []string) int {
+	fs := flag.NewFlagSet("spectra network connections", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	filterProto := fs.String("proto", "", "Filter by protocol: tcp or udp")
+	filterState := fs.String("state", "", "Filter by connection state (e.g. established)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	conns := netstate.CollectConnections(netstate.DefaultRunner)
+
+	var filtered []netstate.Connection
+	for _, c := range conns {
+		if *filterProto != "" && c.Proto != strings.ToLower(*filterProto) {
+			continue
+		}
+		if *filterState != "" && c.State != strings.ToLower(*filterState) {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(filtered)
+		return 0
+	}
+
+	if len(filtered) == 0 {
+		fmt.Println("no connections")
+		return 0
+	}
+
+	fmt.Printf("%-7s  %-5s  %-11s  %-25s  %-25s  %s\n",
+		"PID", "PROTO", "STATE", "LOCAL", "REMOTE", "COMMAND")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, c := range filtered {
+		state := c.State
+		if state == "" {
+			state = "-"
+		}
+		fmt.Printf("%-7d  %-5s  %-11s  %-25s  %-25s  %s\n",
+			c.PID, c.Proto, state,
+			truncate(c.LocalAddr, 25),
+			truncate(c.RemoteAddr, 25),
+			truncate(c.Command, 30))
+	}
 	return 0
 }
 
