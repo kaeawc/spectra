@@ -36,6 +36,7 @@ func subcommandList() []subcommand {
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
 		{"jvm", "List or inspect running JVM processes", runJVM},
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
+		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
