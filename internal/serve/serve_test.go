@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/store"
 )
@@ -23,7 +24,7 @@ func TestDaemonHealthEndpoint(t *testing.T) {
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db)
+	registerHandlers(d, "test-version", db, metrics.NewCollector())
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -91,7 +92,7 @@ func TestDaemonSnapshotList(t *testing.T) {
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test", db)
+	registerHandlers(d, "test", db, metrics.NewCollector())
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {

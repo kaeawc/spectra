@@ -130,6 +130,19 @@ CREATE TABLE IF NOT EXISTS snapshot_apps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_apps_bundle ON snapshot_apps(bundle_id);
+
+CREATE TABLE IF NOT EXISTS process_metrics (
+    pid          INTEGER NOT NULL,
+    minute_at    DATETIME NOT NULL,
+    avg_rss_kib  INTEGER NOT NULL DEFAULT 0,
+    max_rss_kib  INTEGER NOT NULL DEFAULT 0,
+    avg_cpu_pct  REAL NOT NULL DEFAULT 0,
+    max_cpu_pct  REAL NOT NULL DEFAULT 0,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pid, minute_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_process_metrics_pid ON process_metrics(pid, minute_at DESC);
 `
 
 // SnapshotRow is a lightweight summary row from the snapshots table.
@@ -316,6 +329,100 @@ type AppRow struct {
 	Packaging  string
 	Confidence string
 	AppVersion string
+}
+
+// SaveProcessMetrics persists a batch of 1-minute aggregates from the ring
+// buffer. Uses INSERT OR IGNORE so duplicate (pid, minute_at) rows are skipped.
+func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, a := range aggs {
+		_, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO process_metrics
+			    (pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count)
+			VALUES (?,?,?,?,?,?,?)`,
+			a.PID, a.MinuteAt.UTC().Format(time.RFC3339),
+			a.AvgRSSKiB, a.MaxRSSKiB,
+			a.AvgCPUPct, a.MaxCPUPct,
+			a.SampleCount,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetProcessMetrics returns 1-minute aggregate rows for pid, newest first,
+// up to limit rows. Pass limit=0 for no cap (up to 1000).
+func (s *DB) GetProcessMetrics(ctx context.Context, pid, limit int) ([]ProcessMetricRow, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count
+		FROM process_metrics WHERE pid=?
+		ORDER BY minute_at DESC LIMIT ?`, pid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProcessMetricRow
+	for rows.Next() {
+		var r ProcessMetricRow
+		var minuteAt string
+		if err := rows.Scan(&r.PID, &minuteAt, &r.AvgRSSKiB, &r.MaxRSSKiB,
+			&r.AvgCPUPct, &r.MaxCPUPct, &r.SampleCount); err != nil {
+			return nil, err
+		}
+		r.MinuteAt, _ = time.Parse(time.RFC3339, minuteAt)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetAllProcessMetrics returns the most recent rows across all PIDs, ordered
+// by minute_at DESC. limit caps total rows returned (0 → 1000).
+func (s *DB) GetAllProcessMetrics(ctx context.Context, limit int) ([]ProcessMetricRow, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count
+		FROM process_metrics
+		ORDER BY minute_at DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProcessMetricRow
+	for rows.Next() {
+		var r ProcessMetricRow
+		var minuteAt string
+		if err := rows.Scan(&r.PID, &minuteAt, &r.AvgRSSKiB, &r.MaxRSSKiB,
+			&r.AvgCPUPct, &r.MaxCPUPct, &r.SampleCount); err != nil {
+			return nil, err
+		}
+		r.MinuteAt, _ = time.Parse(time.RFC3339, minuteAt)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ProcessMetricRow is one 1-minute aggregate row from process_metrics.
+type ProcessMetricRow struct {
+	PID         int
+	MinuteAt    time.Time
+	AvgRSSKiB   int64
+	MaxRSSKiB   int64
+	AvgCPUPct   float64
+	MaxCPUPct   float64
+	SampleCount int
 }
 
 // ErrNotFound is returned when a requested record doesn't exist.

@@ -12,8 +12,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -80,8 +82,16 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer db.Close()
 
+	// Start the ~1Hz process metrics sampler.
+	collector := metrics.NewCollector()
+	sampler := metrics.NewSampler(collector, time.Second, nil)
+	go sampler.Run(ctx)
+
+	// Flush aggregates to SQLite every minute.
+	go flushMetricsLoop(ctx, collector, db)
+
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db)
+	registerHandlers(d, opts.SpectraVersion, db, collector)
 
 	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
@@ -92,8 +102,39 @@ func Run(ctx context.Context, opts Options) error {
 	return d.ServeListener(ln)
 }
 
+// flushMetricsLoop writes 1-minute aggregates from the ring buffer to SQLite
+// on a 1-minute tick until ctx is cancelled.
+func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			aggs := c.FlushAggregates(5 * time.Minute)
+			if len(aggs) == 0 {
+				continue
+			}
+			rows := make([]store.ProcessMetricRow, len(aggs))
+			for i, a := range aggs {
+				rows[i] = store.ProcessMetricRow{
+					PID:         a.PID,
+					MinuteAt:    a.MinuteAt,
+					AvgRSSKiB:   a.AvgRSSKiB,
+					MaxRSSKiB:   a.MaxRSSKiB,
+					AvgCPUPct:   a.AvgCPUPct,
+					MaxCPUPct:   a.MaxCPUPct,
+					SampleCount: a.SampleCount,
+				}
+			}
+			_ = db.SaveProcessMetrics(ctx, rows)
+		}
+	}
+}
+
 // registerHandlers wires all JSON-RPC methods into d.
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "version": version}, nil
 	})
@@ -130,6 +171,35 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB) {
 			return nil, err
 		}
 		return snap, nil
+	})
+
+	d.Register("process.live", func(params json.RawMessage) (any, error) {
+		// Returns the most recent samples for all known PIDs.
+		var p struct{ Limit int `json:"limit"` }
+		_ = json.Unmarshal(params, &p)
+		if p.Limit <= 0 {
+			p.Limit = 60 // default: last 60 seconds
+		}
+		pids := collector.PIDs()
+		result := make(map[string]any, len(pids))
+		for _, pid := range pids {
+			samples := collector.Recent(pid, p.Limit)
+			if len(samples) > 0 {
+				result[fmt.Sprint(pid)] = samples
+			}
+		}
+		return result, nil
+	})
+
+	d.Register("process.history", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID   int `json:"pid"`
+			Limit int `json:"limit"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("process.history requires {\"pid\": <pid>}")
+		}
+		return db.GetProcessMetrics(context.Background(), p.PID, p.Limit)
 	})
 
 	d.Register("rules.check", func(params json.RawMessage) (any, error) {
