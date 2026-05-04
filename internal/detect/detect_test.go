@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // makeBundle creates a synthetic .app skeleton at t.TempDir()/Name.app
@@ -449,5 +450,27 @@ func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
 	}
 	if !keepAlive {
 		t.Error("KeepAlive: got false, want true")
+	}
+}
+
+func TestLstartLayoutParse(t *testing.T) {
+	samples := []struct {
+		raw      string
+		wantYear int
+	}{
+		{"Sat May  2 22:37:01 2026", 2026},
+		{"Mon Jan  1 00:00:00 2025", 2025},
+	}
+	for _, s := range samples {
+		raw := strings.Join(strings.Fields(s.raw), " ")
+		layout := strings.Join(strings.Fields(lstartLayout), " ")
+		parsed, err := time.Parse(layout, raw)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", s.raw, err)
+			continue
+		}
+		if parsed.Year() != s.wantYear {
+			t.Errorf("Year = %d, want %d", parsed.Year(), s.wantYear)
+		}
 	}
 }

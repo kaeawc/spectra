@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
 )
@@ -257,11 +258,20 @@ func printMeta(r detect.Result) {
 	}
 	if len(r.RunningProcesses) > 0 {
 		var totalRSS int
+		var oldest time.Time
 		for _, p := range r.RunningProcesses {
 			totalRSS += p.RSSKiB
+			if !p.StartTime.IsZero() && (oldest.IsZero() || p.StartTime.Before(oldest)) {
+				oldest = p.StartTime
+			}
 		}
-		fmt.Printf("    running: %d processes, %s RSS\n",
-			len(r.RunningProcesses), humanSize(int64(totalRSS)*1024))
+		uptimeStr := ""
+		if !oldest.IsZero() {
+			d := time.Since(oldest).Round(time.Second)
+			uptimeStr = fmt.Sprintf(", uptime %s", formatDuration(d))
+		}
+		fmt.Printf("    running: %d processes, %s RSS%s\n",
+			len(r.RunningProcesses), humanSize(int64(totalRSS)*1024), uptimeStr)
 	}
 	if r.Storage != nil {
 		parts := []string{}
@@ -294,6 +304,19 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+func formatDuration(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 }
 
 func humanSize(n int64) string {
