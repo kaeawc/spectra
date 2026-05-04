@@ -172,6 +172,8 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 			})
 			_ = db.SaveSnapshot(ctx, store.FromSnapshot(snap))
 			_ = db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap))
+			_ = db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap))
+			_ = db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap))
 			_, _ = db.PruneSnapshots(ctx, 100)
 		}
 	}
@@ -216,6 +218,8 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, err
 		}
 		_ = db.SaveSnapshotProcesses(context.Background(), snap.ID, store.ProcessesFromSnapshot(snap))
+		_ = db.SaveLoginItems(context.Background(), snap.ID, store.LoginItemsFromSnapshot(snap))
+		_ = db.SaveGrantedPerms(context.Background(), snap.ID, store.GrantedPermsFromSnapshot(snap))
 		return snap, nil
 	})
 
@@ -319,6 +323,22 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("snapshot.processes requires {\"id\":\"<snapshot-id>\"}")
 		}
 		return db.GetSnapshotProcesses(context.Background(), p.ID)
+	})
+
+	d.Register("snapshot.login_items", func(params json.RawMessage) (any, error) {
+		var p struct{ ID string `json:"id"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+			return nil, fmt.Errorf("snapshot.login_items requires {\"id\":\"<snapshot-id>\"}")
+		}
+		return db.GetLoginItems(context.Background(), p.ID)
+	})
+
+	d.Register("snapshot.granted_perms", func(params json.RawMessage) (any, error) {
+		var p struct{ ID string `json:"id"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+			return nil, fmt.Errorf("snapshot.granted_perms requires {\"id\":\"<snapshot-id>\"}")
+		}
+		return db.GetGrantedPerms(context.Background(), p.ID)
 	})
 
 	// snapshot.prune — delete live snapshots beyond retention limit.

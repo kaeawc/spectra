@@ -60,6 +60,41 @@ func ProcessesFromSnapshot(s snapshot.Snapshot) []ProcessSnapshotRow {
 	return rows
 }
 
+// LoginItemsFromSnapshot converts a snapshot's per-app LoginItems into
+// LoginItemRows ready for SaveLoginItems.
+func LoginItemsFromSnapshot(s snapshot.Snapshot) []LoginItemRow {
+	var rows []LoginItemRow
+	for _, r := range s.Apps {
+		for _, li := range r.LoginItems {
+			rows = append(rows, LoginItemRow{
+				BundleID:  r.BundleID,
+				PlistPath: li.Path,
+				Label:     li.Label,
+				Scope:     li.Scope,
+				Daemon:    li.Daemon,
+				RunAtLoad: li.RunAtLoad,
+				KeepAlive: li.KeepAlive,
+			})
+		}
+	}
+	return rows
+}
+
+// GrantedPermsFromSnapshot converts a snapshot's per-app GrantedPermissions
+// into GrantedPermRows ready for SaveGrantedPerms.
+func GrantedPermsFromSnapshot(s snapshot.Snapshot) []GrantedPermRow {
+	var rows []GrantedPermRow
+	for _, r := range s.Apps {
+		for _, svc := range r.GrantedPermissions {
+			rows = append(rows, GrantedPermRow{
+				BundleID: r.BundleID,
+				Service:  svc,
+			})
+		}
+	}
+	return rows
+}
+
 func fromResult(r detect.Result) AppInput {
 	name := appName(r.Path)
 	return AppInput{

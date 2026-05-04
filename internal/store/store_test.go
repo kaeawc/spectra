@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
@@ -514,5 +515,147 @@ func TestProcessesFromSnapshot(t *testing.T) {
 	}
 	if !found[1] || !found[412] {
 		t.Errorf("pids = %v, want {1, 412}", found)
+	}
+}
+
+func TestSaveAndGetLoginItems(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	snap := sampleInput(); snap.ID = "snap-li-1"
+	if err := db.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []LoginItemRow{
+		{BundleID: "com.example.app", PlistPath: "/Library/LaunchAgents/com.example.app.plist",
+			Label: "com.example.app", Scope: "user", RunAtLoad: true},
+		{BundleID: "com.example.app", PlistPath: "/Library/LaunchDaemons/com.example.daemon.plist",
+			Label: "com.example.daemon", Scope: "system", Daemon: true, KeepAlive: true},
+	}
+	if err := db.SaveLoginItems(ctx, snap.ID, items); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.GetLoginItems(ctx, snap.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	byPath := map[string]LoginItemRow{}
+	for _, r := range got {
+		byPath[r.PlistPath] = r
+	}
+	agent := byPath["/Library/LaunchAgents/com.example.app.plist"]
+	if !agent.RunAtLoad {
+		t.Error("RunAtLoad should be true for agent")
+	}
+	daemon := byPath["/Library/LaunchDaemons/com.example.daemon.plist"]
+	if !daemon.Daemon || !daemon.KeepAlive {
+		t.Error("Daemon and KeepAlive should be true for daemon row")
+	}
+}
+
+func TestSaveLoginItemsIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	snap := sampleInput(); snap.ID = "snap-li-2"
+	if err := db.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []LoginItemRow{
+		{BundleID: "com.test", PlistPath: "/Library/LaunchAgents/com.test.plist", Label: "com.test"},
+	}
+	if err := db.SaveLoginItems(ctx, snap.ID, items); err != nil {
+		t.Fatal(err)
+	}
+	// second call should be a no-op
+	if err := db.SaveLoginItems(ctx, snap.ID, items); err != nil {
+		t.Fatalf("second SaveLoginItems: %v", err)
+	}
+	got, err := db.GetLoginItems(ctx, snap.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("len = %d, want 1", len(got))
+	}
+}
+
+func TestSaveAndGetGrantedPerms(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	snap := sampleInput(); snap.ID = "snap-gp-1"
+	if err := db.SaveSnapshot(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	perms := []GrantedPermRow{
+		{BundleID: "com.slack.slack", Service: "kTCCServiceMicrophone"},
+		{BundleID: "com.slack.slack", Service: "kTCCServiceCamera"},
+		{BundleID: "com.zoom.xos", Service: "kTCCServiceMicrophone"},
+	}
+	if err := db.SaveGrantedPerms(ctx, snap.ID, perms); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.GetGrantedPerms(ctx, snap.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	slackSvcs := map[string]bool{}
+	for _, r := range got {
+		if r.BundleID == "com.slack.slack" {
+			slackSvcs[r.Service] = true
+		}
+	}
+	if !slackSvcs["kTCCServiceMicrophone"] || !slackSvcs["kTCCServiceCamera"] {
+		t.Errorf("missing expected services for slack: %v", slackSvcs)
+	}
+}
+
+func TestLoginItemsFromSnapshot(t *testing.T) {
+	snap := snapshot.Snapshot{
+		ID: "snap-conv",
+		Apps: []detect.Result{
+			{
+				BundleID: "com.example.app",
+				LoginItems: []detect.LoginItem{
+					{Path: "/Library/LaunchAgents/com.example.plist", Label: "com.example", Scope: "user", RunAtLoad: true},
+				},
+			},
+		},
+	}
+	rows := LoginItemsFromSnapshot(snap)
+	if len(rows) != 1 {
+		t.Fatalf("len = %d, want 1", len(rows))
+	}
+	if rows[0].BundleID != "com.example.app" {
+		t.Errorf("BundleID = %q", rows[0].BundleID)
+	}
+	if !rows[0].RunAtLoad {
+		t.Error("RunAtLoad should be true")
+	}
+}
+
+func TestGrantedPermsFromSnapshot(t *testing.T) {
+	snap := snapshot.Snapshot{
+		ID: "snap-gp-conv",
+		Apps: []detect.Result{
+			{BundleID: "com.slack.slack", GrantedPermissions: []string{"kTCCServiceMicrophone", "kTCCServiceCamera"}},
+			{BundleID: "com.zoom.xos", GrantedPermissions: []string{"kTCCServiceMicrophone"}},
+		},
+	}
+	rows := GrantedPermsFromSnapshot(snap)
+	if len(rows) != 3 {
+		t.Fatalf("len = %d, want 3", len(rows))
 	}
 }
