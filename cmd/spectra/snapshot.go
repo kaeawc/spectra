@@ -216,6 +216,22 @@ func runSnapshotShow(args []string) int {
 		return 1
 	}
 
+	// Try to use the full snapshot JSON for a rich display.
+	if snapJSON, err := db.GetSnapshotJSON(ctx, id); err == nil && len(snapJSON) > 0 {
+		var snap snapshot.Snapshot
+		if err := json.Unmarshal(snapJSON, &snap); err == nil {
+			if *asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(snap)
+				return 0
+			}
+			printSnapshot(snap)
+			return 0
+		}
+	}
+
+	// Fallback: snapshot JSON not available — use the lightweight row + apps.
 	apps, err := db.GetSnapshotApps(ctx, id)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
