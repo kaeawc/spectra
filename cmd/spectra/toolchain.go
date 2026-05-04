@@ -155,6 +155,17 @@ func printToolchains(tc toolchain.Toolchains) {
 		}
 	}
 
+	if len(tc.BuildTools) > 0 {
+		fmt.Printf("\nBuild tools (%d):\n", len(tc.BuildTools))
+		for _, bt := range tc.BuildTools {
+			fmt.Printf("  %-8s  %-12s  %s\n", bt.Name, bt.Version, bt.Source)
+		}
+	}
+
+	if len(tc.JVMManagers) > 0 {
+		fmt.Printf("\nJVM managers: %s\n", strings.Join(tc.JVMManagers, ", "))
+	}
+
 	b := tc.Brew
 	fmt.Printf("\nHomebrew: %d formulae, %d casks, %d taps\n",
 		len(b.Formulae), len(b.Casks), len(b.Taps))
