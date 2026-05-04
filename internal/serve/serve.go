@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
@@ -200,6 +201,71 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("process.history requires {\"pid\": <pid>}")
 		}
 		return db.GetProcessMetrics(context.Background(), p.PID, p.Limit)
+	})
+
+	d.Register("inspect.app", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Path    string         `json:"path"`
+			Options detect.Options `json:"options"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
+			return nil, fmt.Errorf("inspect.app requires {\"path\": \"<app-path>\"}")
+		}
+		return detect.DetectWith(p.Path, p.Options)
+	})
+
+	d.Register("inspect.app.batch", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Paths   []string       `json:"paths"`
+			Options detect.Options `json:"options"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || len(p.Paths) == 0 {
+			return nil, fmt.Errorf("inspect.app.batch requires {\"paths\": [...]}")
+		}
+		results := make([]detect.Result, 0, len(p.Paths))
+		for _, path := range p.Paths {
+			r, err := detect.DetectWith(path, p.Options)
+			if err != nil {
+				continue // silently skip unreadable bundles
+			}
+			results = append(results, r)
+		}
+		return results, nil
+	})
+
+	d.Register("inspect.host", func(_ json.RawMessage) (any, error) {
+		return snapshot.CollectHost(version), nil
+	})
+
+	d.Register("snapshot.diff", func(params json.RawMessage) (any, error) {
+		var p struct {
+			IDA string `json:"id_a"`
+			IDB string `json:"id_b"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.IDA == "" || p.IDB == "" {
+			return nil, fmt.Errorf("snapshot.diff requires {\"id_a\": \"...\", \"id_b\": \"...\"}")
+		}
+		ctx := context.Background()
+		loadSnap := func(id string) (*snapshot.Snapshot, error) {
+			raw, err := db.GetSnapshotJSON(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if raw == nil {
+				return nil, fmt.Errorf("snapshot %q has no JSON blob", id)
+			}
+			var s snapshot.Snapshot
+			return &s, json.Unmarshal(raw, &s)
+		}
+		snapA, err := loadSnap(p.IDA)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot %q: %w", p.IDA, err)
+		}
+		snapB, err := loadSnap(p.IDB)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot %q: %w", p.IDB, err)
+		}
+		return diff.Compare(*snapA, *snapB), nil
 	})
 
 	d.Register("rules.check", func(params json.RawMessage) (any, error) {
