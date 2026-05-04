@@ -329,3 +329,16 @@ func TestDaemonProcessListReturnsSlice(t *testing.T) {
 		t.Fatalf("result type %T, want []any", resp.Result)
 	}
 }
+
+// storage.system is deliberately not tested here: it walks ~/Library which
+// can take 10+ seconds, exceeding the 5-second test socket deadline. It is
+// tested via storagestate_test.go instead.
+
+func TestDaemonStorageByAppEmptyPaths(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 21, "storage.byApp", `{"paths":[]}`)
+	if resp.Error == nil {
+		t.Error("expected error for empty paths")
+	}
+}
