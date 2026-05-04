@@ -17,16 +17,17 @@ import (
 
 // Info is one running process at snapshot time.
 type Info struct {
-	PID             int     `json:"pid"`
-	PPID            int     `json:"ppid"`
-	UID             int     `json:"uid"`
-	User            string  `json:"user,omitempty"`
-	Command         string  `json:"command"`          // short (comm) — just the exe name
-	FullCommandLine string  `json:"full_command_line"` // full argv[0...] string
-	RSSKiB          int64   `json:"rss_kib"`
-	VSizeKiB        int64   `json:"vsize_kib"`
-	ThreadCount     int     `json:"thread_count"`      // number of threads (nlwp)
-	CPUPct          float64 `json:"cpu_pct"`           // CPU % at sample time (pcpu)
+	PID             int       `json:"pid"`
+	PPID            int       `json:"ppid"`
+	UID             int       `json:"uid"`
+	User            string    `json:"user,omitempty"`
+	Command         string    `json:"command"`           // short (comm) — just the exe name
+	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
+	RSSKiB          int64     `json:"rss_kib"`
+	VSizeKiB        int64     `json:"vsize_kib"`
+	ThreadCount     int       `json:"thread_count"`      // number of threads (nlwp)
+	CPUPct          float64   `json:"cpu_pct"`           // CPU % at sample time (pcpu)
+	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
@@ -51,10 +52,11 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	if run == nil {
 		run = defaultRunner
 	}
-	// Column order: pid ppid pcpu rss vsz uid user command...
+	// Column order: pid ppid pcpu rss vsz uid user lstart command...
+	// lstart produces a 5-token date "Dow Mon DD HH:MM:SS YYYY".
 	// macOS ps does not support nlwp; ThreadCount is populated by separate
 	// collectors when available.
-	out, err := run("ps", "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,command=")
+	out, err := run("ps", "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=")
 	if err != nil {
 		return nil
 	}
@@ -89,12 +91,17 @@ func parsePS(raw string) []Info {
 	return out
 }
 
+// lstartLayout matches the macOS lstart format: "Mon Jan  2 15:04:05 2006"
+// (single-digit days are space-padded in the raw string but normalised after
+// Fields() splits on whitespace, so we use two-digit zero-padded day here).
+const lstartLayout = "Mon Jan 2 15:04:05 2006"
+
 func parseRow(line string) Info {
-	// Order: pid ppid pcpu rss vsz uid user command...
-	// The first 7 fields have no spaces. Everything from field 8 onward is
-	// the full argv string (may contain spaces).
+	// Order: pid ppid pcpu rss vsz uid user <lstart:5 tokens> command...
+	// lstart is "Dow Mon DD HH:MM:SS YYYY" — always 5 space-separated tokens.
+	// Minimum field count: 7 fixed + 5 lstart + 1 command = 13.
 	fields := strings.Fields(line)
-	if len(fields) < 8 {
+	if len(fields) < 13 {
 		return Info{}
 	}
 	pid, _ := strconv.Atoi(fields[0])
@@ -103,7 +110,13 @@ func parseRow(line string) Info {
 	rss, _ := strconv.ParseInt(fields[3], 10, 64)
 	vsz, _ := strconv.ParseInt(fields[4], 10, 64)
 	uid, _ := strconv.Atoi(fields[5])
-	full := strings.Join(fields[7:], " ")
+	// fields[6] = user; fields[7:12] = lstart (5 tokens); fields[12:] = command
+	lstartStr := strings.Join(fields[7:12], " ")
+	var startTime time.Time
+	if t, err := time.Parse(lstartLayout, lstartStr); err == nil {
+		startTime = t
+	}
+	full := strings.Join(fields[12:], " ")
 	return Info{
 		PID:             pid,
 		PPID:            ppid,
@@ -114,6 +127,7 @@ func parseRow(line string) Info {
 		User:            fields[6],
 		Command:         shortName(full),
 		FullCommandLine: full,
+		StartTime:       startTime,
 	}
 }
 
