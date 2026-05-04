@@ -177,6 +177,15 @@ func TestParseVPNInterfacesEmpty(t *testing.T) {
 	}
 }
 
+func hasArg(args []string, s string) bool {
+	for _, a := range args {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCollect(t *testing.T) {
 	stub := func(name string, args ...string) ([]byte, error) {
 		switch name {
@@ -188,7 +197,10 @@ func TestCollect(t *testing.T) {
 			}
 			return []byte("HTTPEnable : 0\n"), nil
 		case "lsof":
-			return []byte(lsofOutput), nil
+			if hasArg(args, "-sTCP:LISTEN") {
+				return []byte(lsofOutput), nil
+			}
+			return []byte(lsofFixture), nil
 		case "ifconfig":
 			return []byte(ifconfigWithVPN), nil
 		}
@@ -210,6 +222,9 @@ func TestCollect(t *testing.T) {
 	}
 	if len(s.VPNInterfaces) != 1 || s.VPNInterfaces[0] != "utun3" {
 		t.Errorf("VPNInterfaces = %v, want [utun3]", s.VPNInterfaces)
+	}
+	if s.EstablishedConnectionsCount != 3 {
+		t.Errorf("EstablishedConnectionsCount = %d, want 3", s.EstablishedConnectionsCount)
 	}
 }
 
