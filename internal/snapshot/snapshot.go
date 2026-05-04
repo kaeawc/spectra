@@ -11,6 +11,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -32,14 +33,14 @@ type Snapshot struct {
 	Apps       []detect.Result      `json:"apps"`
 	Processes  []process.Info       `json:"processes,omitempty"`
 	Toolchains toolchain.Toolchains `json:"toolchains"`
+	Power      sysinfo.PowerState   `json:"power"`
+	Sysctls    map[string]string    `json:"sysctls,omitempty"`
 
 	// Placeholders for upcoming collectors. Empty until implemented.
 	// See docs/design/system-inventory.md.
-	// JVMs       []JVMInfo
-	// Network    *NetworkState
-	// Storage    *StorageState
-	// Power      *PowerState
-	// Sysctls    map[string]string
+	// JVMs    []JVMInfo
+	// Network *NetworkState
+	// Storage *StorageState
 }
 
 // Options configure a snapshot Build.
@@ -64,6 +65,10 @@ type Options struct {
 
 	// SkipProcesses disables the process collector (faster for tests).
 	SkipProcesses bool
+
+	// SysinfoCmdRunner is forwarded to sysinfo collectors (sysctls + power).
+	// Zero value uses the real commands.
+	SysinfoCmdRunner sysinfo.CmdRunner
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -76,10 +81,15 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		Kind:    KindLive,
 	}
 
+	siRun := opts.SysinfoCmdRunner
+	if siRun == nil {
+		siRun = sysinfo.DefaultRunner
+	}
+
 	var wg sync.WaitGroup
-	collectors := 3
+	collectors := 5 // host, apps, toolchains, power, sysctls
 	if !opts.SkipProcesses {
-		collectors = 4
+		collectors = 6
 	}
 	wg.Add(collectors)
 
@@ -87,25 +97,26 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		defer wg.Done()
 		s.Host = CollectHost(opts.SpectraVersion)
 	}()
-
 	go func() {
 		defer wg.Done()
 		s.Apps = collectApps(ctx, opts)
 	}()
-
 	go func() {
 		defer wg.Done()
 		s.Toolchains = toolchain.Collect(ctx, opts.ToolchainOpts)
+	}()
+	go func() {
+		defer wg.Done()
+		s.Power = sysinfo.CollectPower(siRun)
+	}()
+	go func() {
+		defer wg.Done()
+		s.Sysctls = sysinfo.CollectSysctls(siRun)
 	}()
 
 	if !opts.SkipProcesses {
 		go func() {
 			defer wg.Done()
-			// Pass app paths for bundle attribution after apps are known.
-			// Since we're parallel, we collect all processes without attribution
-			// and attribute post-hoc once apps are resolved. For now, we skip
-			// attribution during the snapshot build (it can be added in a follow-up
-			// once the two collectors are sequenced or apps is pre-populated).
 			s.Processes = process.CollectAll(ctx, opts.ProcessOpts)
 		}()
 	}
