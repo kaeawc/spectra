@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/storagestate"
@@ -40,9 +41,7 @@ type Snapshot struct {
 	Network    netstate.State        `json:"network"`
 	Storage    storagestate.State    `json:"storage"`
 
-	// Placeholders for upcoming collectors. Empty until implemented.
-	// See docs/design/system-inventory.md.
-	// JVMs []JVMInfo
+	JVMs []jvm.Info `json:"jvms,omitempty"`
 }
 
 // Options configure a snapshot Build.
@@ -83,6 +82,14 @@ type Options struct {
 	// StorageOpts are forwarded to the storage state collector.
 	// Zero value uses live filesystem paths.
 	StorageOpts storagestate.CollectOptions
+
+	// JVMOpts are forwarded to the JVM collector.
+	// Zero value uses the real jps/jcmd commands.
+	JVMOpts jvm.CollectOptions
+
+	// SkipJVMs disables JVM process discovery (faster for tests; requires jps
+	// in PATH for real collection).
+	SkipJVMs bool
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -110,6 +117,9 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		collectors++
 	}
 	if !opts.SkipStorage {
+		collectors++
+	}
+	if !opts.SkipJVMs {
 		collectors++
 	}
 	wg.Add(collectors)
@@ -149,6 +159,12 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		go func() {
 			defer wg.Done()
 			s.Processes = process.CollectAll(ctx, opts.ProcessOpts)
+		}()
+	}
+	if !opts.SkipJVMs {
+		go func() {
+			defer wg.Done()
+			s.JVMs = jvm.CollectAll(ctx, opts.JVMOpts)
 		}()
 	}
 
