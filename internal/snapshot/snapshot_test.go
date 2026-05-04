@@ -83,3 +83,21 @@ func TestScanAppsReadsDir(t *testing.T) {
 		t.Errorf("scanApps got %d, want 2 (Foo.app + Bar.app)", len(got))
 	}
 }
+
+func TestBuildSkipAppsProducesNoApps(t *testing.T) {
+	snap := Build(context.Background(), Options{
+		SkipApps:      true,
+		SkipProcesses: true,
+		SkipStorage:   true,
+		SkipJVMs:      true,
+	})
+	if snap.ID == "" {
+		t.Error("ID should not be empty")
+	}
+	if snap.Host.Hostname == "" {
+		t.Error("Host.Hostname should not be empty")
+	}
+	if len(snap.Apps) != 0 {
+		t.Errorf("Apps = %d, want 0 when SkipApps=true", len(snap.Apps))
+	}
+}

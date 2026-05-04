@@ -90,6 +90,11 @@ type Options struct {
 	// SkipJVMs disables JVM process discovery (faster for tests; requires jps
 	// in PATH for real collection).
 	SkipJVMs bool
+
+	// SkipApps disables the per-app Detect() pass entirely. Useful for
+	// host-only snapshots where app data is not needed (e.g. daemon
+	// periodic captures).
+	SkipApps bool
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -112,7 +117,10 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 
 	var wg sync.WaitGroup
-	collectors := 6 // host, apps, toolchains, power, sysctls, network
+	collectors := 5 // host, toolchains, power, sysctls, network
+	if !opts.SkipApps {
+		collectors++
+	}
 	if !opts.SkipProcesses {
 		collectors++
 	}
@@ -128,10 +136,12 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		defer wg.Done()
 		s.Host = CollectHost(opts.SpectraVersion)
 	}()
-	go func() {
-		defer wg.Done()
-		s.Apps = collectApps(ctx, opts)
-	}()
+	if !opts.SkipApps {
+		go func() {
+			defer wg.Done()
+			s.Apps = collectApps(ctx, opts)
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		s.Toolchains = toolchain.Collect(ctx, opts.ToolchainOpts)
