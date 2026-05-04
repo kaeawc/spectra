@@ -184,6 +184,9 @@ func printMeta(r detect.Result) {
 	if len(security) > 0 {
 		fmt.Printf("    security: %s\n", strings.Join(security, ", "))
 	}
+	if r.GatekeeperStatus != "" {
+		fmt.Printf("    gatekeeper: %s\n", r.GatekeeperStatus)
+	}
 	if len(r.Entitlements) > 0 {
 		fmt.Printf("    entitlements: %s\n", strings.Join(r.Entitlements, ", "))
 	}
