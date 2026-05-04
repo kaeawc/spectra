@@ -5,14 +5,15 @@ package toolchain
 
 // Toolchains is the aggregate result of all subsystem discoverers.
 type Toolchains struct {
-	Brew    BrewInventory    `json:"brew"`
-	JDKs    []JDKInstall     `json:"jdks,omitempty"`
-	Node    []RuntimeInstall `json:"node,omitempty"`
-	Python  []RuntimeInstall `json:"python,omitempty"`
-	Go      []RuntimeInstall `json:"go,omitempty"`
-	Ruby    []RuntimeInstall `json:"ruby,omitempty"`
-	Rust    []RustToolchain  `json:"rust,omitempty"`
-	Env     EnvSnapshot      `json:"env"`
+	Brew        BrewInventory    `json:"brew"`
+	JDKs        []JDKInstall     `json:"jdks,omitempty"`
+	Node        []RuntimeInstall `json:"node,omitempty"`
+	Python      []RuntimeInstall `json:"python,omitempty"`
+	Go          []RuntimeInstall `json:"go,omitempty"`
+	Ruby        []RuntimeInstall `json:"ruby,omitempty"`
+	Rust        []RustToolchain  `json:"rust,omitempty"`
+	JVMManagers []string         `json:"jvm_managers,omitempty"` // "sdkman", "asdf", "mise", "jenv"
+	Env         EnvSnapshot      `json:"env"`
 }
 
 // BrewInventory holds installed Homebrew formulae, casks, and taps.

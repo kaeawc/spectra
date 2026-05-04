@@ -177,3 +177,68 @@ func TestDiscoverRubyFromRbenv(t *testing.T) {
 		t.Errorf("got %d rbenv installs, want 1", count)
 	}
 }
+
+func TestDiscoverJVMManagersNone(t *testing.T) {
+	home := t.TempDir()
+	managers := discoverJVMManagers(home)
+	if len(managers) != 0 {
+		t.Errorf("expected no managers, got %v", managers)
+	}
+}
+
+func TestDiscoverJVMManagersSDKMan(t *testing.T) {
+	home := t.TempDir()
+	sdkmanBin := filepath.Join(home, ".sdkman", "bin")
+	if err := os.MkdirAll(sdkmanBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sdkmanBin, "sdkman-init.sh"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	managers := discoverJVMManagers(home)
+	if len(managers) != 1 || managers[0] != "sdkman" {
+		t.Errorf("expected [sdkman], got %v", managers)
+	}
+}
+
+func TestDiscoverJVMManagersMise(t *testing.T) {
+	home := t.TempDir()
+	misePath := filepath.Join(home, ".local", "share", "mise")
+	if err := os.MkdirAll(misePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managers := discoverJVMManagers(home)
+	if len(managers) != 1 || managers[0] != "mise" {
+		t.Errorf("expected [mise], got %v", managers)
+	}
+}
+
+func TestDiscoverJVMManagersMultiple(t *testing.T) {
+	home := t.TempDir()
+	// Install both asdf and jenv.
+	asdfBin := filepath.Join(home, ".asdf", "bin")
+	if err := os.MkdirAll(asdfBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(asdfBin, "asdf"), []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jenvBin := filepath.Join(home, ".jenv", "bin")
+	if err := os.MkdirAll(jenvBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jenvBin, "jenv"), []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managers := discoverJVMManagers(home)
+	if len(managers) != 2 {
+		t.Errorf("expected 2 managers, got %v", managers)
+	}
+	found := map[string]bool{}
+	for _, m := range managers {
+		found[m] = true
+	}
+	if !found["asdf"] || !found["jenv"] {
+		t.Errorf("expected asdf and jenv in %v", managers)
+	}
+}

@@ -243,3 +243,25 @@ func runtimeInstall(source, version, binPath, activePath string) RuntimeInstall 
 		Active:  isActive,
 	}
 }
+
+// discoverJVMManagers returns the names of JVM version managers present in the
+// user's home directory. Checks for sdkman, asdf, mise, and jenv by probing
+// their canonical install paths.
+func discoverJVMManagers(home string) []string {
+	probes := []struct {
+		name string
+		path string
+	}{
+		{"sdkman", filepath.Join(home, ".sdkman", "bin", "sdkman-init.sh")},
+		{"asdf", filepath.Join(home, ".asdf", "bin", "asdf")},
+		{"mise", filepath.Join(home, ".local", "share", "mise")},
+		{"jenv", filepath.Join(home, ".jenv", "bin", "jenv")},
+	}
+	var found []string
+	for _, p := range probes {
+		if _, err := os.Stat(p.path); err == nil {
+			found = append(found, p.name)
+		}
+	}
+	return found
+}
