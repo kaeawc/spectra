@@ -57,7 +57,8 @@ per non-empty field.
 ## `spectra snapshot`
 
 Captures a [system-inventory snapshot](../design/system-inventory.md)
-of the local machine. Today only `host` info and the `apps` slice are
+of the local machine and persists it to `~/.spectra/spectra.db`
+(SQLite, WAL mode). Today only `host` info and the `apps` slice are
 populated; processes / JVMs / JDKs / toolchains / network / storage
 state will land alongside the daemon.
 
@@ -66,13 +67,54 @@ state will land alongside the daemon.
 | `--json` | false | Emit JSON instead of the human summary |
 | `--network` | false | Forwarded to per-app `Detect()` |
 | `--no-apps` | false | Skip the apps inventory (host-only, very fast) |
+| `--no-store` | false | Do not persist the snapshot to the local database |
 
 ### Examples
 
 ```bash
-spectra snapshot                # full snapshot, human-readable
-spectra snapshot --no-apps      # ~50ms, just the host facts
+spectra snapshot                   # full snapshot, persisted + printed
+spectra snapshot --no-apps         # ~50ms, just the host facts
 spectra snapshot --json | jq .host
+spectra snapshot --no-store        # ephemeral — do not write to DB
+```
+
+## `spectra snapshot list`
+
+Lists snapshots stored in `~/.spectra/spectra.db`, newest first.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--json` | false | Emit JSON array |
+
+### Examples
+
+```bash
+spectra snapshot list
+spectra snapshot list --json | jq '.[0].id'
+```
+
+### Output
+
+```
+ID                                KIND      TAKEN AT              APPS
+------------------------------------------------------------------------
+snap-20260504T095749Z-4829        live      2026-05-04 09:57:49Z  61
+snap-20260503T140012Z-1234        live      2026-05-03 14:00:12Z  58
+```
+
+## `spectra snapshot show <id>`
+
+Prints the per-app table for one stored snapshot.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--json` | false | Emit JSON |
+
+### Examples
+
+```bash
+spectra snapshot show snap-20260504T095749Z-4829
+spectra snapshot show snap-20260504T095749Z-4829 --json | jq .apps
 ```
 
 ### Output (human)
