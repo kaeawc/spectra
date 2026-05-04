@@ -35,6 +35,7 @@ func subcommandList() []subcommand {
 		{"inspect", "Inspect .app bundles (default; runs when no subcommand given)", runInspect},
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
 		{"jvm", "List or inspect running JVM processes", runJVM},
+		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
