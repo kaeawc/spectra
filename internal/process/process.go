@@ -21,13 +21,17 @@ type Info struct {
 	PPID            int       `json:"ppid"`
 	UID             int       `json:"uid"`
 	User            string    `json:"user,omitempty"`
-	Command         string    `json:"command"`           // short (comm) — just the exe name
-	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
+	Command         string    `json:"command"`              // short (comm) — just the exe name
+	FullCommandLine string    `json:"full_command_line"`    // full argv[0...] string
 	RSSKiB          int64     `json:"rss_kib"`
 	VSizeKiB        int64     `json:"vsize_kib"`
-	ThreadCount     int       `json:"thread_count"`      // number of threads (nlwp)
-	CPUPct          float64   `json:"cpu_pct"`           // CPU % at sample time (pcpu)
+	ThreadCount     int       `json:"thread_count"`         // number of threads (nlwp)
+	CPUPct          float64   `json:"cpu_pct"`              // CPU % at sample time (pcpu)
 	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
+
+	// Deep fields — populated only when CollectOptions.Deep is true.
+	OpenFDs        int   `json:"open_fds,omitempty"`        // open file descriptor count
+	ListeningPorts []int `json:"listening_ports,omitempty"` // TCP ports this process listens on
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
@@ -40,6 +44,10 @@ type CollectOptions struct {
 	// BundlePaths, when non-empty, triggers bundle attribution: each process
 	// whose executable lives inside one of these .app paths gets AppPath set.
 	BundlePaths []string
+
+	// Deep, when true, enriches each process with OpenFDs and ListeningPorts
+	// via a single batched lsof call. Adds ~50-100ms per collection.
+	Deep bool
 
 	// CmdRunner overrides exec.Command for testing.
 	CmdRunner func(name string, args ...string) ([]byte, error)
@@ -63,6 +71,9 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	procs := parsePS(string(out))
 	if len(opts.BundlePaths) > 0 {
 		attributeBundles(procs, opts.BundlePaths)
+	}
+	if opts.Deep && len(procs) > 0 {
+		enrichDeep(procs, run)
 	}
 	return procs
 }

@@ -534,14 +534,16 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 
 	// process.list — snapshot of all running processes via ps.
-	// Optional: { "bundles": ["/Applications/Foo.app"] } to enable app attribution.
+	// Optional: { "bundles": ["/Applications/Foo.app"], "deep": true }
 	d.Register("process.list", func(params json.RawMessage) (any, error) {
 		var p struct {
 			Bundles []string `json:"bundles"`
+			Deep    bool     `json:"deep"`
 		}
 		_ = json.Unmarshal(params, &p)
 		return process.CollectAll(context.Background(), process.CollectOptions{
 			BundlePaths: p.Bundles,
+			Deep:        p.Deep,
 		}), nil
 	})
 
