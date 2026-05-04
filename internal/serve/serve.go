@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
@@ -625,6 +627,30 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return process.BuildTree(procs), nil
 	})
 
+	// process.sample — run `sample <pid> <duration>` and return the text output.
+	// Required: {"pid": <pid>}. Optional: {"duration": 1, "interval": 10}.
+	d.Register("process.sample", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID      int `json:"pid"`
+			Duration int `json:"duration"`
+			Interval int `json:"interval"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("process.sample requires {\"pid\": <pid>}")
+		}
+		if p.Duration == 0 {
+			p.Duration = 1
+		}
+		if p.Interval == 0 {
+			p.Interval = 10
+		}
+		out, err := runSampleCmd(p.PID, p.Duration, p.Interval)
+		if err != nil {
+			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	})
+
 	// storage.system — disk volumes + ~/Library usage summary.
 	d.Register("storage.system", func(_ json.RawMessage) (any, error) {
 		return storagestate.Collect(storagestate.CollectOptions{}), nil
@@ -666,4 +692,16 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		return map[string]any{"cleared": p.Kind}, nil
 	})
+}
+
+// runSampleCmd runs `sample <pid> <duration> <interval>` and returns stdout.
+func runSampleCmd(pid, durationSec, intervalMS int) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(),
+		time.Duration(durationSec+5)*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "sample",
+		strconv.Itoa(pid),
+		strconv.Itoa(durationSec),
+		strconv.Itoa(intervalMS),
+	).Output()
 }
