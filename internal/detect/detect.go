@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Result is the diagnosis for one .app bundle.
@@ -111,9 +112,10 @@ type LoginItem struct {
 
 // ProcessInfo is one running process belonging to this bundle.
 type ProcessInfo struct {
-	PID     int
-	RSSKiB  int    // resident set size, kibibytes
-	Command string // executable path (truncated to bundle-relative)
+	PID       int
+	RSSKiB    int       // resident set size, kibibytes
+	Command   string    // executable path (truncated to bundle-relative)
+	StartTime time.Time // process start time (from ps lstart)
 }
 
 // Dependencies enumerates the third-party libraries an app embeds.
@@ -1279,10 +1281,18 @@ func home() string {
 	return h
 }
 
+// lstartLayout is the Go parse layout for the 5-token lstart output from ps.
+// e.g. "Sat May  2 22:37:01 2026"
+const lstartLayout = "Mon Jan  2 15:04:05 2006"
+
 // scanRunningProcesses uses `ps` to find processes whose executable path
-// lives inside this bundle. Reports PID, RSS, and a bundle-relative path.
+// lives inside this bundle. Reports PID, RSS, start time, and a bundle-relative path.
+//
+// ps format: pid=,rss=,lstart=,comm=
+// lstart produces 5 whitespace-separated tokens ("Sat May  2 22:37:01 2026")
+// so the command starts at fields[7] (0-indexed: 0=pid, 1=rss, 2-6=lstart, 7+=comm).
 func scanRunningProcesses(appPath string) []ProcessInfo {
-	out, err := exec.Command("ps", "-axwwo", "pid=,rss=,comm=").Output()
+	out, err := exec.Command("ps", "-axwwo", "pid=,rss=,lstart=,comm=").Output()
 	if err != nil {
 		return nil
 	}
@@ -1292,23 +1302,28 @@ func scanRunningProcesses(appPath string) []ProcessInfo {
 		if line == "" {
 			continue
 		}
-		// Format: "PID RSS COMMAND..."
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		// minimum: pid(1) + rss(1) + lstart(5) + comm(1) = 8 fields
+		if len(fields) < 8 {
 			continue
 		}
-		// Reconstruct the command (which may contain spaces) by joining fields[2:].
-		cmd := strings.Join(fields[2:], " ")
+		// fields[2:7] are the 5 lstart tokens; fields[7:] are the command.
+		cmd := strings.Join(fields[7:], " ")
 		if !strings.HasPrefix(cmd, appPath+"/") {
 			continue
 		}
 		var pid, rss int
 		fmt.Sscanf(fields[0], "%d", &pid)
 		fmt.Sscanf(fields[1], "%d", &rss)
+
+		lstartStr := strings.Join(fields[2:7], " ")
+		startTime, _ := time.Parse(lstartLayout, lstartStr)
+
 		procs = append(procs, ProcessInfo{
-			PID:     pid,
-			RSSKiB:  rss,
-			Command: strings.TrimPrefix(cmd, appPath+"/"),
+			PID:       pid,
+			RSSKiB:    rss,
+			Command:   strings.TrimPrefix(cmd, appPath+"/"),
+			StartTime: startTime,
 		})
 	}
 	return procs
