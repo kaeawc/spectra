@@ -472,3 +472,12 @@ func TestDaemonJVMHeapDumpRequiresPID(t *testing.T) {
 		t.Error("expected error when pid=0")
 	}
 }
+
+func TestDaemonProcessSampleRequiresPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 53, "process.sample", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid=0")
+	}
+}
