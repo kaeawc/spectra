@@ -171,6 +171,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 				SkipJVMs:       true,
 			})
 			_ = db.SaveSnapshot(ctx, store.FromSnapshot(snap))
+			_ = db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap))
 			_, _ = db.PruneSnapshots(ctx, 100)
 		}
 	}
@@ -214,6 +215,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := db.SaveSnapshot(context.Background(), store.FromSnapshot(snap)); err != nil {
 			return nil, err
 		}
+		_ = db.SaveSnapshotProcesses(context.Background(), snap.ID, store.ProcessesFromSnapshot(snap))
 		return snap, nil
 	})
 
@@ -309,6 +311,14 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("snapshot %q: %w", p.IDB, err)
 		}
 		return diff.Compare(*snapA, *snapB), nil
+	})
+
+	d.Register("snapshot.processes", func(params json.RawMessage) (any, error) {
+		var p struct{ ID string `json:"id"` }
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+			return nil, fmt.Errorf("snapshot.processes requires {\"id\":\"<snapshot-id>\"}")
+		}
+		return db.GetSnapshotProcesses(context.Background(), p.ID)
 	})
 
 	// snapshot.prune — delete live snapshots beyond retention limit.
