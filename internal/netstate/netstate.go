@@ -20,7 +20,8 @@ type State struct {
 	DNSServers        []string        `json:"dns_servers,omitempty"`
 	Proxy             ProxyConfig     `json:"proxy"`
 	HostsOverrides    []HostsEntry    `json:"hosts_overrides,omitempty"`
-	ListeningPorts    []ListeningPort `json:"listening_ports,omitempty"`
+	ListeningPorts              []ListeningPort `json:"listening_ports,omitempty"`
+	EstablishedConnectionsCount int             `json:"established_connections_count,omitempty"`
 
 	// VPNActive is true when at least one tunnel interface (utun*) is UP with
 	// an assigned address. macOS uses utun interfaces for all VPN types:
@@ -78,6 +79,9 @@ func Collect(run CmdRunner) State {
 	if out, err := run("ifconfig"); err == nil {
 		s.VPNInterfaces = parseVPNInterfaces(string(out))
 		s.VPNActive = len(s.VPNInterfaces) > 0
+	}
+	if out, err := run("lsof", "-i", "-P", "-n"); err == nil {
+		s.EstablishedConnectionsCount = len(parseLSOFConnections(string(out)))
 	}
 	return s
 }
