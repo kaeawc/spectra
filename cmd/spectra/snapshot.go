@@ -231,6 +231,9 @@ func runSnapshotShow(args []string) int {
 
 	fmt.Printf("id:         %s\n", row.ID)
 	fmt.Printf("kind:       %s\n", row.Kind)
+	if row.Name != "" {
+		fmt.Printf("name:       %s\n", row.Name)
+	}
 	fmt.Printf("taken-at:   %s\n", row.TakenAt.Format("2006-01-02T15:04:05Z"))
 	fmt.Printf("spectra:    %s\n", row.SpectraVer)
 	fmt.Printf("apps:       %d\n\n", row.AppCount)
