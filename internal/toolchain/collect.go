@@ -90,6 +90,10 @@ func Collect(ctx context.Context, opts CollectOptions) Toolchains {
 			return func(t *Toolchains) { t.JVMManagers = managers }, nil
 		}),
 		run(func() (func(*Toolchains), error) {
+			buildTools := discoverBuildTools(opts)
+			return func(t *Toolchains) { t.BuildTools = buildTools }, nil
+		}),
+		run(func() (func(*Toolchains), error) {
 			snap := collectEnv()
 			return func(t *Toolchains) { t.Env = snap }, nil
 		}),
