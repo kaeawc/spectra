@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -41,7 +42,8 @@ func DefaultSockPath() (string, error) {
 type Options struct {
 	SockPath       string
 	SpectraVersion string
-	DBPath         string // empty = store.DefaultPath()
+	DBPath         string        // empty = store.DefaultPath()
+	CacheRegistry  *cache.Registry // nil = cache.Default
 }
 
 // Run starts the daemon: listens on the Unix socket and serves requests until
@@ -99,8 +101,13 @@ func Run(ctx context.Context, opts Options) error {
 	// Capture a live snapshot every minute; prune to the last 100 live snapshots.
 	go snapshotLoop(ctx, opts.SpectraVersion, db)
 
+	cacheReg := opts.CacheRegistry
+	if cacheReg == nil {
+		cacheReg = cache.Default
+	}
+
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector)
+	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg)
 
 	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
@@ -166,7 +173,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 }
 
 // registerHandlers wires all JSON-RPC methods into d.
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "version": version}, nil
 	})
@@ -559,5 +566,28 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return storagestate.Collect(storagestate.CollectOptions{
 			AppPaths: p.Paths,
 		}), nil
+	})
+
+	// cache.stats — per-kind entry count, bytes on disk, and last-write time.
+	d.Register("cache.stats", func(_ json.RawMessage) (any, error) {
+		stats, err := cacheReg.Stats()
+		if err != nil {
+			return nil, fmt.Errorf("cache stats: %w", err)
+		}
+		return stats, nil
+	})
+
+	// cache.clear — evict cached data.
+	// Optional: { "kind": "detect" } to clear a single kind; omit for all.
+	d.Register("cache.clear", func(params json.RawMessage) (any, error) {
+		var p struct{ Kind string `json:"kind"` }
+		_ = json.Unmarshal(params, &p)
+		if err := cacheReg.Clear(p.Kind); err != nil {
+			return nil, fmt.Errorf("cache clear: %w", err)
+		}
+		if p.Kind == "" {
+			return map[string]any{"cleared": "all"}, nil
+		}
+		return map[string]any{"cleared": p.Kind}, nil
 	})
 }

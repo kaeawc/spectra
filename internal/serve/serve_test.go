@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/store"
@@ -36,7 +37,7 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 	t.Cleanup(func() { db.Close() })
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector())
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -398,5 +399,45 @@ func TestDaemonJVMJFRStopMissingPID(t *testing.T) {
 	resp := rpcCall(t, enc, dec, 34, "jvm.jfr.stop", `{}`)
 	if resp.Error == nil {
 		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonCacheStatsReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 40, "cache.stats", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("cache.stats: %v", resp.Error)
+	}
+	// Result should be a slice (may be empty if no cache kinds registered in tests).
+	if _, ok := resp.Result.([]any); !ok {
+		t.Fatalf("result type %T, want []any", resp.Result)
+	}
+}
+
+func TestDaemonCacheClearAll(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 41, "cache.clear", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("cache.clear (all): %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if m["cleared"] != "all" {
+		t.Errorf("cleared = %v, want all", m["cleared"])
+	}
+}
+
+func TestDaemonCacheClearUnknownKindReturnsError(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	// "detect" kind is not registered in the test registry (no initCacheStores),
+	// so clearing it should return an RPC error.
+	resp := rpcCall(t, enc, dec, 42, "cache.clear", `{"kind":"detect"}`)
+	if resp.Error == nil {
+		t.Error("expected error for unregistered cache kind")
 	}
 }
