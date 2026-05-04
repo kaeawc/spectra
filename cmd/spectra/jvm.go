@@ -28,6 +28,8 @@ func runJVM(args []string) int {
 			return runJVMHeapDump(args[1:])
 		case "jfr":
 			return runJVMJFR(args[1:])
+		case "gc-stats":
+			return runJVMGCStats(args[1:])
 		}
 	}
 
@@ -174,6 +176,46 @@ func runJVMHeapDump(args []string) int {
 		return 1
 	}
 	fmt.Println(destPath)
+	return 0
+}
+
+func runJVMGCStats(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm gc-stats", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm gc-stats [--json] <pid>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+
+	stats, err := jvm.CollectGCStats(pid, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gc-stats failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(stats)
+		return 0
+	}
+
+	fmt.Printf("GC stats for PID %d\n", pid)
+	fmt.Printf("  Young GC:  %d events, %.3fs total\n", stats.YGC, stats.YGCT)
+	fmt.Printf("  Full GC:   %d events, %.3fs total\n", stats.FGC, stats.FGCT)
+	fmt.Printf("  Total GC:  %.3fs\n", stats.GCT)
+	fmt.Printf("  Eden:      %.0f KiB used / %.0f KiB capacity\n", stats.EU, stats.EC)
+	fmt.Printf("  Old:       %.0f KiB used / %.0f KiB capacity\n", stats.OU, stats.OC)
+	fmt.Printf("  Metaspace: %.0f KiB used / %.0f KiB capacity\n", stats.MU, stats.MC)
 	return 0
 }
 
