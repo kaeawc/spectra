@@ -38,6 +38,7 @@ func subcommandList() []subcommand {
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
 		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
+		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
