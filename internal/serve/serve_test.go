@@ -299,3 +299,20 @@ func TestDaemonSnapshotDiffMissingIDs(t *testing.T) {
 		t.Error("expected RPC error for missing id_b, got nil")
 	}
 }
+
+func TestDaemonNetworkStateReturnsObject(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 18, "network.state", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("network.state: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	// network.state should have vpn_active field.
+	if _, exists := m["vpn_active"]; !exists {
+		t.Error("network.state: expected vpn_active field in result")
+	}
+}

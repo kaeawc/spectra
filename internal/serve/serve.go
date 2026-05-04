@@ -18,6 +18,7 @@ import (
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -403,5 +404,10 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// toolchain.scan — full toolchain inventory (brew, JDKs, Node, Python, Go, etc.).
 	d.Register("toolchain.scan", func(_ json.RawMessage) (any, error) {
 		return toolchain.Collect(context.Background(), toolchain.CollectOptions{}), nil
+	})
+
+	// network.state — current network configuration snapshot.
+	d.Register("network.state", func(_ json.RawMessage) (any, error) {
+		return netstate.Collect(netstate.DefaultRunner), nil
 	})
 }
