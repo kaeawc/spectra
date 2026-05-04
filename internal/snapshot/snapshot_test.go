@@ -16,6 +16,7 @@ func TestBuildHostOnly(t *testing.T) {
 		AppPaths:       []string{"/dev/null/__skip__"},
 		SkipProcesses:  true,
 		SkipStorage:    true,
+		SkipJVMs:       true,
 	})
 
 	if snap.ID == "" {

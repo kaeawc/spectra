@@ -34,6 +34,7 @@ func subcommandList() []subcommand {
 	return []subcommand{
 		{"inspect", "Inspect .app bundles (default; runs when no subcommand given)", runInspect},
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
+		{"jvm", "List or inspect running JVM processes", runJVM},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},
