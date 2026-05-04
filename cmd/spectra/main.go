@@ -38,6 +38,7 @@ func subcommandList() []subcommand {
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
 		{"status", "Check whether the local daemon is running", runStatus},
+		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},
