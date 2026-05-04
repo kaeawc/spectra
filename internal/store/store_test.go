@@ -162,6 +162,150 @@ func TestListSnapshotsByMachine(t *testing.T) {
 	}
 }
 
+// --- Issues ---
+
+func seedSnapshot(t *testing.T, db *DB) string {
+	t.Helper()
+	in := sampleInput()
+	if err := db.SaveSnapshot(context.Background(), in); err != nil {
+		t.Fatalf("seedSnapshot: %v", err)
+	}
+	return in.ID
+}
+
+func TestUpsertIssuesNewAndRefresh(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+
+	findings := []FindingInput{
+		{RuleID: "app-unsigned", Subject: "MyApp", Severity: "medium", Message: "not signed", Fix: "sign it"},
+		{RuleID: "jvm-eol-version", Subject: "PID 123 (old.App)", Severity: "medium", Message: "JDK 9", Fix: "upgrade"},
+	}
+
+	ids, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
+	if err != nil {
+		t.Fatalf("UpsertIssues: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 IDs, got %d", len(ids))
+	}
+
+	// Second call with same findings should refresh, not insert.
+	ids2, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
+	if err != nil {
+		t.Fatalf("UpsertIssues (refresh): %v", err)
+	}
+	if ids2[0] != ids[0] || ids2[1] != ids[1] {
+		t.Errorf("refresh changed IDs: %v vs %v", ids, ids2)
+	}
+
+	rows, err := db.ListIssues(ctx, "TEST-UUID-1234", "")
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 issues, got %d", len(rows))
+	}
+	if rows[0].Status != IssueOpen {
+		t.Errorf("status = %q, want open", rows[0].Status)
+	}
+}
+
+func TestListIssuesFilterByStatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+
+	findings := []FindingInput{
+		{RuleID: "rule-A", Subject: "S1", Severity: "medium", Message: "m1"},
+		{RuleID: "rule-B", Subject: "S2", Severity: "high", Message: "m2"},
+	}
+	ids, _ := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
+
+	// Acknowledge the first issue.
+	if err := db.UpdateIssueStatus(ctx, ids[0], IssueAcknowledged); err != nil {
+		t.Fatalf("UpdateIssueStatus: %v", err)
+	}
+
+	openOnes, _ := db.ListIssues(ctx, "TEST-UUID-1234", IssueOpen)
+	if len(openOnes) != 1 {
+		t.Errorf("expected 1 open issue, got %d", len(openOnes))
+	}
+
+	ackOnes, _ := db.ListIssues(ctx, "TEST-UUID-1234", IssueAcknowledged)
+	if len(ackOnes) != 1 {
+		t.Errorf("expected 1 acknowledged issue, got %d", len(ackOnes))
+	}
+}
+
+func TestUpdateIssueStatusNotFound(t *testing.T) {
+	db := openTestDB(t)
+	err := db.UpdateIssueStatus(context.Background(), "no-such-id", IssueClosed)
+	if err != ErrNotFound {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestRecordAndListAppliedFixes(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+
+	ids, _ := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, []FindingInput{
+		{RuleID: "rule-X", Subject: "App", Severity: "info", Message: "bloat", Fix: "clean"},
+	})
+	issueID := ids[0]
+
+	fixID, err := db.RecordAppliedFix(ctx, AppliedFixInput{
+		IssueID:   issueID,
+		AppliedBy: "user",
+		Command:   "docker system prune",
+		Output:    "Deleted 10 GiB",
+		ExitCode:  0,
+	})
+	if err != nil {
+		t.Fatalf("RecordAppliedFix: %v", err)
+	}
+	if fixID == "" {
+		t.Error("expected non-empty fix ID")
+	}
+
+	fixes, err := db.ListAppliedFixes(ctx, issueID)
+	if err != nil {
+		t.Fatalf("ListAppliedFixes: %v", err)
+	}
+	if len(fixes) != 1 {
+		t.Fatalf("expected 1 fix, got %d", len(fixes))
+	}
+	if fixes[0].Command != "docker system prune" {
+		t.Errorf("command = %q", fixes[0].Command)
+	}
+}
+
+func TestUpsertIssuesDoesNotReopenDismissed(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+
+	findings := []FindingInput{
+		{RuleID: "rule-Y", Subject: "App", Severity: "low", Message: "minor"},
+	}
+	ids, _ := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
+
+	// Dismiss the issue.
+	_ = db.UpdateIssueStatus(ctx, ids[0], IssueDismissed)
+
+	// Same finding again — should create a NEW issue because dismissed != open|acknowledged.
+	ids2, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
+	if err != nil {
+		t.Fatalf("UpsertIssues after dismiss: %v", err)
+	}
+	if len(ids2) != 1 || ids2[0] == ids[0] {
+		t.Errorf("expected new issue ID after dismiss, got same: %v", ids2)
+	}
+}
+
 func TestAppName(t *testing.T) {
 	cases := map[string]string{
 		"/Applications/Slack.app":        "Slack",
