@@ -193,6 +193,79 @@ func TestThreadDumpNilDefaultRunner(t *testing.T) {
 	_, _ = ThreadDump(0, nil)
 }
 
+// --- JFR ---
+
+func TestJFRStartFakeRunner(t *testing.T) {
+	var capturedArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("Started recording 1 with name spectra"), nil
+	}
+	if err := JFRStart(42, "spectra", run); err != nil {
+		t.Fatalf("JFRStart: %v", err)
+	}
+	if len(capturedArgs) < 3 || capturedArgs[1] != "JFR.start" || capturedArgs[2] != "name=spectra" {
+		t.Errorf("unexpected jcmd args: %v", capturedArgs)
+	}
+}
+
+func TestJFRDumpFakeRunner(t *testing.T) {
+	var capturedArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("Dumped recording spectra to /tmp/test.jfr"), nil
+	}
+	if err := JFRDump(42, "spectra", "/tmp/test.jfr", run); err != nil {
+		t.Fatalf("JFRDump: %v", err)
+	}
+	if len(capturedArgs) < 4 || capturedArgs[1] != "JFR.dump" {
+		t.Errorf("unexpected jcmd args: %v", capturedArgs)
+	}
+	found := false
+	for _, a := range capturedArgs {
+		if a == "filename=/tmp/test.jfr" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("filename arg not found in: %v", capturedArgs)
+	}
+}
+
+func TestJFRStopFakeRunner(t *testing.T) {
+	var capturedArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("Stopped recording spectra"), nil
+	}
+	if err := JFRStop(42, "spectra", "", run); err != nil {
+		t.Fatalf("JFRStop: %v", err)
+	}
+	if len(capturedArgs) < 3 || capturedArgs[1] != "JFR.stop" {
+		t.Errorf("unexpected jcmd args: %v", capturedArgs)
+	}
+}
+
+func TestJFRStopWithDumpFakeRunner(t *testing.T) {
+	var capturedArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("Stopped recording spectra, dumped to /tmp/out.jfr"), nil
+	}
+	if err := JFRStop(42, "spectra", "/tmp/out.jfr", run); err != nil {
+		t.Fatalf("JFRStop with dump: %v", err)
+	}
+	found := false
+	for _, a := range capturedArgs {
+		if a == "filename=/tmp/out.jfr" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("filename arg not found in: %v", capturedArgs)
+	}
+}
+
 // --- CollectAll with fake runner ---
 
 func TestCollectAllNoJPS(t *testing.T) {

@@ -121,6 +121,42 @@ func HeapDump(pid int, destPath string, run CmdRunner) error {
 	return err
 }
 
+// JFRStart starts a Java Flight Recorder recording named recordingName on pid.
+// Pass nil for run to use the default system runner.
+func JFRStart(pid int, recordingName string, run CmdRunner) error {
+	if run == nil {
+		run = DefaultRunner
+	}
+	_, err := run("jcmd", fmt.Sprint(pid), "JFR.start", "name="+recordingName)
+	return err
+}
+
+// JFRDump dumps the named JFR recording for pid to destPath.
+// Pass nil for run to use the default system runner.
+func JFRDump(pid int, recordingName, destPath string, run CmdRunner) error {
+	if run == nil {
+		run = DefaultRunner
+	}
+	_, err := run("jcmd", fmt.Sprint(pid), "JFR.dump",
+		"name="+recordingName, "filename="+destPath)
+	return err
+}
+
+// JFRStop stops and optionally dumps the named JFR recording.
+// If destPath is non-empty the recording is dumped before stopping.
+// Pass nil for run to use the default system runner.
+func JFRStop(pid int, recordingName, destPath string, run CmdRunner) error {
+	if run == nil {
+		run = DefaultRunner
+	}
+	args := []string{fmt.Sprint(pid), "JFR.stop", "name=" + recordingName}
+	if destPath != "" {
+		args = append(args, "filename="+destPath)
+	}
+	_, err := run("jcmd", args...)
+	return err
+}
+
 // countThreads counts threads in `jcmd Thread.print` output.
 //
 // Thread entries begin with a line like:
