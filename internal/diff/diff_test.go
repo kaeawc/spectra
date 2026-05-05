@@ -315,3 +315,73 @@ func TestDiffVPNNoChange(t *testing.T) {
 		t.Errorf("expected no vpn changes, got %+v", sec.Changes)
 	}
 }
+
+func TestDiffActiveRuntimesVersionChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.ID = "snap-a"
+	b.ID = "snap-b"
+	a.Toolchains.Node = []toolchain.RuntimeInstall{
+		{Version: "v18.20.4", Source: "nvm", Active: true},
+		{Version: "v22.1.0", Source: "nvm", Active: false},
+	}
+	b.Toolchains.Node = []toolchain.RuntimeInstall{
+		{Version: "v18.20.4", Source: "nvm", Active: false},
+		{Version: "v22.1.0", Source: "nvm", Active: true},
+	}
+	result := Compare(a, b)
+	var section *Section
+	for i := range result.Sections {
+		if result.Sections[i].Name == "active_runtimes" {
+			section = &result.Sections[i]
+			break
+		}
+	}
+	if section == nil {
+		t.Fatal("missing active_runtimes section")
+	}
+	if len(section.Changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %+v", len(section.Changes), section.Changes)
+	}
+	c := section.Changes[0]
+	if c.Key != "node" {
+		t.Errorf("key = %q, want node", c.Key)
+	}
+	if c.Before != "v18.20.4" || c.After != "v22.1.0" {
+		t.Errorf("before/after = %q/%q", c.Before, c.After)
+	}
+}
+
+func TestDiffActiveRuntimesNoChange(t *testing.T) {
+	a := base()
+	b := base()
+	a.Toolchains.Node = []toolchain.RuntimeInstall{{Version: "v18.20.4", Active: true}}
+	b.Toolchains.Node = []toolchain.RuntimeInstall{{Version: "v18.20.4", Active: true}}
+	result := Compare(a, b)
+	for _, s := range result.Sections {
+		if s.Name == "active_runtimes" && len(s.Changes) != 0 {
+			t.Errorf("expected 0 changes, got %d: %+v", len(s.Changes), s.Changes)
+		}
+	}
+}
+
+func TestDiffActiveRuntimesAdded(t *testing.T) {
+	a := base()
+	b := base()
+	// a has no Go, b has Go active
+	b.Toolchains.Go = []toolchain.RuntimeInstall{{Version: "1.22.3", Source: "goenv", Active: true}}
+	result := Compare(a, b)
+	for _, s := range result.Sections {
+		if s.Name == "active_runtimes" {
+			found := false
+			for _, c := range s.Changes {
+				if c.Key == "go" && c.Kind == Added {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected go Added change, got %+v", s.Changes)
+			}
+		}
+	}
+}

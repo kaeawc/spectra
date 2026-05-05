@@ -61,6 +61,7 @@ func Compare(a, b snapshot.Snapshot) Result {
 			diffApps(a, b),
 			diffJDKs(a, b),
 			diffBrewFormulae(a, b),
+			diffActiveRuntimes(a, b),
 			diffListeningPorts(a, b),
 			diffVPN(a, b),
 			diffPathDirs(a, b),
@@ -336,4 +337,48 @@ func diffSysctls(a, b snapshot.Snapshot) Section {
 		}
 	}
 	return Section{Name: "sysctls", Changes: changes}
+}
+
+// diffActiveRuntimes compares the active version for each language runtime
+// (node, python, go, ruby). A change fires when the active version differs
+// between the two snapshots.
+func diffActiveRuntimes(a, b snapshot.Snapshot) Section {
+	type langRuntimes struct {
+		name     string
+		aSlice   []toolchain.RuntimeInstall
+		bSlice   []toolchain.RuntimeInstall
+	}
+	langs := []langRuntimes{
+		{"node", a.Toolchains.Node, b.Toolchains.Node},
+		{"python", a.Toolchains.Python, b.Toolchains.Python},
+		{"go", a.Toolchains.Go, b.Toolchains.Go},
+		{"ruby", a.Toolchains.Ruby, b.Toolchains.Ruby},
+	}
+
+	activeVersion := func(runtimes []toolchain.RuntimeInstall) string {
+		for _, r := range runtimes {
+			if r.Active {
+				return r.Version
+			}
+		}
+		return ""
+	}
+
+	var changes []Change
+	for _, l := range langs {
+		va := activeVersion(l.aSlice)
+		vb := activeVersion(l.bSlice)
+		if va == vb {
+			continue
+		}
+		switch {
+		case va == "" && vb != "":
+			changes = append(changes, Change{Kind: Added, Key: l.name, After: vb})
+		case va != "" && vb == "":
+			changes = append(changes, Change{Kind: Removed, Key: l.name, Before: va})
+		default:
+			changes = append(changes, Change{Kind: Changed, Key: l.name, Before: va, After: vb})
+		}
+	}
+	return Section{Name: "active_runtimes", Changes: changes}
 }
