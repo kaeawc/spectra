@@ -406,6 +406,28 @@ func TestDaemonJVMGCStatsMissingPID(t *testing.T) {
 	}
 }
 
+func TestDaemonJVMCamelCaseAliasesRequirePID(t *testing.T) {
+	tests := []struct {
+		method string
+		id     int
+	}{
+		{method: "jvm.threadDump", id: 133},
+		{method: "jvm.heapHistogram", id: 134},
+		{method: "jvm.gcStats", id: 135},
+		{method: "jvm.heapDump", id: 136},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			enc, dec, cancel := testDaemon(t)
+			defer cancel()
+			resp := rpcCall(t, enc, dec, tt.id, tt.method, `{}`)
+			if resp.Error == nil {
+				t.Error("expected error when pid missing")
+			}
+		})
+	}
+}
+
 func TestDaemonJVMJFRStartMissingPID(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()
