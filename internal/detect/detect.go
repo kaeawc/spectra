@@ -11,6 +11,7 @@ package detect
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -36,10 +37,11 @@ type Result struct {
 
 	// Metadata pulled from Info.plist and frameworks. Best-effort; any
 	// field may be empty if the bundle doesn't expose it.
-	BundleID          string   // CFBundleIdentifier (com.example.app)
-	AppVersion        string   // CFBundleShortVersionString
-	BuildNumber       string   // CFBundleVersion
-	ElectronVersion   string   // version of bundled Electron Framework, if any
+	BundleID          string // CFBundleIdentifier (com.example.app)
+	AppVersion        string // CFBundleShortVersionString
+	BuildNumber       string // CFBundleVersion
+	ElectronVersion   string // version of bundled Electron Framework, if any
+	FrameworkVersions map[string]string
 	Architectures     []string // arm64, x86_64
 	BundleSizeBytes   int64    // total disk usage of the .app (sparse-aware: Blocks*512)
 	ApparentSizeBytes int64    // logical size of the .app (fi.Size() sum; may be >> BundleSizeBytes for sparse images)
@@ -237,6 +239,7 @@ func populateMetadata(appPath, exe string, r *Result) {
 		efw := filepath.Join(appPath, "Contents", "Frameworks", "Electron Framework.framework", "Resources", "Info.plist")
 		r.ElectronVersion = readPlistString(efw, "CFBundleVersion")
 	}
+	r.FrameworkVersions = frameworkVersions(appPath, r)
 
 	if exe != "" {
 		r.Architectures = readArchitectures(exe)
@@ -246,6 +249,62 @@ func populateMetadata(appPath, exe string, r *Result) {
 	r.Sandboxed, r.Entitlements = readEntitlements(appPath)
 	r.MASReceipt = exists(filepath.Join(appPath, "Contents", "_MASReceipt"))
 	r.Storage = scanStorage(appPath, r.BundleID)
+}
+
+func frameworkVersions(appPath string, r *Result) map[string]string {
+	versions := make(map[string]string)
+	if r.ElectronVersion != "" {
+		versions["Electron"] = r.ElectronVersion
+	}
+	flutterPlist := filepath.Join(appPath, "Contents", "Frameworks", "FlutterMacOS.framework", "Resources", "Info.plist")
+	if v := firstPlistString(flutterPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
+		versions["Flutter"] = v
+	}
+	qtPlist := filepath.Join(appPath, "Contents", "Frameworks", "QtCore.framework", "Resources", "Info.plist")
+	if v := firstPlistString(qtPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
+		versions["Qt"] = v
+	}
+	if v := readTauriVersion(appPath); v != "" {
+		versions["Tauri"] = v
+	}
+	if len(versions) == 0 {
+		return nil
+	}
+	return versions
+}
+
+func firstPlistString(plist string, keys ...string) string {
+	for _, key := range keys {
+		if v := readPlistString(plist, key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func readTauriVersion(appPath string) string {
+	for _, rel := range []string{
+		filepath.Join("Contents", "Resources", "tauri.conf.json"),
+		filepath.Join("Contents", "Resources", "tauri.conf.json5"),
+	} {
+		data, err := os.ReadFile(filepath.Join(appPath, rel))
+		if err != nil {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		if pkg, ok := m["package"].(map[string]any); ok {
+			if v, ok := pkg["version"].(string); ok && v != "" {
+				return v
+			}
+		}
+		if v, ok := m["version"].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // scanStorage measures user-data sizes under ~/Library for this bundle.
