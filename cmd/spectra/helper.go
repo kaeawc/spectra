@@ -16,6 +16,8 @@ const helperBinaryDest = "/Library/PrivilegedHelperTools/spectra-helper"
 // helperPlist is the LaunchDaemon plist path.
 const helperPlist = "/Library/LaunchDaemons/dev.spectra.helper.plist"
 
+const helperGroup = "_spectra"
+
 // helperPlistContent is the LaunchDaemon plist that starts spectra-helper
 // at boot and keeps it alive.
 const helperPlistContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -64,6 +66,14 @@ func runInstallHelper(args []string) int {
 		name string
 		fn   func() error
 	}{
+		{"Create _spectra group", ensureHelperGroup},
+		{"Add current user to _spectra group", func() error {
+			user := helperInstallUser(os.Getenv)
+			if user == "" || user == "root" {
+				return nil
+			}
+			return sudoRun("dseditgroup", "-o", "edit", "-a", user, "-t", "user", helperGroup)
+		}},
 		{"Create /Library/PrivilegedHelperTools/", func() error {
 			return sudoRun("mkdir", "-p", "/Library/PrivilegedHelperTools")
 		}},
@@ -110,8 +120,24 @@ func runInstallHelper(args []string) int {
 	fmt.Println("To grant Full Disk Access (required for TCC.db queries):")
 	fmt.Println("  System Settings → Privacy & Security → Full Disk Access → add spectra-helper")
 	fmt.Println()
+	fmt.Println("If this is the first install, log out and back in so group membership is refreshed.")
+	fmt.Println()
 	fmt.Println("Verify with: spectra install-helper --status")
 	return 0
+}
+
+func ensureHelperGroup() error {
+	if err := sudoRun("dseditgroup", "-o", "read", helperGroup); err == nil {
+		return nil
+	}
+	return sudoRun("dseditgroup", "-o", "create", helperGroup)
+}
+
+func helperInstallUser(getenv func(string) string) string {
+	if user := getenv("SUDO_USER"); user != "" {
+		return user
+	}
+	return getenv("USER")
 }
 
 func runUninstallHelper(args []string) int {

@@ -73,7 +73,6 @@ Planned but not implemented yet:
 
 - `helper.fs_usage.start(filter)`
 - `helper.fs_usage.stop(handle)`
-- `_spectra` group provisioning and socket group ownership hardening
 
 Notably absent:
 
@@ -98,8 +97,9 @@ streams: framing makes recovery from partial reads trivial.
 ## Authentication and authorization
 
 - **Filesystem permissions** on `/var/run/spectra-helper.sock` gate which
-  users can connect. The planned hardened install creates an `_spectra`
-  group and assigns the socket to it.
+  users can connect. The installer creates an `_spectra` group, adds the
+  invoking user, and the helper assigns the socket to `root:_spectra`
+  with `0660` permissions at startup.
 - **Caller credential check** via `getpeereid(2)` on the connected
   socket is implemented and passed to method handlers.
 - **Method allowlist** is hardcoded in the helper. There is no dynamic
