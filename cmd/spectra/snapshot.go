@@ -232,14 +232,19 @@ func runSnapshotShow(args []string) int {
 		}
 	}
 
-	// Fallback: snapshot JSON not available — use the lightweight row + apps.
+	return runSnapshotShowFallback(ctx, db, row, id, *asJSON)
+}
+
+// runSnapshotShowFallback renders a snapshot using the lightweight row + apps
+// when the full snapshot JSON blob is not available.
+func runSnapshotShowFallback(ctx context.Context, db *store.DB, row store.SnapshotRow, id string, asJSON bool) int {
 	apps, err := db.GetSnapshotApps(ctx, id)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
-	if *asJSON {
+	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(map[string]any{"snapshot": row, "apps": apps})
