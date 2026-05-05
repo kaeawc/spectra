@@ -12,10 +12,13 @@ import (
 func discoverNode(opts CollectOptions) ([]RuntimeInstall, error) {
 	active := activeVersion(opts.CmdRunner, "node")
 	var out []RuntimeInstall
+	add := func(source, version, binPath string) {
+		out = append(out, runtimeInstallWithVersionProbe(opts.CmdRunner, source, version, binPath, active))
+	}
 
 	// nvm
 	for _, v := range listDirs(filepath.Join(opts.Home, ".nvm", "versions", "node")) {
-		out = append(out, runtimeInstall("nvm", v, filepath.Join(opts.Home, ".nvm", "versions", "node", v, "bin", "node"), active))
+		add("nvm", v, filepath.Join(opts.Home, ".nvm", "versions", "node", v, "bin", "node"))
 	}
 	// fnm
 	for _, base := range []string{
@@ -23,20 +26,20 @@ func discoverNode(opts CollectOptions) ([]RuntimeInstall, error) {
 		filepath.Join(opts.Home, ".local", "share", "fnm", "node-versions"),
 	} {
 		for _, v := range listDirs(base) {
-			out = append(out, runtimeInstall("fnm", v, filepath.Join(base, v, "installation", "bin", "node"), active))
+			add("fnm", v, filepath.Join(base, v, "installation", "bin", "node"))
 		}
 	}
 	// volta
 	for _, v := range listDirs(filepath.Join(opts.Home, ".volta", "tools", "image", "node")) {
-		out = append(out, runtimeInstall("volta", v, filepath.Join(opts.Home, ".volta", "tools", "image", "node", v, "bin", "node"), active))
+		add("volta", v, filepath.Join(opts.Home, ".volta", "tools", "image", "node", v, "bin", "node"))
 	}
 	// mise
 	for _, v := range listDirs(filepath.Join(opts.Home, ".local", "share", "mise", "installs", "node")) {
-		out = append(out, runtimeInstall("mise", v, filepath.Join(opts.Home, ".local", "share", "mise", "installs", "node", v, "bin", "node"), active))
+		add("mise", v, filepath.Join(opts.Home, ".local", "share", "mise", "installs", "node", v, "bin", "node"))
 	}
 	// asdf
 	for _, v := range listDirs(filepath.Join(opts.Home, ".asdf", "installs", "nodejs")) {
-		out = append(out, runtimeInstall("asdf", v, filepath.Join(opts.Home, ".asdf", "installs", "nodejs", v, "bin", "node"), active))
+		add("asdf", v, filepath.Join(opts.Home, ".asdf", "installs", "nodejs", v, "bin", "node"))
 	}
 	// brew
 	for _, cellar := range opts.BrewCellars {
@@ -45,7 +48,7 @@ func discoverNode(opts CollectOptions) ([]RuntimeInstall, error) {
 				continue
 			}
 			for _, v := range listDirs(filepath.Join(cellar, pkg)) {
-				out = append(out, runtimeInstall("brew", v, filepath.Join(cellar, pkg, v, "bin", "node"), active))
+				add("brew", v, filepath.Join(cellar, pkg, v, "bin", "node"))
 			}
 		}
 	}
@@ -248,6 +251,29 @@ func runtimeInstall(source, version, binPath, activePath string) RuntimeInstall 
 		Path:    binPath,
 		Active:  isActive,
 	}
+}
+
+func runtimeInstallWithVersionProbe(run CmdRunner, source, fallbackVersion, binPath, activePath string) RuntimeInstall {
+	install := runtimeInstall(source, fallbackVersion, binPath, activePath)
+	if version := versionFromExecutable(run, binPath, "--version"); version != "" {
+		install.Version = version
+	}
+	return install
+}
+
+func versionFromExecutable(run CmdRunner, path string, args ...string) string {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return ""
+	}
+	if run == nil {
+		run = execRunner
+	}
+	out, err := run(path, args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // discoverJVMManagers returns the names of JVM version managers present in the

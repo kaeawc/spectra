@@ -89,6 +89,39 @@ func TestDiscoverNodeMarksActiveFromInjectedRunner(t *testing.T) {
 	}
 }
 
+func TestDiscoverNodeUsesExecutableVersionOutput(t *testing.T) {
+	home := t.TempDir()
+	dirVersion := "current"
+	nodePath := filepath.Join(home, ".nvm", "versions", "node", dirVersion, "bin", "node")
+	if err := os.MkdirAll(filepath.Dir(nodePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nodePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == nodePath && len(args) == 1 && args[0] == "--version" {
+				return []byte("v22.1.1\n"), nil
+			}
+			return nil, errors.New("unexpected command")
+		},
+	}
+	installs, err := discoverNode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installs) != 1 {
+		t.Fatalf("got %d installs, want 1: %+v", len(installs), installs)
+	}
+	if installs[0].Version != "v22.1.1" {
+		t.Fatalf("version = %q, want executable output", installs[0].Version)
+	}
+}
+
 func TestDiscoverRustToolchains(t *testing.T) {
 	home := t.TempDir()
 	rtBase := filepath.Join(home, ".rustup", "toolchains")
