@@ -159,14 +159,19 @@ internal/
 ## Audit log
 
 The LaunchDaemon plist sends stderr to `/var/log/spectra-helper.log`.
-Structured per-call audit logging and rotation are planned.
+The helper writes one JSON object per handled request to stderr, so the
+LaunchDaemon log captures caller UID, method, status, duration, and error
+summary without recording request parameters.
 
 ```
-2026-05-04T18:33:21Z uid=501 method=tcc.system.query bundleID=com.anthropic.claudefordesktop result=ok rows=2
+{"time":"2026-05-05T17:33:21Z","uid":501,"method":"helper.tcc.system.query","ok":true,"duration_ms":4}
+{"time":"2026-05-05T17:33:24Z","uid":501,"method":"helper.unknown","ok":false,"duration_ms":0,"error":"method not found"}
 ```
 
 Users running with the helper installed can audit what got asked of
 it. The unprivileged daemon never writes to this log directly.
+Rotation is still handled by the host's `/var/log` policy; a dedicated
+Spectra log rotation policy is future hardening work.
 
 ## Code signing and notarization
 
