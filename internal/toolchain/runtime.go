@@ -10,7 +10,7 @@ import (
 
 // discoverNode enumerates Node.js installations from all common managers.
 func discoverNode(opts CollectOptions) ([]RuntimeInstall, error) {
-	active := activeVersion("node")
+	active := activeVersion(opts.CmdRunner, "node")
 	var out []RuntimeInstall
 
 	// nvm
@@ -55,7 +55,7 @@ func discoverNode(opts CollectOptions) ([]RuntimeInstall, error) {
 
 // discoverPython enumerates Python installations.
 func discoverPython(opts CollectOptions) ([]RuntimeInstall, error) {
-	active := activeVersion("python3")
+	active := activeVersion(opts.CmdRunner, "python3")
 	var out []RuntimeInstall
 
 	// system
@@ -96,7 +96,7 @@ func discoverPython(opts CollectOptions) ([]RuntimeInstall, error) {
 
 // discoverGo enumerates Go installations.
 func discoverGo(opts CollectOptions) ([]RuntimeInstall, error) {
-	active := activeVersion("go")
+	active := activeVersion(opts.CmdRunner, "go")
 	var out []RuntimeInstall
 
 	// system /usr/local/go
@@ -133,7 +133,7 @@ func discoverGo(opts CollectOptions) ([]RuntimeInstall, error) {
 
 // discoverRuby enumerates Ruby installations.
 func discoverRuby(opts CollectOptions) ([]RuntimeInstall, error) {
-	active := activeVersion("ruby")
+	active := activeVersion(opts.CmdRunner, "ruby")
 	var out []RuntimeInstall
 
 	// rbenv
@@ -224,9 +224,13 @@ func listDirs(dir string) []string {
 	return out
 }
 
-// activeVersion runs `which <bin>` and returns the resolved path.
-func activeVersion(bin string) string {
-	out, err := execRunner("which", bin)
+// activeVersion runs `which <bin>` through the injected runner and returns the
+// resolved path.
+func activeVersion(run CmdRunner, bin string) string {
+	if run == nil {
+		run = execRunner
+	}
+	out, err := run("which", bin)
 	if err != nil {
 		return ""
 	}
