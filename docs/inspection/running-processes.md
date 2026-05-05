@@ -6,17 +6,28 @@ otherwise static inspection.
 
 ## Source
 
-`ps -axwwo pid=,rss=,comm=` — equals signs suppress the column
-headers, `axww` gets every process with full unwrapped command lines.
-A process is attributed to the app when its `comm` field starts with
-`<app-path>/`.
+`ps -axwwo pid=,rss=,lstart=,comm=` for per-app attribution, and
+`ps -axwwo pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=`
+for the full process subcommand. Equals signs suppress the column
+headers; `axww` gets every process with full unwrapped command lines.
+A process is attributed to the app when its executable path starts
+with `<app-path>/`.
 
 For each match Spectra captures:
 
 - **PID** — process identifier
 - **RSS (KiB)** — resident set size
+- **CPU%** — point-in-time `pcpu` from `ps` in `spectra process`
+- **Start time** — parsed from `lstart`
 - **Command** — bundle-relative path (so `Contents/MacOS/Slack Helper`
   rather than the full `/Applications/Slack.app/...`)
+
+With `spectra process --deep`, Spectra also runs one batched
+`lsof -p <pid1,pid2,...>` call to collect:
+
+- **Open file descriptors** — counted from numeric FD rows
+- **Listening TCP ports** — parsed from `(LISTEN)` socket rows
+- **Outbound TCP connections** — remote `host:port` values
 
 ## Sample output
 
@@ -74,25 +85,28 @@ The `RunningProcesses` field on the JSON result holds the full list:
   process's RSS but only exist once on disk. The 2.4 GB total for
   Claude is overcounted; real OS-level memory pressure is lower.
   Activity Monitor has the same issue.
-- **No CPU% yet.** `ps` reports CPU time and percent, but extracting
-  it usefully takes a snapshot or two over time. Will land with the
-  daemon's ring buffer.
-- **No thread counts, file descriptors, or open ports.** All
-  reachable but not yet integrated. `lsof -p <pid>` is the natural
-  next layer.
+- **CPU% is point-in-time.** It is useful for "what is hot right now,"
+  but trends require the daemon metrics ring buffer.
+- **No thread counts yet.** macOS `ps` does not expose Linux-style
+  `nlwp`/`thcount` fields on this host. Thread counts are still a
+  future `libproc`/`proc_pidinfo` collector.
 
 ## Implementation reference
 
-`internal/detect/detect.go`:
+Per-app attribution in `internal/detect/detect.go`:
 - `scanRunningProcesses(appPath) []ProcessInfo`
 - Filters `ps` output by command-path prefix.
 - Single fork per inspection (not per process), so calling `Detect()`
   on many apps is O(N) forks of `ps`, not O(N×M).
 
+Full process inventory in `internal/process/`:
+- `CollectAll(ctx, opts)` — parses `ps` rows, including `pcpu`
+- `enrichDeep(procs, run)` — one batched `lsof -p` call for FD and
+  socket detail when `--deep` is set
+
 ## Future ideas
 
 - Switch to `libproc` via cgo (or `process.NewProcess` from
   `gopsutil`) to get richer per-process data without forking.
-- Add CPU%, thread count, file descriptor count, network connections
-  via `lsof -p`.
+- Add thread count via `proc_pidinfo`.
 - Compute "app uptime" from the oldest matching process's start time.

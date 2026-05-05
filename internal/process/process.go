@@ -3,8 +3,8 @@
 // docs/design/system-inventory.md and docs/inspection/running-processes.md.
 //
 // Collection is a single fork of `ps`; per-app attribution is a string-prefix
-// match (no extra forks). CPU% and thread counts land with the daemon's ring
-// buffer.
+// match (no extra forks). CPU% is captured from ps; thread counts land with a
+// future libproc/proc_pidinfo collector.
 package process
 
 import (
@@ -46,8 +46,9 @@ type CollectOptions struct {
 	// whose executable lives inside one of these .app paths gets AppPath set.
 	BundlePaths []string
 
-	// Deep, when true, enriches each process with OpenFDs and ListeningPorts
-	// via a single batched lsof call. Adds ~50-100ms per collection.
+	// Deep, when true, enriches each process with OpenFDs, ListeningPorts,
+	// and OutboundConnections via a single batched lsof call. Adds ~50-100ms
+	// per collection.
 	Deep bool
 
 	// CmdRunner overrides exec.Command for testing.
