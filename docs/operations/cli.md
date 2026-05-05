@@ -215,6 +215,26 @@ spectra baseline list
 spectra baseline drop snap-20260504T095749Z-4829
 ```
 
+## `spectra jvm`
+
+Lists or inspects running JVM processes and exposes JDK-tool diagnostics.
+
+### Examples
+
+```bash
+spectra jvm
+spectra jvm --json
+spectra jvm 4012
+spectra jvm thread-dump 4012
+spectra jvm heap-histogram 4012
+spectra jvm heap-dump --out /tmp/app.hprof 4012
+spectra jvm gc-stats --json 4012
+spectra jvm jfr start 4012 --name spectra
+spectra jvm jfr dump 4012 --name spectra --out /tmp/app.jfr
+spectra jvm jfr summary --json /tmp/app.jfr
+spectra jvm jfr stop 4012 --name spectra
+```
+
 ## `spectra serve`
 
 Runs the JSON-RPC daemon. By default it listens only on the current

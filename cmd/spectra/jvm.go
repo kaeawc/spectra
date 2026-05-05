@@ -226,11 +226,41 @@ func runJVMGCStats(args []string) int {
 }
 
 func runJVMJFR(args []string) int {
+	if len(args) > 0 && args[0] == "summary" {
+		return runJFRSummary(args[1:])
+	}
 	sub, pid, name, outPath, code := parseJFRArgs(args)
 	if code != 0 {
 		return code
 	}
 	return executeJFR(sub, pid, name, outPath)
+}
+
+func runJFRSummary(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm jfr summary", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm jfr summary [--json] <recording.jfr>")
+		return 2
+	}
+
+	summary, err := jvm.SummarizeJFR(fs.Arg(0), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jfr summary failed for %s: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(summary)
+		return 0
+	}
+	printJFRSummary(summary)
+	return 0
 }
 
 func parseJFRArgs(args []string) (string, int, string, string, int) {
@@ -336,6 +366,23 @@ func runJFRStop(pid int, name, dest string) int {
 		fmt.Println(dest)
 	}
 	return 0
+}
+
+func printJFRSummary(summary jvm.JFRSummary) {
+	fmt.Printf("File      %s\n", strOrDash(summary.Path))
+	fmt.Printf("Version   %s\n", strOrDash(summary.Version))
+	fmt.Printf("Chunks    %s\n", intOrDash(summary.Chunks))
+	fmt.Printf("Start     %s\n", strOrDash(summary.Start))
+	fmt.Printf("Duration  %s\n", strOrDash(summary.Duration))
+	if len(summary.Events) == 0 {
+		return
+	}
+	fmt.Println("\nEvents:")
+	fmt.Printf("%-48s %10s %12s\n", "TYPE", "COUNT", "BYTES")
+	fmt.Println(strings.Repeat("-", 74))
+	for _, event := range summary.Events {
+		fmt.Printf("%-48s %10d %12d\n", truncate(event.Type, 48), event.Count, event.SizeBytes)
+	}
 }
 
 func printJVMList(infos []jvm.Info) {

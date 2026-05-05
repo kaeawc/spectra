@@ -37,6 +37,7 @@ var (
 	collectToolchains = toolchain.Collect
 	collectJDKs       = toolchain.CollectJDKs
 	runJFRDump        = jvm.JFRDump
+	runJFRSummary     = jvm.SummarizeJFR
 )
 
 // DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
@@ -666,6 +667,21 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("jfr stop pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "stopped": true}, nil
+	})
+
+	// jvm.jfr.summary — run `jfr summary <path>` and return parsed event counts.
+	d.Register("jvm.jfr.summary", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
+			return nil, fmt.Errorf("jvm.jfr.summary requires {\"path\": \"...\"}")
+		}
+		summary, err := runJFRSummary(p.Path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("jfr summary %s: %w", p.Path, err)
+		}
+		return summary, nil
 	})
 
 	// jvm.inspect — structured inspection of one JVM process.

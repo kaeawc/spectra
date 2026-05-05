@@ -85,6 +85,7 @@ helper is installed and reachable.
 | `jcmd <pid> GC.heap_dump <path>` | full heap dump | same UID | seconds-minutes, GBs | `jvm.heapDump` artifact |
 | `jcmd <pid> JFR.start name=spectra` | start JFR recording | same UID | low | `jvm.jfr.start` |
 | `jcmd <pid> JFR.dump name=spectra filename=...` | stop+dump JFR | same UID | low | `jvm.jfr.dump` |
+| `jfr summary <path>` | JFR recording metadata + event counts | user | low | `jvm.jfr.summary` |
 | `jstat -gc <pid>` | GC counters snapshot | same UID | low | `jvm.gc_stats` |
 
 All require a JDK in `$PATH` — see [toolchains.md](toolchains.md) for
