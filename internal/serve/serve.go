@@ -638,6 +638,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}, nil
 	})
 
+	// toolchain.build_tools — installed JVM-ecosystem build tools (Maven, Gradle, Bazel, Make, CMake).
+	d.Register("toolchain.build_tools", func(_ json.RawMessage) (any, error) {
+		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		return tc.BuildTools, nil
+	})
+
+	// jdk.scan — re-enumerate installed JDK toolchains (alias for jdk.list that signals a fresh scan intent).
+	d.Register("jdk.scan", func(_ json.RawMessage) (any, error) {
+		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		return tc.JDKs, nil
+	})
+
 	// network.state — current network configuration snapshot.
 	d.Register("network.state", func(_ json.RawMessage) (any, error) {
 		return netstate.Collect(netstate.DefaultRunner), nil
