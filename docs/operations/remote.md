@@ -43,8 +43,17 @@ spectra connect work-mac call jvm.thread_dump '{"pid":4012}'
 spectra connect work-mac call snapshot.create
 ```
 
-Typed remote subcommands like `spectra connect work-mac jvm` are still
-planned; today `call` is the stable escape hatch.
+Common typed remote shortcuts are available for frequent read-only calls:
+
+```bash
+spectra connect work-mac inspect /Applications/Slack.app
+spectra connect work-mac jvm
+spectra connect work-mac processes
+spectra connect work-mac network
+spectra connect work-mac toolchains
+```
+
+Use `call` for everything else.
 
 ## Cross-host operations
 

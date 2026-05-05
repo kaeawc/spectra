@@ -291,6 +291,11 @@ automatic tsnet registration and cross-host fan-out remain future work.
 |---|---|
 | `spectra connect <target>` | Call `health` |
 | `spectra connect <target> status` | Call `health` |
+| `spectra connect <target> inspect <App.app>` | Call `inspect.app` |
+| `spectra connect <target> jvm` | Call `jvm.list` |
+| `spectra connect <target> processes` | Call `process.list` |
+| `spectra connect <target> network` | Call `network.state` |
+| `spectra connect <target> toolchains` | Call `toolchain.scan` |
 | `spectra connect <target> call <method> [json-params]` | Call an RPC method directly |
 
 ### Examples
@@ -298,6 +303,11 @@ automatic tsnet registration and cross-host fan-out remain future work.
 ```bash
 spectra connect local
 spectra connect 127.0.0.1:7878 status
+spectra connect work-mac inspect /Applications/Slack.app
+spectra connect work-mac jvm
+spectra connect work-mac processes
+spectra connect work-mac network
+spectra connect work-mac toolchains
 spectra connect work-mac call snapshot.create
 spectra connect work-mac call inspect.app '{"path":"/Applications/Slack.app"}'
 ```
