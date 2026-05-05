@@ -1,10 +1,12 @@
 # Daemon mode
 
-> **Status: planned.** Captures the design for `spectra serve`.
+`spectra serve` runs the local long-lived collector and JSON-RPC server.
+It is implemented today for the Unix-socket local workflow; remote tsnet
+and TCP listeners remain future work.
 
-`spectra serve` runs the long-lived collector. CLI invocations like
-`spectra list` and `spectra inspect` are clients that talk to a local
-or remote daemon over JSON-RPC.
+Most CLI commands still run in-process. `spectra status`, `spectra metrics`,
+and direct JSON-RPC clients use the daemon socket today; the same RPC surface
+is intended to back future thin clients and UI clients.
 
 See [../design/architecture.md](../design/architecture.md) for the
 overall daemon-with-clients model and
@@ -15,59 +17,75 @@ Tailscale integration that makes remote operation a first-class case.
 
 ```bash
 spectra serve              # foreground, logs to stdout
-spectra serve --daemon     # detached, logs to ~/Library/Logs/Spectra/
+spectra serve --sock /tmp/spectra.sock
 ```
 
-Or as a launchd-managed agent installed by the installer.
+The current CLI runs in the foreground until interrupted. A launchd-managed
+agent or detached `--daemon` mode is still future packaging work.
 
 ## Listening surfaces
 
 | Surface | Default | Use |
 |---|---|---|
 | Unix socket | `~/.spectra/sock` | local CLI, local TUI/GUI clients |
-| Tailscale `tsnet` | `spectra.<tailnet>.ts.net:7878` | remote clients via Tailscale |
-| TCP localhost | _disabled by default_ | explicit `--listen 127.0.0.1:7878` |
+| Tailscale `tsnet` | _not implemented_ | future remote clients via Tailscale |
+| TCP localhost | _not implemented_ | future explicit loopback listener |
 
-The Unix socket is always on. Tailscale and TCP are opt-in via flags.
+The Unix socket is created with `0600` permissions and removed on clean
+shutdown.
 
-## RPC surface (sketch)
+## RPC surface
 
 JSON-RPC 2.0 methods, organized by concern:
 
 - **Inspection** — `inspect.app`, `inspect.app.batch`, `inspect.host`
 - **Snapshots** — `snapshot.create`, `snapshot.list`, `snapshot.get`,
-  `snapshot.diff`
-- **Live state** — `process.list`, `process.tree`, `process.history`
+  `snapshot.diff`, `snapshot.processes`, `snapshot.login_items`,
+  `snapshot.granted_perms`, `snapshot.prune`
+- **Live state** — `process.live`, `process.history`, `process.list`,
+  `process.tree`, `process.sample`
 - **JVM** — `jvm.list`, `jvm.inspect`, `jvm.threadDump`, `jvm.heapDump`,
-  `jvm.jfr.start/stop/dump`, `jvm.attachAgent`
+  `jvm.heapHistogram`, `jvm.gcStats`, `jvm.jfr.start`, `jvm.jfr.stop`,
+  `jvm.jfr.dump`
 - **JDK** — `jdk.list`, `jdk.scan`
-- **Toolchain** — `toolchain.brew`, `toolchain.runtimes` (mise/asdf/etc.)
-- **Network** — `network.connections`, `network.byApp`
+- **Toolchain** — `toolchain.scan`, `toolchain.brew`,
+  `toolchain.runtimes`, `toolchain.build_tools`
+- **Network** — `network.state`, `network.connections`, `network.byApp`
 - **Storage** — `storage.byApp`, `storage.system`
-- **Issues** — `issues.list`, `issues.acknowledge`, `issues.dismiss`
+- **Power** — `power.state`
+- **Issues** — `issues.list`, `issues.record`, `issues.update`,
+  `issues.acknowledge`, `issues.dismiss`, `issues.fix.record`,
+  `issues.fix.list`
 - **Cache** — `cache.stats`, `cache.clear`
+- **Helper proxy** — `helper.health`, `helper.powermetrics.sample`,
+  `helper.tcc.system.query`
 
-The CLI subcommands map 1:1 to RPC methods so a thin client wrapper
-is sufficient and the same RPC surface serves a future GUI without
-changes.
+Snake-case and camel-case aliases exist for selected older JVM methods
+(`jvm.thread_dump` / `jvm.threadDump`, etc.).
 
 ## Caching
 
-The daemon caches `Detect()` results in the
-[blob store](caching.md) and a small in-memory LRU. Repeat calls for
-unchanged apps return in microseconds.
+The daemon can pass the detect cache store into snapshot creation so repeated
+`Detect()` work reuses the [blob store](caching.md). There is no in-memory
+LRU today.
 
 ## Live data ring buffer
 
-Process-level metrics (CPU%, RSS, network bytes/sec) are sampled at
-~1Hz into an in-memory ring buffer. Last 5 minutes per process kept
-in RAM; aggregated to 1-minute rows on flush to SQLite.
+Process-level metrics (CPU%, RSS, virtual size) are sampled at ~1Hz into
+an in-memory ring buffer. The last 5 minutes per process are kept in RAM
+and flushed as 1-minute aggregates to SQLite. `spectra metrics` reads the
+stored rows; the `process.live` RPC returns recent in-memory samples.
+
+The daemon also captures a host-focused live snapshot every minute and prunes
+live snapshots to the last 100 rows. Apps, storage, and JVMs are skipped in
+that loop to keep the tick cheap.
 
 ## Privileged helper
 
-For root-only data (system TCC.db, `fs_usage`, `powermetrics`), the
-unprivileged daemon talks to a separately installed privileged
-helper over a local Unix socket. See
+For root-only data, the unprivileged daemon can proxy to a separately
+installed privileged helper over a local Unix socket. Implemented helper
+proxy methods cover health, system TCC query, and one-shot `powermetrics`
+sampling. `fs_usage` remains future work. See
 [../design/distribution.md](../design/distribution.md).
 
 The remote client never talks to the helper directly — the daemon
@@ -75,11 +93,8 @@ mediates and applies its own access control.
 
 ## Authentication
 
-V1: Tailscale-ACL-only for tsnet listener. The Unix socket is
-restricted to the user that runs the daemon (filesystem perms).
-
-Future: per-host bearer tokens issued at install time, for SSH or
-non-Tailscale TCP usage.
+Current local mode relies on Unix socket filesystem permissions. Remote
+authentication is future work with the remote portal.
 
 ## Security posture
 
@@ -87,27 +102,35 @@ non-Tailscale TCP usage.
 - The Unix socket is `0600`-permissioned in `~/.spectra/`.
 - All RPC calls are read-only by default. State-changing calls
   (`snapshot.create`, `cache.clear`, `issues.acknowledge`,
-  `jvm.heapDump`) are routed through an explicit method whitelist.
+  `issues.dismiss`, `issues.fix.record`, `snapshot.prune`, JVM heap/JFR
+  capture) are explicit methods.
 - The daemon is intended to be a low-privilege observer, not a remote
   shell. Method surface is intentionally narrow; arbitrary
   `exec.Command` is not exposed over RPC.
 
 ## Health
 
-Each daemon publishes `/health` returning `{ ok: true, version: ... }`
-on its socket and tsnet listener. Used by:
+Each daemon exposes a JSON-RPC `health` method returning
+`{ ok: true, version: ... }` on the Unix socket. Used by:
 
 - `spectra status` — local health check.
-- TUI client — show connection state.
-- Tailscale ACL probes — verify reachability.
+- future TUI/GUI clients — show connection state.
 
 ## Implementation order
 
-1. RPC dispatcher with handler registration (matches today's
-   `Detect()` shape).
+Implemented:
+
+1. RPC dispatcher with handler registration.
 2. Unix socket transport.
-3. CLI clients dispatch through RPC instead of in-process calls.
-4. SQLite snapshots.
-5. tsnet integration.
-6. Live data ring buffer.
-7. Privileged helper handshake.
+3. SQLite-backed snapshots, issues, process rows, permission rows, and
+   metrics rows.
+4. Live process metrics ring buffer and periodic live snapshots.
+5. Local `spectra status` and `spectra metrics` clients.
+6. Privileged helper proxy methods for implemented helper capabilities.
+
+Future:
+
+1. CLI-wide RPC dispatch instead of in-process command execution.
+2. launchd or detached daemon lifecycle.
+3. tsnet and optional TCP listeners.
+4. TUI/GUI clients.
