@@ -597,3 +597,28 @@ func TestDaemonIssuesDismissMissingID(t *testing.T) {
 		t.Fatal("expected error for missing id, got nil")
 	}
 }
+
+func TestDaemonToolchainBuildToolsReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 63, "toolchain.build_tools", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("toolchain.build_tools: %v", resp.Error)
+	}
+	// Result should be a JSON array (may be empty if no build tools installed).
+	if _, ok := resp.Result.([]any); !ok && resp.Result != nil {
+		t.Fatalf("result type %T, want []any or nil", resp.Result)
+	}
+}
+
+func TestDaemonJDKScanReturnsSlice(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 64, "jdk.scan", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("jdk.scan: %v", resp.Error)
+	}
+	if _, ok := resp.Result.([]any); !ok && resp.Result != nil {
+		t.Fatalf("result type %T, want []any or nil", resp.Result)
+	}
+}
