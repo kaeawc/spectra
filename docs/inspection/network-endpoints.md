@@ -98,8 +98,10 @@ Useful for:
 - **No protocol audit.** `http://` and `https://` are treated the same
   in the output; the recommendation engine may flag plain-HTTP
   references separately later.
-- **Bundle-only.** This isn't live network observation. For that
-  Spectra will integrate `lsof -i` and `nettop` once the daemon lands.
+- **Bundle-only.** This isn't live network observation. For current live
+  sockets use `spectra network connections` or the daemon's
+  `network.connections` / `network.byApp` methods, which are backed by
+  `lsof -i -P -n`. Per-process throughput via `nettop` is still future work.
 
 ## Implementation reference
 
@@ -108,6 +110,11 @@ Useful for:
 - Streamed reader with overlapping window (256-byte tail) so URLs
   spanning chunk boundaries aren't missed.
 - Deduped via map, then sorted for stable output.
+
+Related live-network collectors:
+- `internal/netstate/connections.go` — `lsof -i -P -n` socket list.
+- `internal/netstate/netstate.go` — routes, DNS, proxy config, VPN state,
+  listening ports, and connection counts.
 
 ## CLI usage
 
