@@ -256,3 +256,21 @@ func TestCollectAllFail(t *testing.T) {
 		t.Error("VPNActive should be false when ifconfig fails")
 	}
 }
+
+func TestCollectConnectionsCountFallsBackToNetstat(t *testing.T) {
+	stub := func(name string, args ...string) ([]byte, error) {
+		switch name {
+		case "route", "scutil", "ifconfig":
+			return []byte(""), nil
+		case "lsof":
+			return nil, errors.New("lsof failed")
+		case "netstat":
+			return []byte(netstatFixture), nil
+		}
+		return nil, errors.New("unexpected command")
+	}
+	s := Collect(stub)
+	if s.EstablishedConnectionsCount != 3 {
+		t.Errorf("EstablishedConnectionsCount = %d, want 3", s.EstablishedConnectionsCount)
+	}
+}

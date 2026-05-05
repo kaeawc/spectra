@@ -19,10 +19,14 @@ type Connection struct {
 // LISTEN entries are omitted — those appear in State.ListeningPorts.
 func CollectConnections(run CmdRunner) []Connection {
 	out, err := run("lsof", "-i", "-P", "-n")
+	if err == nil {
+		return parseLSOFConnections(string(out))
+	}
+	out, err = run("netstat", "-an")
 	if err != nil {
 		return nil
 	}
-	return parseLSOFConnections(string(out))
+	return parseNetstatConnections(string(out))
 }
 
 // parseLSOFConnections extracts active connections from `lsof -i -P -n` output.
@@ -92,4 +96,72 @@ func parseLSOFConnections(out string) []Connection {
 		})
 	}
 	return conns
+}
+
+// parseNetstatConnections extracts system-wide active sockets from
+// `netstat -an` output. netstat has no PID/command columns, so callers receive
+// socket state only.
+func parseNetstatConnections(out string) []Connection {
+	var conns []Connection
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		proto := strings.ToLower(fields[0])
+		if !strings.HasPrefix(proto, "tcp") && !strings.HasPrefix(proto, "udp") {
+			continue
+		}
+		state := ""
+		if strings.HasPrefix(proto, "tcp") && len(fields) >= 6 {
+			state = strings.ToLower(fields[5])
+		}
+		if state == "listen" {
+			continue
+		}
+		conns = append(conns, Connection{
+			Proto:      trimProtoFamily(proto),
+			LocalAddr:  normalizeNetstatAddr(fields[3]),
+			RemoteAddr: netstatRemoteAddr(fields),
+			State:      state,
+		})
+	}
+	return conns
+}
+
+func trimProtoFamily(proto string) string {
+	switch {
+	case strings.HasPrefix(proto, "tcp"):
+		return "tcp"
+	case strings.HasPrefix(proto, "udp"):
+		return "udp"
+	default:
+		return proto
+	}
+}
+
+func netstatRemoteAddr(fields []string) string {
+	if len(fields) < 5 {
+		return ""
+	}
+	return normalizeNetstatAddr(fields[4])
+}
+
+func normalizeNetstatAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" || addr == "*.*" {
+		return ""
+	}
+	idx := strings.LastIndex(addr, ".")
+	if idx < 0 {
+		return addr
+	}
+	host, port := addr[:idx], addr[idx+1:]
+	if port == "*" {
+		return host
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return addr
+	}
+	return host + ":" + port
 }
