@@ -526,3 +526,40 @@ func TestDaemonSnapshotProcessesRequiresID(t *testing.T) {
 		t.Error("expected error when id missing")
 	}
 }
+
+func TestDaemonToolchainBrewReturnsObject(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 58, "toolchain.brew", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("toolchain.brew: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	// Should have formulae, casks, taps keys (even if empty slices / nil).
+	for _, key := range []string{"formulae", "casks", "taps"} {
+		if _, exists := m[key]; !exists {
+			t.Errorf("toolchain.brew: missing key %q", key)
+		}
+	}
+}
+
+func TestDaemonToolchainRuntimesReturnsObject(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 59, "toolchain.runtimes", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("toolchain.runtimes: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	for _, key := range []string{"node", "python", "go", "ruby", "rust"} {
+		if _, exists := m[key]; !exists {
+			t.Errorf("toolchain.runtimes: missing key %q", key)
+		}
+	}
+}

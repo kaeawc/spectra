@@ -589,6 +589,24 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return toolchain.Collect(context.Background(), toolchain.CollectOptions{}), nil
 	})
 
+	// toolchain.brew — Homebrew formulae, casks, and taps.
+	d.Register("toolchain.brew", func(_ json.RawMessage) (any, error) {
+		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		return tc.Brew, nil
+	})
+
+	// toolchain.runtimes — language runtime installs (Node, Python, Go, Ruby, Rust).
+	d.Register("toolchain.runtimes", func(_ json.RawMessage) (any, error) {
+		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		return map[string]any{
+			"node":   tc.Node,
+			"python": tc.Python,
+			"go":     tc.Go,
+			"ruby":   tc.Ruby,
+			"rust":   tc.Rust,
+		}, nil
+	})
+
 	// network.state — current network configuration snapshot.
 	d.Register("network.state", func(_ json.RawMessage) (any, error) {
 		return netstate.Collect(netstate.DefaultRunner), nil
