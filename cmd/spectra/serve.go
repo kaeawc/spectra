@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/serve"
 )
@@ -22,6 +23,8 @@ func runServe(args []string) int {
 	sockPath := fs.String("sock", "", "Unix socket path (default: ~/.spectra/sock)")
 	tcpAddr := fs.String("tcp", "", "Optional TCP listen address, such as 127.0.0.1:7878")
 	allowRemote := fs.Bool("allow-remote", false, "Allow --tcp to bind a non-loopback address")
+	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
+	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -42,7 +45,19 @@ func runServe(args []string) int {
 			return 1
 		}
 	}
+
+	daemonLog, closeLog, resolvedLogPath, err := openDaemonLogger(*logFile, *noLogFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if closeLog != nil {
+		defer closeLog()
+	}
 	fmt.Fprintf(os.Stderr, "spectra serve: listening on %s\n", sock)
+	if resolvedLogPath != "" {
+		fmt.Fprintf(os.Stderr, "spectra serve: logging to %s\n", resolvedLogPath)
+	}
 	if *tcpAddr != "" {
 		if *allowRemote {
 			fmt.Fprintln(os.Stderr, "spectra serve: warning: TCP RPC has no Spectra-layer authentication; rely on SSH/Tailscale/firewall controls")
@@ -59,11 +74,31 @@ func runServe(args []string) int {
 		TCPAddr:        *tcpAddr,
 		SpectraVersion: version,
 		DetectStore:    detectStore,
+		Logger:         daemonLog,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+func openDaemonLogger(path string, disabled bool) (logger.Logger, func(), string, error) {
+	if disabled {
+		return nil, nil, "", nil
+	}
+	if path == "" {
+		var err error
+		path, err = serve.DefaultLogPath()
+		if err != nil {
+			return nil, nil, "", err
+		}
+	}
+	f, err := serve.OpenLogFile(path)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	log := logger.New(logger.Config{Writer: f, Format: logger.FormatJSON})
+	return log, func() { _ = f.Close() }, path, nil
 }
 
 func isLoopbackListenAddr(addr string) bool {

@@ -21,6 +21,7 @@ import (
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -57,11 +58,16 @@ type Options struct {
 	DBPath         string              // empty = store.DefaultPath()
 	CacheRegistry  *cache.Registry     // nil = cache.Default
 	DetectStore    *cache.ShardedStore // nil = no detect caching
+	Logger         logger.Logger       // nil = discard
 }
 
 // Run starts the daemon: listens on the Unix socket and serves requests until
 // ctx is cancelled. Run blocks until the listener is shut down.
 func Run(ctx context.Context, opts Options) error {
+	log := opts.Logger
+	if log == nil {
+		log = logger.Discard()
+	}
 	sockPath := opts.SockPath
 	if sockPath == "" {
 		var err error
@@ -85,6 +91,7 @@ func Run(ctx context.Context, opts Options) error {
 		ln.Close()
 		return fmt.Errorf("serve: chmod %s: %w", sockPath, err)
 	}
+	log.Info("daemon unix listener ready", "socket", sockPath)
 
 	listeners := []net.Listener{ln}
 	if opts.TCPAddr != "" {
@@ -95,6 +102,7 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err)
 		}
 		listeners = append(listeners, tcpLn)
+		log.Warn("daemon tcp listener ready", "address", opts.TCPAddr)
 	}
 	defer os.Remove(sockPath)
 	defer closeListeners(listeners)
@@ -111,6 +119,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("serve: open db: %w", err)
 	}
 	defer db.Close()
+	log.Info("daemon storage ready", "db", dbPath)
 
 	// Start the ~1Hz process metrics sampler.
 	collector := metrics.NewCollector()
@@ -130,6 +139,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	d := rpc.NewDispatcher()
 	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore)
+	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
 	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
@@ -137,7 +147,12 @@ func Run(ctx context.Context, opts Options) error {
 		closeListeners(listeners)
 	}()
 
-	return serveAll(d, listeners)
+	if err := serveAll(d, listeners); err != nil {
+		log.Error("daemon stopped with error", "error", err.Error())
+		return err
+	}
+	log.Info("daemon stopped")
+	return nil
 }
 
 func serveAll(d *rpc.Dispatcher, listeners []net.Listener) error {

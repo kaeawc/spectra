@@ -16,13 +16,20 @@ Tailscale integration that makes remote operation a first-class case.
 ## Lifecycle
 
 ```bash
-spectra serve              # foreground, logs to stdout
+spectra serve              # foreground, JSONL log file enabled
 spectra serve --sock /tmp/spectra.sock
 spectra serve --tcp 127.0.0.1:7878
+spectra serve --log-file /tmp/spectra-daemon.jsonl
+spectra serve --no-log-file
 ```
 
 The current CLI runs in the foreground until interrupted. A launchd-managed
 agent or detached `--daemon` mode is still future packaging work.
+
+By default, structured daemon lifecycle logs are appended to
+`~/Library/Logs/Spectra/daemon.jsonl` with `0600` permissions. Foreground
+status lines still go to stderr for interactive use. Use `--log-file` to
+choose another JSONL path or `--no-log-file` for short-lived test runs.
 
 ## Listening surfaces
 
@@ -124,6 +131,14 @@ listener. Used by:
 - `spectra status` — local health check.
 - `spectra connect <target>` — Unix or TCP health check.
 - future TUI/GUI clients — show connection state.
+
+## Logs
+
+The daemon writes JSONL records for listener startup, storage readiness,
+serving start, and shutdown/error events. These records include socket paths,
+TCP listen addresses, database path, version, and listener count. They do not
+include heap-dump contents, JFR contents, process command-line arguments, or
+RPC payloads.
 
 ## Implementation order
 
