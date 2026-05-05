@@ -28,7 +28,9 @@ Three consequences:
    daemon becomes a tailnet node directly — no port forwarding, no
    firewall rules, no `ssh -L`. The spectra binary on the remote Mac
    registers as `work-mac.tailnet-name.ts.net`, and `spectra connect work-mac`
-   Just Works with MagicDNS.
+   Just Works with MagicDNS. The current implementation stops one step
+   earlier: the daemon can opt into an explicit TCP listener and the
+   client can call JSON-RPC methods with `spectra connect <host> call ...`.
 
 ## Authentication
 
@@ -91,12 +93,14 @@ These will get pinned down before the first daemon commit:
 1. Refactor `Detect()` and live collectors behind an `Inspector` interface
    so the same code path serves CLI and daemon.
 2. `spectra serve` over a local Unix socket first. Validates the RPC shape
-   without touching networking.
-3. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
+   without touching networking. **Implemented.**
+3. Add explicit TCP JSON-RPC transport for `spectra connect <host> call`.
+   **Implemented; authentication is still delegated to the network path.**
+4. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
    Tailscale's discovery.
-4. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
-5. Privileged helper as `spectra install-helper` subcommand. Same binary
+5. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
+6. Privileged helper as `spectra install-helper` subcommand. Same binary
    ships the helper; SMAppService-registered LaunchDaemon.
-6. Ring buffer + history for replay (requires SQLite from
+7. Ring buffer + history for replay (requires SQLite from
    [storage.md](storage.md)).
-7. Native GUI after the TUI proves the data model.
+8. Native GUI after the TUI proves the data model.

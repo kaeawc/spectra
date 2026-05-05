@@ -153,3 +153,10 @@ func isClosedErr(err error) bool {
 func DialUnix(sockPath string) (io.ReadWriteCloser, error) {
 	return net.Dial("unix", sockPath)
 }
+
+// DialNetwork connects to a Spectra daemon over any net.Dial-supported
+// network/address pair. It is used by remote clients once a daemon is
+// intentionally listening beyond its local Unix socket.
+func DialNetwork(network, address string) (io.ReadWriteCloser, error) {
+	return net.Dial(network, address)
+}

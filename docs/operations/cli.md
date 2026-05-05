@@ -30,6 +30,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `storage` | Show disk volumes and `~/Library` footprint |
 | `process` | List running processes sorted by memory |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
+| `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -186,6 +187,23 @@ spectra diff baseline pre-incident live
 to a baseline by ID first, then by baseline name. When the name/id is
 omitted, the newest baseline is used.
 
+## `spectra snapshot prune`
+
+Deletes old live snapshots beyond the retention limit. Baselines are
+never pruned.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--keep` | `100` | Number of newest live snapshots to retain |
+| `--json` | false | Emit JSON |
+
+### Examples
+
+```bash
+spectra snapshot prune
+spectra snapshot prune --keep 25 --json
+```
+
 ## `spectra baseline`
 
 Convenience alias for `spectra snapshot baseline`.
@@ -195,6 +213,58 @@ Convenience alias for `spectra snapshot baseline`.
 ```bash
 spectra baseline list
 spectra baseline drop snap-20260504T095749Z-4829
+```
+
+## `spectra serve`
+
+Runs the JSON-RPC daemon. By default it listens only on the current
+user's Unix socket at `~/.spectra/sock`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--sock` | `~/.spectra/sock` | Unix socket path |
+| `--tcp` | empty | Optional TCP listen address, such as `127.0.0.1:7878` |
+| `--allow-remote` | false | Allow `--tcp` to bind a non-loopback address |
+
+TCP RPC has no Spectra-layer authentication today. Keep it on loopback
+for local use or expose it only through SSH, Tailscale, or firewall
+controls you trust.
+
+### Examples
+
+```bash
+spectra serve
+spectra serve --tcp 127.0.0.1:7878
+spectra serve --tcp 100.64.0.5:7878 --allow-remote
+```
+
+## `spectra connect`
+
+Calls a running daemon using the same JSON-RPC protocol as the local
+Unix-socket client. This is the implemented remote transport today;
+automatic tsnet registration and cross-host fan-out remain future work.
+
+| Target | Meaning |
+|---|---|
+| `local` | Default local Unix socket |
+| `unix:/path/to/sock` | Explicit Unix socket |
+| `/path/to/sock` | Explicit Unix socket shorthand |
+| `host:port` | TCP daemon |
+| `host` | TCP daemon on port `7878` |
+
+| Form | Description |
+|---|---|
+| `spectra connect <target>` | Call `health` |
+| `spectra connect <target> status` | Call `health` |
+| `spectra connect <target> call <method> [json-params]` | Call an RPC method directly |
+
+### Examples
+
+```bash
+spectra connect local
+spectra connect 127.0.0.1:7878 status
+spectra connect work-mac call snapshot.create
+spectra connect work-mac call inspect.app '{"path":"/Applications/Slack.app"}'
 ```
 
 ## `spectra version`
@@ -210,12 +280,3 @@ Prints the build version (typically a git describe from `make build`).
 
 Per-app errors are written to stderr; the offending entry is dropped
 and processing continues for other paths.
-
-## Remaining planned subcommands
-
-```
-spectra connect <host>              # client targeting a remote daemon
-```
-
-See [../design/architecture.md](../design/architecture.md) for the
-shape of the daemon RPC.
