@@ -14,6 +14,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 func runJVM(args []string) int {
@@ -41,10 +42,11 @@ func runJVM(args []string) int {
 	}
 
 	ctx := context.Background()
+	jvmOpts := jvmOptions(ctx)
 	var infos []jvm.Info
 
 	if fs.NArg() == 0 {
-		infos = jvm.CollectAll(ctx, jvm.CollectOptions{})
+		infos = jvm.CollectAll(ctx, jvmOpts)
 		if len(infos) == 0 {
 			fmt.Fprintln(os.Stderr, "no running JVMs found (is jps in your PATH?)")
 			return 0
@@ -56,7 +58,7 @@ func runJVM(args []string) int {
 			fmt.Fprintf(os.Stderr, "invalid PID %q\n", pidStr)
 			return 2
 		}
-		info := jvm.InspectPID(ctx, pid, jvm.CollectOptions{})
+		info := jvm.InspectPID(ctx, pid, jvmOpts)
 		if info == nil {
 			fmt.Fprintf(os.Stderr, "could not inspect PID %d (process not found or jcmd unavailable)\n", pid)
 			return 1
@@ -77,6 +79,10 @@ func runJVM(args []string) int {
 		printJVMDetail(infos[0])
 	}
 	return 0
+}
+
+func jvmOptions(ctx context.Context) jvm.CollectOptions {
+	return jvm.CollectOptions{JDKs: toolchain.CollectJDKs(ctx, toolchain.CollectOptions{})}
 }
 
 func runJVMThreadDump(args []string) int {
@@ -360,6 +366,8 @@ func printJVMDetail(info jvm.Info) {
 	fmt.Printf("JDK vendor    %s\n", strOrDash(info.JDKVendor))
 	fmt.Printf("JDK version   %s\n", strOrDash(info.JDKVersion))
 	fmt.Printf("Java home     %s\n", strOrDash(info.JavaHome))
+	fmt.Printf("JDK install   %s\n", strOrDash(info.JDKInstallID))
+	fmt.Printf("JDK source    %s\n", strOrDash(info.JDKSource))
 	fmt.Printf("VM args       %s\n", strOrDash(info.VMArgs))
 	fmt.Printf("VM flags      %s\n", strOrDash(info.VMFlags))
 	fmt.Printf("Threads       %s\n", intOrDash(info.ThreadCount))
