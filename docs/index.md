@@ -56,8 +56,8 @@ model, [inspection/](inspection/) for what we extract from each bundle, and
 
 ## Distribution
 
-Spectra currently installs from source. Homebrew and prebuilt binaries are
-planned, with an optional `sudo` step that installs a privileged helper for
-root-only telemetry (Full Disk Access, `fs_usage`, `powermetrics`). The Mac
-App Store is incompatible with the live-monitoring features. See
+Spectra currently installs from source with an optional `sudo` helper
+install for root-only telemetry (system TCC, firewall rules, and
+`powermetrics`). Homebrew and prebuilt binaries are planned. The Mac App
+Store is incompatible with the live-monitoring features. See
 [design/distribution.md](design/distribution.md) for the full analysis.
