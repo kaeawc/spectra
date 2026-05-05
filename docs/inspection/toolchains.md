@@ -1,8 +1,9 @@
 # Toolchain inventory
 
-> **Status: planned.** Catalogs every package manager and language
-> runtime Spectra will enumerate to power cross-host diff and the
-> recommendations engine.
+Spectra catalogs package managers, language runtimes, JVM managers, build
+tools, and shell environment fields that affect runtime resolution. The
+inventory is available from the CLI, the daemon RPC surface, and snapshots;
+snapshot diffs and recommendation rules consume the same data.
 
 The "diff my Mac vs your Mac" feature for engineers stands or falls
 on toolchain inventory. Two engineers debugging a flaky JVM test need
@@ -11,12 +12,32 @@ different `JAVA_HOME` settings — fast. Spectra collects each subsystem
 independently and rolls them up under
 [`Toolchains` in the system inventory](../design/system-inventory.md#toolchains).
 
+Entry points:
+
+```bash
+spectra toolchain
+spectra toolchain --json
+spectra toolchain brew --json
+spectra toolchain jdks --json
+spectra snapshot create --baseline pre-debug
+spectra diff baseline pre-debug live
+```
+
+Daemon methods:
+
+- `toolchain.scan`
+- `toolchain.brew`
+- `toolchain.runtimes`
+- `toolchain.build_tools`
+- `jdk.list`
+- `jdk.scan`
+
 ## Subsystems
 
 ### Homebrew
 
-Source: `brew info --json=v2 --installed` for formulae, `brew list --cask`
-for casks, `brew tap` for taps.
+Source: `brew info --json=v2 --installed` for formulae,
+`brew list --cask --versions` for casks, `brew tap` for taps.
 
 ```
 toolchains.brew {
@@ -32,8 +53,8 @@ toolchains.brew {
 }
 ```
 
-Cheap and fast — `brew info --json=v2 --installed` gives everything in
-one call.
+The collector never runs `brew update` and treats Homebrew failures as a
+partial inventory, not a scan failure.
 
 ### JDK installations
 
@@ -45,11 +66,11 @@ location set.
 toolchains.jdks []{
   install_id
   path                       # absolute path to JDK home
-  source ∈ {system, brew, sdkman, asdf, mise, jbr-toolbox, manual}
+  source ∈ {system, brew, sdkman, asdf, mise, coursier, jbr-toolbox, manual}
   version_major, version_minor, version_patch
   vendor                     # "Eclipse Adoptium", "Azul Zulu", "JetBrains"
   release_string             # raw "21.0.6+7-LTS"
-  is_active_for_terminal     # whether $JAVA_HOME points here
+  is_active_java_home        # whether $JAVA_HOME points here
 }
 ```
 
@@ -67,10 +88,13 @@ Spectra parses this rather than running the JDK because (1) it's
 faster and (2) it works for JDKs that aren't otherwise functional
 (missing entitlements, broken codesign).
 
-### Node.js runtimes
+### Language runtimes
 
-Multiple managers may coexist on the same machine. Spectra checks
-each independently:
+Multiple managers may coexist on the same machine. Spectra checks each
+runtime independently and marks the install whose binary wins current
+`$PATH` resolution as `active`.
+
+#### Node.js
 
 | Manager | Detection | Path probed |
 |---|---|---|
@@ -81,15 +105,13 @@ each independently:
 | mise | `~/.local/share/mise/installs/node/` | per-version dirs |
 | asdf | `~/.asdf/installs/nodejs/` | per-version dirs |
 
-Each version reports its `node --version` output if executable.
+Each version reports its `node --version` output if executable; otherwise
+it falls back to the directory name.
 
-The `active` flag indicates which version `node` would resolve to
-based on the current `$PATH` ordering — the inventory needs this to
-explain "why is `node` resolving to v18 even though I installed v22?"
+#### Python
 
-### Python runtimes
+Sources:
 
-Same structure as Node, with sources:
 - `system` — `/usr/bin/python3` (Apple's bundled)
 - `brew` — Homebrew formulae `python@*`
 - `pyenv` — `~/.pyenv/versions/`
@@ -98,9 +120,14 @@ Same structure as Node, with sources:
 
 ### Ruby, Go, Rust
 
-Symmetric to Node and Python; each has its standard set of managers
-(`rbenv`, `asdf`, `mise` for Ruby; `brew`, `goenv`, `mise`, `asdf` for
-Go; `rustup` for Rust toolchains and channels).
+Ruby sources: `rbenv`, `mise`, `asdf`, Homebrew `ruby` / `ruby@*`.
+
+Go sources: system `/usr/local/go`, `goenv`, `mise`, `asdf`, Homebrew
+`go` / `go@*`.
+
+Rust reports rustup-managed toolchains from `~/.rustup/toolchains/`, their
+channel (`stable`, `beta`, `nightly`, or `custom`), and the default
+toolchain from `~/.rustup/settings.toml`.
 
 ### JVM-specific package managers
 
@@ -122,8 +149,26 @@ actively shimming `java` based on `$PATH` ordering.
 | Make | system `xcrun make`, brew formula | version |
 | CMake | brew formula | version |
 
-Skipped unless installed; running `mvn -version` on a machine without
-Maven is a wasted fork.
+Homebrew Cellar checks are used first for common build tools. Version
+commands are fallback probes so a machine without Maven, Gradle, Bazel,
+Make, or CMake only pays a small number of failed subprocess lookups.
+
+### Environment
+
+Spectra records only the shell fields needed to explain runtime resolution:
+
+```go
+env {
+  shell
+  path_dirs[]
+  java_home
+  go_path
+  go_root
+  npm_prefix
+  pnpm_home
+  proxy_env_vars
+}
+```
 
 ## Why the level of detail
 
@@ -148,6 +193,8 @@ For each subsystem:
 - **Active runtime versions**: matched by language; if the active
   `node` is v18 on host A and v22 on host B, that's a high-signal
   diff entry.
+- **PATH directories**: sequence-compared, so added, removed, and
+  reordered entries are all visible.
 
 ## Recommendations engine inputs
 
@@ -156,6 +203,7 @@ Toolchain rows feed several recommendation rules:
 - `jdk-eol-version` — major version <= 11.
 - `jdk-multiple-versions-installed` — same major version from
   multiple sources (legitimate occasionally; usually drift).
+- `java-home-mismatch` — `$JAVA_HOME` points outside the discovered JDK set.
 - `path-shadows-active-runtime` — `$PATH` order causes a different
   binary to win than the user's manager would suggest.
 - `brew-deprecated-formula` — formula marked deprecated.
@@ -165,17 +213,15 @@ Toolchain rows feed several recommendation rules:
 
 - All discovery is **read-only** and **local**: no network calls,
   no `brew update`.
-- Each subsystem is implemented behind an interface
-  (`internal/toolchain/discoverer.go`):
-  ```go
-  type Discoverer interface {
-      Name() string
-      Discover(context.Context) (Subsystem, error)
-  }
-  ```
-- Discoverers run in parallel for the cross-host snapshot, with a
-  reasonable timeout per subsystem so a slow `mise` invocation
-  doesn't block the whole snapshot.
+- Code lives in `internal/toolchain/`.
+- `Collect(ctx, opts)` runs subsystem collectors in parallel and returns
+  partial results when one collector cannot read a source or a subprocess
+  probe fails.
+- Subprocess execution and environment reads are injectable through
+  `CollectOptions.CmdRunner` and `CollectOptions.EnvLookup`, which keeps
+  tests on synthetic homes and fake command output.
+- The current collector has no per-subsystem hard timeout; callers can
+  cancel the overall context before a task starts.
 
 ## See also
 
