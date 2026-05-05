@@ -165,6 +165,7 @@ NetworkState {
   vpn_interfaces []
   listening_ports []{ port, proto, pid, app_path }
   established_connections_count
+  process_throughput []{ pid, command, bytes_in_per_sec, bytes_out_per_sec }
 }
 ```
 

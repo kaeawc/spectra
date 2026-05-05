@@ -8,8 +8,10 @@ package netstate
 
 import (
 	"bufio"
+	"encoding/csv"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +24,7 @@ type State struct {
 	HostsOverrides              []HostsEntry    `json:"hosts_overrides,omitempty"`
 	ListeningPorts              []ListeningPort `json:"listening_ports,omitempty"`
 	EstablishedConnectionsCount int             `json:"established_connections_count,omitempty"`
+	ProcessThroughput           []Throughput    `json:"process_throughput,omitempty"`
 
 	// VPNActive is true when at least one tunnel interface (utun*) is UP with
 	// an assigned address. macOS uses utun interfaces for all VPN types:
@@ -49,6 +52,14 @@ type ListeningPort struct {
 	Proto   string `json:"proto"` // "tcp", "udp"
 	PID     int    `json:"pid,omitempty"`
 	AppPath string `json:"app_path,omitempty"`
+}
+
+// Throughput is a per-process network throughput sample from nettop.
+type Throughput struct {
+	PID            int    `json:"pid"`
+	Command        string `json:"command"`
+	BytesInPerSec  int64  `json:"bytes_in_per_sec"`
+	BytesOutPerSec int64  `json:"bytes_out_per_sec"`
 }
 
 // CmdRunner abstracts shell-out for testability.
@@ -81,6 +92,7 @@ func Collect(run CmdRunner) State {
 		s.VPNActive = len(s.VPNInterfaces) > 0
 	}
 	s.EstablishedConnectionsCount = len(collectConnectionRows(run))
+	s.ProcessThroughput = CollectThroughput(run)
 	return s
 }
 
@@ -92,6 +104,90 @@ func collectConnectionRows(run CmdRunner) []Connection {
 		return parseNetstatConnections(string(out))
 	}
 	return nil
+}
+
+// CollectThroughput samples per-process external-interface network throughput.
+// It asks nettop for two CSV samples in delta mode and uses the final sample;
+// the first sample is cumulative since process start on some macOS releases.
+func CollectThroughput(run CmdRunner) []Throughput {
+	out, err := run("nettop", "-P", "-L", "2", "-x", "-d", "-J", "bytes_in,bytes_out", "-t", "external")
+	if err != nil {
+		return nil
+	}
+	rows := parseNettopThroughput(string(out))
+	active := rows[:0]
+	for _, row := range rows {
+		if row.BytesInPerSec > 0 || row.BytesOutPerSec > 0 {
+			active = append(active, row)
+		}
+	}
+	return active
+}
+
+func parseNettopThroughput(out string) []Throughput {
+	r := csv.NewReader(strings.NewReader(out))
+	r.FieldsPerRecord = -1
+
+	var sample []Throughput
+	var last []Throughput
+	for {
+		record, err := r.Read()
+		if err != nil {
+			break
+		}
+		if len(record) < 3 {
+			continue
+		}
+		if record[0] == "" && record[1] == "bytes_in" && record[2] == "bytes_out" {
+			if sample != nil {
+				last = sample
+			}
+			sample = nil
+			continue
+		}
+		row, ok := parseNettopThroughputRow(record)
+		if ok {
+			sample = append(sample, row)
+		}
+	}
+	if sample != nil {
+		last = sample
+	}
+	return last
+}
+
+func parseNettopThroughputRow(record []string) (Throughput, bool) {
+	command, pid, ok := splitNettopProcess(record[0])
+	if !ok {
+		return Throughput{}, false
+	}
+	bytesIn, err := strconv.ParseInt(strings.TrimSpace(record[1]), 10, 64)
+	if err != nil {
+		return Throughput{}, false
+	}
+	bytesOut, err := strconv.ParseInt(strings.TrimSpace(record[2]), 10, 64)
+	if err != nil {
+		return Throughput{}, false
+	}
+	return Throughput{
+		PID:            pid,
+		Command:        command,
+		BytesInPerSec:  bytesIn,
+		BytesOutPerSec: bytesOut,
+	}, true
+}
+
+func splitNettopProcess(raw string) (string, int, bool) {
+	raw = strings.TrimSpace(raw)
+	idx := strings.LastIndex(raw, ".")
+	if idx <= 0 || idx == len(raw)-1 {
+		return "", 0, false
+	}
+	pid, err := strconv.Atoi(raw[idx+1:])
+	if err != nil || pid <= 0 {
+		return "", 0, false
+	}
+	return raw[:idx], pid, true
 }
 
 // parseRoute extracts interface and gateway from `route -n get default`.

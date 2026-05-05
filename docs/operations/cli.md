@@ -237,8 +237,10 @@ spectra jvm jfr stop 4012 --name spectra
 
 ## `spectra network`
 
-Shows unprivileged network state by default. `spectra network firewall`
-asks the privileged helper for current pf firewall rules.
+Shows unprivileged network state by default, including current routes,
+DNS, VPN state, listening ports, and active per-process throughput from
+`nettop`. `spectra network firewall` asks the privileged helper for
+current pf firewall rules.
 
 ### Examples
 

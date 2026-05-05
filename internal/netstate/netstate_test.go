@@ -177,6 +177,55 @@ func TestParseVPNInterfacesEmpty(t *testing.T) {
 	}
 }
 
+const nettopThroughputFixture = `,bytes_in,bytes_out,
+Slack Helper.412,1000,2000,
+Google Chrome H.999,3000,4000,
+,bytes_in,bytes_out,
+Slack Helper.412,7,11,
+Google Chrome H.999,0,0,
+bad-row,1,2,
+`
+
+func TestParseNettopThroughputUsesFinalSample(t *testing.T) {
+	rows := parseNettopThroughput(nettopThroughputFixture)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %+v", len(rows), rows)
+	}
+	if rows[0].Command != "Slack Helper" || rows[0].PID != 412 {
+		t.Fatalf("first row identity = %+v", rows[0])
+	}
+	if rows[0].BytesInPerSec != 7 || rows[0].BytesOutPerSec != 11 {
+		t.Fatalf("first row throughput = %+v", rows[0])
+	}
+	if rows[1].Command != "Google Chrome H" || rows[1].PID != 999 {
+		t.Fatalf("second row identity = %+v", rows[1])
+	}
+}
+
+func TestCollectThroughputFiltersInactiveRows(t *testing.T) {
+	var gotName string
+	var gotArgs []string
+	stub := func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return []byte(nettopThroughputFixture), nil
+	}
+
+	rows := CollectThroughput(stub)
+	if gotName != "nettop" {
+		t.Fatalf("command = %q, want nettop", gotName)
+	}
+	if !hasArg(gotArgs, "-d") || !hasArg(gotArgs, "-P") || !hasArg(gotArgs, "external") {
+		t.Fatalf("nettop args = %v", gotArgs)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("active rows = %d, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].PID != 412 {
+		t.Fatalf("active row = %+v", rows[0])
+	}
+}
+
 func hasArg(args []string, s string) bool {
 	for _, a := range args {
 		if a == s {
@@ -203,6 +252,8 @@ func TestCollect(t *testing.T) {
 			return []byte(lsofFixture), nil
 		case "ifconfig":
 			return []byte(ifconfigWithVPN), nil
+		case "nettop":
+			return []byte(nettopThroughputFixture), nil
 		}
 		return nil, errors.New("unexpected command")
 	}
@@ -225,6 +276,9 @@ func TestCollect(t *testing.T) {
 	}
 	if s.EstablishedConnectionsCount != 3 {
 		t.Errorf("EstablishedConnectionsCount = %d, want 3", s.EstablishedConnectionsCount)
+	}
+	if len(s.ProcessThroughput) != 1 || s.ProcessThroughput[0].PID != 412 {
+		t.Errorf("ProcessThroughput = %+v, want active Slack row", s.ProcessThroughput)
 	}
 }
 

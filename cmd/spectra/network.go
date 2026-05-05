@@ -132,6 +132,7 @@ func printNetworkState(s netstate.State) {
 	printProxyState(s.Proxy)
 	printHostsOverrides(s.HostsOverrides)
 	printListeningPorts(s.ListeningPorts)
+	printProcessThroughput(s.ProcessThroughput)
 }
 
 func printNetworkOverview(s netstate.State) {
@@ -148,6 +149,9 @@ func printNetworkOverview(s netstate.State) {
 	}
 	if len(s.DNSServers) > 0 {
 		fmt.Printf("dns:           %s\n", strings.Join(s.DNSServers, ", "))
+	}
+	if len(s.ProcessThroughput) > 0 {
+		fmt.Printf("throughput:    %d active processes\n", len(s.ProcessThroughput))
 	}
 }
 
@@ -193,6 +197,28 @@ func printListeningPorts(listening []netstate.ListeningPort) {
 	fmt.Printf("listening ports (%d):\n", len(ports))
 	for _, p := range ports {
 		fmt.Printf("  %s/%d%s%s\n", p.Proto, p.Port, listeningPID(p), listeningApp(p))
+	}
+}
+
+func printProcessThroughput(rows []netstate.Throughput) {
+	if len(rows) == 0 {
+		return
+	}
+	sorted := append([]netstate.Throughput(nil), rows...)
+	sort.Slice(sorted, func(i, j int) bool {
+		left := sorted[i].BytesInPerSec + sorted[i].BytesOutPerSec
+		right := sorted[j].BytesInPerSec + sorted[j].BytesOutPerSec
+		return left > right
+	})
+	if len(sorted) > 10 {
+		sorted = sorted[:10]
+	}
+
+	fmt.Println()
+	fmt.Printf("network throughput (%d active):\n", len(rows))
+	for _, row := range sorted {
+		fmt.Printf("  pid=%d %-24s in=%d B/s out=%d B/s\n",
+			row.PID, truncate(row.Command, 24), row.BytesInPerSec, row.BytesOutPerSec)
 	}
 }
 
