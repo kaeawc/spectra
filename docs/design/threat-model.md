@@ -135,8 +135,8 @@ attacker-chosen files.
 - `Detect()` and friends accept paths only under bundle-validation
   (must be a real `.app`).
 - SQL queries against TCC.db pre-validate the bundle ID against
-  `[a-zA-Z0-9._-]+` allowlist (already implemented; see
-  `validBundleID`).
+  `[a-zA-Z0-9._-]+` allowlist in both the detector and privileged
+  helper paths (see `internal/bundleid.Valid`).
 - RPC handler dispatch is method-allowlist; unknown methods return
   errors rather than passing through.
 - TCP listen is opt-in. Non-loopback binds require `--allow-remote`,
@@ -234,7 +234,7 @@ Things Spectra commits to before v1 release:
 - [x] Static analysis (`gosec`) runs in CI.
 - [ ] No `os/exec` calls take user-supplied arguments without an
       allowlist.
-- [ ] No `database/sql` queries take user-supplied strings without
+- [x] No `database/sql` queries take user-supplied strings without
       parameterization (where supported) or strict allowlist
       (where not, e.g. macOS `sqlite3` CLI).
 

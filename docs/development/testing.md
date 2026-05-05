@@ -49,7 +49,7 @@ filesystem dependencies on `/Applications`.
 - Network endpoint extraction (regex correctness)
 - Helper / XPC / plugin enumeration
 - Privacy description parsing
-- Bundle ID prefix and SQL safety (`validBundleID`)
+- Bundle ID prefix and SQL safety (`internal/bundleid.Valid`)
 - Wrapper following on small main executables
 - Error path: rejecting non-`.app` paths
 
@@ -59,7 +59,7 @@ filesystem dependencies on `/Applications`.
   CI smoke-tests against `/System/Applications/Calculator.app` and
   `/System/Applications/Chess.app` which exist on every macOS runner.
 - **TCC.db reads** — requires a real SQLite database with an
-  applicable `client` row. The validation gate (`validBundleID`)
+  applicable `client` row. The validation gate (`internal/bundleid.Valid`)
   is unit-tested; the integration is smoke-tested end-to-end.
 
 ## Running tests in CI

@@ -724,6 +724,15 @@ func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
 	}
 }
 
+func TestDaemonHelperTCCRejectsInvalidBundleID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 156, "helper.tcc.system.query", `{"bundle_id":"x'; --"}`)
+	if resp.Error == nil {
+		t.Fatal("expected error when bundle_id is invalid")
+	}
+}
+
 func TestDaemonSnapshotProcessesRequiresID(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()
