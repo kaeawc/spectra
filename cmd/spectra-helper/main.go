@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/helper"
 )
@@ -75,6 +76,7 @@ func run() int {
 
 	d := helper.NewDispatcher()
 	d.SetAuditWriter(os.Stderr)
+	d.SetRateLimit(120, time.Minute)
 	helper.RegisterAll(d, nil) // nil → real commands
 
 	fmt.Fprintf(os.Stderr, "spectra-helper %s: listening on %s\n", version, sockPath)

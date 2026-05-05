@@ -163,6 +163,8 @@ secrets, then reads the resulting `.hprof` from the blob cache.
   operations.
 - Heap-dump consent, sensitive artifact manifests, and remote-serving
   restrictions are planned hardening items.
+- The privileged helper enforces a per-UID request limit so a compromised
+  unprivileged daemon cannot hammer root-only commands indefinitely.
 
 **Residual risk:** A peer with network access to daemon RPC can request
 heap dumps. Users delegating diagnostic access to teammates should treat
