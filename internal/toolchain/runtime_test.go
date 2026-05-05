@@ -313,6 +313,30 @@ func TestDiscoverBuildToolsMavenFromBrew(t *testing.T) {
 	}
 }
 
+func TestDiscoverBuildToolsMavenFromCmdUsesDocumentedFlag(t *testing.T) {
+	home := t.TempDir()
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "mvn" && len(args) == 1 && args[0] == "-version" {
+				return []byte("Apache Maven 3.9.6\n"), nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "maven" {
+		t.Errorf("expected [maven], got %v", tools)
+	}
+	if tools[0].Version != "3.9.6" {
+		t.Errorf("version = %q, want 3.9.6", tools[0].Version)
+	}
+	if tools[0].Source != "system" {
+		t.Errorf("source = %q, want system", tools[0].Source)
+	}
+}
+
 func TestDiscoverBuildToolsGradleFromCmd(t *testing.T) {
 	home := t.TempDir()
 	opts := CollectOptions{

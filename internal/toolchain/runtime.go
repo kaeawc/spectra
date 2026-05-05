@@ -284,10 +284,10 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 		}
 	}
 
-	// Maven — check brew cellar first, then mvn --version.
+	// Maven — check brew cellar first, then mvn -version.
 	if v := brewVersion(opts.BrewCellars, "maven"); v != "" {
 		add("maven", v, "brew")
-	} else if v := versionFromCmd(opts.CmdRunner, "mvn", "--version"); v != "" {
+	} else if v := versionFromCmd(opts.CmdRunner, "mvn", "-version"); v != "" {
 		add("maven", v, "system")
 	}
 
