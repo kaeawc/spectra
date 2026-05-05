@@ -74,6 +74,7 @@ func run() int {
 	}()
 
 	d := helper.NewDispatcher()
+	d.SetAuditWriter(os.Stderr)
 	helper.RegisterAll(d, nil) // nil → real commands
 
 	fmt.Fprintf(os.Stderr, "spectra-helper %s: listening on %s\n", version, sockPath)

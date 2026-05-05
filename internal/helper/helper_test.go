@@ -132,6 +132,51 @@ func TestDispatcherMethodNotFound(t *testing.T) {
 	}
 }
 
+func TestDispatcherAuditLogSuccessAndFailure(t *testing.T) {
+	d := NewDispatcher()
+	var log bytes.Buffer
+	d.SetAuditWriter(&log)
+	base := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	tick := 0
+	d.SetClock(func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * time.Millisecond)
+	})
+	d.Register("helper.ok", func(uid uint32, _ json.RawMessage) (any, error) {
+		if uid != 501 {
+			t.Fatalf("uid = %d, want 501", uid)
+		}
+		return map[string]any{"ok": true}, nil
+	})
+
+	okReq := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.ok"}`)
+	if resp := d.handle(501, okReq); resp.Error != nil {
+		t.Fatalf("unexpected response error: %+v", resp.Error)
+	}
+	badReq := []byte(`{"jsonrpc":"2.0","id":2,"method":"helper.missing"}`)
+	if resp := d.handle(501, badReq); resp.Error == nil {
+		t.Fatal("expected missing method error")
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("audit lines = %d, want 2: %s", len(lines), log.String())
+	}
+	var first, second auditEvent
+	if err := json.Unmarshal(lines[0], &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(lines[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	if !first.OK || first.Method != "helper.ok" || first.UID != 501 {
+		t.Errorf("first audit event = %+v", first)
+	}
+	if second.OK || second.Method != "helper.missing" || second.Error != "method not found" {
+		t.Errorf("second audit event = %+v", second)
+	}
+}
+
 func TestTCCQueryRequiresBundleID(t *testing.T) {
 	d := NewDispatcher()
 	RegisterAll(d, func(string, ...string) ([]byte, error) {
