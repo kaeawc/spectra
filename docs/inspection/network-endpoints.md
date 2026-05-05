@@ -103,7 +103,7 @@ Useful for:
   `network.connections` / `network.byApp` methods, which are backed by
   `lsof -i -P -n` with a `netstat -an` fallback when `lsof` is unavailable.
   The fallback is system-wide and does not include PID or app attribution.
-  Per-process throughput via `nettop` is still future work.
+  Per-process throughput comes from `nettop` in `network.process_throughput`.
 
 ## Implementation reference
 
