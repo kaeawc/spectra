@@ -90,7 +90,11 @@ func Collect(ctx context.Context, opts CollectOptions) Toolchains {
 		}),
 		run(func() (func(*Toolchains), error) {
 			managers := discoverJVMManagers(opts.Home)
-			return func(t *Toolchains) { t.JVMManagers = managers }, nil
+			active := discoverActiveJVMManager(opts.Home, opts.CmdRunner)
+			return func(t *Toolchains) {
+				t.JVMManagers = managers
+				t.ActiveJVMManager = active
+			}, nil
 		}),
 		run(func() (func(*Toolchains), error) {
 			buildTools := discoverBuildTools(opts)

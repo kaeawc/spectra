@@ -13,8 +13,10 @@ type Toolchains struct {
 	Ruby        []RuntimeInstall `json:"ruby,omitempty"`
 	Rust        []RustToolchain  `json:"rust,omitempty"`
 	JVMManagers []string         `json:"jvm_managers,omitempty"` // "sdkman", "asdf", "mise", "jenv"
-	BuildTools  []BuildTool      `json:"build_tools,omitempty"`
-	Env         EnvSnapshot      `json:"env"`
+	// ActiveJVMManager is the manager whose java shim wins PATH resolution.
+	ActiveJVMManager string      `json:"active_jvm_manager,omitempty"`
+	BuildTools       []BuildTool `json:"build_tools,omitempty"`
+	Env              EnvSnapshot `json:"env"`
 }
 
 // BuildTool is one JVM-ecosystem build tool installation (Maven, Gradle, Bazel, Make, CMake).

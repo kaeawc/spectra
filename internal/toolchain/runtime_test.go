@@ -272,6 +272,33 @@ func TestDiscoverJVMManagersMultiple(t *testing.T) {
 	}
 }
 
+func TestDiscoverActiveJVMManagerFromJenvShim(t *testing.T) {
+	home := t.TempDir()
+	activeJava := filepath.Join(home, ".jenv", "shims", "java")
+	manager := discoverActiveJVMManager(home, func(name string, args ...string) ([]byte, error) {
+		if name == "which" && len(args) == 1 && args[0] == "java" {
+			return []byte(activeJava + "\n"), nil
+		}
+		return nil, errors.New("not found")
+	})
+	if manager != "jenv" {
+		t.Fatalf("manager = %q, want jenv", manager)
+	}
+}
+
+func TestDiscoverActiveJVMManagerIgnoresSystemJava(t *testing.T) {
+	home := t.TempDir()
+	manager := discoverActiveJVMManager(home, func(name string, args ...string) ([]byte, error) {
+		if name == "which" && len(args) == 1 && args[0] == "java" {
+			return []byte("/usr/bin/java\n"), nil
+		}
+		return nil, errors.New("not found")
+	})
+	if manager != "" {
+		t.Fatalf("manager = %q, want empty", manager)
+	}
+}
+
 func TestDiscoverBuildToolsNone(t *testing.T) {
 	home := t.TempDir()
 	opts := CollectOptions{

@@ -163,7 +163,11 @@ func printToolchains(tc toolchain.Toolchains) {
 	}
 
 	if len(tc.JVMManagers) > 0 {
-		fmt.Printf("\nJVM managers: %s\n", strings.Join(tc.JVMManagers, ", "))
+		active := ""
+		if tc.ActiveJVMManager != "" {
+			active = fmt.Sprintf(" (active: %s)", tc.ActiveJVMManager)
+		}
+		fmt.Printf("\nJVM managers: %s%s\n", strings.Join(tc.JVMManagers, ", "), active)
 	}
 
 	b := tc.Brew
