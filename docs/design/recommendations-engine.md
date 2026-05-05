@@ -1,14 +1,57 @@
 # Recommendations engine
 
-> **Status: planned.** Design captured here so the data layer can be built
-> with the eventual rules engine in mind.
+Spectra has an implemented recommendations engine backed by a built-in Go
+rule catalog, persisted issues, and applied-fix history. The long-term
+architecture still points toward CEL/YAML rules, but today's engine is
+compiled Go code so the catalog can ship without adding a dependency.
 
 The recommendations engine is what turns Spectra from "DataDog Agent for
 Macs" into something genuinely new: **a persistent issue catalog where
 declarative rules fire against structured snapshots and produce ranked,
 actionable findings with remediation steps.**
 
-## Shape
+Entry points:
+
+```bash
+spectra rules
+spectra rules --json
+spectra rules --snapshot <snapshot-id>
+spectra issues check
+spectra issues list [--status open]
+spectra issues acknowledge <issue-id>
+spectra issues dismiss <issue-id>
+spectra issues update --status fixed <issue-id>
+```
+
+Daemon methods:
+
+- `rules.check`
+- `issues.list`
+- `issues.record`
+- `issues.update`
+- `issues.acknowledge`
+- `issues.dismiss`
+- `issues.fix.record`
+- `issues.fix.list`
+
+## Current shape
+
+Rules are Go values in `internal/rules/`:
+
+```go
+type Rule struct {
+    ID       string
+    Severity Severity
+    MatchFn  func(snapshot.Snapshot) []Finding
+}
+```
+
+`rules.Evaluate(snapshot, rules.V1Catalog())` runs the catalog and returns
+sorted findings. `spectra rules` prints findings without persisting them;
+`spectra issues check` evaluates rules, persists the snapshot when needed,
+and upserts findings into the issue catalog.
+
+## Future shape
 
 Rules are declarative, written in YAML with [CEL](https://github.com/google/cel-spec)
 expressions for the matching predicate:
@@ -31,6 +74,8 @@ expressions for the matching predicate:
 ```
 
 ## Why CEL
+
+CEL remains the target for a later external rule catalog because:
 
 - Declarative — rules can be added without touching Go code.
 - Sandboxed — evaluation has no side effects.
@@ -60,14 +105,19 @@ observations, not two separate issues. This is what makes Spectra useful
 beyond a single point-in-time check — you can see when something
 appeared, when it got fixed, and what was tried.
 
-Schema lives in [storage.md](storage.md):
+Schema lives in [storage.md](storage.md) and is implemented in
+`internal/store`:
 
 - `issues` — id, rule_id, host_id, first_seen_snapshot_id, last_seen_snapshot_id, status
 - `applied_fixes` — id, issue_id, applied_at, applied_by, command, output, exit_code
 
+Findings are matched by `(rule_id, machine_uuid, subject)` while the issue
+is `open` or `acknowledged`. Dismissed issues are not reopened by a later
+matching finding.
+
 ## Rule sources
 
-V1 catalog ships with the binary. Future:
+The V1 catalog ships with the binary. Future:
 
 - **Project-local overrides** — per-team `spectra.yml` extends the catalog.
 - **Remote catalogs** — pull from a URL or git repo (e.g.
@@ -90,22 +140,28 @@ toolchain.brew_formulae[], toolchain.jdks[], toolchain.node_versions[]
 diff.added_apps[], diff.removed_apps[], diff.changed_versions[]   # vs baseline
 ```
 
-The data model in [storage.md](storage.md) is the source of truth for
-what's queryable.
+The current Go catalog can inspect the complete `snapshot.Snapshot`
+structure. The data model in [storage.md](storage.md) is the source of
+truth for what is persisted.
 
-## Examples worth shipping in the V1 catalog
+## V1 catalog
 
-- JVM end-of-life version detected.
-- Heap allocation > 60% of system RAM.
-- App granted permissions far broader than declared usage descriptions
-  (e.g. "Slack has Camera granted but no NSCameraUsageDescription").
-- Apps not signed by a Developer ID team (unsigned binaries).
-- Apps without hardened runtime (security regression).
-- Login-item plist references a binary that no longer exists.
-- Storage footprint > 5 GB for any user-data location.
-- Multiple JDKs installed at the same major version (drift).
-- `JAVA_HOME` references a JDK Spectra cannot find.
-- Sparse-file inflation > 10× actual on-disk usage (likely Docker VM).
+Implemented rules:
+
+- `jvm-eol-version`
+- `jvm-heap-vs-system`
+- `jdk-major-version-drift`
+- `java-home-mismatch`
+- `library-storage-footprint`
+- `app-no-hardened-runtime`
+- `app-unsigned`
+- `login-item-dangling`
+- `brew-deprecated-formula`
+- `brew-stale-pinned`
+- `path-shadows-active-runtime`
+- `permission-mismatch`
+- `sparse-file-inflation`
+- `app-gatekeeper-rejected`
 
 ## Out of scope for v1
 
@@ -116,3 +172,5 @@ what's queryable.
   independently; we'll deal with conflicts when we see them.
 - **Multi-host rules** that fire on tailnet-wide patterns (e.g. "this
   team has version drift across machines"). V2.
+- **External CEL/YAML catalogs.** The Go `MatchFn` interface is the point
+  where a future CEL evaluator plugs in.
