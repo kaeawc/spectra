@@ -413,6 +413,34 @@ func TestDiscoverBuildToolsGradleFromCmdUsesDocumentedFlag(t *testing.T) {
 	}
 }
 
+func TestDiscoverBuildToolsGradleReportsUserHome(t *testing.T) {
+	home := t.TempDir()
+	gradleUserHome := filepath.Join(home, ".gradle-custom")
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "gradle" && len(args) == 1 && args[0] == "-version" {
+				return []byte("Gradle 8.5\n"), nil
+			}
+			return nil, errors.New("not found")
+		},
+		EnvLookup: func(key string) (string, bool) {
+			if key == "GRADLE_USER_HOME" {
+				return gradleUserHome, true
+			}
+			return "", false
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "gradle" {
+		t.Fatalf("expected [gradle], got %v", tools)
+	}
+	if tools[0].UserHome != gradleUserHome {
+		t.Fatalf("user home = %q, want %q", tools[0].UserHome, gradleUserHome)
+	}
+}
+
 func TestDiscoverBuildToolsBazelReportsConfigPath(t *testing.T) {
 	home := t.TempDir()
 	bazelrcPath := filepath.Join(home, ".bazelrc")

@@ -25,10 +25,16 @@ type CollectOptions struct {
 	// CmdRunner runs external commands. Defaults to execRunner.
 	// Inject a fake in tests to avoid shelling out to brew.
 	CmdRunner CmdRunner
+	// EnvLookup reads named environment variables. Defaults to os.LookupEnv.
+	// Inject a fake in tests to avoid mutating process environment.
+	EnvLookup EnvLookup
 }
 
 // CmdRunner abstracts exec.Command for testability.
 type CmdRunner func(name string, args ...string) ([]byte, error)
+
+// EnvLookup abstracts os.LookupEnv for testability.
+type EnvLookup func(key string) (string, bool)
 
 // Collect runs all subsystem discoverers in parallel and returns the
 // aggregate Toolchains. Any discoverer error is silently absorbed —
@@ -139,6 +145,9 @@ func withDefaults(o CollectOptions) CollectOptions {
 	}
 	if o.CmdRunner == nil {
 		o.CmdRunner = execRunner
+	}
+	if o.EnvLookup == nil {
+		o.EnvLookup = os.LookupEnv
 	}
 	return o
 }

@@ -25,6 +25,7 @@ type BuildTool struct {
 	Version    string `json:"version"`               // raw version string
 	Source     string `json:"source"`                // "brew", "system", "wrapper"
 	ConfigPath string `json:"config_path,omitempty"` // user-level config path when known
+	UserHome   string `json:"user_home,omitempty"`   // tool-specific user home when known
 }
 
 // BrewInventory holds installed Homebrew formulae, casks, and taps.

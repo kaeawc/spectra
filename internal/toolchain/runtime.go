@@ -307,6 +307,7 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 				Version:    version,
 				Source:     source,
 				ConfigPath: buildToolConfigPath(opts.Home, name),
+				UserHome:   buildToolUserHome(opts, name),
 			})
 		}
 	}
@@ -363,6 +364,16 @@ func buildToolConfigPath(home, name string) string {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
+	}
+	return ""
+}
+
+func buildToolUserHome(opts CollectOptions, name string) string {
+	if name != "gradle" || opts.EnvLookup == nil {
+		return ""
+	}
+	if v, ok := opts.EnvLookup("GRADLE_USER_HOME"); ok {
+		return v
 	}
 	return ""
 }
