@@ -6,6 +6,7 @@
 //	spectra /Applications/*.app
 //	spectra --all                               # inspect every /Applications app
 //	spectra --json /Applications/Cursor.app
+//	spectra list                                # inspect every /Applications app
 //	spectra snapshot                            # capture host + apps snapshot
 //	spectra snapshot --json
 //	spectra version
@@ -33,6 +34,7 @@ type subcommand struct {
 func subcommandList() []subcommand {
 	return []subcommand{
 		{"inspect", "Inspect .app bundles (default; runs when no subcommand given)", runInspect},
+		{"list", "Inspect every .app under /Applications", runList},
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
 		{"jvm", "List or inspect running JVM processes", runJVM},
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
@@ -85,6 +87,17 @@ func runVersion(_ []string) int {
 	return 0
 }
 
+func runList(args []string) int {
+	return runInspect(listInspectArgs(args))
+}
+
+func listInspectArgs(args []string) []string {
+	next := make([]string, 0, len(args)+1)
+	next = append(next, "--all")
+	next = append(next, args...)
+	return next
+}
+
 func runHelpCmd(_ []string) int {
 	runHelp(os.Stdout)
 	return 0
@@ -103,5 +116,6 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "Flag-only invocations route to `inspect`:")
 	fmt.Fprintln(w, "  spectra /Applications/Slack.app")
 	fmt.Fprintln(w, "  spectra --all -v")
+	fmt.Fprintln(w, "  spectra list -v")
 	fmt.Fprintln(w, "  spectra --json /Applications/Cursor.app")
 }

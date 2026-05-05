@@ -17,6 +17,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | Name | Description |
 |---|---|
 | `inspect` | Inspect `.app` bundles (default; runs when no subcommand given) |
+| `list` | Inspect every `.app` under `/Applications` |
 | `snapshot` | Capture a structured snapshot of host + installed apps |
 | `diff` | Diff two stored snapshots |
 | `rules` | Evaluate recommendation rules against a snapshot |
@@ -54,6 +55,7 @@ flags for one.
 spectra /Applications/Slack.app                # one app, terse
 spectra -v /Applications/Claude.app            # full per-app dump
 spectra --all                                  # scan /Applications + Utilities
+spectra list -v                                # same scan with an explicit subcommand
 spectra --network -v /Applications/Cursor.app  # add embedded URL hosts
 spectra --json /Applications/*.app | jq '.[] | select(.UI == "Tauri")'
 ```
@@ -178,7 +180,6 @@ and processing continues for other paths.
 
 ```
 spectra connect <host>              # client targeting a remote daemon
-spectra list                        # alias for "scan all bundles via local daemon"
 ```
 
 See [../design/architecture.md](../design/architecture.md) for the
