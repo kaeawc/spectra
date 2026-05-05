@@ -379,7 +379,7 @@ func (s *DB) GetSnapshotJSON(ctx context.Context, id string) ([]byte, error) {
 // DeleteSnapshot deletes a snapshot and all its child rows by ID.
 func (s *DB) DeleteSnapshot(ctx context.Context, id string) error {
 	for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM `+table+` WHERE snapshot_id=?`, id); err != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM `+table+` WHERE snapshot_id=?`, id); err != nil { // #nosec G202 — table is a hardcoded literal, not user input
 			return fmt.Errorf("store: delete %s for %s: %w", table, id, err)
 		}
 	}
@@ -730,7 +730,7 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 		pruneSubquery := `SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=?
 			AND id NOT IN (SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
 		for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
-			if _, err := s.db.ExecContext(ctx,
+			if _, err := s.db.ExecContext(ctx, // #nosec G202 — table is a hardcoded literal, not user input
 				`DELETE FROM `+table+` WHERE snapshot_id IN (`+pruneSubquery+`)`,
 				m, m, keepN); err != nil {
 				return total, fmt.Errorf("store: prune %s %s: %w", table, m, err)
