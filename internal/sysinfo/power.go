@@ -9,25 +9,25 @@ import (
 // PowerState captures battery and thermal facts.
 // See docs/design/system-inventory.md#powerstate.
 type PowerState struct {
-	OnBattery       bool           `json:"on_battery"`
-	BatteryPct      int            `json:"battery_pct"`
-	ThermalPressure string         `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
+	OnBattery       bool             `json:"on_battery"`
+	BatteryPct      int              `json:"battery_pct"`
+	ThermalPressure string           `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
 	Assertions      []PowerAssertion `json:"assertions,omitempty"`
-	EnergyTopUsers  []EnergyUser   `json:"energy_top_users,omitempty"`
+	EnergyTopUsers  []EnergyUser     `json:"energy_top_users,omitempty"`
 }
 
 // EnergyUser is one entry from `top -l 1 -o power`.
 type EnergyUser struct {
-	PID           int     `json:"pid"`
-	EnergyImpact  float64 `json:"energy_impact"`
-	Command       string  `json:"command"`
+	PID          int     `json:"pid"`
+	EnergyImpact float64 `json:"energy_impact"`
+	Command      string  `json:"command"`
 }
 
 // PowerAssertion is one pmset sleep/display assertion.
 type PowerAssertion struct {
-	Type    string `json:"type"`
-	PID     int    `json:"pid"`
-	Name    string `json:"name,omitempty"`
+	Type string `json:"type"`
+	PID  int    `json:"pid"`
+	Name string `json:"name,omitempty"`
 }
 
 // CollectPower gathers PowerState from pmset. Any sub-command failure is
@@ -122,7 +122,8 @@ func parsTherm(out string, ps *PowerState) {
 // parseAssertions extracts active assertions from `pmset -g assertions`.
 //
 // Real output line format (per-process listing):
-//   " pid 412(Slack): [0x000165b8000002f1] 00:00:04 PreventUserIdleSleep named: "audio" "
+//
+//	" pid 412(Slack): [0x000165b8000002f1] 00:00:04 PreventUserIdleSleep named: "audio" "
 var (
 	assertionPIDRe  = regexp.MustCompile(`pid (\d+)\(`)
 	assertionTypeRe = regexp.MustCompile(`\]\s+[\d:]+\s+(\w+)`)

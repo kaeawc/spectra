@@ -13,32 +13,32 @@ import (
 
 // State is the StorageState slice of a Spectra snapshot.
 type State struct {
-	Volumes         []Volume   `json:"volumes,omitempty"`
+	Volumes          []Volume  `json:"volumes,omitempty"`
 	UserLibraryBytes int64     `json:"user_library_bytes"`
-	AppCachesBytes  int64      `json:"app_caches_bytes"`
-	LargestApps     []AppSize  `json:"largest_apps,omitempty"`
+	AppCachesBytes   int64     `json:"app_caches_bytes"`
+	LargestApps      []AppSize `json:"largest_apps,omitempty"`
 }
 
 // Volume is one mounted filesystem.
 type Volume struct {
-	MountPoint    string `json:"mount_point"`
-	FSType        string `json:"fs_type,omitempty"`
-	TotalBytes    int64  `json:"total_bytes"`
-	UsedBytes     int64  `json:"used_bytes"`
-	AvailBytes    int64  `json:"avail_bytes"`
+	MountPoint string `json:"mount_point"`
+	FSType     string `json:"fs_type,omitempty"`
+	TotalBytes int64  `json:"total_bytes"`
+	UsedBytes  int64  `json:"used_bytes"`
+	AvailBytes int64  `json:"avail_bytes"`
 }
 
 // AppSize is one app bundle's on-disk footprint.
 type AppSize struct {
-	Path         string `json:"path"`
-	OnDiskBytes  int64  `json:"on_disk_bytes"`
+	Path        string `json:"path"`
+	OnDiskBytes int64  `json:"on_disk_bytes"`
 }
 
 // CmdRunner abstracts shell-out for testability.
 type CmdRunner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner runs the real command.
-func DefaultRunner(name string, args ...string) ([]byte, error) {
+func DefaultRunner(_ string, _ ...string) ([]byte, error) {
 	return os.ReadFile("/dev/null") // never called directly; overridden per-use
 }
 
@@ -117,8 +117,8 @@ func parseDF(out string) []Volume {
 // sparse-file-aware block counting. Returns 0 if dir doesn't exist.
 func dirBytes(dir string) int64 {
 	var total int64
-	filepath.Walk(dir, func(path string, fi os.FileInfo, err error) error { //nolint:errcheck
-		if err != nil || fi.IsDir() {
+	filepath.Walk(dir, func(_ string, fi os.FileInfo, _ error) error { //nolint:errcheck
+		if fi == nil || fi.IsDir() {
 			return nil
 		}
 		total += diskBytes(fi)

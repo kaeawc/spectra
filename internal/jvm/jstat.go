@@ -17,14 +17,14 @@ type GCStats struct {
 	S1U float64 `json:"s1u"` // Survivor 1 utilization (KiB)
 
 	// Eden / Old
-	EC  float64 `json:"ec"`  // Eden capacity (KiB)
-	EU  float64 `json:"eu"`  // Eden utilization (KiB)
-	OC  float64 `json:"oc"`  // Old generation capacity (KiB)
-	OU  float64 `json:"ou"`  // Old generation utilization (KiB)
+	EC float64 `json:"ec"` // Eden capacity (KiB)
+	EU float64 `json:"eu"` // Eden utilization (KiB)
+	OC float64 `json:"oc"` // Old generation capacity (KiB)
+	OU float64 `json:"ou"` // Old generation utilization (KiB)
 
 	// Metaspace
-	MC  float64 `json:"mc"`  // Metaspace capacity (KiB)
-	MU  float64 `json:"mu"`  // Metaspace utilization (KiB)
+	MC   float64 `json:"mc"`   // Metaspace capacity (KiB)
+	MU   float64 `json:"mu"`   // Metaspace utilization (KiB)
 	CCSC float64 `json:"ccsc"` // Compressed class space capacity (KiB)
 	CCSU float64 `json:"ccsu"` // Compressed class space utilization (KiB)
 
@@ -55,8 +55,8 @@ func CollectGCStats(pid int, run CmdRunner) (*GCStats, error) {
 //
 // Example:
 //
-//	 S0C    S1C    S0U    S1U      EC       EU        OC         OU       MC     MU    CCSC   CCSU   YGC     YGCT    FGC    FGCT     GCT
-//	 0.0    0.0    0.0    0.0   40960.0  20480.0  204800.0    4096.0  61440.0 59900.3 8064.0 7678.7     5    0.078   0      0.000    0.078
+//	S0C    S1C    S0U    S1U      EC       EU        OC         OU       MC     MU    CCSC   CCSU   YGC     YGCT    FGC    FGCT     GCT
+//	0.0    0.0    0.0    0.0   40960.0  20480.0  204800.0    4096.0  61440.0 59900.3 8064.0 7678.7     5    0.078   0      0.000    0.078
 func parseGCStats(out string) (*GCStats, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) < 2 {

@@ -108,11 +108,12 @@ jobs:
         run: |
           # Excluded rules:
           #   G104 — best-effort cleanup of os.Remove etc. is intentional
+          #   G204 — invoking fixed macOS utilities is the inspection model
           #   G304 — Detect, scanStorage take filesystem paths as input by design
           #   G602 — false positive on byte conversion of UintN(256)
           #   G703 — same path-as-input rationale as G304
           #   G704 — URL is caller input by design
-          gosec -exclude=G104,G304,G602,G703,G704 -fmt=junit-xml -out=gosec-report.xml -stdout ./...
+          gosec -exclude=G104,G204,G304,G602,G703,G704 -fmt=junit-xml -out=gosec-report.xml -stdout ./...
 
       - name: Check if security report was created
         id: gosec-report-exists

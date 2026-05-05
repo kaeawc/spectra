@@ -23,17 +23,17 @@ import (
 // time. Every field is best-effort; any collector failure leaves the
 // field empty / zero rather than failing the snapshot.
 type HostInfo struct {
-	Hostname        string `json:"hostname"`
-	MachineUUID     string `json:"machine_uuid,omitempty"`
-	OSName          string `json:"os_name"`            // "macOS"
-	OSVersion       string `json:"os_version"`         // "15.6.1"
-	OSBuild         string `json:"os_build,omitempty"` // "24G90"
-	CPUBrand        string `json:"cpu_brand,omitempty"`
-	CPUCores        int    `json:"cpu_cores"`
-	RAMBytes        uint64 `json:"ram_bytes"`
-	Architecture    string `json:"architecture"` // arm64 | amd64
-	UptimeSeconds   int64  `json:"uptime_seconds"`
-	SpectraVersion  string `json:"spectra_version,omitempty"`
+	Hostname       string `json:"hostname"`
+	MachineUUID    string `json:"machine_uuid,omitempty"`
+	OSName         string `json:"os_name"`            // "macOS"
+	OSVersion      string `json:"os_version"`         // "15.6.1"
+	OSBuild        string `json:"os_build,omitempty"` // "24G90"
+	CPUBrand       string `json:"cpu_brand,omitempty"`
+	CPUCores       int    `json:"cpu_cores"`
+	RAMBytes       uint64 `json:"ram_bytes"`
+	Architecture   string `json:"architecture"` // arm64 | amd64
+	UptimeSeconds  int64  `json:"uptime_seconds"`
+	SpectraVersion string `json:"spectra_version,omitempty"`
 }
 
 // CollectHost gathers HostInfo from the local machine. Spectra version

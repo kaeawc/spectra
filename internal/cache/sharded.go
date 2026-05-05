@@ -95,13 +95,13 @@ func (s *ShardedStore) Has(key []byte) bool {
 func (s *ShardedStore) Stats() (StoreStats, error) {
 	var st StoreStats
 	st.Kind = filepath.Base(s.root)
-	err := filepath.WalkDir(s.root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(s.root, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return err
 		}
 		st.Entries++
 		st.BytesOnDisk += info.Size()

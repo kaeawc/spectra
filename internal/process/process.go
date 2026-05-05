@@ -21,8 +21,8 @@ type Info struct {
 	PPID            int       `json:"ppid"`
 	UID             int       `json:"uid"`
 	User            string    `json:"user,omitempty"`
-	Command         string    `json:"command"`              // short (comm) — just the exe name
-	FullCommandLine string    `json:"full_command_line"`    // full argv[0...] string
+	Command         string    `json:"command"`           // short (comm) — just the exe name
+	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
 	RSSKiB          int64     `json:"rss_kib"`
 	VSizeKiB        int64     `json:"vsize_kib"`
 	ThreadCount     int       `json:"thread_count"`         // number of threads (nlwp)

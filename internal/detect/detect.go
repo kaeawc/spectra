@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -340,12 +341,12 @@ func readArchitectures(exe string) []string {
 // non-sparse files they are equal; a Docker VM disk image may show
 // apparent 60 GiB vs actual 4 GiB. Errors are ignored; partial sums are fine.
 func bundleSizes(appPath string) (actual, apparent int64) {
-	_ = filepath.WalkDir(appPath, func(_ string, d os.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
+	_ = filepath.WalkDir(appPath, func(_ string, d os.DirEntry, _ error) error {
+		if d == nil || d.IsDir() {
 			return nil
 		}
-		fi, err := d.Info()
-		if err != nil || !fi.Mode().IsRegular() {
+		fi, _ := d.Info()
+		if fi == nil || !fi.Mode().IsRegular() {
 			return nil
 		}
 		actual += diskBytes(fi)
@@ -462,11 +463,7 @@ func classifyByBundleMarkers(appPath string, r *Result) bool {
 		hasAsar := exists(filepath.Join(resources, "app.asar"))
 		hasAppDir := isDir(filepath.Join(resources, "app"))
 		if hasAsar || hasAppDir {
-			r.UI = "Electron"
-			r.Runtime = "Node+Chromium"
-			r.Language = "TypeScript/JS"
-			r.Confidence = "high"
-			r.Signals = append(r.Signals, "Frameworks/Electron Framework.framework")
+			setHighConfidence(r, "Electron", "Node+Chromium", "TypeScript/JS", "Frameworks/Electron Framework.framework")
 			if hasAsar {
 				r.Signals = append(r.Signals, "Resources/app.asar")
 			} else {
@@ -478,31 +475,19 @@ func classifyByBundleMarkers(appPath string, r *Result) bool {
 
 	// Flutter
 	if exists(filepath.Join(frameworks, "FlutterMacOS.framework")) {
-		r.UI = "Flutter"
-		r.Runtime = "Dart"
-		r.Language = "Dart"
-		r.Confidence = "high"
-		r.Signals = append(r.Signals, "Frameworks/FlutterMacOS.framework")
+		setHighConfidence(r, "Flutter", "Dart", "Dart", "Frameworks/FlutterMacOS.framework")
 		return true
 	}
 
 	// Qt
 	if exists(filepath.Join(frameworks, "QtCore.framework")) || exists(filepath.Join(resources, "qt.conf")) {
-		r.UI = "Qt"
-		r.Runtime = "C++"
-		r.Language = "C++"
-		r.Confidence = "high"
-		r.Signals = append(r.Signals, "QtCore.framework or qt.conf")
+		setHighConfidence(r, "Qt", "C++", "C++", "QtCore.framework or qt.conf")
 		return true
 	}
 
 	// React Native macOS
 	if exists(filepath.Join(frameworks, "React.framework")) || exists(filepath.Join(frameworks, "hermes.framework")) {
-		r.UI = "ReactNative"
-		r.Runtime = "Hermes/JSC"
-		r.Language = "TypeScript/JS"
-		r.Confidence = "high"
-		r.Signals = append(r.Signals, "React.framework or hermes.framework")
+		setHighConfidence(r, "ReactNative", "Hermes/JSC", "TypeScript/JS", "React.framework or hermes.framework")
 		return true
 	}
 
@@ -510,48 +495,50 @@ func classifyByBundleMarkers(appPath string, r *Result) bool {
 	jvmRoot := findJVMRoot(contents)
 	jarCount := countJars(contents)
 	if jvmRoot != "" || jarCount >= 5 {
-		if jvmRoot != "" {
-			r.Signals = append(r.Signals, "bundled JVM at "+rel(appPath, jvmRoot))
-		} else {
-			r.Signals = append(r.Signals, fmt.Sprintf("%d .jar files in bundle (no embedded JVM)", jarCount))
-		}
-		r.Runtime = "JVM"
-		r.Language = "Java"
-		r.Confidence = "high"
-
-		// Compose Desktop / KMP: skiko + Kotlin
-		if hasFileLike(contents, "libskiko-macos") {
-			r.UI = "ComposeDesktop"
-			r.Language = "Kotlin"
-			r.Signals = append(r.Signals, "libskiko-macos-*.dylib")
-			return true
-		}
-		// Eclipse RCP
-		if hasFileLike(contents, "org.eclipse.osgi") {
-			r.UI = "EclipseRCP"
-			r.Signals = append(r.Signals, "org.eclipse.osgi plugin")
-			return true
-		}
-		// install4j
-		if hasFileLike(contents, "i4jruntime.jar") || hasFileLike(contents, ".install4j") {
-			r.UI = "Swing"
-			r.Packaging = "install4j"
-			r.Signals = append(r.Signals, "install4j launcher")
-			return true
-		}
-		// NetBeans Platform
-		if hasFileLike(contents, "org-netbeans") {
-			r.UI = "NetBeansPlatform"
-			r.Signals = append(r.Signals, "org-netbeans-* jar")
-			return true
-		}
-		// Generic JVM, can't pin UI toolkit.
-		r.UI = "Swing/JavaFX (JVM)"
-		r.Confidence = "medium"
-		return true
+		return classifyJVMMarkers(appPath, contents, jvmRoot, jarCount, r)
 	}
 
 	return false
+}
+
+func setHighConfidence(r *Result, ui, runtime, language, signal string) {
+	r.UI = ui
+	r.Runtime = runtime
+	r.Language = language
+	r.Confidence = "high"
+	r.Signals = append(r.Signals, signal)
+}
+
+func classifyJVMMarkers(appPath, contents, jvmRoot string, jarCount int, r *Result) bool {
+	if jvmRoot != "" {
+		r.Signals = append(r.Signals, "bundled JVM at "+rel(appPath, jvmRoot))
+	} else {
+		r.Signals = append(r.Signals, fmt.Sprintf("%d .jar files in bundle (no embedded JVM)", jarCount))
+	}
+	r.Runtime = "JVM"
+	r.Language = "Java"
+	r.Confidence = "high"
+
+	switch {
+	case hasFileLike(contents, "libskiko-macos"):
+		r.UI = "ComposeDesktop"
+		r.Language = "Kotlin"
+		r.Signals = append(r.Signals, "libskiko-macos-*.dylib")
+	case hasFileLike(contents, "org.eclipse.osgi"):
+		r.UI = "EclipseRCP"
+		r.Signals = append(r.Signals, "org.eclipse.osgi plugin")
+	case hasFileLike(contents, "i4jruntime.jar") || hasFileLike(contents, ".install4j"):
+		r.UI = "Swing"
+		r.Packaging = "install4j"
+		r.Signals = append(r.Signals, "install4j launcher")
+	case hasFileLike(contents, "org-netbeans"):
+		r.UI = "NetBeansPlatform"
+		r.Signals = append(r.Signals, "org-netbeans-* jar")
+	default:
+		r.UI = "Swing/JavaFX (JVM)"
+		r.Confidence = "medium"
+	}
+	return true
 }
 
 // --- Layer 2: linked dylibs --------------------------------------------------
@@ -702,8 +689,8 @@ func bundleRootFromExe(exe string) string {
 func hasBundledWebApp(appPath string) bool {
 	res := filepath.Join(appPath, "Contents", "Resources")
 	var hit bool
-	_ = filepath.WalkDir(res, func(_ string, d os.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
+	_ = filepath.WalkDir(res, func(_ string, d os.DirEntry, _ error) error {
+		if d == nil || d.IsDir() {
 			return nil
 		}
 		if d.Name() == "index.html" {
@@ -847,8 +834,8 @@ func findJVMRoot(contents string) string {
 	}
 	// Fallback walk (cheap; bundles are shallow).
 	var found string
-	_ = filepath.WalkDir(contents, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	_ = filepath.WalkDir(contents, func(path string, d os.DirEntry, _ error) error {
+		if d == nil || d.IsDir() {
 			return nil
 		}
 		if d.Name() == "libjvm.dylib" {
@@ -867,8 +854,8 @@ func scanNativeModules(appPath string) []NativeModule {
 	var mods []NativeModule
 	seen := map[string]struct{}{}
 	for _, root := range nativeModuleRoots(appPath) {
-		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d == nil || d.IsDir() {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, _ error) error {
+			if d == nil || d.IsDir() {
 				return nil
 			}
 			// Skip dSYM debug bundles and source maps.
@@ -919,16 +906,7 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 
 	// Resolve @rpath references to actual sibling dylibs so we can also
 	// inspect the real implementation library (e.g. libClaudeSwift.dylib).
-	var sidecars []string
-	for _, lib := range libs {
-		if strings.HasPrefix(lib, "@rpath/") {
-			sib := filepath.Join(filepath.Dir(absPath), strings.TrimPrefix(lib, "@rpath/"))
-			if exists(sib) {
-				sidecars = append(sidecars, sib)
-				m.Hints = append(m.Hints, "rpath sibling: "+filepath.Base(sib))
-			}
-		}
-	}
+	sidecars := nativeModuleSidecars(absPath, libs, &m)
 
 	// Rust signal #1: Cargo target path leaks into the load command.
 	if strings.Contains(joined, "/target/") && (strings.Contains(joined, "-apple-darwin/release/") || strings.Contains(joined, "-apple-darwin/debug/")) {
@@ -972,6 +950,21 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 		m.Hints = append(m.Hints, "links libc++")
 	}
 	return m
+}
+
+func nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {
+	var sidecars []string
+	for _, lib := range libs {
+		if !strings.HasPrefix(lib, "@rpath/") {
+			continue
+		}
+		sib := filepath.Join(filepath.Dir(absPath), strings.TrimPrefix(lib, "@rpath/"))
+		if exists(sib) {
+			sidecars = append(sidecars, sib)
+			m.Hints = append(m.Hints, "rpath sibling: "+filepath.Base(sib))
+		}
+	}
+	return sidecars
 }
 
 // followFrameworkShim handles browser-style apps whose CFBundleExecutable
@@ -1058,8 +1051,8 @@ func followWrapper(exe string) string {
 // Bounded by walk; bundles aren't deep.
 func countJars(root string) int {
 	var n int
-	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
+	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, _ error) error {
+		if d == nil || d.IsDir() {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), ".jar") {
@@ -1074,11 +1067,11 @@ func countJars(root string) int {
 // in its basename. Bounded walk; bundles aren't deep.
 func hasFileLike(root, sub string) bool {
 	var hit bool
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
+	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, _ error) error {
+		if d == nil {
 			return nil
 		}
-		if d != nil && !d.IsDir() && strings.Contains(d.Name(), sub) {
+		if !d.IsDir() && strings.Contains(d.Name(), sub) {
 			hit = true
 			return io.EOF
 		}
@@ -1334,9 +1327,14 @@ func scanRunningProcesses(appPath string) []ProcessInfo {
 		if !strings.HasPrefix(cmd, appPath+"/") {
 			continue
 		}
-		var pid, rss int
-		fmt.Sscanf(fields[0], "%d", &pid)
-		fmt.Sscanf(fields[1], "%d", &rss)
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		rss, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
 
 		lstartStr := strings.Join(fields[2:7], " ")
 		startTime, _ := time.Parse(lstartLayout, lstartStr)

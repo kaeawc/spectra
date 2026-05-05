@@ -32,6 +32,7 @@ func runSample(args []string) int {
 
 	// Run: sample <pid> <duration> <interval> -e (stderr only for errors)
 	// stdout receives the formatted call tree.
+	// #nosec G204 -- PID, duration, and interval are parsed integers.
 	cmd := exec.Command("sample",
 		strconv.Itoa(pid),
 		strconv.Itoa(*duration),

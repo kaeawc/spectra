@@ -77,10 +77,12 @@ func ruleJVMHeapVsSystemRAM() Rule {
 		ID:       "jvm-heap-vs-system",
 		Severity: SeverityHigh,
 		MatchFn: func(s snapshot.Snapshot) []Finding {
-			ramMB := int64(s.Host.RAMBytes / (1024 * 1024))
-			if ramMB == 0 {
+			const maxInt64 = uint64(1<<63 - 1)
+			ramMB := s.Host.RAMBytes / (1024 * 1024)
+			if ramMB == 0 || ramMB > maxInt64 {
 				return nil
 			}
+			ramMBInt := int64(ramMB)
 			var findings []Finding
 			for _, j := range s.JVMs {
 				if j.VMArgs == "" {
@@ -90,13 +92,13 @@ func ruleJVMHeapVsSystemRAM() Rule {
 				if xmxMB <= 0 {
 					continue
 				}
-				pct := xmxMB * 100 / ramMB
+				pct := xmxMB * 100 / ramMBInt
 				if pct > 60 {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-heap-vs-system",
 						Severity: SeverityHigh,
 						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
-						Message:  fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMB),
+						Message:  fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMBInt),
 						Fix:      "Reduce -Xmx, or if this is intentional ensure sufficient swap headroom.",
 					})
 				}
@@ -299,24 +301,24 @@ func rulePermissionMismatch() Rule {
 	// Services without a required NS key (e.g. SystemPolicyAllFiles, Accessibility)
 	// are omitted — they don't require a usage description in Info.plist.
 	tccToNSKey := map[string]string{
-		"Camera":                 "NSCameraUsageDescription",
-		"Microphone":             "NSMicrophoneUsageDescription",
-		"Contacts":               "NSContactsUsageDescription",
-		"PhotoLibrary":           "NSPhotoLibraryUsageDescription",
-		"PhotoLibraryAdd":        "NSPhotoLibraryAddUsageDescription",
-		"Calendar":               "NSCalendarsUsageDescription",
-		"Reminders":              "NSRemindersUsageDescription",
-		"Bluetooth":              "NSBluetoothAlwaysUsageDescription",
-		"SpeechRecognition":      "NSSpeechRecognitionUsageDescription",
-		"FaceID":                 "NSFaceIDUsageDescription",
-		"Motion":                 "NSMotionUsageDescription",
-		"HealthShare":            "NSHealthShareUsageDescription",
-		"HealthUpdate":           "NSHealthUpdateUsageDescription",
-		"HomeKit":                "NSHomeKitUsageDescription",
-		"NearbyInteraction":      "NSNearbyInteractionUsageDescription",
-		"UserTracking":           "NSUserTrackingUsageDescription",
-		"FocusStatus":            "NSFocusStatusUsageDescription",
-		"LocalNetwork":           "NSLocalNetworkUsageDescription",
+		"Camera":            "NSCameraUsageDescription",
+		"Microphone":        "NSMicrophoneUsageDescription",
+		"Contacts":          "NSContactsUsageDescription",
+		"PhotoLibrary":      "NSPhotoLibraryUsageDescription",
+		"PhotoLibraryAdd":   "NSPhotoLibraryAddUsageDescription",
+		"Calendar":          "NSCalendarsUsageDescription",
+		"Reminders":         "NSRemindersUsageDescription",
+		"Bluetooth":         "NSBluetoothAlwaysUsageDescription",
+		"SpeechRecognition": "NSSpeechRecognitionUsageDescription",
+		"FaceID":            "NSFaceIDUsageDescription",
+		"Motion":            "NSMotionUsageDescription",
+		"HealthShare":       "NSHealthShareUsageDescription",
+		"HealthUpdate":      "NSHealthUpdateUsageDescription",
+		"HomeKit":           "NSHomeKitUsageDescription",
+		"NearbyInteraction": "NSNearbyInteractionUsageDescription",
+		"UserTracking":      "NSUserTrackingUsageDescription",
+		"FocusStatus":       "NSFocusStatusUsageDescription",
+		"LocalNetwork":      "NSLocalNetworkUsageDescription",
 	}
 
 	return Rule{
@@ -495,7 +497,7 @@ func rulePathShadowsActiveRuntime() Rule {
 				"pyenv": true, "uv": true,
 				"goenv": true,
 				"rbenv": true,
-				"asdf": true, "mise": true,
+				"asdf":  true, "mise": true,
 			}
 			var findings []Finding
 			for _, g := range groups {

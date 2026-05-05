@@ -34,6 +34,9 @@ type CmdRunner func(name string, args ...string) ([]byte, error)
 // aggregate Toolchains. Any discoverer error is silently absorbed —
 // a partial result is still useful.
 func Collect(ctx context.Context, opts CollectOptions) Toolchains {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	opts = withDefaults(opts)
 
 	var (
@@ -104,6 +107,11 @@ func Collect(ctx context.Context, opts CollectOptions) Toolchains {
 		task := task
 		go func() {
 			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			task()
 		}()
 	}

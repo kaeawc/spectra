@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // testDaemon wires up a dispatcher with registered handlers, starts it on a
@@ -37,6 +38,24 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 	t.Cleanup(func() { db.Close() })
 
 	d := rpc.NewDispatcher()
+	origCollectToolchains := collectToolchains
+	collectToolchains = func(context.Context, toolchain.CollectOptions) toolchain.Toolchains {
+		return toolchain.Toolchains{
+			Brew: toolchain.BrewInventory{
+				Formulae: []toolchain.BrewFormula{},
+				Casks:    []toolchain.BrewCask{},
+				Taps:     []toolchain.BrewTap{},
+			},
+			Node:       []toolchain.RuntimeInstall{},
+			Python:     []toolchain.RuntimeInstall{},
+			Go:         []toolchain.RuntimeInstall{},
+			Ruby:       []toolchain.RuntimeInstall{},
+			Rust:       []toolchain.RustToolchain{},
+			JDKs:       []toolchain.JDKInstall{},
+			BuildTools: []toolchain.BuildTool{},
+		}
+	}
+	t.Cleanup(func() { collectToolchains = origCollectToolchains })
 	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil)
 
 	ln, err := net.Listen("unix", sockPath)
@@ -53,7 +72,9 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 		cancel()
 		t.Fatal(err)
 	}
-	conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { conn.Close() })
 
 	return json.NewEncoder(conn), json.NewDecoder(conn), cancel

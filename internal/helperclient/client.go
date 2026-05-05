@@ -53,7 +53,9 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 		return nil, ErrHelperUnavailable
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		return nil, fmt.Errorf("helperclient: set deadline: %w", err)
+	}
 
 	id := c.reqID.Add(1)
 	paramBytes, _ := json.Marshal(params)

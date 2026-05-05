@@ -728,9 +728,10 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 	for _, m := range machines {
 		// Delete child rows for to-be-pruned snapshots first (FK constraints).
 		pruneSubquery := `SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=?
-			AND id NOT IN (SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
+				AND id NOT IN (SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
 		for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
-			if _, err := s.db.ExecContext(ctx, // #nosec G202 — table is a hardcoded literal, not user input
+			// #nosec G202 -- table is selected from hardcoded literals, not user input.
+			if _, err := s.db.ExecContext(ctx,
 				`DELETE FROM `+table+` WHERE snapshot_id IN (`+pruneSubquery+`)`,
 				m, m, keepN); err != nil {
 				return total, fmt.Errorf("store: prune %s %s: %w", table, m, err)

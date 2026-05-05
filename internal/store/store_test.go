@@ -104,7 +104,7 @@ func TestGetSnapshot(t *testing.T) {
 func TestGetSnapshotNotFound(t *testing.T) {
 	db := openTestDB(t)
 	_, err := db.GetSnapshot(context.Background(), "no-such-id")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }
@@ -353,7 +353,7 @@ func TestListIssuesFilterByStatus(t *testing.T) {
 func TestUpdateIssueStatusNotFound(t *testing.T) {
 	db := openTestDB(t)
 	err := db.UpdateIssueStatus(context.Background(), "no-such-id", IssueClosed)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }
@@ -419,7 +419,7 @@ func TestUpsertIssuesDoesNotReopenDismissed(t *testing.T) {
 
 func TestAppName(t *testing.T) {
 	cases := map[string]string{
-		"/Applications/Slack.app":        "Slack",
+		"/Applications/Slack.app":         "Slack",
 		"/Applications/Google Chrome.app": "Google Chrome",
 		"/tmp/Foo.app/":                   "Foo.app", // trailing slash → Base returns ""
 	}
@@ -523,7 +523,8 @@ func TestSaveAndGetLoginItems(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	snap := sampleInput(); snap.ID = "snap-li-1"
+	snap := sampleInput()
+	snap.ID = "snap-li-1"
 	if err := db.SaveSnapshot(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +564,8 @@ func TestSaveLoginItemsIdempotent(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	snap := sampleInput(); snap.ID = "snap-li-2"
+	snap := sampleInput()
+	snap.ID = "snap-li-2"
 	if err := db.SaveSnapshot(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +593,8 @@ func TestSaveAndGetGrantedPerms(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	snap := sampleInput(); snap.ID = "snap-gp-1"
+	snap := sampleInput()
+	snap.ID = "snap-gp-1"
 	if err := db.SaveSnapshot(ctx, snap); err != nil {
 		t.Fatal(err)
 	}

@@ -15,11 +15,11 @@ import (
 
 // State is the NetworkState slice of a Spectra snapshot.
 type State struct {
-	DefaultRouteIface string          `json:"default_route_iface,omitempty"`
-	DefaultRouteGW    string          `json:"default_route_gw,omitempty"`
-	DNSServers        []string        `json:"dns_servers,omitempty"`
-	Proxy             ProxyConfig     `json:"proxy"`
-	HostsOverrides    []HostsEntry    `json:"hosts_overrides,omitempty"`
+	DefaultRouteIface           string          `json:"default_route_iface,omitempty"`
+	DefaultRouteGW              string          `json:"default_route_gw,omitempty"`
+	DNSServers                  []string        `json:"dns_servers,omitempty"`
+	Proxy                       ProxyConfig     `json:"proxy"`
+	HostsOverrides              []HostsEntry    `json:"hosts_overrides,omitempty"`
 	ListeningPorts              []ListeningPort `json:"listening_ports,omitempty"`
 	EstablishedConnectionsCount int             `json:"established_connections_count,omitempty"`
 
@@ -39,8 +39,8 @@ type ProxyConfig struct {
 
 // HostsEntry is one non-default line from /etc/hosts.
 type HostsEntry struct {
-	IP      string   `json:"ip"`
-	Names   []string `json:"names"`
+	IP    string   `json:"ip"`
+	Names []string `json:"names"`
 }
 
 // ListeningPort is one TCP/UDP socket currently bound on the machine.
@@ -181,10 +181,10 @@ func scutilKV(out string) map[string]string {
 func readHostsOverrides(hostsPath string) []HostsEntry {
 	// Default macOS /etc/hosts entries — skip these.
 	defaults := map[string]bool{
-		"127.0.0.1":   true,
+		"127.0.0.1":       true,
 		"255.255.255.255": true,
-		"::1":         true,
-		"fe80::1%lo0": true,
+		"::1":             true,
+		"fe80::1%lo0":     true,
 	}
 
 	f, err := os.Open(hostsPath)

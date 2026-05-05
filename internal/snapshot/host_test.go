@@ -62,11 +62,11 @@ func TestHostInfoString(t *testing.T) {
 
 func TestHumanBytes(t *testing.T) {
 	cases := map[uint64]string{
-		512:                            "512 B",
-		2048:                           "2 KB", // 2.0 → 2
-		2 * 1024 * 1024:                "2 MB",
-		3 * 1024 * 1024 * 1024:         "3.0 GB",
-		2 * 1024 * 1024 * 1024 * 1024:  "2.0 TB",
+		512:                           "512 B",
+		2048:                          "2 KB", // 2.0 → 2
+		2 * 1024 * 1024:               "2 MB",
+		3 * 1024 * 1024 * 1024:        "3.0 GB",
+		2 * 1024 * 1024 * 1024 * 1024: "2.0 TB",
 	}
 	for in, want := range cases {
 		got := humanBytes(in)
@@ -79,12 +79,12 @@ func TestHumanBytes(t *testing.T) {
 
 func TestHumanDuration(t *testing.T) {
 	cases := map[int64]string{
-		60:                  "0m",        // 1 minute → minute formatter says "0m" for under-an-hour edge — actually "1m"
-		120:                 "2m",
-		3600:                "1h 0m",
-		3 * 3600:            "3h 0m",
-		3*3600 + 25*60:      "3h 25m",
-		90000:               "1d 1h 0m", // 25 hours
+		60:             "0m", // 1 minute → minute formatter says "0m" for under-an-hour edge — actually "1m"
+		120:            "2m",
+		3600:           "1h 0m",
+		3 * 3600:       "3h 0m",
+		3*3600 + 25*60: "3h 25m",
+		90000:          "1d 1h 0m", // 25 hours
 	}
 	for in, want := range cases {
 		got := humanDuration(in)

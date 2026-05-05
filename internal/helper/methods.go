@@ -26,7 +26,9 @@ func RegisterAll(d *Dispatcher, run CmdRunner) {
 	})
 
 	d.Register("helper.powermetrics.sample", func(_ uint32, params json.RawMessage) (any, error) {
-		var p struct{ DurationMS int `json:"duration_ms"` }
+		var p struct {
+			DurationMS int `json:"duration_ms"`
+		}
 		_ = json.Unmarshal(params, &p)
 		if p.DurationMS <= 0 {
 			p.DurationMS = 500
@@ -54,7 +56,9 @@ func RegisterAll(d *Dispatcher, run CmdRunner) {
 	})
 
 	d.Register("helper.tcc.system.query", func(_ uint32, params json.RawMessage) (any, error) {
-		var p struct{ BundleID string `json:"bundle_id"` }
+		var p struct {
+			BundleID string `json:"bundle_id"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.BundleID == "" {
 			return nil, fmt.Errorf("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
 		}

@@ -90,65 +90,84 @@ func runNetworkConnections(args []string) int {
 
 func printNetworkState(s netstate.State) {
 	fmt.Println("=== Network state ===")
+	printNetworkOverview(s)
+	printProxyState(s.Proxy)
+	printHostsOverrides(s.HostsOverrides)
+	printListeningPorts(s.ListeningPorts)
+}
 
+func printNetworkOverview(s netstate.State) {
 	if s.DefaultRouteIface != "" {
 		fmt.Printf("default route: %s via %s\n", s.DefaultRouteIface, s.DefaultRouteGW)
 	}
-
 	if s.EstablishedConnectionsCount > 0 {
 		fmt.Printf("connections:   %d established\n", s.EstablishedConnectionsCount)
 	}
-
 	if s.VPNActive {
 		fmt.Printf("vpn:           active (%s)\n", strings.Join(s.VPNInterfaces, ", "))
 	} else {
 		fmt.Printf("vpn:           inactive\n")
 	}
-
 	if len(s.DNSServers) > 0 {
 		fmt.Printf("dns:           %s\n", strings.Join(s.DNSServers, ", "))
 	}
+}
 
-	if s.Proxy.HTTP != "" || s.Proxy.HTTPS != "" || s.Proxy.SOCKS != "" {
-		fmt.Println()
-		fmt.Println("proxy:")
-		if s.Proxy.HTTP != "" {
-			fmt.Printf("  http:  %s\n", s.Proxy.HTTP)
-		}
-		if s.Proxy.HTTPS != "" {
-			fmt.Printf("  https: %s\n", s.Proxy.HTTPS)
-		}
-		if s.Proxy.SOCKS != "" {
-			fmt.Printf("  socks: %s\n", s.Proxy.SOCKS)
-		}
+func printProxyState(proxy netstate.ProxyConfig) {
+	if proxy.HTTP == "" && proxy.HTTPS == "" && proxy.SOCKS == "" {
+		return
+	}
+	fmt.Println()
+	fmt.Println("proxy:")
+	if proxy.HTTP != "" {
+		fmt.Printf("  http:  %s\n", proxy.HTTP)
+	}
+	if proxy.HTTPS != "" {
+		fmt.Printf("  https: %s\n", proxy.HTTPS)
+	}
+	if proxy.SOCKS != "" {
+		fmt.Printf("  socks: %s\n", proxy.SOCKS)
+	}
+}
+
+func printHostsOverrides(hosts []netstate.HostsEntry) {
+	if len(hosts) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("hosts overrides (%d):\n", len(hosts))
+	for _, h := range hosts {
+		fmt.Printf("  %-16s  %s\n", h.IP, strings.Join(h.Names, " "))
+	}
+}
+
+func printListeningPorts(listening []netstate.ListeningPort) {
+	if len(listening) == 0 {
+		return
 	}
 
-	if len(s.HostsOverrides) > 0 {
-		fmt.Println()
-		fmt.Printf("hosts overrides (%d):\n", len(s.HostsOverrides))
-		for _, h := range s.HostsOverrides {
-			fmt.Printf("  %-16s  %s\n", h.IP, strings.Join(h.Names, " "))
-		}
-	}
+	// Sort by port for stable output.
+	ports := make([]netstate.ListeningPort, len(listening))
+	copy(ports, listening)
+	sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
 
-	if len(s.ListeningPorts) > 0 {
-		// Sort by port for stable output.
-		ports := make([]netstate.ListeningPort, len(s.ListeningPorts))
-		copy(ports, s.ListeningPorts)
-		sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
-
-		fmt.Println()
-		fmt.Printf("listening ports (%d):\n", len(ports))
-		for _, p := range ports {
-			pid := ""
-			if p.PID > 0 {
-				pid = fmt.Sprintf(" pid=%d", p.PID)
-			}
-			app := ""
-			if p.AppPath != "" {
-				app = fmt.Sprintf(" (%s)", p.AppPath)
-			}
-			fmt.Printf("  %s/%d%s%s\n", p.Proto, p.Port, pid, app)
-		}
+	fmt.Println()
+	fmt.Printf("listening ports (%d):\n", len(ports))
+	for _, p := range ports {
+		fmt.Printf("  %s/%d%s%s\n", p.Proto, p.Port, listeningPID(p), listeningApp(p))
 	}
+}
+
+func listeningPID(p netstate.ListeningPort) string {
+	if p.PID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" pid=%d", p.PID)
+}
+
+func listeningApp(p netstate.ListeningPort) string {
+	if p.AppPath == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", p.AppPath)
 }

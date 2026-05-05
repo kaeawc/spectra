@@ -15,5 +15,5 @@ func diskBytes(fi os.FileInfo) int64 {
 	if !ok {
 		return fi.Size()
 	}
-	return int64(st.Blocks) * 512
+	return st.Blocks * 512
 }

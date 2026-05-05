@@ -220,9 +220,17 @@ func runJVMGCStats(args []string) int {
 }
 
 func runJVMJFR(args []string) int {
+	sub, pid, name, outPath, code := parseJFRArgs(args)
+	if code != 0 {
+		return code
+	}
+	return executeJFR(sub, pid, name, outPath)
+}
+
+func parseJFRArgs(args []string) (string, int, string, string, int) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(os.Stderr, "usage: spectra jvm jfr <start|dump|stop> <pid> [--out <path>] [--name <name>]")
-		return 2
+		return "", 0, "", "", 2
 	}
 	sub := args[0]
 	rest := args[1:]
@@ -232,67 +240,94 @@ func runJVMJFR(args []string) int {
 	outPath := fs.String("out", "", "Output .jfr path (for dump/stop)")
 	name := fs.String("name", "spectra", "Recording name")
 	if err := fs.Parse(rest); err != nil {
-		return 2
+		return "", 0, "", "", 2
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintf(os.Stderr, "usage: spectra jvm jfr %s [flags] <pid>\n", sub)
-		return 2
+		return "", 0, "", "", 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
-		return 2
+		return "", 0, "", "", 2
 	}
+	return sub, pid, *name, *outPath, 0
+}
 
+func executeJFR(sub string, pid int, name, outPath string) int {
 	switch sub {
 	case "start":
-		if err := jvm.JFRStart(pid, *name, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "JFR.start failed for PID %d: %v\n", pid, err)
-			return 1
-		}
-		fmt.Fprintf(os.Stdout, "JFR recording %q started on PID %d\n", *name, pid)
-
+		return runJFRStart(pid, name)
 	case "dump":
-		dest := *outPath
-		if dest == "" {
-			home, herr := os.UserHomeDir()
-			if herr != nil {
-				fmt.Fprintln(os.Stderr, herr)
-				return 1
-			}
-			ts := time.Now().UTC().Format("20060102T150405Z")
-			dest = filepath.Join(home, ".spectra", fmt.Sprintf("%d-%s.jfr", pid, ts))
-			if mkErr := os.MkdirAll(filepath.Dir(dest), 0o700); mkErr != nil {
-				fmt.Fprintln(os.Stderr, mkErr)
-				return 1
-			}
-		}
-		if err := jvm.JFRDump(pid, *name, dest, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "JFR.dump failed for PID %d: %v\n", pid, err)
-			return 1
-		}
-		if cacheStores != nil && cacheStores.JFR != nil {
-			if data, rerr := os.ReadFile(dest); rerr == nil {
-				key := cache.Key([]byte(fmt.Sprintf("jfr:%d:%d", pid, time.Now().UnixNano())))
-				_ = cacheStores.JFR.Put(key, data)
-			}
-		}
-		fmt.Println(dest)
-
+		return runJFRDump(pid, name, outPath)
 	case "stop":
-		dest := *outPath
-		if err := jvm.JFRStop(pid, *name, dest, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "JFR.stop failed for PID %d: %v\n", pid, err)
-			return 1
-		}
-		fmt.Fprintf(os.Stdout, "JFR recording %q stopped on PID %d\n", *name, pid)
-		if dest != "" {
-			fmt.Println(dest)
-		}
-
+		return runJFRStop(pid, name, outPath)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown jfr subcommand %q; use start, dump, or stop\n", sub)
 		return 2
+	}
+}
+
+func runJFRStart(pid int, name string) int {
+	if err := jvm.JFRStart(pid, name, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "JFR.start failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stdout, "JFR recording %q started on PID %d\n", name, pid)
+	return 0
+}
+
+func runJFRDump(pid int, name, dest string) int {
+	if dest == "" {
+		var err error
+		dest, err = defaultJFRPath(pid)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+	if err := jvm.JFRDump(pid, name, dest, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "JFR.dump failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	cacheJFRDump(pid, dest)
+	fmt.Println(dest)
+	return 0
+}
+
+func defaultJFRPath(pid int) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	dest := filepath.Join(home, ".spectra", fmt.Sprintf("%d-%s.jfr", pid, ts))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+func cacheJFRDump(pid int, dest string) {
+	if cacheStores == nil || cacheStores.JFR == nil {
+		return
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		return
+	}
+	key := cache.Key([]byte(fmt.Sprintf("jfr:%d:%d", pid, time.Now().UnixNano())))
+	_ = cacheStores.JFR.Put(key, data)
+}
+
+func runJFRStop(pid int, name, dest string) int {
+	if err := jvm.JFRStop(pid, name, dest, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "JFR.stop failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stdout, "JFR recording %q stopped on PID %d\n", name, pid)
+	if dest != "" {
+		fmt.Println(dest)
 	}
 	return 0
 }
