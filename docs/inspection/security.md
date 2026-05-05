@@ -1,8 +1,8 @@
 # Security inspection
 
-Spectra surfaces three layers of an app's security posture: code
-signing, hardened runtime / sandbox, and the entitlements vs granted
-permissions split.
+Spectra surfaces four layers of an app's security posture: code
+signing, Gatekeeper trust assessment, hardened runtime / sandbox, and
+the entitlements vs granted permissions split.
 
 ## Code signing
 
@@ -20,6 +20,16 @@ Detected from the `flags=0x10000(runtime)` substring in
 `codesign -dv` output. Required for Developer ID notarization. Apps
 without it can't pass Gatekeeper on macOS 10.15+ and are a meaningful
 security regression.
+
+## Gatekeeper assessment
+
+Collected with `spctl --assess --type exec <app>`. Spectra records the
+coarse verdict as `accepted` or `rejected` and leaves the field empty
+when `spctl` is unavailable or cannot assess the bundle.
+
+This is separate from code signing metadata. A bundle can expose a Team
+ID and entitlements but still be rejected by Gatekeeper because it is
+not notarized, is damaged, or fails policy checks on the current host.
 
 ## Sandbox
 
@@ -120,6 +130,7 @@ will flag in the future as a permission-vs-declaration mismatch.
 
 `internal/detect/detect.go`:
 - `readSigning(appPath)` — team ID + hardened runtime
+- `readGatekeeperStatus(appPath)` — Gatekeeper accepted / rejected
 - `readEntitlements(appPath)` — declared entitlements
 - `readPrivacyDescriptions(appPath)` — `NS*UsageDescription`
 - `scanGrantedPermissions(bundleID)` — TCC reads

@@ -41,6 +41,7 @@ Source of truth: `internal/detect/detect.go`.
 | `Entitlements` | []string | Curated boolean entitlements set true |
 | `PrivacyDescriptions` | map[string]string | `NS*UsageDescription` keys + values |
 | `GrantedPermissions` | []string | TCC.db `auth_value >= 2` services |
+| `GatekeeperStatus` | string | `spctl --assess --type exec`: `accepted`, `rejected`, or empty when unavailable |
 
 ## Live + structural fields
 
