@@ -21,9 +21,10 @@ type Toolchains struct {
 
 // BuildTool is one JVM-ecosystem build tool installation (Maven, Gradle, Bazel, Make, CMake).
 type BuildTool struct {
-	Name    string `json:"name"`    // "maven", "gradle", "bazel", "make", "cmake"
-	Version string `json:"version"` // raw version string
-	Source  string `json:"source"`  // "brew", "system", "wrapper"
+	Name       string `json:"name"`                  // "maven", "gradle", "bazel", "make", "cmake"
+	Version    string `json:"version"`               // raw version string
+	Source     string `json:"source"`                // "brew", "system", "wrapper"
+	ConfigPath string `json:"config_path,omitempty"` // user-level config path when known
 }
 
 // BrewInventory holds installed Homebrew formulae, casks, and taps.

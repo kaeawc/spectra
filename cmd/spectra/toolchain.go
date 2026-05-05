@@ -158,7 +158,11 @@ func printToolchains(tc toolchain.Toolchains) {
 	if len(tc.BuildTools) > 0 {
 		fmt.Printf("\nBuild tools (%d):\n", len(tc.BuildTools))
 		for _, bt := range tc.BuildTools {
-			fmt.Printf("  %-8s  %-12s  %s\n", bt.Name, bt.Version, bt.Source)
+			config := ""
+			if bt.ConfigPath != "" {
+				config = "  " + bt.ConfigPath
+			}
+			fmt.Printf("  %-8s  %-12s  %s%s\n", bt.Name, bt.Version, bt.Source, config)
 		}
 	}
 

@@ -139,6 +139,7 @@ Toolchains {
   ruby    []{ version, source ∈ {brew, asdf, rbenv}, active }
   rust    []{ toolchain, channel ∈ {stable, beta, nightly}, default }
   jvm_managers ∈ {sdkman, asdf, mise, jenv}
+  build_tools []{ name, version, source, config_path? }
 }
 ```
 

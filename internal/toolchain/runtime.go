@@ -302,7 +302,12 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 
 	add := func(name, version, source string) {
 		if version != "" {
-			tools = append(tools, BuildTool{Name: name, Version: version, Source: source})
+			tools = append(tools, BuildTool{
+				Name:       name,
+				Version:    version,
+				Source:     source,
+				ConfigPath: buildToolConfigPath(opts.Home, name),
+			})
 		}
 	}
 
@@ -344,6 +349,17 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 	}
 
 	return tools
+}
+
+func buildToolConfigPath(home, name string) string {
+	switch name {
+	case "maven":
+		path := filepath.Join(home, ".m2", "settings.xml")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
 }
 
 // brewVersion returns the installed version of a formula by scanning
