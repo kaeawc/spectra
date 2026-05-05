@@ -28,6 +28,7 @@ echo ""
 
 echo "Build:"
 check "spectra binary" go build -ldflags "-s -w" -o spectra ./cmd/spectra/
+check "spectra-helper binary" go build -ldflags "-s -w" -o spectra-helper ./cmd/spectra-helper/
 
 echo ""
 echo "Quality:"

@@ -1,23 +1,42 @@
 # Distribution
 
 Each macOS distribution channel imposes a different ceiling on what
-Spectra can do. This page captures the analysis behind why we chose
-**Homebrew + optional curl-bash for a privileged helper** and ruled out
-the Mac App Store.
+Spectra can do. This page captures the analysis behind the current
+**source build + optional LaunchDaemon helper** distribution path, the
+planned Homebrew/prebuilt release channels, and why the Mac App Store is
+out of scope for the full product.
+
+Today the supported path is:
+
+```bash
+git clone https://github.com/kaeawc/spectra.git
+cd spectra
+make build-all
+./spectra version
+./spectra-helper --version
+```
+
+The helper is optional. Users who want root-only telemetry install it
+explicitly:
+
+```bash
+sudo ./spectra install-helper
+./spectra install-helper --status
+```
 
 ## Capability vs channel matrix
 
-| Capability | MAS | Homebrew (CLI) | Homebrew Cask (.app) | curl-bash + sudo |
+| Capability | MAS | Source build | Homebrew CLI (planned) | Prebuilt archive/cask (planned) |
 |---|---|---|---|---|
 | Static inspection of `/Applications` | partial | ✓ | ✓ | ✓ |
 | Read other users' app data | ✗ (sandbox) | ✓ | ✓ | ✓ |
 | Per-user TCC.db | ✗ | ✓ | ✓ | ✓ |
-| System TCC.db | ✗ | sudo only | sudo only | ✓ via helper |
+| System TCC.db | ✗ | ✓ via helper | ✓ via helper | ✓ via helper |
 | `lsof -i`, `nettop` | ✗ | ✓ | ✓ | ✓ |
-| `fs_usage`, `powermetrics`, `pmset` | ✗ | sudo only | sudo only | ✓ via helper |
+| `fs_usage`, `powermetrics`, `pmset` | ✗ | ✓ via helper | ✓ via helper | ✓ via helper |
 | Listen on TCP / Unix socket | ✗ | ✓ | ✓ | ✓ |
 | Embed `tsnet` (Tailscale) | ✗ | ✓ | ✓ | ✓ |
-| Install LaunchDaemon | ✗ | user can do it | via SMAppService | ✓ |
+| Install LaunchDaemon | ✗ | ✓ via `sudo spectra install-helper` | ✓ via opt-in command | planned signed helper |
 | System Extension (kernel-grade) | ✗ | ✗ | requires Apple entitlement | requires Apple entitlement |
 
 ## Why Mac App Store is out
@@ -41,7 +60,24 @@ inspection of bundles already in `/Applications`. That loses the entire
 live-state and remote-debugging story. Two distribution targets isn't
 worth the engineering for that capability slice.
 
-## Why Homebrew is the primary channel
+## Current source-build channel
+
+Source build is the only supported channel today. It keeps distribution
+honest while the product surface is still changing quickly:
+
+- `make build` produces the unprivileged CLI.
+- `make build-all` produces both `spectra` and `spectra-helper`.
+- `spectra install-helper` copies the helper to
+  `/Library/PrivilegedHelperTools/spectra-helper`, writes
+  `/Library/LaunchDaemons/dev.spectra.helper.plist`, and loads it with
+  `launchctl`.
+- `spectra install-helper uninstall` unloads the LaunchDaemon and removes
+  the installed helper files.
+
+This is intentionally less polished than a signed release package, but it
+matches the implemented code path and keeps root installation explicit.
+
+## Why Homebrew is still the planned primary channel
 
 - Developer-shaped tools live there. Krit, Tailscale CLI, Datadog Agent,
   1Password CLI all use it.
@@ -57,22 +93,32 @@ worth the engineering for that capability slice.
 brew install kaeawc/tap/spectra
 ```
 
-## Why an optional sudo helper
-
-Homebrew can't install a LaunchDaemon. The capabilities that need root
-(`fs_usage`, `powermetrics`, system TCC.db) require a separately
-installed privileged helper. The user grants this once, explicitly:
+The first Homebrew formula should build the unprivileged CLI and helper
+binary, but should not install or start the helper automatically. Root
+visibility stays behind the same explicit command:
 
 ```bash
-# Planned
 sudo spectra install-helper
 ```
 
-This installs a notarized helper as a `SMAppService.daemon` (macOS 13+).
-The unprivileged CLI/daemon talks to the helper over a local Unix socket
-when it needs root-only data. Users who don't install the helper still
-get every capability that doesn't strictly require root — which is the
-overwhelming majority of what Spectra extracts today.
+## Why an optional sudo helper
+
+The capabilities that need root (`fs_usage`, `powermetrics`, system
+TCC.db) require a separately installed privileged helper. The user grants
+this once, explicitly:
+
+```bash
+sudo spectra install-helper
+```
+
+The current installer uses a LaunchDaemon plist and root-owned helper
+binary. Future signed packaging can move this to `SMAppService.daemon`
+or `SMJobBless` once Spectra has release signing, notarization, and
+helper identity verification in place. The unprivileged CLI/daemon talks
+to the helper over a local Unix socket when it needs root-only data.
+Users who don't install the helper still get every capability that
+doesn't strictly require root, which is the overwhelming majority of what
+Spectra extracts today.
 
 This split is the same pattern Tailscale uses: unprivileged CLI for most
 operations, privileged daemon for the kernel-touching parts.
