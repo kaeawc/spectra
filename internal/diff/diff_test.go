@@ -15,12 +15,12 @@ func base() snapshot.Snapshot {
 		ID:   "snap-a",
 		Kind: snapshot.KindLive,
 		Host: snapshot.HostInfo{
-			Hostname:    "mac-a",
-			OSVersion:   "14.4",
-			OSBuild:     "23E214",
-			CPUBrand:    "Apple M3",
-			CPUCores:    10,
-			RAMBytes:    17179869184,
+			Hostname:     "mac-a",
+			OSVersion:    "14.4",
+			OSBuild:      "23E214",
+			CPUBrand:     "Apple M3",
+			CPUCores:     10,
+			RAMBytes:     17179869184,
 			Architecture: "arm64",
 		},
 	}
@@ -244,11 +244,11 @@ func TestDiffSysctls(t *testing.T) {
 	a := base()
 	b := base()
 	a.Sysctls = map[string]string{
-		"hw.ncpu":     "10",
-		"hw.memsize":  "17179869184",
+		"hw.ncpu":    "10",
+		"hw.memsize": "17179869184",
 	}
 	b.Sysctls = map[string]string{
-		"hw.ncpu":      "10",
+		"hw.ncpu":       "10",
 		"kern.maxfiles": "12288",
 	}
 

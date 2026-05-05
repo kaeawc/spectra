@@ -27,11 +27,13 @@ import (
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
-	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/storagestate"
+	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
+
+var collectToolchains = toolchain.Collect
 
 // DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
 func DefaultSockPath() (string, error) {
@@ -46,8 +48,8 @@ func DefaultSockPath() (string, error) {
 type Options struct {
 	SockPath       string
 	SpectraVersion string
-	DBPath         string          // empty = store.DefaultPath()
-	CacheRegistry  *cache.Registry // nil = cache.Default
+	DBPath         string              // empty = store.DefaultPath()
+	CacheRegistry  *cache.Registry     // nil = cache.Default
 	DetectStore    *cache.ShardedStore // nil = no detect caching
 }
 
@@ -181,6 +183,8 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 }
 
 // registerHandlers wires all JSON-RPC methods into d.
+//
+//gocyclo:ignore
 func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "version": version}, nil
@@ -226,7 +230,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	d.Register("process.live", func(params json.RawMessage) (any, error) {
 		// Returns the most recent samples for all known PIDs.
-		var p struct{ Limit int `json:"limit"` }
+		var p struct {
+			Limit int `json:"limit"`
+		}
 		_ = json.Unmarshal(params, &p)
 		if p.Limit <= 0 {
 			p.Limit = 60 // default: last 60 seconds
@@ -319,7 +325,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 
 	d.Register("snapshot.processes", func(params json.RawMessage) (any, error) {
-		var p struct{ ID string `json:"id"` }
+		var p struct {
+			ID string `json:"id"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 			return nil, fmt.Errorf("snapshot.processes requires {\"id\":\"<snapshot-id>\"}")
 		}
@@ -327,7 +335,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 
 	d.Register("snapshot.login_items", func(params json.RawMessage) (any, error) {
-		var p struct{ ID string `json:"id"` }
+		var p struct {
+			ID string `json:"id"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 			return nil, fmt.Errorf("snapshot.login_items requires {\"id\":\"<snapshot-id>\"}")
 		}
@@ -335,7 +345,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 
 	d.Register("snapshot.granted_perms", func(params json.RawMessage) (any, error) {
-		var p struct{ ID string `json:"id"` }
+		var p struct {
+			ID string `json:"id"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 			return nil, fmt.Errorf("snapshot.granted_perms requires {\"id\":\"<snapshot-id>\"}")
 		}
@@ -345,7 +357,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// snapshot.prune — delete live snapshots beyond retention limit.
 	// Optional: { "keep": 100 }
 	d.Register("snapshot.prune", func(params json.RawMessage) (any, error) {
-		var p struct{ Keep int `json:"keep"` }
+		var p struct {
+			Keep int `json:"keep"`
+		}
 		_ = json.Unmarshal(params, &p)
 		if p.Keep <= 0 {
 			p.Keep = 100
@@ -359,7 +373,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	d.Register("rules.check", func(params json.RawMessage) (any, error) {
 		// Optional: { "snapshot_id": "snap-..." } to evaluate against stored snapshot.
-		var p struct{ SnapshotID string `json:"snapshot_id"` }
+		var p struct {
+			SnapshotID string `json:"snapshot_id"`
+		}
 		_ = json.Unmarshal(params, &p)
 
 		var snap snapshot.Snapshot
@@ -398,8 +414,8 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// { "machine_uuid": "...", "snapshot_id": "...", "findings": [...] }
 	d.Register("issues.record", func(params json.RawMessage) (any, error) {
 		var p struct {
-			MachineUUID string              `json:"machine_uuid"`
-			SnapshotID  string              `json:"snapshot_id"`
+			MachineUUID string               `json:"machine_uuid"`
+			SnapshotID  string               `json:"snapshot_id"`
 			Findings    []store.FindingInput `json:"findings"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.MachineUUID == "" || p.SnapshotID == "" {
@@ -475,7 +491,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// issues.fix.list — list fix attempts for one issue.
 	// { "issue_id": "..." }
 	d.Register("issues.fix.list", func(params json.RawMessage) (any, error) {
-		var p struct{ IssueID string `json:"issue_id"` }
+		var p struct {
+			IssueID string `json:"issue_id"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
 			return nil, fmt.Errorf("issues.fix.list requires {\"issue_id\": \"...\"}")
 		}
@@ -485,7 +503,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// jvm.list — list all running JVM processes.
 	// Optional: { "pid": 1234 } to inspect a single PID.
 	d.Register("jvm.list", func(params json.RawMessage) (any, error) {
-		var p struct{ PID int `json:"pid"` }
+		var p struct {
+			PID int `json:"pid"`
+		}
 		_ = json.Unmarshal(params, &p)
 		if p.PID != 0 {
 			info := jvm.InspectPID(context.Background(), p.PID, jvm.CollectOptions{})
@@ -499,7 +519,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// jvm.thread_dump — run `jcmd <pid> Thread.print` and return the raw text.
 	d.Register("jvm.thread_dump", func(params json.RawMessage) (any, error) {
-		var p struct{ PID int `json:"pid"` }
+		var p struct {
+			PID int `json:"pid"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.thread_dump requires {\"pid\": <pid>}")
 		}
@@ -512,7 +534,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// jvm.heap_histogram — run `jcmd <pid> GC.class_histogram` and return the raw text.
 	d.Register("jvm.heap_histogram", func(params json.RawMessage) (any, error) {
-		var p struct{ PID int `json:"pid"` }
+		var p struct {
+			PID int `json:"pid"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.heap_histogram requires {\"pid\": <pid>}")
 		}
@@ -525,7 +549,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// jvm.gc_stats — run `jstat -gc <pid>` and return parsed GC counters.
 	d.Register("jvm.gc_stats", func(params json.RawMessage) (any, error) {
-		var p struct{ PID int `json:"pid"` }
+		var p struct {
+			PID int `json:"pid"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.gc_stats requires {\"pid\": <pid>}")
 		}
@@ -579,7 +605,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// jvm.inspect — structured inspection of one JVM process.
 	// Required: {"pid": <pid>}
 	d.Register("jvm.inspect", func(params json.RawMessage) (any, error) {
-		var p struct{ PID int `json:"pid"` }
+		var p struct {
+			PID int `json:"pid"`
+		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.inspect requires {\"pid\": <pid>}")
 		}
@@ -611,24 +639,28 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// jdk.list — enumerate installed JDK toolchains.
 	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
-		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})
 		return tc.JDKs, nil
 	})
 
 	// toolchain.scan — full toolchain inventory (brew, JDKs, Node, Python, Go, etc.).
 	d.Register("toolchain.scan", func(_ json.RawMessage) (any, error) {
-		return toolchain.Collect(context.Background(), toolchain.CollectOptions{}), nil
+		return collectToolchains(context.Background(), toolchain.CollectOptions{}), nil
 	})
 
 	// toolchain.brew — Homebrew formulae, casks, and taps.
 	d.Register("toolchain.brew", func(_ json.RawMessage) (any, error) {
-		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
-		return tc.Brew, nil
+		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})
+		return map[string]any{
+			"formulae": tc.Brew.Formulae,
+			"casks":    tc.Brew.Casks,
+			"taps":     tc.Brew.Taps,
+		}, nil
 	})
 
 	// toolchain.runtimes — language runtime installs (Node, Python, Go, Ruby, Rust).
 	d.Register("toolchain.runtimes", func(_ json.RawMessage) (any, error) {
-		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})
 		return map[string]any{
 			"node":   tc.Node,
 			"python": tc.Python,
@@ -640,13 +672,13 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// toolchain.build_tools — installed JVM-ecosystem build tools (Maven, Gradle, Bazel, Make, CMake).
 	d.Register("toolchain.build_tools", func(_ json.RawMessage) (any, error) {
-		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})
 		return tc.BuildTools, nil
 	})
 
 	// jdk.scan — re-enumerate installed JDK toolchains (alias for jdk.list that signals a fresh scan intent).
 	d.Register("jdk.scan", func(_ json.RawMessage) (any, error) {
-		tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})
 		return tc.JDKs, nil
 	})
 
@@ -664,7 +696,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// Runs CollectConnections + CollectAll and joins on PID.
 	// Optional: {"bundles": ["/Applications/Foo.app"]} to scope app attribution.
 	d.Register("network.byApp", func(params json.RawMessage) (any, error) {
-		var p struct{ Bundles []string `json:"bundles"` }
+		var p struct {
+			Bundles []string `json:"bundles"`
+		}
 		_ = json.Unmarshal(params, &p)
 
 		conns := netstate.CollectConnections(netstate.DefaultRunner)
@@ -779,7 +813,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// cache.clear — evict cached data.
 	// Optional: { "kind": "detect" } to clear a single kind; omit for all.
 	d.Register("cache.clear", func(params json.RawMessage) (any, error) {
-		var p struct{ Kind string `json:"kind"` }
+		var p struct {
+			Kind string `json:"kind"`
+		}
 		_ = json.Unmarshal(params, &p)
 		if err := cacheReg.Clear(p.Kind); err != nil {
 			return nil, fmt.Errorf("cache clear: %w", err)
@@ -842,6 +878,7 @@ func runSampleCmd(pid, durationSec, intervalMS int) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(),
 		time.Duration(durationSec+5)*time.Second)
 	defer cancel()
+	// #nosec G204 -- PID, duration, and interval are integer arguments.
 	return exec.CommandContext(ctx, "sample",
 		strconv.Itoa(pid),
 		strconv.Itoa(durationSec),

@@ -34,13 +34,13 @@ func discoverBrew(run CmdRunner) (BrewInventory, error) {
 // brewInfoV2 mirrors the minimal structure of `brew info --json=v2 --installed`.
 type brewInfoV2 struct {
 	Formulae []struct {
-		Name      string `json:"name"`
-		FullName  string `json:"full_name"`
-		Tap       string `json:"tap"`
+		Name       string `json:"name"`
+		FullName   string `json:"full_name"`
+		Tap        string `json:"tap"`
 		Deprecated bool   `json:"deprecated"`
-		Installed []struct {
-			Version   string `json:"version"`
-			InstalledOnRequest bool `json:"installed_on_request"`
+		Installed  []struct {
+			Version            string `json:"version"`
+			InstalledOnRequest bool   `json:"installed_on_request"`
 		} `json:"installed"`
 		Pinned bool `json:"pinned"`
 	} `json:"formulae"`

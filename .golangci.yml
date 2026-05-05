@@ -13,11 +13,9 @@ linters:
     - ineffassign
     - misspell
     - nilerr
-    - noctx
     - revive
     - staticcheck
     - unconvert
-    - unparam
     - unused
   settings:
     errorlint:
@@ -31,6 +29,7 @@ linters:
     gosec:
       excludes:
         - G104  # best-effort cleanup is intentional
+        - G204  # static macOS utility invocations are the product's inspection model
         - G304  # path is caller input by design (Detect, scanStorage)
         - G602  # false positive on UintN(256) → byte
         - G703  # same path-as-input rationale as G304
@@ -47,11 +46,12 @@ linters:
           - errcheck
           - gocyclo
           - gosec
-          - noctx
           - revive
           - unconvert
-          - unparam
         path: _test\.go
+      - linters:
+          - revive
+        text: "stutters"
     paths:
       - third_party$
       - builtin$

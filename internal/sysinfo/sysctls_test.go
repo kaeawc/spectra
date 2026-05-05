@@ -21,9 +21,9 @@ func stubSysctl(responses map[string]string) CmdRunner {
 
 func TestCollectSysctls(t *testing.T) {
 	stub := stubSysctl(map[string]string{
-		"kern.maxfiles":        "49152",
-		"hw.ncpu":              "16",
-		"vm.memory_pressure":   "0",
+		"kern.maxfiles":      "49152",
+		"hw.ncpu":            "16",
+		"vm.memory_pressure": "0",
 	})
 	got := CollectSysctls(stub)
 

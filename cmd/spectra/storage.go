@@ -67,4 +67,3 @@ func printStorageState(s storagestate.State) {
 		}
 	}
 }
-

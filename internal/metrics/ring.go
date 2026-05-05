@@ -17,17 +17,17 @@ const maxSamples = 300
 
 // Sample is one point-in-time observation of a single process.
 type Sample struct {
-	TakenAt   time.Time `json:"taken_at"`
-	PID       int       `json:"pid"`
-	RSSKiB    int64     `json:"rss_kib"`
-	CPUPct    float64   `json:"cpu_pct"` // from ps -o pcpu (average since process start)
-	VSizeKiB  int64     `json:"vsize_kib"`
+	TakenAt  time.Time `json:"taken_at"`
+	PID      int       `json:"pid"`
+	RSSKiB   int64     `json:"rss_kib"`
+	CPUPct   float64   `json:"cpu_pct"` // from ps -o pcpu (average since process start)
+	VSizeKiB int64     `json:"vsize_kib"`
 }
 
 // Aggregate is the 1-minute summary written to SQLite on flush.
 type Aggregate struct {
 	PID         int       `json:"pid"`
-	MinuteAt    time.Time `json:"minute_at"`  // truncated to the minute
+	MinuteAt    time.Time `json:"minute_at"` // truncated to the minute
 	AvgRSSKiB   int64     `json:"avg_rss_kib"`
 	MaxRSSKiB   int64     `json:"max_rss_kib"`
 	AvgCPUPct   float64   `json:"avg_cpu_pct"`
@@ -38,8 +38,8 @@ type Aggregate struct {
 // RingBuffer holds the most recent samples for one PID in a circular buffer.
 type RingBuffer struct {
 	samples [maxSamples]Sample
-	head    int  // index where next sample will be written
-	count   int  // total samples stored (≤ maxSamples)
+	head    int // index where next sample will be written
+	count   int // total samples stored (≤ maxSamples)
 }
 
 // Add inserts a sample, overwriting the oldest when the buffer is full.
@@ -74,7 +74,10 @@ func (r *RingBuffer) Aggregate() []Aggregate {
 		return nil
 	}
 	// Group by truncated minute.
-	type key struct{ pid int; minute time.Time }
+	type key struct {
+		pid    int
+		minute time.Time
+	}
 	groups := make(map[key]*Aggregate)
 	for _, s := range samples {
 		minute := s.TakenAt.UTC().Truncate(time.Minute)

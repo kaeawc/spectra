@@ -128,11 +128,11 @@ func TestCollectorMissingPID(t *testing.T) {
 func TestParseSampleLine(t *testing.T) {
 	at := time.Now()
 	cases := []struct {
-		line    string
-		wantOK  bool
-		pid     int
-		rss     int64
-		cpuPct  float64
+		line   string
+		wantOK bool
+		pid    int
+		rss    int64
+		cpuPct float64
 	}{
 		{"  412  12345  67890  1.2", true, 412, 12345, 1.2},
 		{"1 100 200 0.5", true, 1, 100, 200}, // vsz in field 3, cpu in 4 — wait, check order

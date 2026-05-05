@@ -36,6 +36,7 @@ func run() int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// #nosec G301 -- /var/run must remain traversable so group ACLs on the socket matter.
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "spectra-helper: mkdir: %v\n", err)
 		return 1
@@ -49,6 +50,7 @@ func run() int {
 		return 1
 	}
 	// 0660: accessible to root and _spectra group members only.
+	// #nosec G302 -- helper socket intentionally grants _spectra group access.
 	if err := os.Chmod(sockPath, 0o660); err != nil {
 		ln.Close()
 		fmt.Fprintf(os.Stderr, "spectra-helper: chmod: %v\n", err)

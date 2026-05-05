@@ -7,6 +7,7 @@ package rpc
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -141,7 +142,7 @@ func isClosedErr(err error) bool {
 		return false
 	}
 	// net.ErrClosed is available since Go 1.16.
-	if err == net.ErrClosed {
+	if errors.Is(err, net.ErrClosed) {
 		return true
 	}
 	return false

@@ -154,6 +154,16 @@ func printTable(rs []detect.Result, verbose bool) {
 }
 
 func printMeta(r detect.Result) {
+	printIdentityMeta(r)
+	printSecurityMeta(r)
+	printPrivacyMeta(r)
+	printDependencyMeta(r)
+	printStructureMeta(r)
+	printRuntimeMeta(r)
+	printStorageMeta(r)
+}
+
+func printIdentityMeta(r detect.Result) {
 	if r.BundleID != "" {
 		ver := r.AppVersion
 		if r.BuildNumber != "" && r.BuildNumber != r.AppVersion {
@@ -175,6 +185,9 @@ func printMeta(r detect.Result) {
 		}
 		fmt.Printf("    team: %s%s\n", r.TeamID, extras)
 	}
+}
+
+func printSecurityMeta(r detect.Result) {
 	security := []string{}
 	if r.HardenedRuntime {
 		security = append(security, "hardened-runtime")
@@ -194,6 +207,9 @@ func printMeta(r detect.Result) {
 	if r.SparkleFeedURL != "" {
 		fmt.Printf("    sparkle feed: %s\n", r.SparkleFeedURL)
 	}
+}
+
+func printPrivacyMeta(r detect.Result) {
 	if len(r.GrantedPermissions) > 0 {
 		fmt.Printf("    privacy granted: %s\n", strings.Join(r.GrantedPermissions, ", "))
 	}
@@ -205,6 +221,9 @@ func printMeta(r detect.Result) {
 		sort.Strings(keys)
 		fmt.Printf("    privacy declared: %s\n", strings.Join(keys, ", "))
 	}
+}
+
+func printDependencyMeta(r detect.Result) {
 	if r.Dependencies != nil {
 		if len(r.Dependencies.ThirdPartyFrameworks) > 0 {
 			fmt.Printf("    frameworks (%d): %s\n", len(r.Dependencies.ThirdPartyFrameworks),
@@ -222,6 +241,9 @@ func printMeta(r detect.Result) {
 		fmt.Printf("    hosts (%d): %s\n", len(r.NetworkEndpoints),
 			truncateList(r.NetworkEndpoints, 8))
 	}
+}
+
+func printStructureMeta(r detect.Result) {
 	if r.Helpers != nil {
 		if len(r.Helpers.HelperApps) > 0 {
 			fmt.Printf("    helpers (%d): %s\n", len(r.Helpers.HelperApps), truncateList(r.Helpers.HelperApps, 6))
@@ -236,26 +258,32 @@ func printMeta(r detect.Result) {
 	if len(r.LoginItems) > 0 {
 		labels := make([]string, len(r.LoginItems))
 		for i, li := range r.LoginItems {
-			var flags []string
-			if li.Daemon {
-				flags = append(flags, "daemon")
-			} else if li.Scope == "system" {
-				flags = append(flags, "system")
-			}
-			if li.RunAtLoad {
-				flags = append(flags, "run-at-load")
-			}
-			if li.KeepAlive {
-				flags = append(flags, "keep-alive")
-			}
-			if len(flags) > 0 {
-				labels[i] = li.Label + " (" + strings.Join(flags, ", ") + ")"
-			} else {
-				labels[i] = li.Label
-			}
+			labels[i] = loginItemLabel(li)
 		}
 		fmt.Printf("    login items (%d): %s\n", len(labels), strings.Join(labels, ", "))
 	}
+}
+
+func loginItemLabel(li detect.LoginItem) string {
+	var flags []string
+	if li.Daemon {
+		flags = append(flags, "daemon")
+	} else if li.Scope == "system" {
+		flags = append(flags, "system")
+	}
+	if li.RunAtLoad {
+		flags = append(flags, "run-at-load")
+	}
+	if li.KeepAlive {
+		flags = append(flags, "keep-alive")
+	}
+	if len(flags) == 0 {
+		return li.Label
+	}
+	return li.Label + " (" + strings.Join(flags, ", ") + ")"
+}
+
+func printRuntimeMeta(r detect.Result) {
 	if len(r.RunningProcesses) > 0 {
 		var totalRSS int
 		var oldest time.Time
@@ -273,6 +301,9 @@ func printMeta(r detect.Result) {
 		fmt.Printf("    running: %d processes, %s RSS%s\n",
 			len(r.RunningProcesses), humanSize(int64(totalRSS)*1024), uptimeStr)
 	}
+}
+
+func printStorageMeta(r detect.Result) {
 	if r.Storage != nil {
 		parts := []string{}
 		add := func(label string, n int64) {

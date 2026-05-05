@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"testing"
 )
 
@@ -104,7 +105,7 @@ Slack    412  alice  1w  REG   1,15  0     123   /tmp/out
 		},
 		Deep: true,
 	}
-	_ = CollectAll(nil, opts)
+	_ = CollectAll(context.TODO(), opts)
 	if !deepCalled {
 		t.Error("expected lsof to be called when Deep=true")
 	}

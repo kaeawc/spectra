@@ -372,9 +372,9 @@ func TestPermissionMismatchUnknownServiceIgnored(t *testing.T) {
 	s := baseSnap()
 	s.Apps = []detect.Result{
 		{
-			Path:               "/Applications/FDA.app",
-			TeamID:             "TEAM1",
-			GrantedPermissions: []string{"SystemPolicyAllFiles", "Accessibility"},
+			Path:                "/Applications/FDA.app",
+			TeamID:              "TEAM1",
+			GrantedPermissions:  []string{"SystemPolicyAllFiles", "Accessibility"},
 			PrivacyDescriptions: map[string]string{},
 		},
 	}
@@ -398,7 +398,7 @@ func TestPermissionMismatchNoGrantedPermissions(t *testing.T) {
 
 func TestSparseFileInflationFires(t *testing.T) {
 	s := baseSnap()
-	actual := int64(5 * 1024 * 1024 * 1024)   // 5 GiB real
+	actual := int64(5 * 1024 * 1024 * 1024)    // 5 GiB real
 	apparent := int64(60 * 1024 * 1024 * 1024) // 60 GiB logical (12×)
 	s.Apps = []detect.Result{
 		{
@@ -418,7 +418,7 @@ func TestSparseFileInflationFires(t *testing.T) {
 
 func TestSparseFileInflationBelowThreshold(t *testing.T) {
 	s := baseSnap()
-	actual := int64(10 * 1024 * 1024 * 1024) // 10 GiB
+	actual := int64(10 * 1024 * 1024 * 1024)   // 10 GiB
 	apparent := int64(15 * 1024 * 1024 * 1024) // 15 GiB (1.5×)
 	s.Apps = []detect.Result{
 		{
@@ -438,7 +438,7 @@ func TestSparseFileInflationSmallBundle(t *testing.T) {
 	s.Apps = []detect.Result{
 		{
 			Path:              "/Applications/Tiny.app",
-			BundleSizeBytes:   100 * 1024,            // 100 KiB actual
+			BundleSizeBytes:   100 * 1024,               // 100 KiB actual
 			ApparentSizeBytes: 100 * 1024 * 1024 * 1024, // 100 GiB apparent (absurd edge case)
 		},
 	}
@@ -453,7 +453,7 @@ func TestEvaluateSortOrder(t *testing.T) {
 	s := baseSnap()
 	// RAMBytes = 16 GiB
 	s.JVMs = []jvm.Info{
-		{PID: 1, MainClass: "big", VMArgs: "-Xmx12g"}, // high
+		{PID: 1, MainClass: "big", VMArgs: "-Xmx12g"},   // high
 		{PID: 2, MainClass: "old", JDKVersion: "9.0.4"}, // medium
 	}
 	s.Storage = storagestate.State{UserLibraryBytes: 10 * 1024 * 1024 * 1024} // info

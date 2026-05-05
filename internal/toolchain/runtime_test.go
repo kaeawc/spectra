@@ -100,10 +100,10 @@ func TestDiscoverRustToolchains(t *testing.T) {
 
 func TestRustChannel(t *testing.T) {
 	cases := map[string]string{
-		"stable-aarch64-apple-darwin":                 "stable",
-		"nightly-2025-03-01-aarch64-apple-darwin":     "nightly",
-		"beta-aarch64-apple-darwin":                   "beta",
-		"1.78.0-aarch64-apple-darwin":                 "custom",
+		"stable-aarch64-apple-darwin":             "stable",
+		"nightly-2025-03-01-aarch64-apple-darwin": "nightly",
+		"beta-aarch64-apple-darwin":               "beta",
+		"1.78.0-aarch64-apple-darwin":             "custom",
 	}
 	for in, want := range cases {
 		if got := rustChannel(in); got != want {

@@ -96,17 +96,17 @@ func diffHost(a, b snapshot.Snapshot) Section {
 	return Section{Name: "host", Changes: changes}
 }
 
+type appInfo struct {
+	version          string
+	path             string
+	hardenedRuntime  bool
+	gatekeeperStatus string
+	teamID           string
+}
+
 // diffApps matches by bundle ID (falling back to path when bundle ID is empty).
 // Reports added, removed, version-changed, and security-changed apps.
 func diffApps(a, b snapshot.Snapshot) Section {
-	type appInfo struct {
-		version          string
-		path             string
-		hardenedRuntime  bool
-		gatekeeperStatus string
-		teamID           string
-	}
-
 	mapA := make(map[string]appInfo, len(a.Apps))
 	for _, r := range a.Apps {
 		k := r.BundleID
@@ -134,13 +134,6 @@ func diffApps(a, b snapshot.Snapshot) Section {
 		}
 	}
 
-	boolStr := func(v bool) string {
-		if v {
-			return "true"
-		}
-		return "false"
-	}
-
 	var changes []Change
 	for k, ia := range mapA {
 		ib, ok := mapB[k]
@@ -153,22 +146,14 @@ func diffApps(a, b snapshot.Snapshot) Section {
 		}
 		if ia.hardenedRuntime != ib.hardenedRuntime {
 			changes = append(changes, Change{Kind: Changed, Key: k + ":hardened-runtime",
-				Before: boolStr(ia.hardenedRuntime), After: boolStr(ib.hardenedRuntime)})
+				Before: boolString(ia.hardenedRuntime), After: boolString(ib.hardenedRuntime)})
 		}
 		if ia.gatekeeperStatus != ib.gatekeeperStatus && ia.gatekeeperStatus != "" && ib.gatekeeperStatus != "" {
 			changes = append(changes, Change{Kind: Changed, Key: k + ":gatekeeper",
 				Before: ia.gatekeeperStatus, After: ib.gatekeeperStatus})
 		}
 		if ia.teamID != ib.teamID {
-			before, after := ia.teamID, ib.teamID
-			if before == "" {
-				before = "(unsigned)"
-			}
-			if after == "" {
-				after = "(unsigned)"
-			}
-			changes = append(changes, Change{Kind: Changed, Key: k + ":team-id",
-				Before: before, After: after})
+			changes = append(changes, teamIDChange(k, ia.teamID, ib.teamID))
 		}
 	}
 	for k, ib := range mapB {
@@ -177,6 +162,23 @@ func diffApps(a, b snapshot.Snapshot) Section {
 		}
 	}
 	return Section{Name: "apps", Changes: changes}
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func teamIDChange(key, before, after string) Change {
+	if before == "" {
+		before = "(unsigned)"
+	}
+	if after == "" {
+		after = "(unsigned)"
+	}
+	return Change{Kind: Changed, Key: key + ":team-id", Before: before, After: after}
 }
 
 // diffJDKs matches by (major.minor.patch, vendor). Same identity at different
@@ -344,9 +346,9 @@ func diffSysctls(a, b snapshot.Snapshot) Section {
 // between the two snapshots.
 func diffActiveRuntimes(a, b snapshot.Snapshot) Section {
 	type langRuntimes struct {
-		name     string
-		aSlice   []toolchain.RuntimeInstall
-		bSlice   []toolchain.RuntimeInstall
+		name   string
+		aSlice []toolchain.RuntimeInstall
+		bSlice []toolchain.RuntimeInstall
 	}
 	langs := []langRuntimes{
 		{"node", a.Toolchains.Node, b.Toolchains.Node},

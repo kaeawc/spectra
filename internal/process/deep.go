@@ -28,8 +28,8 @@ func enrichDeep(procs []Info, run func(string, ...string) ([]byte, error)) {
 
 // deepResult accumulates per-PID results during lsof parsing.
 type deepResult struct {
-	fdCount      int
-	listenPorts  []int
+	fdCount       int
+	listenPorts   []int
 	outboundConns []string
 }
 
@@ -49,60 +49,79 @@ func parseLSOFDeep(procs []Info, out string) {
 	}
 
 	results := make(map[int]*deepResult, len(procs))
-
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			continue
-		}
-		if _, ok := idx[pid]; !ok {
-			continue
-		}
+		recordLSOFLine(idx, results, line)
+	}
+	applyDeepResults(procs, idx, results)
+}
 
-		r := results[pid]
-		if r == nil {
-			r = &deepResult{}
-			results[pid] = r
-		}
-
-		fd := fields[3]
-		// Count rows where FD starts with a digit — those are real open descriptors.
-		if len(fd) > 0 && fd[0] >= '0' && fd[0] <= '9' {
-			r.fdCount++
-		}
-
-		// Listening port detection: NODE=TCP, NAME contains "(LISTEN)".
-		// Outbound connection: NODE=TCP, NAME contains "->", no "(LISTEN)".
-		if len(fields) >= 9 {
-			node := strings.ToUpper(fields[7])
-			if node == "TCP" {
-				name := strings.Join(fields[8:], " ")
-				if strings.Contains(name, "(LISTEN)") {
-					// Extract port from "host:port (LISTEN)".
-					addr := strings.TrimSuffix(name, " (LISTEN)")
-					if colon := strings.LastIndex(addr, ":"); colon >= 0 {
-						if port, err := strconv.Atoi(addr[colon+1:]); err == nil && port > 0 {
-							r.listenPorts = append(r.listenPorts, port)
-						}
-					}
-				} else if idx2 := strings.Index(name, "->"); idx2 >= 0 {
-					// "local->remote (STATE)" — record the remote address.
-					remote := name[idx2+2:]
-					if sp := strings.Index(remote, " "); sp >= 0 {
-						remote = remote[:sp]
-					}
-					if remote != "" {
-						r.outboundConns = append(r.outboundConns, remote)
-					}
-				}
-			}
-		}
+func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return
+	}
+	pid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return
+	}
+	if _, ok := idx[pid]; !ok {
+		return
 	}
 
+	r := results[pid]
+	if r == nil {
+		r = &deepResult{}
+		results[pid] = r
+	}
+
+	fd := fields[3]
+	// Count rows where FD starts with a digit — those are real open descriptors.
+	if len(fd) > 0 && fd[0] >= '0' && fd[0] <= '9' {
+		r.fdCount++
+	}
+	if len(fields) >= 9 && strings.EqualFold(fields[7], "TCP") {
+		recordTCPName(r, strings.Join(fields[8:], " "))
+	}
+}
+
+func recordTCPName(r *deepResult, name string) {
+	if strings.Contains(name, "(LISTEN)") {
+		if port := parseListenPort(name); port > 0 {
+			r.listenPorts = append(r.listenPorts, port)
+		}
+		return
+	}
+	if remote := parseRemoteAddress(name); remote != "" {
+		r.outboundConns = append(r.outboundConns, remote)
+	}
+}
+
+func parseListenPort(name string) int {
+	addr := strings.TrimSuffix(name, " (LISTEN)")
+	colon := strings.LastIndex(addr, ":")
+	if colon < 0 {
+		return 0
+	}
+	port, err := strconv.Atoi(addr[colon+1:])
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
+}
+
+func parseRemoteAddress(name string) string {
+	idx := strings.Index(name, "->")
+	if idx < 0 {
+		return ""
+	}
+	remote := name[idx+2:]
+	if sp := strings.Index(remote, " "); sp >= 0 {
+		remote = remote[:sp]
+	}
+	return remote
+}
+
+func applyDeepResults(procs []Info, idx map[int]int, results map[int]*deepResult) {
 	// Write results back into the procs slice.
 	for pid, r := range results {
 		i := idx[pid]

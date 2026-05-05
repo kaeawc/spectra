@@ -172,6 +172,7 @@ func runHelperStatus(args []string) int {
 }
 
 func sudoRun(name string, args ...string) error {
+	// #nosec G204 -- sudo is invoked only for the fixed helper management commands.
 	cmd := exec.Command("sudo", append([]string{name}, args...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

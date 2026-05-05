@@ -2,6 +2,7 @@ package helper
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -107,7 +108,7 @@ func (d *Dispatcher) ServeListener(ln net.Listener) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if err == net.ErrClosed {
+			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
 			return err

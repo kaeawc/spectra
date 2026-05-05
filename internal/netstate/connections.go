@@ -28,7 +28,8 @@ func CollectConnections(run CmdRunner) []Connection {
 // parseLSOFConnections extracts active connections from `lsof -i -P -n` output.
 //
 // lsof column order: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME [STATE]
-//   NODE is "TCP" or "UDP"; NAME is "local->remote"; STATE is "(ESTABLISHED)" etc.
+//
+//	NODE is "TCP" or "UDP"; NAME is "local->remote"; STATE is "(ESTABLISHED)" etc.
 //
 // Example lines:
 //
