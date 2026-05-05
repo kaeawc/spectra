@@ -7,4 +7,4 @@
 junit-report.xml
 gosec-report.xml
 site/
-spectra-helper
+/spectra-helper

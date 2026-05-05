@@ -17,25 +17,44 @@ make build
 ./spectra /Applications/Slack.app
 ```
 
-## Planned: Homebrew
+To build both the CLI and optional privileged helper:
+
+```bash
+make build-all
+./spectra version
+./spectra-helper --version
+```
+
+`spectra install-helper` expects the `spectra-helper` binary to live next
+to the `spectra` binary that is running, which `make build-all` does in
+the repo root.
+
+## Homebrew
 
 ```bash
 brew install kaeawc/tap/spectra
 spectra /Applications/Slack.app
 ```
 
-## Planned: Privileged helper
+The formula is not published yet; source build is the supported path for
+now.
+
+## Privileged helper
 
 For telemetry that requires root (system TCC.db, `fs_usage`, `powermetrics`),
-Spectra will ship an optional helper installable via:
+Spectra has an optional helper installable from a source build:
 
 ```bash
+make build-all
 sudo spectra install-helper
+spectra install-helper --status
 ```
 
-The helper registers as a `SMAppService.daemon` (macOS 13+) and exposes
-root-only data over a local Unix socket to the unprivileged daemon. The
-unprivileged tier still works without it for everything we currently scan.
+The current installer copies `spectra-helper` to
+`/Library/PrivilegedHelperTools/`, writes a LaunchDaemon plist, and starts
+it with `launchctl`. It exposes root-only data over a local Unix socket to
+the unprivileged daemon. The unprivileged tier still works without it for
+everything that does not require root.
 
 See [design/distribution.md](design/distribution.md) for the full
 capability-vs-channel matrix.
