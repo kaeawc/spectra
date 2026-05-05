@@ -225,8 +225,8 @@ Things Spectra commits to before v1 release:
 ## Reporting issues
 
 Security issues should be reported privately to the maintainers. See
-[../../SECURITY.md](../../SECURITY.md) for the current reporting
-policy.
+the [security policy](https://github.com/kaeawc/spectra/security/policy)
+for the current reporting process.
 
 ## See also
 
