@@ -216,8 +216,10 @@ and impersonates the daemon as that tailnet node.
 - Helper stderr is written by launchd to `/var/log/spectra-helper.log`.
   The helper emits structured per-call JSON audit records there. Dedicated
   rotation remains planned.
-- Daemon logs currently go to the foreground process. Structured daemon
-  logs under `~/Library/Logs/Spectra/` are planned.
+- Daemon lifecycle logs are written as JSONL to
+  `~/Library/Logs/Spectra/daemon.jsonl` by default, with `0600`
+  permissions. Foreground status lines still go to stderr for interactive
+  use.
 - Logs do **not** include heap-dump contents, JFR contents, or
   process command-line arguments (which may contain secrets).
 

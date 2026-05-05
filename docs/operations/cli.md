@@ -269,6 +269,8 @@ controls you trust.
 
 ```bash
 spectra serve
+spectra serve --log-file /tmp/spectra-daemon.jsonl
+spectra serve --no-log-file
 spectra serve --tcp 127.0.0.1:7878
 spectra serve --tcp 100.64.0.5:7878 --allow-remote
 ```

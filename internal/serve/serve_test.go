@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/store"
@@ -117,6 +119,62 @@ func TestDaemonHealthEndpoint(t *testing.T) {
 	if m["version"] != "test-version" {
 		t.Errorf("version = %v, want test-version", m["version"])
 	}
+}
+
+func TestRunLogsLifecycle(t *testing.T) {
+	dir, err := os.MkdirTemp("", "sp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sockPath := filepath.Join(dir, "s.sock")
+	dbPath := filepath.Join(dir, "t.db")
+	logs := logger.NewCapture(slog.LevelInfo)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, Options{
+			SockPath:       sockPath,
+			DBPath:         dbPath,
+			SpectraVersion: "test-version",
+			CacheRegistry:  cache.Default,
+			Logger:         logs,
+		})
+	}()
+
+	waitForSocket(t, sockPath)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancellation")
+	}
+	if !logs.HasMessage("daemon unix listener ready") {
+		t.Fatalf("missing listener log: %+v", logs.Records())
+	}
+	if !logs.HasMessage("daemon storage ready") {
+		t.Fatalf("missing storage log: %+v", logs.Records())
+	}
+	if !logs.HasMessage("daemon stopped") {
+		t.Fatalf("missing stopped log: %+v", logs.Records())
+	}
+}
+
+func waitForSocket(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("socket %s was not created", path)
 }
 
 func TestDaemonSnapshotList(t *testing.T) {
