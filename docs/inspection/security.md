@@ -124,7 +124,11 @@ Slack
 Slack has ScreenCapture granted that wasn't in its declared list — this
 is the exact pattern the recommendations engine
 ([../design/recommendations-engine.md](../design/recommendations-engine.md))
-will flag in the future as a permission-vs-declaration mismatch.
+flags today as `permission-mismatch` when the granted TCC service maps to
+a required `NS*UsageDescription` key that is missing from `Info.plist`.
+Services that macOS grants through generic system prompts, such as
+Accessibility or ScreenCapture, are intentionally ignored by that rule
+until there is a stable declaration key to compare against.
 
 ## Implementation reference
 
