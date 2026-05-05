@@ -224,8 +224,9 @@ Things Spectra commits to before v1 release:
 
 ## Reporting issues
 
-Security issues should be reported privately to the maintainers. A
-`SECURITY.md` will land alongside the v0.1 release with PGP details.
+Security issues should be reported privately to the maintainers. See
+[../../SECURITY.md](../../SECURITY.md) for the current reporting
+policy.
 
 ## See also
 
