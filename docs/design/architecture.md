@@ -4,9 +4,9 @@ Spectra is heading toward a daemon-with-clients model where the same Go
 binary acts as either a long-lived collector or as a lightweight client
 that queries a local or remote daemon over JSON-RPC.
 
-## Today: single-binary CLI
+## Today: CLI plus optional daemon
 
-The current `spectra` binary runs static inspection in a single pass per
+The current `spectra` binary can run static inspection in a single pass per
 invocation:
 
 ```
@@ -28,20 +28,29 @@ Each sub-detection is independent. Results accumulate into a single
 `detect.Result` struct (see
 [reference/result-schema.md](../reference/result-schema.md)).
 
-## Planned: daemon-with-clients
+It can also run a JSON-RPC daemon:
+
+```bash
+spectra serve                         # Unix socket at ~/.spectra/sock
+spectra serve --tcp 127.0.0.1:7878    # opt-in TCP listener
+spectra connect 127.0.0.1:7878        # health check
+spectra connect 127.0.0.1:7878 call snapshot.create
+```
+
+## Daemon-with-clients
 
 Spectra is shaping into three roles played by the same binary:
 
 ```
 ┌─ Collector (long-lived) ───────────────────────────────────┐
 │  spectra serve                                              │
-│  ├ Listens on Unix socket and tsnet (Tailscale)            │
+│  ├ Listens on Unix socket and optional TCP JSON-RPC         │
 │  ├ Caches Detect() results keyed by content hash           │
 │  ├ Periodically samples live state (ps, lsof, nettop)      │
 │  ├ Writes snapshots to SQLite                              │
 │  └ Talks to optional privileged helper for root-only data  │
 └────────────────────────────────────────────────────────────┘
-        ↑ JSON-RPC over Unix socket / tsnet
+        ↑ JSON-RPC over Unix socket / explicit TCP
 ┌─ Client (interactive) ─────────────────────────────────────┐
 │  spectra list / spectra inspect / spectra connect host     │
 │  ├ Renders to terminal (table or JSON)                     │
@@ -50,8 +59,8 @@ Spectra is shaping into three roles played by the same binary:
         ↑ same RPC surface, talks to local or remote daemon
 ┌─ Privileged helper (optional, root) ───────────────────────┐
 │  Installed by `sudo spectra install-helper`                 │
-│  ├ Registered as SMAppService.daemon (macOS 13+)           │
-│  ├ Reads system TCC.db, runs fs_usage / powermetrics       │
+│  ├ Installed as a LaunchDaemon                             │
+│  ├ Reads system TCC.db, runs powermetrics                  │
 │  └ Exposes data over a local Unix socket to the daemon     │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -72,7 +81,7 @@ required only for root-grade visibility.
   imply a single owner of the SQLite database — that's the daemon.
 - **Remote portal is the primary use case.** See
   [remote-portal.md](remote-portal.md). A long-lived daemon that's a
-  tailnet node makes "inspect a teammate's Mac" a one-line command.
+  tailnet node will make "inspect a teammate's Mac" a one-line command.
 
 ## Why not native macOS GUI from the start
 
@@ -86,14 +95,9 @@ incompatible with this architecture.
 
 ## RPC protocol
 
-Decision pending. Strong candidates:
+The implemented daemon protocol is newline-delimited JSON-RPC 2.0 over
+Unix sockets or explicit TCP. `tsnet` remains the planned Tailscale
+transport; it should carry the same RPC method surface rather than create
+a separate API.
 
-- **JSON-RPC 2.0 over HTTP** (carried by `tsnet` for transport): boring,
-  portable, debuggable with `curl`. Future SwiftUI client can hit it
-  natively.
-- **gRPC**: more typed, harder to cross-language without codegen.
-- **Custom framed JSON over Unix socket**: simplest, least debuggable.
-
-Leaning toward JSON-RPC over HTTP for protocol stability and ease of
-manual debugging. See [design/storage.md](storage.md) for the data the
-RPC will be moving.
+See [storage.md](storage.md) for the data the RPC moves.
