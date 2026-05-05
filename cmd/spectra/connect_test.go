@@ -73,6 +73,34 @@ func TestParseConnectCall(t *testing.T) {
 	}
 }
 
+func TestParseConnectTypedCalls(t *testing.T) {
+	tests := []struct {
+		args       []string
+		wantMethod string
+		wantParams string
+	}{
+		{args: []string{"jvm"}, wantMethod: "jvm.list"},
+		{args: []string{"processes"}, wantMethod: "process.list"},
+		{args: []string{"network"}, wantMethod: "network.state"},
+		{args: []string{"toolchains"}, wantMethod: "toolchain.scan"},
+		{args: []string{"inspect", "/Applications/Slack.app"}, wantMethod: "inspect.app", wantParams: `{"path":"/Applications/Slack.app"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.wantMethod, func(t *testing.T) {
+			method, params, err := parseConnectCall(tt.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if method != tt.wantMethod {
+				t.Fatalf("method = %q, want %q", method, tt.wantMethod)
+			}
+			if tt.wantParams != "" && string(params) != tt.wantParams {
+				t.Fatalf("params = %s, want %s", string(params), tt.wantParams)
+			}
+		})
+	}
+}
+
 func TestCallRPC(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()

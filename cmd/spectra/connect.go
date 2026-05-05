@@ -72,7 +72,8 @@ func runConnect(args []string) int {
 }
 
 func printConnectUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|health]")
+	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|health|jvm|processes|network|toolchains]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "targets: local, unix:/path/to/sock, /path/to/sock, host:port, host")
@@ -104,6 +105,34 @@ func parseConnectTarget(raw string) (connectTarget, error) {
 func parseConnectCall(args []string) (string, json.RawMessage, error) {
 	if len(args) == 0 || args[0] == "status" || args[0] == "health" {
 		return "health", nil, nil
+	}
+	switch args[0] {
+	case "jvm":
+		if len(args) != 1 {
+			return "", nil, fmt.Errorf("connect jvm takes no extra arguments")
+		}
+		return "jvm.list", nil, nil
+	case "process", "processes":
+		if len(args) != 1 {
+			return "", nil, fmt.Errorf("connect processes takes no extra arguments")
+		}
+		return "process.list", nil, nil
+	case "network":
+		if len(args) != 1 {
+			return "", nil, fmt.Errorf("connect network takes no extra arguments")
+		}
+		return "network.state", nil, nil
+	case "toolchain", "toolchains":
+		if len(args) != 1 {
+			return "", nil, fmt.Errorf("connect toolchains takes no extra arguments")
+		}
+		return "toolchain.scan", nil, nil
+	case "inspect":
+		if len(args) != 2 {
+			return "", nil, fmt.Errorf("connect inspect requires <App.app>")
+		}
+		params, _ := json.Marshal(map[string]string{"path": args[1]})
+		return "inspect.app", json.RawMessage(params), nil
 	}
 	if args[0] != "call" || len(args) < 2 || len(args) > 3 {
 		return "", nil, fmt.Errorf("invalid connect command")
