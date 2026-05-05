@@ -17,6 +17,8 @@ func issuesSubcommands() []subcommand {
 	return []subcommand{
 		{"list", "List stored issues", runIssuesList},
 		{"update", "Update an issue status", runIssuesUpdate},
+		{"acknowledge", "Mark an issue acknowledged", runIssuesAcknowledge},
+		{"dismiss", "Mark an issue dismissed", runIssuesDismiss},
 		{"check", "Run rules, record findings as issues, and print a summary", runIssuesCheck},
 	}
 }
@@ -114,6 +116,41 @@ func runIssuesUpdate(args []string) int {
 		return 1
 	}
 	fmt.Printf("issue %s → %s\n", id, *status)
+	return 0
+}
+
+func runIssuesAcknowledge(args []string) int {
+	return runIssuesSetStatus(args, "acknowledge", store.IssueAcknowledged)
+}
+
+func runIssuesDismiss(args []string) int {
+	return runIssuesSetStatus(args, "dismiss", store.IssueDismissed)
+}
+
+func runIssuesSetStatus(args []string, verb string, status store.IssueStatus) int {
+	fs := flag.NewFlagSet("spectra issues "+verb, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintf(os.Stderr, "usage: spectra issues %s <issue-id>\n", verb)
+		return 2
+	}
+
+	db, _, err := openIssuesDB()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	id := fs.Arg(0)
+	if err := db.UpdateIssueStatus(context.Background(), id, status); err != nil {
+		fmt.Fprintf(os.Stderr, "%s %q: %v\n", verb, id, err)
+		return 1
+	}
+	fmt.Printf("issue %s → %s\n", id, status)
 	return 0
 }
 
