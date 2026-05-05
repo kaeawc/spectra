@@ -3,7 +3,9 @@
 Spectra implements the JDK shell-tool layer of JVM inspection today:
 running-process discovery, structured per-PID metadata, thread dumps,
 heap histograms, heap dumps, one-shot GC stats, and JFR start/dump/stop.
-The planned in-process Java agent layer is still future work.
+It also attributes running JVMs back to the installed-JDK inventory when
+`java.home` matches a discovered JDK path. The in-process Java agent
+layer remains future work.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -110,8 +112,9 @@ JAVA_RUNTIME_VERSION="21.0.6+7-LTS"
 
 Running Java processes expose their `java.home`, `java.vendor`, and
 `java.version` properties through `jcmd VM.system_properties`. Spectra
-prints and serializes those fields today; explicit matching back to the
-installed-JDK inventory is still a higher-level correlation step.
+prints and serializes those fields today, and uses `java.home` to attach
+`jdk_install_id`, `jdk_source`, and `jdk_path` when the running JVM
+matches a discovered install.
 
 ## Sample output
 
@@ -128,6 +131,8 @@ Main class    com.intellij.idea.Main
 JDK vendor    JetBrains s.r.o.
 JDK version   21.0.6
 Java home     /Users/me/Library/Application Support/JetBrains/Toolbox/apps/.../jbr/Contents/Home
+JDK install   jbr-toolbox-jetbrains-s-r-o-21.0.6
+JDK source    jbr-toolbox
 VM args       -Xmx4g -Xms256m ...
 VM flags      -XX:+UseG1GC ...
 Threads       87
@@ -159,10 +164,11 @@ Implemented:
    thread count, thread dump, class histogram, heap dump, and JFR control.
 4. `jstat -gc` one-shot GC counter parsing.
 5. CLI and daemon RPC surfaces for the implemented collectors.
+6. Path-based attribution from each running JVM's `java.home` to the
+   installed-JDK inventory.
 
 Future:
 
 1. Java agent JAR for in-process capabilities.
 2. Async-profiler / flamegraph integration.
 3. JFR file parser and structured JFR summaries.
-4. Higher-level JDK install attribution for each running process.

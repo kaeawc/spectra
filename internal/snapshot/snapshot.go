@@ -191,6 +191,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 
 	wg.Wait()
+	jvm.AttributeJDKs(s.JVMs, s.Toolchains.JDKs)
 	return s
 }
 

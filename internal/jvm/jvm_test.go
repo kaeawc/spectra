@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // --- jps parsing ---
@@ -332,5 +334,67 @@ java_command: com.example.Server
 	}
 	if info.SysProps["java.home"] != "/usr/lib/jvm/temurin-21" {
 		t.Errorf("java.home = %q", info.SysProps["java.home"])
+	}
+}
+
+func TestCollectAllAttributesJDKInstall(t *testing.T) {
+	run := func(name string, args ...string) ([]byte, error) {
+		switch name {
+		case "jps":
+			return []byte("4012 com.example.Server\n"), nil
+		case "jcmd":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("jcmd needs args")
+			}
+			switch args[1] {
+			case "VM.system_properties":
+				return []byte(`java.home=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+java.vendor=Eclipse Adoptium
+java.version=21.0.6
+`), nil
+			case "VM.command_line":
+				return []byte("jvm_args: -Xmx2g\n"), nil
+			case "Thread.print":
+				return []byte("\"main\" #1 prio=5\n"), nil
+			}
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+
+	got := CollectAll(context.Background(), CollectOptions{
+		CmdRunner: run,
+		JDKs: []toolchain.JDKInstall{{
+			InstallID: "system-eclipse-adoptium-21.0.6",
+			Path:      "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+			Source:    "system",
+		}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 JVM info, got %d", len(got))
+	}
+	info := got[0]
+	if info.JDKInstallID != "system-eclipse-adoptium-21.0.6" {
+		t.Errorf("JDKInstallID = %q", info.JDKInstallID)
+	}
+	if info.JDKSource != "system" {
+		t.Errorf("JDKSource = %q", info.JDKSource)
+	}
+	if info.JDKPath != "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home" {
+		t.Errorf("JDKPath = %q", info.JDKPath)
+	}
+}
+
+func TestAttributeJDKsUpdatesExistingInfos(t *testing.T) {
+	infos := []Info{{
+		PID:      4012,
+		JavaHome: "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+	}}
+	AttributeJDKs(infos, []toolchain.JDKInstall{{
+		InstallID: "system-eclipse-adoptium-21.0.6",
+		Path:      "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+		Source:    "system",
+	}})
+	if infos[0].JDKInstallID != "system-eclipse-adoptium-21.0.6" {
+		t.Errorf("JDKInstallID = %q", infos[0].JDKInstallID)
 	}
 }

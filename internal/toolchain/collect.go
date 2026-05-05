@@ -129,6 +129,25 @@ func Collect(ctx context.Context, opts CollectOptions) Toolchains {
 	return out
 }
 
+// CollectJDKs enumerates only installed JDKs. Use this from JVM inspection
+// paths that need attribution without paying for the full toolchain inventory.
+func CollectJDKs(ctx context.Context, opts CollectOptions) []JDKInstall {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+	opts = withDefaults(opts)
+	jdks, err := discoverJDKs(opts)
+	if err != nil {
+		return nil
+	}
+	return jdks
+}
+
 func withDefaults(o CollectOptions) CollectOptions {
 	if o.Home == "" {
 		h, _ := os.UserHomeDir()

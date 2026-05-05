@@ -61,3 +61,22 @@ JAVA_RUNTIME_VERSION="21.0.6+7-LTS"
 		t.Errorf("ActiveJVMManager: got %q, want jenv", tc.ActiveJVMManager)
 	}
 }
+
+func TestCollectJDKsOnly(t *testing.T) {
+	home := t.TempDir()
+	sdkBase := filepath.Join(home, ".sdkman", "candidates", "java")
+	makeJDK(t, sdkBase, "21.0.6-tem", "21.0.6", "21.0.6+7-LTS", "Eclipse Adoptium")
+
+	jdks := CollectJDKs(context.Background(), CollectOptions{
+		Home:          home,
+		BrewCellars:   []string{filepath.Join(home, "cellar")},
+		SystemJVMRoot: filepath.Join(home, "nope"),
+		UserJVMRoot:   filepath.Join(home, "nope2"),
+	})
+	if len(jdks) != 1 {
+		t.Fatalf("JDKs: got %d, want 1", len(jdks))
+	}
+	if jdks[0].Source != "sdkman" {
+		t.Errorf("Source = %q, want sdkman", jdks[0].Source)
+	}
+}

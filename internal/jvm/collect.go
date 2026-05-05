@@ -3,13 +3,19 @@ package jvm
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
+
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // CollectOptions configure the JVM collector.
 type CollectOptions struct {
 	// CmdRunner is used for all subprocess calls. Nil means DefaultRunner.
 	CmdRunner CmdRunner
+	// JDKs is the already-discovered JDK inventory used to attribute each
+	// running JVM's java.home back to an installed toolchain.
+	JDKs []toolchain.JDKInstall
 }
 
 // CollectAll discovers all running JVM processes and collects per-process
@@ -35,7 +41,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			info := collectOne(ctx, pid, main, run)
+			info := collectOne(ctx, pid, main, run, opts.JDKs)
 			mu.Lock()
 			results = append(results, info)
 			mu.Unlock()
@@ -56,12 +62,20 @@ func InspectPID(_ context.Context, pid int, opts CollectOptions) *Info {
 	if _, err := run("jcmd", fmt.Sprint(pid), "VM.version"); err != nil {
 		return nil
 	}
-	info := collectOne(context.Background(), pid, "", run)
+	info := collectOne(context.Background(), pid, "", run, opts.JDKs)
 	return &info
 }
 
+// AttributeJDKs attaches installed-JDK identity fields to already-collected
+// JVM process snapshots when java.home matches a discovered JDK path.
+func AttributeJDKs(infos []Info, jdks []toolchain.JDKInstall) {
+	for i := range infos {
+		attributeJDK(&infos[i], jdks)
+	}
+}
+
 // collectOne gathers Info for a single PID.
-func collectOne(_ context.Context, pid int, main string, run CmdRunner) Info {
+func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []toolchain.JDKInstall) Info {
 	info := Info{PID: pid, MainClass: main}
 
 	props := collectSysProps(pid, run)
@@ -74,6 +88,26 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner) Info {
 
 	info.VMFlags, info.VMArgs = collectCommandLine(pid, run)
 	info.ThreadCount = collectThreadCount(pid, run)
+	attributeJDK(&info, jdks)
 
 	return info
+}
+
+func attributeJDK(info *Info, jdks []toolchain.JDKInstall) {
+	if info == nil || info.JavaHome == "" || len(jdks) == 0 {
+		return
+	}
+	javaHome := filepath.Clean(info.JavaHome)
+	for _, install := range jdks {
+		if install.Path == "" {
+			continue
+		}
+		if filepath.Clean(install.Path) != javaHome {
+			continue
+		}
+		info.JDKInstallID = install.InstallID
+		info.JDKSource = install.Source
+		info.JDKPath = install.Path
+		return
+	}
 }

@@ -40,6 +40,7 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 
 	d := rpc.NewDispatcher()
 	origCollectToolchains := collectToolchains
+	origCollectJDKs := collectJDKs
 	collectToolchains = func(context.Context, toolchain.CollectOptions) toolchain.Toolchains {
 		return toolchain.Toolchains{
 			Brew: toolchain.BrewInventory{
@@ -56,7 +57,13 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 			BuildTools: []toolchain.BuildTool{},
 		}
 	}
-	t.Cleanup(func() { collectToolchains = origCollectToolchains })
+	collectJDKs = func(context.Context, toolchain.CollectOptions) []toolchain.JDKInstall {
+		return nil
+	}
+	t.Cleanup(func() {
+		collectToolchains = origCollectToolchains
+		collectJDKs = origCollectJDKs
+	})
 	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil)
 
 	ln, err := net.Listen("unix", sockPath)

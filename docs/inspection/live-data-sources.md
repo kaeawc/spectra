@@ -89,8 +89,9 @@ helper is installed and reachable.
 
 All require a JDK in `$PATH` — see [toolchains.md](toolchains.md) for
 JDK discovery. Running JVM inspection records each process's `java.home`,
-`java.vendor`, and `java.version`; higher-level attribution back to a
-discovered JDK install is still future work.
+`java.vendor`, and `java.version`. When `java.home` matches a discovered
+JDK path, Spectra also records `jdk_install_id`, `jdk_source`, and
+`jdk_path`.
 
 ## Code-signing and entitlements
 

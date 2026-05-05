@@ -90,6 +90,9 @@ JVMInfo {
   java_home
   jdk_vendor
   jdk_version
+  jdk_install_id
+  jdk_source
+  jdk_path
   vm_args
   vm_flags
   thread_count

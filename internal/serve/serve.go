@@ -35,6 +35,7 @@ import (
 
 var (
 	collectToolchains = toolchain.Collect
+	collectJDKs       = toolchain.CollectJDKs
 	runJFRDump        = jvm.JFRDump
 )
 
@@ -542,14 +543,15 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			PID int `json:"pid"`
 		}
 		_ = json.Unmarshal(params, &p)
+		jvmOpts := daemonJVMOptions()
 		if p.PID != 0 {
-			info := jvm.InspectPID(context.Background(), p.PID, jvm.CollectOptions{})
+			info := jvm.InspectPID(context.Background(), p.PID, jvmOpts)
 			if info == nil {
 				return nil, fmt.Errorf("JVM PID %d not found", p.PID)
 			}
 			return info, nil
 		}
-		return jvm.CollectAll(context.Background(), jvm.CollectOptions{}), nil
+		return jvm.CollectAll(context.Background(), jvmOpts), nil
 	})
 
 	// jvm.thread_dump — run `jcmd <pid> Thread.print` and return the raw text.
@@ -675,7 +677,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.inspect requires {\"pid\": <pid>}")
 		}
-		info := jvm.InspectPID(context.Background(), p.PID, jvm.CollectOptions{})
+		info := jvm.InspectPID(context.Background(), p.PID, daemonJVMOptions())
 		if info == nil {
 			return nil, fmt.Errorf("JVM PID %d not found or not a Java process", p.PID)
 		}
@@ -937,6 +939,10 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		return result, nil
 	})
+}
+
+func daemonJVMOptions() jvm.CollectOptions {
+	return jvm.CollectOptions{JDKs: collectJDKs(context.Background(), toolchain.CollectOptions{})}
 }
 
 // runSampleCmd runs `sample <pid> <duration> <interval>` and returns stdout.
