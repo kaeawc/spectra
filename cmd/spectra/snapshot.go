@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
 // snapshotSubcommands returns snapshot sub-subcommands. Separate function
@@ -283,24 +284,101 @@ func printSnapshot(s snapshot.Snapshot) {
 	fmt.Println()
 	fmt.Print(s.Host.String())
 
-	if len(s.Apps) == 0 {
+	if len(s.Apps) > 0 {
+		fmt.Println()
+		fmt.Printf("apps:           %d inspected\n", len(s.Apps))
+
+		byUI := map[string]int{}
+		for _, a := range s.Apps {
+			byUI[a.UI]++
+		}
+		keys := make([]string, 0, len(byUI))
+		for k := range byUI {
+			keys = append(keys, k)
+		}
+		sortStrings(keys)
+		fmt.Println("by-ui:")
+		for _, k := range keys {
+			fmt.Printf("  %-26s %d\n", k, byUI[k])
+		}
+	}
+
+	printSnapshotToolchains(s)
+	printSnapshotNetwork(s)
+	printSnapshotPower(s)
+}
+
+func printSnapshotToolchains(s snapshot.Snapshot) {
+	tc := s.Toolchains
+	if len(tc.JDKs) == 0 && len(tc.Node) == 0 && len(tc.Python) == 0 &&
+		len(tc.Go) == 0 && len(tc.Ruby) == 0 && len(tc.Brew.Formulae) == 0 &&
+		len(tc.BuildTools) == 0 {
 		return
 	}
 	fmt.Println()
-	fmt.Printf("apps:           %d inspected\n", len(s.Apps))
+	fmt.Println("toolchains:")
+	if len(tc.JDKs) > 0 {
+		fmt.Printf("  jdks:          %d installed\n", len(tc.JDKs))
+	}
+	if len(tc.Brew.Formulae) > 0 {
+		fmt.Printf("  brew formulae: %d installed\n", len(tc.Brew.Formulae))
+	}
+	for _, rt := range []struct {
+		name string
+		list []toolchain.RuntimeInstall
+	}{
+		{"node", tc.Node}, {"python", tc.Python},
+		{"go", tc.Go}, {"ruby", tc.Ruby},
+	} {
+		if len(rt.list) == 0 {
+			continue
+		}
+		active := ""
+		for _, r := range rt.list {
+			if r.Active {
+				active = " (active: " + r.Version + ")"
+				break
+			}
+		}
+		fmt.Printf("  %-14s %d version(s)%s\n", rt.name+":", len(rt.list), active)
+	}
+	if len(tc.BuildTools) > 0 {
+		fmt.Printf("  build tools:   %d installed\n", len(tc.BuildTools))
+	}
+}
 
-	byUI := map[string]int{}
-	for _, a := range s.Apps {
-		byUI[a.UI]++
+func printSnapshotNetwork(s snapshot.Snapshot) {
+	n := s.Network
+	if !n.VPNActive && len(n.ListeningPorts) == 0 && n.EstablishedConnectionsCount == 0 {
+		return
 	}
-	keys := make([]string, 0, len(byUI))
-	for k := range byUI {
-		keys = append(keys, k)
+	fmt.Println()
+	fmt.Println("network:")
+	if n.VPNActive {
+		fmt.Printf("  vpn:           active\n")
 	}
-	sortStrings(keys)
-	fmt.Println("by-ui:")
-	for _, k := range keys {
-		fmt.Printf("  %-26s %d\n", k, byUI[k])
+	if n.EstablishedConnectionsCount > 0 {
+		fmt.Printf("  connections:   %d established\n", n.EstablishedConnectionsCount)
+	}
+	if len(n.ListeningPorts) > 0 {
+		fmt.Printf("  listening:     %d ports\n", len(n.ListeningPorts))
+	}
+}
+
+func printSnapshotPower(s snapshot.Snapshot) {
+	p := s.Power
+	if p.ThermalPressure == "" && !p.OnBattery && p.BatteryPct == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("power:")
+	if p.OnBattery {
+		fmt.Printf("  source:        battery (%d%%)\n", p.BatteryPct)
+	} else if p.BatteryPct > 0 {
+		fmt.Printf("  battery:       %d%% (AC)\n", p.BatteryPct)
+	}
+	if p.ThermalPressure != "" && p.ThermalPressure != "nominal" {
+		fmt.Printf("  thermal:       %s\n", p.ThermalPressure)
 	}
 }
 
