@@ -158,11 +158,7 @@ func printToolchains(tc toolchain.Toolchains) {
 	if len(tc.BuildTools) > 0 {
 		fmt.Printf("\nBuild tools (%d):\n", len(tc.BuildTools))
 		for _, bt := range tc.BuildTools {
-			config := ""
-			if bt.ConfigPath != "" {
-				config = "  " + bt.ConfigPath
-			}
-			fmt.Printf("  %-8s  %-12s  %s%s\n", bt.Name, bt.Version, bt.Source, config)
+			fmt.Printf("  %-8s  %-12s  %s%s\n", bt.Name, bt.Version, bt.Source, buildToolDetails(bt))
 		}
 	}
 
@@ -187,6 +183,20 @@ func printToolchains(tc toolchain.Toolchains) {
 	if tc.Env.GoPath != "" {
 		fmt.Printf("GOPATH:    %s\n", tc.Env.GoPath)
 	}
+}
+
+func buildToolDetails(bt toolchain.BuildTool) string {
+	var details []string
+	if bt.ConfigPath != "" {
+		details = append(details, bt.ConfigPath)
+	}
+	if bt.UserHome != "" {
+		details = append(details, "user_home="+bt.UserHome)
+	}
+	if len(details) == 0 {
+		return ""
+	}
+	return "  " + strings.Join(details, "  ")
 }
 
 func printRuntimes(name string, runtimes []toolchain.RuntimeInstall) {
