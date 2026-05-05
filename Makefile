@@ -63,7 +63,7 @@ docs-install:
 	pip install --user mkdocs mkdocs-material
 	./scripts/lychee/install_lychee.sh
 
-docs-validate: docs-nav docs-lychee
+docs-validate: docs-nav docs-lychee docs-build
 
 # --- Cleanup -----------------------------------------------------------------
 
