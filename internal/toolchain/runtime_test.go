@@ -61,6 +61,34 @@ func TestDiscoverNodeFromMultipleManagers(t *testing.T) {
 	}
 }
 
+func TestDiscoverNodeMarksActiveFromInjectedRunner(t *testing.T) {
+	home := t.TempDir()
+	version := "v22.1.0"
+	makeVersionDir(t, filepath.Join(home, ".nvm", "versions", "node"), version)
+	activeNode := filepath.Join(home, ".nvm", "versions", "node", version, "bin", "node")
+
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "which" && len(args) == 1 && args[0] == "node" {
+				return []byte(activeNode + "\n"), nil
+			}
+			return nil, errors.New("unexpected command")
+		},
+	}
+	installs, err := discoverNode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installs) != 1 {
+		t.Fatalf("got %d installs, want 1: %+v", len(installs), installs)
+	}
+	if !installs[0].Active {
+		t.Fatalf("Active = false, want true for %s", activeNode)
+	}
+}
+
 func TestDiscoverRustToolchains(t *testing.T) {
 	home := t.TempDir()
 	rtBase := filepath.Join(home, ".rustup", "toolchains")
