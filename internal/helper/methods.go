@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+
+	"github.com/kaeawc/spectra/internal/bundleid"
 )
 
 // CmdRunner abstracts subprocess calls for testability.
@@ -69,6 +71,9 @@ func RegisterAll(d *Dispatcher, run CmdRunner) {
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.BundleID == "" {
 			return nil, fmt.Errorf("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
+		}
+		if !bundleid.Valid(p.BundleID) {
+			return nil, fmt.Errorf("helper.tcc.system.query rejects invalid bundle_id %q", p.BundleID)
 		}
 		const tccDB = "/Library/Application Support/com.apple.TCC/TCC.db"
 		query := fmt.Sprintf(

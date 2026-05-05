@@ -96,9 +96,10 @@ Service names get the `kTCCService` prefix stripped for display.
 
 macOS's `sqlite3` CLI doesn't accept bind variables on the command
 line, so the bundle ID is interpolated into the query string. Spectra
-guards this with `validBundleID` — an allowlist of `[a-zA-Z0-9._-]+`
-characters that matches the reverse-DNS bundle ID format. Anything
-outside that charset is rejected.
+guards this with `internal/bundleid.Valid` — an allowlist of
+`[a-zA-Z0-9._-]+` characters that matches the reverse-DNS bundle ID
+format. Anything outside that charset is rejected before the detector
+or privileged helper builds the query.
 
 ## Declared vs granted: the gap
 
@@ -138,4 +139,4 @@ until there is a stable declaration key to compare against.
 - `readEntitlements(appPath)` — declared entitlements
 - `readPrivacyDescriptions(appPath)` — `NS*UsageDescription`
 - `scanGrantedPermissions(bundleID)` — TCC reads
-- `validBundleID(s)` — SQL safety gate
+- `internal/bundleid.Valid(s)` — SQL safety gate

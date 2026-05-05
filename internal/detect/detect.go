@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/bundleid"
 )
 
 // Result is the diagnosis for one .app bundle.
@@ -1198,20 +1200,7 @@ func scanGrantedPermissions(bundleID string) []string {
 // reverse-DNS bundle identifiers. Used to gate SQL-string interpolation
 // in scanGrantedPermissions where parameter binding isn't available.
 func validBundleID(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '.', r == '-', r == '_':
-		default:
-			return false
-		}
-	}
-	return true
+	return bundleid.Valid(s)
 }
 
 // scanHelpers enumerates sub-bundles inside the .app: helper apps,

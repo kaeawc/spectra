@@ -234,6 +234,49 @@ func TestTCCQueryRequiresBundleID(t *testing.T) {
 	}
 }
 
+func TestTCCQueryRejectsInvalidBundleID(t *testing.T) {
+	d := NewDispatcher()
+	RegisterAll(d, func(string, ...string) ([]byte, error) {
+		return nil, fmt.Errorf("should not be called")
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.tcc.system.query","params":{"bundle_id":"x'; --"}}`)
+	resp := d.handle(501, req)
+	if resp.Error == nil {
+		t.Fatal("expected invalid bundle_id error")
+	}
+}
+
+func TestTCCQueryUsesAllowlistedBundleID(t *testing.T) {
+	d := NewDispatcher()
+	var gotName string
+	var gotArgs []string
+	RegisterAll(d, func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return []byte("kTCCServiceCamera|2\n"), nil
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.tcc.system.query","params":{"bundle_id":"com.example.App-1"}}`)
+	resp := d.handle(501, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	if gotName != "sqlite3" {
+		t.Fatalf("command = %q, want sqlite3", gotName)
+	}
+	if len(gotArgs) != 2 {
+		t.Fatalf("args = %v, want db path and query", gotArgs)
+	}
+	if gotArgs[0] != "/Library/Application Support/com.apple.TCC/TCC.db" {
+		t.Errorf("db path = %q", gotArgs[0])
+	}
+	wantQuery := `SELECT service, auth_value FROM access WHERE client="com.example.App-1"`
+	if gotArgs[1] != wantQuery {
+		t.Errorf("query = %q, want %q", gotArgs[1], wantQuery)
+	}
+}
+
 func TestFirewallRulesUsesPFCTL(t *testing.T) {
 	d := NewDispatcher()
 	var gotName string

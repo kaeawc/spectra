@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/bundleid"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
@@ -971,6 +972,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.BundleID == "" {
 			return nil, fmt.Errorf("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
+		}
+		if !bundleid.Valid(p.BundleID) {
+			return nil, fmt.Errorf("helper.tcc.system.query rejects invalid bundle_id %q", p.BundleID)
 		}
 		result, err := hc.TCCSystemQuery(p.BundleID)
 		if err != nil {
