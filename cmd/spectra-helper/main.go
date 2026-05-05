@@ -18,7 +18,9 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -26,8 +28,10 @@ import (
 )
 
 var version = "dev"
+var lookupGroup = user.LookupGroup
 
 const sockPath = "/var/run/spectra-helper.sock"
+const helperGroup = "_spectra"
 
 func main() {
 	os.Exit(runWithArgs(os.Args[1:]))
@@ -62,11 +66,9 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "spectra-helper: listen: %v\n", err)
 		return 1
 	}
-	// 0660: accessible to root and _spectra group members only.
-	// #nosec G302 -- helper socket intentionally grants _spectra group access.
-	if err := os.Chmod(sockPath, 0o660); err != nil {
+	if err := secureSocket(sockPath, helperGroup, os.Chown, os.Chmod); err != nil {
 		ln.Close()
-		fmt.Fprintf(os.Stderr, "spectra-helper: chmod: %v\n", err)
+		fmt.Fprintf(os.Stderr, "spectra-helper: secure socket: %v\n", err)
 		return 1
 	}
 	defer func() {
@@ -91,4 +93,32 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+func secureSocket(path, group string, chown func(string, int, int) error, chmod func(string, os.FileMode) error) error {
+	gid, err := groupID(group)
+	if err != nil {
+		return err
+	}
+	if err := chown(path, 0, gid); err != nil {
+		return fmt.Errorf("chown root:%s: %w", group, err)
+	}
+	// 0660: accessible to root and _spectra group members only.
+	// #nosec G302 -- helper socket intentionally grants _spectra group access.
+	if err := chmod(path, 0o660); err != nil {
+		return fmt.Errorf("chmod 0660: %w", err)
+	}
+	return nil
+}
+
+func groupID(name string) (int, error) {
+	g, err := lookupGroup(name)
+	if err != nil {
+		return 0, fmt.Errorf("lookup group %s: %w", name, err)
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil {
+		return 0, fmt.Errorf("parse group %s gid %q: %w", name, g.Gid, err)
+	}
+	return gid, nil
 }

@@ -50,11 +50,14 @@ sudo spectra install-helper
 spectra install-helper --status
 ```
 
-The current installer copies `spectra-helper` to
-`/Library/PrivilegedHelperTools/`, writes a LaunchDaemon plist, and starts
-it with `launchctl`. It exposes root-only data over a local Unix socket to
-the unprivileged daemon. The unprivileged tier still works without it for
-everything that does not require root.
+The current installer provisions the `_spectra` group, adds the invoking
+user to it, copies `spectra-helper` to `/Library/PrivilegedHelperTools/`,
+writes a LaunchDaemon plist, and starts it with `launchctl`. The helper
+exposes root-only data over `/var/run/spectra-helper.sock` as
+`0660 root:_spectra`. On first install, log out and back in so the user's
+new group membership is visible to shells and long-running processes. The
+unprivileged tier still works without the helper for everything that does
+not require root.
 
 See [design/distribution.md](design/distribution.md) for the full
 capability-vs-channel matrix.

@@ -46,7 +46,7 @@ What Spectra holds or mediates that's worth protecting:
                   │   │  Remote Spectra peers │
                   │   └───────────────────────┘
                   │
-                  │ Unix socket (0660; group hardening planned)
+                  │ Unix socket (0660 root:_spectra)
 ┌─────────────────▼───────────────────────────┐
 │  Privileged helper                          │
 │  Holds: nothing persistent                  │
@@ -111,11 +111,9 @@ Spectra does **not** defend against:
 operation as root, escalating privilege.
 
 **Mitigation:**
-- Helper Unix socket is `0660`; the current installer starts it as a
-  LaunchDaemon and relies on filesystem permissions around
-  `/var/run/spectra-helper.sock`.
-- Hardened `_spectra` group provisioning and socket group ownership are
-  planned but not implemented yet.
+- Helper Unix socket is `0660 root:_spectra`; the installer provisions
+  `_spectra`, adds the invoking user, and the helper assigns socket group
+  ownership at startup.
 - Helper uses `getpeereid(2)` and passes the calling UID to method
   handlers.
 - Helper has a hardcoded method allowlist; no method exposes
@@ -229,7 +227,7 @@ Things Spectra commits to before v1 release:
 
 - [ ] All binaries signed with Developer ID, hardened runtime on.
 - [ ] All distributed binaries notarized.
-- [ ] Helper install path provisions `_spectra` and sets socket group
+- [x] Helper install path provisions `_spectra` and sets socket group
       ownership, or moves to `SMAppService` / `SMJobBless` with
       code-signing requirement checks.
 - [ ] Fuzz-test the JSON-RPC dispatcher for malformed payloads.
