@@ -521,7 +521,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 
 	// jvm.thread_dump — run `jcmd <pid> Thread.print` and return the raw text.
-	d.Register("jvm.thread_dump", func(params json.RawMessage) (any, error) {
+	jvmThreadDump := func(params json.RawMessage) (any, error) {
 		var p struct {
 			PID int `json:"pid"`
 		}
@@ -533,10 +533,12 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("thread dump pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "output": string(out)}, nil
-	})
+	}
+	d.Register("jvm.thread_dump", jvmThreadDump)
+	d.Register("jvm.threadDump", jvmThreadDump)
 
 	// jvm.heap_histogram — run `jcmd <pid> GC.class_histogram` and return the raw text.
-	d.Register("jvm.heap_histogram", func(params json.RawMessage) (any, error) {
+	jvmHeapHistogram := func(params json.RawMessage) (any, error) {
 		var p struct {
 			PID int `json:"pid"`
 		}
@@ -548,10 +550,12 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("heap histogram pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "output": string(out)}, nil
-	})
+	}
+	d.Register("jvm.heap_histogram", jvmHeapHistogram)
+	d.Register("jvm.heapHistogram", jvmHeapHistogram)
 
 	// jvm.gc_stats — run `jstat -gc <pid>` and return parsed GC counters.
-	d.Register("jvm.gc_stats", func(params json.RawMessage) (any, error) {
+	jvmGCStats := func(params json.RawMessage) (any, error) {
 		var p struct {
 			PID int `json:"pid"`
 		}
@@ -563,7 +567,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("gc stats pid %d: %w", p.PID, err)
 		}
 		return stats, nil
-	})
+	}
+	d.Register("jvm.gc_stats", jvmGCStats)
+	d.Register("jvm.gcStats", jvmGCStats)
 
 	// jvm.jfr.start — start a JFR recording on a JVM process.
 	// Required: {"pid": <pid>}. Optional: {"name": "spectra"}.
@@ -646,7 +652,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 
 	// jvm.heap_dump — trigger jcmd GC.heap_dump and return the destination path.
 	// Required: {"pid": <pid>}. Optional: {"dest": "/path/to/out.hprof"}.
-	d.Register("jvm.heap_dump", func(params json.RawMessage) (any, error) {
+	jvmHeapDump := func(params json.RawMessage) (any, error) {
 		var p struct {
 			PID  int    `json:"pid"`
 			Dest string `json:"dest"`
@@ -661,7 +667,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("heap dump pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "dest": p.Dest}, nil
-	})
+	}
+	d.Register("jvm.heap_dump", jvmHeapDump)
+	d.Register("jvm.heapDump", jvmHeapDump)
 
 	// jdk.list — enumerate installed JDK toolchains.
 	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
