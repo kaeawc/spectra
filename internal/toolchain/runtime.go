@@ -291,10 +291,10 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 		add("maven", v, "system")
 	}
 
-	// Gradle — check brew cellar first, then gradle --version.
+	// Gradle — check brew cellar first, then gradle -version.
 	if v := brewVersion(opts.BrewCellars, "gradle"); v != "" {
 		add("gradle", v, "brew")
-	} else if v := versionFromCmd(opts.CmdRunner, "gradle", "--version"); v != "" {
+	} else if v := versionFromCmd(opts.CmdRunner, "gradle", "-version"); v != "" {
 		add("gradle", v, "system")
 	}
 

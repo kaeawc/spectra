@@ -337,13 +337,13 @@ func TestDiscoverBuildToolsMavenFromCmdUsesDocumentedFlag(t *testing.T) {
 	}
 }
 
-func TestDiscoverBuildToolsGradleFromCmd(t *testing.T) {
+func TestDiscoverBuildToolsGradleFromCmdUsesDocumentedFlag(t *testing.T) {
 	home := t.TempDir()
 	opts := CollectOptions{
 		Home:        home,
 		BrewCellars: []string{filepath.Join(home, "Cellar")},
 		CmdRunner: func(name string, args ...string) ([]byte, error) {
-			if name == "gradle" {
+			if name == "gradle" && len(args) == 1 && args[0] == "-version" {
 				return []byte("Gradle 8.5\n..."), nil
 			}
 			return nil, errors.New("not found")
