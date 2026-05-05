@@ -1,8 +1,8 @@
 # System inventory
 
-> **Status: planned.** This is the data model behind every Spectra
-> snapshot. The recommendations engine, cross-host diff, and remote
-> portal all read from this shape.
+This is the implemented data model behind every Spectra snapshot. The
+recommendations engine, cross-host diff, daemon, and stored snapshot JSON
+all read from this shape.
 
 A snapshot is a structured capture of one host at one point in time.
 Cross-host diff (`spectra diff laptop work-mac`) compares two snapshots.
@@ -19,19 +19,17 @@ Snapshot {
   apps:        []AppInfo            # via Detect()
   processes:   []ProcessInfo        # ps + lsof at capture time
   jvms:        []JVMInfo            # running Java processes
-  jdks:        []JDKInstall         # installed JDK toolchains
   toolchains:  Toolchains           # brew, mise/asdf, language runtimes
   network:     NetworkState         # routes, DNS, proxies, listening ports
   storage:     StorageState         # disk usage, sparse-file accounting
   power:       PowerState           # assertions, energy attribution
-  env:         EnvSnapshot          # shell config relevant to runtime
   sysctls:     map[string]string    # selected kernel tunables
 }
 ```
 
-Every leaf field is JSON-serializable. The on-wire format and the
-SQLite row format are the same shape with `_id` references replacing
-embedded objects.
+Every leaf field is JSON-serializable. The full snapshot is stored as
+`snapshots.snapshot_json`; selected rows are also projected into SQLite
+tables for summaries and common queries.
 
 ## HostInfo
 
@@ -44,7 +42,7 @@ HostInfo {
   cpu_brand           # "Apple M3 Max"
   cpu_cores           # physical cores
   ram_bytes
-  arch                # "arm64" | "x86_64"
+  architecture        # "arm64" | "amd64"
   uptime_seconds
   spectra_version
 }
@@ -69,7 +67,7 @@ ProcessInfo {
   command, full_command_line
   cpu_pct                  # over the last sample interval
   rss_kib, vsize_kib
-  thread_count
+  thread_count             # currently 0; future libproc/proc_pidinfo
   start_time
   app_path                 # nullable; populated when bundle attribution succeeds
   open_fds                 # via lsof, only when --deep
@@ -78,7 +76,8 @@ ProcessInfo {
 }
 ```
 
-`--deep` is opt-in because per-process `lsof` adds seconds to a snapshot.
+`--deep` is opt-in because the batched `lsof` enrichment adds extra fork
+cost.
 
 ## JVMInfo
 
@@ -86,22 +85,20 @@ For each Java process at snapshot time:
 
 ```
 JVMInfo {
-  pid                                  # links to ProcessInfo
-  jdk_install_id                       # links to JDKInstall
-  vm_args, system_properties           # jcmd VM.command_line / VM.system_properties
-  loaded_class_count, loaded_classes_bytes
-  thread_count, daemon_thread_count, blocked_thread_count
-  heap {
-    used_bytes, committed_bytes, max_bytes
-    young_gen_used, old_gen_used
-    last_gc_at, last_gc_kind, gc_time_pct
-  }
-  recent_thread_dump_blob_id           # nullable; references blob store
-  recent_jfr_blob_id                   # nullable
+  pid
+  main_class
+  java_home
+  jdk_vendor
+  jdk_version
+  vm_args
+  vm_flags
+  thread_count
+  sys_props                            # selected java.* / os.* / user.* keys
 }
 ```
 
-Source: `jcmd`, `jstat`. See
+Source: `jps` and `jcmd`. GC snapshots are available through JVM commands
+but are not embedded in the snapshot shape today. See
 [../inspection/jvm.md](../inspection/jvm.md).
 
 ## JDKInstall
@@ -112,7 +109,7 @@ Every installed JDK Spectra finds:
 JDKInstall {
   install_id
   path                       # e.g. ~/.sdkman/candidates/java/21.0.6-tem
-  source ∈ {system, brew, sdkman, asdf, mise, jbr-toolbox, manual}
+  source ∈ {system, brew, sdkman, asdf, mise, coursier, jbr-toolbox, manual}
   version_major, version_minor, version_patch
   vendor                     # "Eclipse Adoptium", "Azul Zulu", "JetBrains"
   release_string             # raw "21.0.6+7-LTS"
@@ -129,17 +126,20 @@ Aggregates language and build-tool installations:
 ```
 Toolchains {
   brew {
-    formulae []{ name, version, installed_via, deprecated }
+    formulae []{ name, version, installed_via, deprecated, pinned }
     casks    []{ name, version }
     taps     []{ name }
   }
-  python  []{ version, source ∈ {system, brew, uv, pyenv}, path }
+  jdks    []JDKInstall
+  python  []{ version, source ∈ {system, brew, uv, pyenv, mise, asdf}, path, active }
   node    []{ version, source ∈ {brew, mise, asdf, fnm, volta, nvm}, active }
-  go      []{ version, source ∈ {brew, system}, path }
-  ruby    []{ version, source ∈ {brew, asdf, rbenv}, active }
-  rust    []{ toolchain, channel ∈ {stable, beta, nightly}, default }
+  go      []{ version, source ∈ {brew, system, goenv, mise, asdf}, path, active }
+  ruby    []{ version, source ∈ {brew, asdf, mise, rbenv}, active }
+  rust    []{ toolchain, channel ∈ {stable, beta, nightly, custom}, default }
   jvm_managers ∈ {sdkman, asdf, mise, jenv}
+  active_jvm_manager
   build_tools []{ name, version, source, config_path?, user_home? }
+  env EnvSnapshot
 }
 ```
 
@@ -154,11 +154,12 @@ Snapshot of routes, DNS, proxies, listening ports:
 NetworkState {
   default_route_iface, default_route_gw
   dns_servers []
-  proxy_config {
+  proxy {
     http, https, socks    # from scutil --proxy
   }
-  /etc/hosts entries []   # only non-default lines
+  hosts_overrides []      # only non-default /etc/hosts lines
   vpn_active             # tailscale, cisco anyconnect, openvpn
+  vpn_interfaces []
   listening_ports []{ port, proto, pid, app_path }
   established_connections_count
 }
@@ -172,11 +173,11 @@ Roll-up of disk usage by category:
 StorageState {
   volumes []{
     mount_point
-    fs_type, fs_format
-    total_bytes, used_bytes, available_bytes
+    fs_type
+    total_bytes, used_bytes, avail_bytes
   }
-  user_library_bytes        # sum of ~/Library by category
-  app_caches_total_bytes
+  user_library_bytes
+  app_caches_bytes
   largest_apps []{ path, on_disk_bytes }   # top N
 }
 ```
@@ -188,14 +189,12 @@ reports actual allocation rather than the multi-TB virtual disk size.
 
 ```
 PowerState {
-  on_battery, battery_pct, time_remaining
+  on_battery, battery_pct
   thermal_pressure ∈ {nominal, fair, serious, critical}
-  active_assertions []{
-    type ∈ {PreventUserIdleSleep, PreventDisplaySleep, NoIdleSleepAssertion, …}
-    pid, app_path
-    name, created_at
+  assertions []{
+    type, pid, name
   }
-  energy_top_users []{ pid, app_path, energy_impact_pct }
+  energy_top_users []{ pid, energy_impact, command }
 }
 ```
 
@@ -209,14 +208,11 @@ Just the shell-environment bits relevant to runtime behavior:
 
 ```
 EnvSnapshot {
-  shell ∈ {bash, zsh, fish}
-  path_dirs []                   # ordered $PATH, deduped
-  java_home, javac_home          # nullable
-  go_path, goroot                # nullable
+  shell
+  path_dirs []                   # ordered $PATH
+  java_home
+  go_path, go_root               # nullable
   npm_prefix, pnpm_home          # nullable
-  active_runtime_overrides {     # mise/asdf shims taking precedence
-    node, python, ruby, java
-  }
   proxy_env_vars                 # http_proxy, no_proxy, etc.
 }
 ```
@@ -253,10 +249,10 @@ equality rule is category-specific:
 | `host` | exact match per field |
 | `apps` | matched by bundle ID; reports added/removed/version-changed |
 | `processes` | not directly diffed (snapshot-time noise); aggregates compared instead |
-| `jdks` | matched by `(version_major, version_minor, version_patch, vendor)`; same identity at different paths is "compatible," different identities are "drift" |
+| `toolchains.jdks` | matched by `(version_major, version_minor, version_patch, vendor)`; same identity at different paths is "compatible," different identities are "drift" |
 | `toolchains.brew.formulae` | matched by name; reports added/removed/version-changed |
 | `network.listening_ports` | matched by `(port, proto)`; reports added/removed |
-| `env.path_dirs` | sequence-compared (order matters for shadowing) |
+| `toolchains.env.path_dirs` | sequence-compared (order matters for shadowing) |
 | `sysctls` | exact match per key |
 
 ## Baseline lifecycle
@@ -275,7 +271,7 @@ automatic eviction; live snapshots are subject to retention policy.
 | Snapshot kind | Default retention |
 |---|---|
 | live, on-demand | last 100 |
-| live, scheduled (daemon) | last 24h at 1m granularity, last 30d at 1h granularity |
+| live, scheduled (daemon) | last 100 live snapshots |
 | baseline | indefinite |
 
 Configured via `spectra config retention.live = ...` once the daemon
