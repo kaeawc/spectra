@@ -1,10 +1,11 @@
 # Electron native module sub-detection
 
-Confirmed Electron apps get an additional pass that walks
-`Contents/Resources/app.asar.unpacked/**/*.node` and classifies each
-native add-on by source language. This reveals the architectural split
-between vanilla Electron apps (only off-the-shelf C++ deps) and hybrid
-apps with custom Rust/Swift code.
+Confirmed Electron apps get an additional pass that walks native add-ons
+under `Contents/Resources/app.asar.unpacked/**/*.node` and unpacked
+`Contents/Resources/app/**/*.node` payloads. Each module is classified by
+source language. This reveals the architectural split between vanilla
+Electron apps (only off-the-shelf C++ deps) and hybrid apps with custom
+Rust/Swift code.
 
 ## Classification rules
 

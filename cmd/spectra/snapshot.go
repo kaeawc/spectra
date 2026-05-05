@@ -54,15 +54,9 @@ func runSnapshot(args []string) int {
 	opts := snapshot.Options{
 		SpectraVersion: version,
 		DetectOpts:     detect.Options{ScanNetwork: *withNetwork},
-	}
-	if *skipApps {
-		// Sentinel: a path that won't exist so detect drops it.
-		opts.AppPaths = []string{"/dev/null/__skip_apps_marker__"}
+		SkipApps:       *skipApps,
 	}
 	snap := snapshot.Build(context.Background(), opts)
-	if *skipApps {
-		snap.Apps = nil
-	}
 	if *baseline {
 		snap.Kind = snapshot.KindBaseline
 	}
@@ -109,6 +103,15 @@ func saveSnapshotNamed(snap snapshot.Snapshot, name string) error {
 	input := store.FromSnapshot(snap)
 	input.Name = name
 	if err := db.SaveSnapshot(ctx, input); err != nil {
+		return err
+	}
+	if err := db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap)); err != nil {
+		return err
+	}
+	if err := db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap)); err != nil {
+		return err
+	}
+	if err := db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap)); err != nil {
 		return err
 	}
 	if snap.Kind == snapshot.KindLive {

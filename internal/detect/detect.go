@@ -35,19 +35,19 @@ type Result struct {
 
 	// Metadata pulled from Info.plist and frameworks. Best-effort; any
 	// field may be empty if the bundle doesn't expose it.
-	BundleID         string   // CFBundleIdentifier (com.example.app)
-	AppVersion       string   // CFBundleShortVersionString
-	BuildNumber      string   // CFBundleVersion
-	ElectronVersion  string   // version of bundled Electron Framework, if any
-	Architectures    []string // arm64, x86_64
-	BundleSizeBytes  int64    // total disk usage of the .app (sparse-aware: Blocks*512)
-	ApparentSizeBytes int64   // logical size of the .app (fi.Size() sum; may be >> BundleSizeBytes for sparse images)
-	TeamID           string   // code-sign team identifier
-	SparkleFeedURL   string   // SUFeedURL from Info.plist, if present
-	MASReceipt       bool     // Mac App Store receipt is embedded
-	HardenedRuntime  bool     // codesign reports flags=0x10000(runtime)
-	Sandboxed        bool     // entitlements include com.apple.security.app-sandbox
-	Entitlements     []string // notable boolean entitlements (subset)
+	BundleID          string   // CFBundleIdentifier (com.example.app)
+	AppVersion        string   // CFBundleShortVersionString
+	BuildNumber       string   // CFBundleVersion
+	ElectronVersion   string   // version of bundled Electron Framework, if any
+	Architectures     []string // arm64, x86_64
+	BundleSizeBytes   int64    // total disk usage of the .app (sparse-aware: Blocks*512)
+	ApparentSizeBytes int64    // logical size of the .app (fi.Size() sum; may be >> BundleSizeBytes for sparse images)
+	TeamID            string   // code-sign team identifier
+	SparkleFeedURL    string   // SUFeedURL from Info.plist, if present
+	MASReceipt        bool     // Mac App Store receipt is embedded
+	HardenedRuntime   bool     // codesign reports flags=0x10000(runtime)
+	Sandboxed         bool     // entitlements include com.apple.security.app-sandbox
+	Entitlements      []string // notable boolean entitlements (subset)
 
 	Storage *StorageFootprint // user-data on disk in ~/Library
 
@@ -102,12 +102,12 @@ type Helpers struct {
 
 // LoginItem is one launchd plist installed for this bundle.
 type LoginItem struct {
-	Path       string // full path to the plist
-	Label      string // launchd Label (typically the bundle ID + suffix)
-	Scope      string // user | system
-	Daemon     bool   // true for /Library/LaunchDaemons
-	RunAtLoad  bool   // plist RunAtLoad key
-	KeepAlive  bool   // plist KeepAlive key (simple true/false form)
+	Path      string // full path to the plist
+	Label     string // launchd Label (typically the bundle ID + suffix)
+	Scope     string // user | system
+	Daemon    bool   // true for /Library/LaunchDaemons
+	RunAtLoad bool   // plist RunAtLoad key
+	KeepAlive bool   // plist KeepAlive key (simple true/false form)
 }
 
 // ProcessInfo is one running process belonging to this bundle.
@@ -422,19 +422,19 @@ func readEntitlements(appPath string) (sandboxed bool, notable []string) {
 	// Pairs look like <key>NAME</key><true/> in the single-line XML output.
 	xml := string(out)
 	notableKeys := map[string]bool{
-		"com.apple.security.app-sandbox":                   true,
-		"com.apple.security.network.client":                true,
-		"com.apple.security.network.server":                true,
-		"com.apple.security.device.camera":                 true,
-		"com.apple.security.device.audio-input":            true,
-		"com.apple.security.device.bluetooth":              true,
-		"com.apple.security.device.usb":                    true,
-		"com.apple.security.personal-information.location": true,
-		"com.apple.security.cs.allow-jit":                  true,
-		"com.apple.security.cs.disable-library-validation": true,
-		"com.apple.security.cs.allow-unsigned-executable-memory":      true,
-		"com.apple.security.automation.apple-events":                  true,
-		"com.apple.security.virtualization":                           true,
+		"com.apple.security.app-sandbox":                         true,
+		"com.apple.security.network.client":                      true,
+		"com.apple.security.network.server":                      true,
+		"com.apple.security.device.camera":                       true,
+		"com.apple.security.device.audio-input":                  true,
+		"com.apple.security.device.bluetooth":                    true,
+		"com.apple.security.device.usb":                          true,
+		"com.apple.security.personal-information.location":       true,
+		"com.apple.security.cs.allow-jit":                        true,
+		"com.apple.security.cs.disable-library-validation":       true,
+		"com.apple.security.cs.allow-unsigned-executable-memory": true,
+		"com.apple.security.automation.apple-events":             true,
+		"com.apple.security.virtualization":                      true,
 	}
 
 	for key := range notableKeys {
@@ -860,30 +860,52 @@ func findJVMRoot(contents string) string {
 	return found
 }
 
-// scanNativeModules walks app.asar.unpacked for *.node add-ons and
-// classifies each by language using its link map and binary fingerprint.
+// scanNativeModules walks Electron's unpacked payload roots for *.node
+// add-ons and classifies each by language using its link map and binary
+// fingerprint.
 func scanNativeModules(appPath string) []NativeModule {
-	root := filepath.Join(appPath, "Contents", "Resources", "app.asar.unpacked")
-	if !isDir(root) {
-		return nil
-	}
 	var mods []NativeModule
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
+	seen := map[string]struct{}{}
+	for _, root := range nativeModuleRoots(appPath) {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d == nil || d.IsDir() {
+				return nil
+			}
+			// Skip dSYM debug bundles and source maps.
+			if strings.Contains(path, ".dSYM/") {
+				return nil
+			}
+			if !strings.HasSuffix(d.Name(), ".node") {
+				return nil
+			}
+			rel, _ := filepath.Rel(appPath, path)
+			if _, ok := seen[rel]; ok {
+				return nil
+			}
+			seen[rel] = struct{}{}
+			mods = append(mods, classifyNativeModule(path, rel))
 			return nil
-		}
-		// Skip dSYM debug bundles and source maps.
-		if strings.Contains(path, ".dSYM/") {
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".node") {
-			return nil
-		}
-		rel, _ := filepath.Rel(appPath, path)
-		mods = append(mods, classifyNativeModule(path, rel))
-		return nil
+		})
+	}
+	sort.Slice(mods, func(i, j int) bool {
+		return mods[i].Path < mods[j].Path
 	})
 	return mods
+}
+
+func nativeModuleRoots(appPath string) []string {
+	resources := filepath.Join(appPath, "Contents", "Resources")
+	candidates := []string{
+		filepath.Join(resources, "app.asar.unpacked"),
+		filepath.Join(resources, "app"),
+	}
+	var roots []string
+	for _, root := range candidates {
+		if isDir(root) {
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 // classifyNativeModule infers a language from a single .node file. The
@@ -1455,13 +1477,13 @@ func scanNetworkEndpoints(appPath, exe string) []string {
 
 	// Filter out hostnames that are too generic to be useful (schema URIs).
 	junk := map[string]bool{
-		"www.w3.org":                true,
-		"www.apple.com":             true,
-		"developer.apple.com":       true,
-		"schemas.microsoft.com":     true,
+		"www.w3.org":                 true,
+		"www.apple.com":              true,
+		"developer.apple.com":        true,
+		"schemas.microsoft.com":      true,
 		"schemas.openxmlformats.org": true,
-		"json-schema.org":           true,
-		"www.google.com":            false, // keep — meaningful when present
+		"json-schema.org":            true,
+		"www.google.com":             false, // keep — meaningful when present
 	}
 	out := make([]string, 0, len(hosts))
 	for h := range hosts {

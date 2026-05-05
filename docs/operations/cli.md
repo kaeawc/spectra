@@ -18,6 +18,21 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 |---|---|
 | `inspect` | Inspect `.app` bundles (default; runs when no subcommand given) |
 | `snapshot` | Capture a structured snapshot of host + installed apps |
+| `diff` | Diff two stored snapshots |
+| `rules` | Evaluate recommendation rules against a snapshot |
+| `issues` | List, check, or update persisted recommendation issues |
+| `jvm` | List or inspect running JVM processes |
+| `toolchain` | Show installed language runtimes and package managers |
+| `network` | Show current routes, DNS, VPN, proxy, and listening ports |
+| `power` | Show current battery and thermal state |
+| `storage` | Show disk volumes and `~/Library` footprint |
+| `process` | List running processes sorted by memory |
+| `serve` | Run the local Unix-socket JSON-RPC daemon |
+| `status` | Check whether the local daemon is running |
+| `metrics` | Show stored process metrics from daemon sampling |
+| `sample` | Collect a user-space CPU sample of a process |
+| `cache` | Manage the local blob cache |
+| `install-helper` | Install the privileged helper daemon |
 | `version` | Print Spectra version and exit |
 | `help` | Show top-level help |
 
@@ -58,16 +73,20 @@ per non-empty field.
 
 Captures a [system-inventory snapshot](../design/system-inventory.md)
 of the local machine and persists it to `~/.spectra/spectra.db`
-(SQLite, WAL mode). Today only `host` info and the `apps` slice are
-populated; processes / JVMs / JDKs / toolchains / network / storage
-state will land alongside the daemon.
+(SQLite, WAL mode). Snapshots include host facts, installed app
+inspection, processes, JVMs, toolchains, network state, storage state,
+power state, and selected sysctls. The relational store keeps summary
+rows for apps, processes, login items, and granted privacy permissions
+alongside the full JSON snapshot blob.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--json` | false | Emit JSON instead of the human summary |
 | `--network` | false | Forwarded to per-app `Detect()` |
-| `--no-apps` | false | Skip the apps inventory (host-only, very fast) |
+| `--no-apps` | false | Skip installed-app inspection |
 | `--no-store` | false | Do not persist the snapshot to the local database |
+| `--baseline` | false | Save as an immutable baseline snapshot |
+| `--name` | empty | Human label for the snapshot, usually with `--baseline` |
 
 ### Examples
 
@@ -155,16 +174,11 @@ Prints the build version (typically a git describe from `make build`).
 Per-app errors are written to stderr; the offending entry is dropped
 and processing continues for other paths.
 
-## Planned subcommands (daemon era)
+## Remaining planned subcommands
 
 ```
-spectra serve                       # run the collector daemon
 spectra connect <host>              # client targeting a remote daemon
 spectra list                        # alias for "scan all bundles via local daemon"
-spectra diff <baseline-id> [host]   # snapshot diff
-spectra jvm [pid]                   # JVM inspection
-spectra cache stats / clear         # blob cache management
-spectra install-helper              # privileged helper install (sudo)
 ```
 
 See [../design/architecture.md](../design/architecture.md) for the

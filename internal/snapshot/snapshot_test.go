@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 func TestBuildHostOnly(t *testing.T) {
@@ -99,5 +101,40 @@ func TestBuildSkipAppsProducesNoApps(t *testing.T) {
 	}
 	if len(snap.Apps) != 0 {
 		t.Errorf("Apps = %d, want 0 when SkipApps=true", len(snap.Apps))
+	}
+}
+
+func TestBuildAttributesProcessesToConfiguredAppPaths(t *testing.T) {
+	psOut := "412 1 0.5 184320 204800 501 alice Sat May 2 22:40:05 2026 /Applications/Foo.app/Contents/MacOS/Foo --type=renderer\n" +
+		"1 0 0.0 4096 8192 0 root Sat May 2 22:00:00 2026 /sbin/launchd\n"
+	snap := Build(context.Background(), Options{
+		AppPaths:    []string{"/Applications/Foo.app"},
+		SkipApps:    true,
+		SkipStorage: true,
+		SkipJVMs:    true,
+		ProcessOpts: process.CollectOptions{
+			CmdRunner: func(name string, args ...string) ([]byte, error) {
+				if name == "ps" {
+					return []byte(psOut), nil
+				}
+				return nil, nil
+			},
+		},
+	})
+
+	if len(snap.Processes) != 2 {
+		t.Fatalf("Processes len = %d, want 2", len(snap.Processes))
+	}
+	var matched bool
+	for _, p := range snap.Processes {
+		if p.PID == 412 {
+			matched = true
+			if p.AppPath != "/Applications/Foo.app" {
+				t.Errorf("AppPath = %q, want /Applications/Foo.app", p.AppPath)
+			}
+		}
+	}
+	if !matched {
+		t.Fatal("PID 412 not found")
 	}
 }

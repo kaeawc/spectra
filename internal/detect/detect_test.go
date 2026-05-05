@@ -267,6 +267,87 @@ func TestDependenciesNPMPackages(t *testing.T) {
 	}
 }
 
+func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
+	app := makeBundle(t, "FakeNativeModules")
+	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
+
+	appDirModule := filepath.Join(app, "Contents/Resources/app/node_modules/plain/build/Release/plain.node")
+	if err := os.MkdirAll(filepath.Dir(appDirModule), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(appDirModule, []byte("native addon"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rustModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node")
+	if err := os.MkdirAll(filepath.Dir(rustModule), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("rustc/library/core/src/panicking.rs core::panicking\n", 60)
+	if err := os.WriteFile(rustModule, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Debug-symbol bundles should not produce separate native modules.
+	dsymModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node.dSYM/Contents/Resources/DWARF/custom.node")
+	if err := os.MkdirAll(filepath.Dir(dsymModule), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dsymModule, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Detect(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.NativeModules) != 2 {
+		t.Fatalf("NativeModules len = %d, want 2: %#v", len(r.NativeModules), r.NativeModules)
+	}
+	if r.NativeModules[0].Path != "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node" {
+		t.Errorf("first module path = %q", r.NativeModules[0].Path)
+	}
+	if r.NativeModules[0].Language != "Rust" {
+		t.Errorf("custom module language = %q, want Rust; hints=%v", r.NativeModules[0].Language, r.NativeModules[0].Hints)
+	}
+	if r.NativeModules[1].Path != "Contents/Resources/app/node_modules/plain/build/Release/plain.node" {
+		t.Errorf("second module path = %q", r.NativeModules[1].Path)
+	}
+	if r.NativeModules[1].Language != "C++" {
+		t.Errorf("plain module language = %q, want C++", r.NativeModules[1].Language)
+	}
+}
+
+func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {
+	app := makeBundle(t, "FakeNativeRoots")
+	if roots := nativeModuleRoots(app); len(roots) != 0 {
+		t.Fatalf("roots without payloads = %v, want none", roots)
+	}
+
+	for _, root := range []string{
+		filepath.Join(app, "Contents/Resources/app.asar.unpacked"),
+		filepath.Join(app, "Contents/Resources/app"),
+	} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roots := nativeModuleRoots(app)
+	if len(roots) != 2 {
+		t.Fatalf("roots len = %d, want 2: %v", len(roots), roots)
+	}
+	if !strings.HasSuffix(roots[0], "Contents/Resources/app.asar.unpacked") {
+		t.Errorf("roots[0] = %q", roots[0])
+	}
+	if !strings.HasSuffix(roots[1], "Contents/Resources/app") {
+		t.Errorf("roots[1] = %q", roots[1])
+	}
+}
+
 func TestNetworkEndpointsExtraction(t *testing.T) {
 	app := makeBundle(t, "FakeNet")
 	bin := filepath.Join(app, "Contents/MacOS/main")

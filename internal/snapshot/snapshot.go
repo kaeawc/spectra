@@ -37,10 +37,10 @@ type Snapshot struct {
 	Apps       []detect.Result      `json:"apps"`
 	Processes  []process.Info       `json:"processes,omitempty"`
 	Toolchains toolchain.Toolchains `json:"toolchains"`
-	Power      sysinfo.PowerState    `json:"power"`
-	Sysctls    map[string]string     `json:"sysctls,omitempty"`
-	Network    netstate.State        `json:"network"`
-	Storage    storagestate.State    `json:"storage"`
+	Power      sysinfo.PowerState   `json:"power"`
+	Sysctls    map[string]string    `json:"sysctls,omitempty"`
+	Network    netstate.State       `json:"network"`
+	Storage    storagestate.State   `json:"storage"`
 
 	JVMs []jvm.Info `json:"jvms,omitempty"`
 }
@@ -112,6 +112,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		TakenAt: time.Now().UTC(),
 		Kind:    KindLive,
 	}
+	appPaths := snapshotAppPaths(opts)
 
 	siRun := opts.SysinfoCmdRunner
 	if siRun == nil {
@@ -145,7 +146,9 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipApps {
 		go func() {
 			defer wg.Done()
-			s.Apps = collectApps(ctx, opts)
+			appOpts := opts
+			appOpts.AppPaths = appPaths
+			s.Apps = collectApps(ctx, appOpts)
 		}()
 	}
 	go func() {
@@ -174,7 +177,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipProcesses {
 		go func() {
 			defer wg.Done()
-			s.Processes = process.CollectAll(ctx, opts.ProcessOpts)
+			processOpts := opts.ProcessOpts
+			if len(processOpts.BundlePaths) == 0 {
+				processOpts.BundlePaths = appPaths
+			}
+			s.Processes = process.CollectAll(ctx, processOpts)
 		}()
 	}
 	if !opts.SkipJVMs {
@@ -186,6 +193,20 @@ func Build(ctx context.Context, opts Options) Snapshot {
 
 	wg.Wait()
 	return s
+}
+
+func snapshotAppPaths(opts Options) []string {
+	if len(opts.AppPaths) > 0 {
+		paths := append([]string(nil), opts.AppPaths...)
+		sort.Strings(paths)
+		return paths
+	}
+	if opts.SkipApps {
+		return nil
+	}
+	paths := append(scanApps("/Applications"), scanApps("/Applications/Utilities")...)
+	sort.Strings(paths)
+	return paths
 }
 
 // collectApps runs Detect across opts.AppPaths in parallel. When
