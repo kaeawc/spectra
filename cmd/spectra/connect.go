@@ -106,34 +106,38 @@ func parseConnectCall(args []string) (string, json.RawMessage, error) {
 	if len(args) == 0 || args[0] == "status" || args[0] == "health" {
 		return "health", nil, nil
 	}
-	switch args[0] {
-	case "jvm":
-		if len(args) != 1 {
-			return "", nil, fmt.Errorf("connect jvm takes no extra arguments")
-		}
-		return "jvm.list", nil, nil
-	case "process", "processes":
-		if len(args) != 1 {
-			return "", nil, fmt.Errorf("connect processes takes no extra arguments")
-		}
-		return "process.list", nil, nil
-	case "network":
-		if len(args) != 1 {
-			return "", nil, fmt.Errorf("connect network takes no extra arguments")
-		}
-		return "network.state", nil, nil
-	case "toolchain", "toolchains":
-		if len(args) != 1 {
-			return "", nil, fmt.Errorf("connect toolchains takes no extra arguments")
-		}
-		return "toolchain.scan", nil, nil
-	case "inspect":
-		if len(args) != 2 {
-			return "", nil, fmt.Errorf("connect inspect requires <App.app>")
-		}
-		params, _ := json.Marshal(map[string]string{"path": args[1]})
-		return "inspect.app", json.RawMessage(params), nil
+	if method, params, ok, err := parseConnectShortcut(args); ok || err != nil {
+		return method, params, err
 	}
+	return parseConnectGenericCall(args)
+}
+
+func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) {
+	shortcuts := map[string]string{
+		"jvm":        "jvm.list",
+		"process":    "process.list",
+		"processes":  "process.list",
+		"network":    "network.state",
+		"toolchain":  "toolchain.scan",
+		"toolchains": "toolchain.scan",
+	}
+	if method, ok := shortcuts[args[0]]; ok {
+		if len(args) != 1 {
+			return "", nil, true, fmt.Errorf("connect %s takes no extra arguments", args[0])
+		}
+		return method, nil, true, nil
+	}
+	if args[0] != "inspect" {
+		return "", nil, false, nil
+	}
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect inspect requires <App.app>")
+	}
+	params, _ := json.Marshal(map[string]string{"path": args[1]})
+	return "inspect.app", json.RawMessage(params), true, nil
+}
+
+func parseConnectGenericCall(args []string) (string, json.RawMessage, error) {
 	if args[0] != "call" || len(args) < 2 || len(args) > 3 {
 		return "", nil, fmt.Errorf("invalid connect command")
 	}
