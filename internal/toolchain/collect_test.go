@@ -24,10 +24,18 @@ JAVA_RUNTIME_VERSION="21.0.6+7-LTS"
 	// Plant a fake rustup toolchain.
 	os.MkdirAll(filepath.Join(home, ".rustup", "toolchains", "stable-aarch64-apple-darwin"), 0o755)
 
+	// Plant a fake jenv install and make it the active java shim.
+	os.MkdirAll(filepath.Join(home, ".jenv", "bin"), 0o755)
+	os.WriteFile(filepath.Join(home, ".jenv", "bin", "jenv"), []byte(""), 0o755)
+	activeJava := filepath.Join(home, ".jenv", "shims", "java")
+
 	// Stub brew to return empty.
 	stub := func(name string, args ...string) ([]byte, error) {
 		if name == "brew" && len(args) > 0 && args[0] == "info" {
 			return []byte(`{"formulae":[]}`), nil
+		}
+		if name == "which" && len(args) == 1 && args[0] == "java" {
+			return []byte(activeJava + "\n"), nil
 		}
 		return []byte{}, nil
 	}
@@ -48,5 +56,8 @@ JAVA_RUNTIME_VERSION="21.0.6+7-LTS"
 	}
 	if len(tc.Rust) != 1 {
 		t.Errorf("Rust: got %d, want 1", len(tc.Rust))
+	}
+	if tc.ActiveJVMManager != "jenv" {
+		t.Errorf("ActiveJVMManager: got %q, want jenv", tc.ActiveJVMManager)
 	}
 }

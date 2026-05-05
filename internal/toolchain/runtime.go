@@ -272,6 +272,28 @@ func discoverJVMManagers(home string) []string {
 	return found
 }
 
+func discoverActiveJVMManager(home string, run CmdRunner) string {
+	java := activeVersion(run, "java")
+	if java == "" {
+		return ""
+	}
+	probes := []struct {
+		name   string
+		prefix string
+	}{
+		{"jenv", filepath.Join(home, ".jenv", "shims") + string(os.PathSeparator)},
+		{"asdf", filepath.Join(home, ".asdf", "shims") + string(os.PathSeparator)},
+		{"mise", filepath.Join(home, ".local", "share", "mise", "shims") + string(os.PathSeparator)},
+		{"sdkman", filepath.Join(home, ".sdkman", "candidates", "java") + string(os.PathSeparator)},
+	}
+	for _, p := range probes {
+		if strings.HasPrefix(java, p.prefix) {
+			return p.name
+		}
+	}
+	return ""
+}
+
 // discoverBuildTools finds installed Maven, Gradle, Bazel, Make, and CMake.
 // Uses brew cellar presence (fast, no forking) as primary detection;
 // falls back to version commands for tools not managed by brew.
