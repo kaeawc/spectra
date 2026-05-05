@@ -520,6 +520,15 @@ func TestDaemonJVMJFRDumpMissingDest(t *testing.T) {
 	}
 }
 
+func TestDaemonJVMJFRDumpRequiresSensitiveConfirmation(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 137, "jvm.jfr.dump", `{"pid":42,"dest":"/tmp/out.jfr"}`)
+	if resp.Error == nil {
+		t.Error("expected error when confirm_sensitive is missing")
+	}
+}
+
 func TestDaemonJVMJFRDumpUsesDefaultName(t *testing.T) {
 	var gotPID int
 	var gotName, gotDest string
@@ -534,7 +543,7 @@ func TestDaemonJVMJFRDumpUsesDefaultName(t *testing.T) {
 
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()
-	resp := rpcCall(t, enc, dec, 37, "jvm.jfr.dump", `{"pid":42,"dest":"/tmp/out.jfr"}`)
+	resp := rpcCall(t, enc, dec, 37, "jvm.jfr.dump", `{"pid":42,"dest":"/tmp/out.jfr","confirm_sensitive":true}`)
 	if resp.Error != nil {
 		t.Fatalf("jvm.jfr.dump: %v", resp.Error)
 	}
@@ -667,6 +676,15 @@ func TestDaemonJVMHeapDumpRequiresPID(t *testing.T) {
 	resp := rpcCall(t, enc, dec, 52, "jvm.heap_dump", `{}`)
 	if resp.Error == nil {
 		t.Error("expected error when pid=0")
+	}
+}
+
+func TestDaemonJVMHeapDumpRequiresSensitiveConfirmation(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 152, "jvm.heap_dump", `{"pid":42}`)
+	if resp.Error == nil {
+		t.Error("expected error when confirm_sensitive is missing")
 	}
 }
 

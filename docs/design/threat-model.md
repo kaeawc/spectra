@@ -155,12 +155,10 @@ secrets, then reads the resulting `.hprof` from the blob cache.
 **Mitigation:**
 - Local CLI heap dumps default to `~/.spectra/`, created with user-only
   directory permissions.
-- Daemon RPC exposes `jvm.heap_dump` and `jvm.jfr.*` only to clients
-  that can already reach the daemon. Until consent prompts land, do not
-  expose TCP RPC to peers that should not be allowed to request these
-  operations.
-- Heap-dump consent, sensitive artifact manifests, and remote-serving
-  restrictions are planned hardening items.
+- Daemon RPC requires `confirm_sensitive: true` before `jvm.heap_dump`
+  or `jvm.jfr.dump` writes a sensitive artifact.
+- Sensitive artifact manifests and remote-serving restrictions are
+  planned hardening items.
 - The privileged helper enforces a per-UID request limit so a compromised
   unprivileged daemon cannot hammer root-only commands indefinitely.
 

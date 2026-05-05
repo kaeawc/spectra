@@ -645,15 +645,19 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// jvm.jfr.dump — dump a running JFR recording. Required: {"pid": <pid>, "dest": "/path/to/out.jfr"}.
 	d.Register("jvm.jfr.dump", func(params json.RawMessage) (any, error) {
 		var p struct {
-			PID  int    `json:"pid"`
-			Name string `json:"name"`
-			Dest string `json:"dest"`
+			PID              int    `json:"pid"`
+			Name             string `json:"name"`
+			Dest             string `json:"dest"`
+			ConfirmSensitive bool   `json:"confirm_sensitive"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.jfr.dump requires {\"pid\": <pid>, \"dest\": \"...\"}")
 		}
 		if p.Dest == "" {
 			return nil, fmt.Errorf("jvm.jfr.dump requires {\"dest\": \"...\"}")
+		}
+		if !p.ConfirmSensitive {
+			return nil, fmt.Errorf("jvm.jfr.dump requires {\"confirm_sensitive\": true} because JFR artifacts may contain sensitive process data")
 		}
 		name := p.Name
 		if name == "" {
@@ -720,11 +724,15 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	// Required: {"pid": <pid>}. Optional: {"dest": "/path/to/out.hprof"}.
 	jvmHeapDump := func(params json.RawMessage) (any, error) {
 		var p struct {
-			PID  int    `json:"pid"`
-			Dest string `json:"dest"`
+			PID              int    `json:"pid"`
+			Dest             string `json:"dest"`
+			ConfirmSensitive bool   `json:"confirm_sensitive"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.heap_dump requires {\"pid\": <pid>}")
+		}
+		if !p.ConfirmSensitive {
+			return nil, fmt.Errorf("jvm.heap_dump requires {\"confirm_sensitive\": true} because heap dumps may contain secrets and PII")
 		}
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
