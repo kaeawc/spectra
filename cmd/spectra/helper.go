@@ -18,6 +18,10 @@ const helperPlist = "/Library/LaunchDaemons/dev.spectra.helper.plist"
 
 const helperGroup = "_spectra"
 
+const helperLogPath = "/var/log/spectra-helper.log"
+
+const helperNewsyslogConf = "/etc/newsyslog.d/spectra-helper.conf"
+
 // helperPlistContent is the LaunchDaemon plist that starts spectra-helper
 // at boot and keeps it alive.
 const helperPlistContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -35,9 +39,12 @@ const helperPlistContent = `<?xml version="1.0" encoding="UTF-8"?>
     <key>KeepAlive</key>
     <true/>
     <key>StandardErrorPath</key>
-    <string>/var/log/spectra-helper.log</string>
+    <string>` + helperLogPath + `</string>
 </dict>
 </plist>
+`
+
+const helperNewsyslogContent = helperLogPath + `	root:wheel	640	7	1024	*	J
 `
 
 func runInstallHelper(args []string) int {
@@ -87,17 +94,10 @@ func runInstallHelper(args []string) int {
 			return sudoRun("chmod", "755", helperBinaryDest)
 		}},
 		{"Install LaunchDaemon plist", func() error {
-			// Write plist to a temp file, then sudo-copy it.
-			tmp, err := os.CreateTemp("", "spectra-helper-*.plist")
-			if err != nil {
-				return err
-			}
-			defer os.Remove(tmp.Name())
-			if _, err := tmp.WriteString(helperPlistContent); err != nil {
-				return err
-			}
-			tmp.Close()
-			return sudoRun("cp", tmp.Name(), helperPlist)
+			return installRootTextFile(helperPlist, helperPlistContent, sudoRun, writeTempText)
+		}},
+		{"Install helper log rotation", func() error {
+			return installRootTextFile(helperNewsyslogConf, helperNewsyslogContent, sudoRun, writeTempText)
 		}},
 		{"Load LaunchDaemon", func() error {
 			return sudoRun("launchctl", "load", "-w", helperPlist)
@@ -140,6 +140,39 @@ func helperInstallUser(getenv func(string) string) string {
 	return getenv("USER")
 }
 
+type rootRunner func(name string, args ...string) error
+
+type tempTextWriter func(pattern, content string) (path string, cleanup func(), err error)
+
+func installRootTextFile(dest, content string, run rootRunner, write tempTextWriter) error {
+	tmpPath, cleanup, err := write("spectra-helper-*", content)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	return run("cp", tmpPath, dest)
+}
+
+func writeTempText(pattern, content string) (string, func(), error) {
+	tmp, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.Remove(tmp.Name()) }
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return tmp.Name(), cleanup, nil
+}
+
 func runUninstallHelper(args []string) int {
 	fs := flag.NewFlagSet("spectra uninstall-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -156,6 +189,9 @@ func runUninstallHelper(args []string) int {
 		}},
 		{"Remove plist", func() error {
 			return sudoRun("rm", "-f", helperPlist)
+		}},
+		{"Remove helper log rotation", func() error {
+			return sudoRun("rm", "-f", helperNewsyslogConf)
 		}},
 		{"Remove binary", func() error {
 			return sudoRun("rm", "-f", helperBinaryDest)

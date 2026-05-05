@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestHelperInstallUserPrefersSudoUser(t *testing.T) {
 	env := map[string]string{"SUDO_USER": "alice", "USER": "root"}
@@ -15,5 +18,45 @@ func TestHelperInstallUserFallsBackToUser(t *testing.T) {
 	got := helperInstallUser(func(key string) string { return env[key] })
 	if got != "bob" {
 		t.Fatalf("helperInstallUser = %q, want bob", got)
+	}
+}
+
+func TestHelperNewsyslogContent(t *testing.T) {
+	want := "/var/log/spectra-helper.log\troot:wheel\t640\t7\t1024\t*\tJ\n"
+	if helperNewsyslogContent != want {
+		t.Fatalf("helperNewsyslogContent = %q, want %q", helperNewsyslogContent, want)
+	}
+}
+
+func TestInstallRootTextFileCopiesTemporaryContent(t *testing.T) {
+	var gotPattern, gotContent string
+	cleaned := false
+	write := func(pattern, content string) (string, func(), error) {
+		gotPattern = pattern
+		gotContent = content
+		return "/tmp/spectra-helper-test", func() { cleaned = true }, nil
+	}
+
+	var calls [][]string
+	run := func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	}
+
+	if err := installRootTextFile("/etc/newsyslog.d/spectra-helper.conf", helperNewsyslogContent, run, write); err != nil {
+		t.Fatal(err)
+	}
+	if gotPattern != "spectra-helper-*" {
+		t.Fatalf("pattern = %q", gotPattern)
+	}
+	if gotContent != helperNewsyslogContent {
+		t.Fatalf("content = %q", gotContent)
+	}
+	if !cleaned {
+		t.Fatal("temporary file cleanup was not called")
+	}
+	wantCalls := [][]string{{"cp", "/tmp/spectra-helper-test", "/etc/newsyslog.d/spectra-helper.conf"}}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
 	}
 }

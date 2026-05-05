@@ -171,8 +171,9 @@ summary without recording request parameters.
 
 Users running with the helper installed can audit what got asked of
 it. The unprivileged daemon never writes to this log directly.
-Rotation is still handled by the host's `/var/log` policy; a dedicated
-Spectra log rotation policy is future hardening work.
+`spectra install-helper` also installs
+`/etc/newsyslog.d/spectra-helper.conf`, which keeps seven compressed
+rotations and rolls the helper audit log after it reaches 1 MiB.
 
 ## Code signing and notarization
 
