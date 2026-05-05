@@ -66,6 +66,7 @@ The helper's RPC surface is intentionally narrow. It listens on
 |---|---|
 | `helper.tcc.system.query(bundleID)` | Query system TCC.db for granted services |
 | `helper.powermetrics.sample(duration)` | One-shot powermetrics output |
+| `helper.firewall.rules()` | Current pf firewall rules |
 | `helper.process.tree()` | Process tree including processes the user can't see (e.g. system daemons) |
 | `helper.health()` | Liveness + version |
 
