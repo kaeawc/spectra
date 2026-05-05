@@ -11,6 +11,15 @@ func TestSubcommandListIncludesList(t *testing.T) {
 	t.Fatal("subcommandList missing list alias")
 }
 
+func TestSubcommandListIncludesBaseline(t *testing.T) {
+	for _, sc := range subcommandList() {
+		if sc.name == "baseline" {
+			return
+		}
+	}
+	t.Fatal("subcommandList missing baseline alias")
+}
+
 func TestListInspectArgsPrependsAll(t *testing.T) {
 	got := listInspectArgs([]string{"-v", "--json"})
 	want := []string{"--all", "-v", "--json"}

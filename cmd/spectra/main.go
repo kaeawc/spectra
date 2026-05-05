@@ -45,6 +45,7 @@ func subcommandList() []subcommand {
 		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},
+		{"baseline", "Manage baseline snapshots (list, drop)", runSnapshotBaseline},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
 		{"status", "Check whether the local daemon is running", runStatus},
 		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},

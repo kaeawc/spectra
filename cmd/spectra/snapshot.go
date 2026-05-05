@@ -20,6 +20,7 @@ import (
 // to mirror the top-level pattern and avoid init cycles.
 func snapshotSubcommands() []subcommand {
 	return []subcommand{
+		{"create", "Capture a structured snapshot", runSnapshotCreate},
 		{"list", "List stored snapshots", runSnapshotList},
 		{"show", "Show details of one snapshot by ID", runSnapshotShow},
 		{"diff", "Diff two stored snapshots", runSnapshotDiff},
@@ -50,6 +51,11 @@ func runSnapshot(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	snapName, ok := snapshotNameFromArgs(*baseline, *name, fs.Args())
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: spectra snapshot [--baseline [name]] [--name name]")
+		return 2
+	}
 
 	opts := snapshot.Options{
 		SpectraVersion: version,
@@ -62,7 +68,6 @@ func runSnapshot(args []string) int {
 	}
 
 	if !*noStore {
-		snapName := *name
 		if err := saveSnapshotNamed(snap, snapName); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not persist snapshot: %v\n", err)
 		}
@@ -79,6 +84,20 @@ func runSnapshot(args []string) int {
 	}
 	printSnapshot(snap)
 	return 0
+}
+
+func runSnapshotCreate(args []string) int {
+	return runSnapshot(args)
+}
+
+func snapshotNameFromArgs(baseline bool, explicitName string, args []string) (string, bool) {
+	if len(args) == 0 {
+		return explicitName, true
+	}
+	if !baseline || explicitName != "" || len(args) > 1 {
+		return "", false
+	}
+	return args[0], true
 }
 
 // saveSnapshot opens the default DB, persists snap, and prunes old live
@@ -393,8 +412,10 @@ func sortStrings(s []string) {
 	}
 }
 
-// runSnapshotDiff loads two snapshots by ID and prints a structured diff.
+// runSnapshotDiff loads two snapshots and prints a structured diff.
 // Either ID may be the sentinel "live" to capture a fresh snapshot on the fly.
+// It also supports `diff baseline [name|id] [live|id]`, where the baseline
+// reference is optional and resolves to the newest baseline when omitted.
 func runSnapshotDiff(args []string) int {
 	fs := flag.NewFlagSet("spectra snapshot diff", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -402,11 +423,14 @@ func runSnapshotDiff(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
+	if fs.NArg() < 1 || fs.NArg() > 3 {
+		printDiffUsage()
 		return 2
 	}
-	idA, idB := fs.Arg(0), fs.Arg(1)
+	if fs.Arg(0) != "baseline" && fs.NArg() != 2 {
+		printDiffUsage()
+		return 2
+	}
 
 	dbPath, err := store.DefaultPath()
 	if err != nil {
@@ -421,14 +445,9 @@ func runSnapshotDiff(args []string) int {
 	defer db.Close()
 
 	ctx := context.Background()
-	snapA, err := resolveSnapshot(ctx, db, idA)
+	snapA, snapB, err := resolveDiffOperands(ctx, db, fs.Args())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idA, err)
-		return 1
-	}
-	snapB, err := resolveSnapshot(ctx, db, idB)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idB, err)
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
@@ -445,6 +464,57 @@ func runSnapshotDiff(args []string) int {
 	return 0
 }
 
+func printDiffUsage() {
+	fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
+	fmt.Fprintln(os.Stderr, "   or: spectra diff baseline [name|id] [live|id]")
+}
+
+func resolveDiffOperands(ctx context.Context, db *store.DB, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
+	if len(args) > 0 && args[0] == "baseline" {
+		return resolveBaselineDiffOperands(ctx, db, args[1:])
+	}
+	if len(args) != 2 {
+		printDiffUsage()
+		return nil, nil, fmt.Errorf("invalid diff operands")
+	}
+	idA, idB := args[0], args[1]
+	snapA, err := resolveSnapshot(ctx, db, idA)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot %q: %w", idA, err)
+	}
+	snapB, err := resolveSnapshot(ctx, db, idB)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot %q: %w", idB, err)
+	}
+	return snapA, snapB, nil
+}
+
+func resolveBaselineDiffOperands(ctx context.Context, db *store.DB, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
+	ref := ""
+	other := "live"
+	switch len(args) {
+	case 0:
+	case 1:
+		ref = args[0]
+	case 2:
+		ref = args[0]
+		other = args[1]
+	default:
+		printDiffUsage()
+		return nil, nil, fmt.Errorf("invalid baseline diff operands")
+	}
+
+	snapA, err := resolveBaselineSnapshot(ctx, db, ref)
+	if err != nil {
+		return nil, nil, fmt.Errorf("baseline %q: %w", baselineDisplayName(ref), err)
+	}
+	snapB, err := resolveSnapshot(ctx, db, other)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot %q: %w", other, err)
+	}
+	return snapA, snapB, nil
+}
+
 // resolveSnapshot loads a snapshot from the DB by ID, or captures a fresh
 // live snapshot when id is the sentinel "live".
 func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
@@ -453,6 +523,45 @@ func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Sn
 		return &snap, nil
 	}
 	return loadSnapshotFromDB(ctx, db, id)
+}
+
+func resolveBaselineSnapshot(ctx context.Context, db *store.DB, ref string) (*snapshot.Snapshot, error) {
+	if ref != "" {
+		row, err := db.GetSnapshot(ctx, ref)
+		if err == nil {
+			if row.Kind != string(snapshot.KindBaseline) {
+				return nil, fmt.Errorf("snapshot is %q, not baseline", row.Kind)
+			}
+			return loadSnapshotFromDB(ctx, db, row.ID)
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+
+	rows, err := db.ListSnapshots(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.Kind != string(snapshot.KindBaseline) {
+			continue
+		}
+		if ref == "" || row.Name == ref {
+			return loadSnapshotFromDB(ctx, db, row.ID)
+		}
+	}
+	if ref == "" {
+		return nil, fmt.Errorf("no baselines stored")
+	}
+	return nil, fmt.Errorf("not found")
+}
+
+func baselineDisplayName(ref string) string {
+	if ref == "" {
+		return "latest"
+	}
+	return ref
 }
 
 // loadSnapshotFromDB retrieves the full snapshot JSON blob for id and unmarshals
