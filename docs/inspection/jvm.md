@@ -3,9 +3,10 @@
 Spectra implements the JDK shell-tool layer of JVM inspection today:
 running-process discovery, structured per-PID metadata, thread dumps,
 heap histograms, heap dumps, one-shot GC stats, and JFR start/dump/stop.
-It also attributes running JVMs back to the installed-JDK inventory when
-`java.home` matches a discovered JDK path. The in-process Java agent
-layer remains future work.
+It also parses `jfr summary` output into structured event counts and
+attributes running JVMs back to the installed-JDK inventory when
+`java.home` matches a discovered JDK path. The in-process Java agent layer
+remains future work.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -24,6 +25,7 @@ spectra jvm gc-stats [--json] <pid>
 spectra jvm jfr start <pid> [--name spectra]
 spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
 spectra jvm jfr stop <pid> [--name spectra] [--out <path>]
+spectra jvm jfr summary [--json] <recording.jfr>
 ```
 
 Daemon methods:
@@ -37,6 +39,7 @@ Daemon methods:
 - `jvm.jfr.start`
 - `jvm.jfr.dump`
 - `jvm.jfr.stop`
+- `jvm.jfr.summary`
 - `jdk.list`
 - `jdk.scan`
 
@@ -60,11 +63,14 @@ JDK commands:
 | Heap histogram | `jcmd <pid> GC.class_histogram` |
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
 | JFR start / stop / dump | `jcmd <pid> JFR.start`, `JFR.dump` |
+| JFR summary | `jfr summary <recording.jfr>` |
 
 `spectra jvm` and `spectra jvm <pid>` parse output into structured JSON
-when `--json` is passed. Thread dump text and JFR dump files are copied
-into the [sharded blob store](../design/storage.md) when the cache stores
-are initialized. Heap dumps are written to the requested path or to
+when `--json` is passed. `spectra jvm jfr summary --json <file>` returns
+recording metadata plus per-event counts and byte sizes. Thread dump text
+and JFR dump files are copied into the
+[sharded blob store](../design/storage.md) when the cache stores are
+initialized. Heap dumps are written to the requested path or to
 `~/.spectra/<pid>-<timestamp>.hprof`.
 
 ### Layer 2 — Java agent (in-process)
@@ -166,9 +172,10 @@ Implemented:
 5. CLI and daemon RPC surfaces for the implemented collectors.
 6. Path-based attribution from each running JVM's `java.home` to the
    installed-JDK inventory.
+7. `jfr summary` parsing for structured recording metadata and event
+   counts.
 
 Future:
 
 1. Java agent JAR for in-process capabilities.
 2. Async-profiler / flamegraph integration.
-3. JFR file parser and structured JFR summaries.

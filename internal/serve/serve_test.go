@@ -501,6 +501,46 @@ func TestDaemonJVMJFRStopMissingPID(t *testing.T) {
 	}
 }
 
+func TestDaemonJVMJFRSummaryMissingPath(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 38, "jvm.jfr.summary", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when path missing")
+	}
+}
+
+func TestDaemonJVMJFRSummaryUsesRunner(t *testing.T) {
+	var gotPath string
+	orig := runJFRSummary
+	runJFRSummary = func(path string, _ jvm.CmdRunner) (jvm.JFRSummary, error) {
+		gotPath = path
+		return jvm.JFRSummary{
+			Path:    path,
+			Version: "2.1",
+			Events:  []jvm.JFREventSummary{{Type: "jdk.CPULoad", Count: 2, SizeBytes: 64}},
+		}, nil
+	}
+	t.Cleanup(func() { runJFRSummary = orig })
+
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 39, "jvm.jfr.summary", `{"path":"/tmp/out.jfr"}`)
+	if resp.Error != nil {
+		t.Fatalf("jvm.jfr.summary: %v", resp.Error)
+	}
+	if gotPath != "/tmp/out.jfr" {
+		t.Fatalf("path = %q, want /tmp/out.jfr", gotPath)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if m["version"] != "2.1" {
+		t.Errorf("version = %v, want 2.1", m["version"])
+	}
+}
+
 func TestDaemonCacheStatsReturnsSlice(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()

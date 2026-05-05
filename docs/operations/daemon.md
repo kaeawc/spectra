@@ -50,7 +50,7 @@ JSON-RPC 2.0 methods, organized by concern:
   `process.tree`, `process.sample`
 - **JVM** — `jvm.list`, `jvm.inspect`, `jvm.threadDump`, `jvm.heapDump`,
   `jvm.heapHistogram`, `jvm.gcStats`, `jvm.jfr.start`, `jvm.jfr.stop`,
-  `jvm.jfr.dump`
+  `jvm.jfr.dump`, `jvm.jfr.summary`
 - **JDK** — `jdk.list`, `jdk.scan`
 - **Toolchain** — `toolchain.scan`, `toolchain.brew`,
   `toolchain.runtimes`, `toolchain.build_tools`
