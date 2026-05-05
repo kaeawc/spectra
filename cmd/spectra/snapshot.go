@@ -23,6 +23,7 @@ func snapshotSubcommands() []subcommand {
 		{"show", "Show details of one snapshot by ID", runSnapshotShow},
 		{"diff", "Diff two stored snapshots", runSnapshotDiff},
 		{"prune", "Delete live snapshots beyond the retention limit (default: keep 100)", runSnapshotPrune},
+		{"baseline", "Manage baseline snapshots (list, drop)", runSnapshotBaseline},
 	}
 }
 
@@ -409,6 +410,127 @@ func runSnapshotPrune(args []string) int {
 	} else {
 		fmt.Printf("pruned %d live snapshot(s) (keeping last %d per machine)\n", deleted, *keepN)
 	}
+	return 0
+}
+
+// runSnapshotBaseline dispatches to baseline sub-subcommands (list, drop).
+func runSnapshotBaseline(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			return runBaselineList(args[1:])
+		case "drop":
+			return runBaselineDrop(args[1:])
+		}
+	}
+	fmt.Fprintln(os.Stderr, "usage: spectra snapshot baseline <list|drop>")
+	return 2
+}
+
+// runBaselineList lists baseline snapshots stored in the DB.
+func runBaselineList(args []string) int {
+	fs := flag.NewFlagSet("spectra snapshot baseline list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	rows, err := db.ListSnapshots(ctx, "")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	var baselines []store.SnapshotRow
+	for _, r := range rows {
+		if r.Kind == "baseline" {
+			baselines = append(baselines, r)
+		}
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(baselines)
+		return 0
+	}
+
+	if len(baselines) == 0 {
+		fmt.Println("no baselines stored")
+		return 0
+	}
+	fmt.Printf("%-40s  %-20s  %-4s  %s\n", "ID", "TAKEN AT", "APPS", "NAME")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, r := range baselines {
+		name := r.Name
+		if name == "" {
+			name = "(unnamed)"
+		}
+		fmt.Printf("%-40s  %-20s  %-4d  %s\n",
+			r.ID, r.TakenAt.Format("2006-01-02T15:04:05Z"), r.AppCount, name)
+	}
+	return 0
+}
+
+// runBaselineDrop deletes a baseline snapshot by ID.
+func runBaselineDrop(args []string) int {
+	fs := flag.NewFlagSet("spectra snapshot baseline drop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: spectra snapshot baseline drop <id>")
+		return 2
+	}
+	id := fs.Arg(0)
+
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	row, err := db.GetSnapshot(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		fmt.Fprintf(os.Stderr, "baseline %q not found\n", id)
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if row.Kind != "baseline" {
+		fmt.Fprintf(os.Stderr, "%q is a %q snapshot, not a baseline — use 'snapshot prune' for live snapshots\n", id, row.Kind)
+		return 1
+	}
+
+	if err := db.DeleteSnapshot(ctx, id); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("dropped baseline %s\n", id)
 	return 0
 }
 

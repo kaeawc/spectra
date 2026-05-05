@@ -376,6 +376,24 @@ func (s *DB) GetSnapshotJSON(ctx context.Context, id string) ([]byte, error) {
 	return []byte(raw.String), nil
 }
 
+// DeleteSnapshot deletes a snapshot and all its child rows by ID.
+func (s *DB) DeleteSnapshot(ctx context.Context, id string) error {
+	for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM `+table+` WHERE snapshot_id=?`, id); err != nil {
+			return fmt.Errorf("store: delete %s for %s: %w", table, id, err)
+		}
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM snapshots WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete snapshot %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetSnapshotApps returns the per-app rows for a snapshot.
 func (s *DB) GetSnapshotApps(ctx context.Context, snapID string) ([]AppRow, error) {
 	rows, err := s.db.QueryContext(ctx,
