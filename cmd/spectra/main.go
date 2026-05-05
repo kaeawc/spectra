@@ -38,6 +38,7 @@ func subcommandList() []subcommand {
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
 		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"power", "Show current battery and thermal state", runPower},
+		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
 		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
