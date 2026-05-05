@@ -63,5 +63,5 @@ not-yet-built recommendations engine.
 | Why is this app heavy? | `spectra -v APP.app` (look at storage + processes) |
 | What can this app do to my machine? | `spectra -v APP.app` (entitlements + granted) |
 | What hosts does this app talk to? | `spectra -v --network APP.app` |
-| Is anything new on my machine since last week? | _planned: `spectra diff baseline`_ |
+| Is anything new on my machine since last week? | `spectra diff baseline pre-incident live` |
 | What's running on my work Mac right now? | _planned: `spectra connect work-mac`_ |

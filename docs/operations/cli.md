@@ -20,6 +20,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `list` | Inspect every `.app` under `/Applications` |
 | `snapshot` | Capture a structured snapshot of host + installed apps |
 | `diff` | Diff two stored snapshots |
+| `baseline` | Manage baseline snapshots (alias for `snapshot baseline`) |
 | `rules` | Evaluate recommendation rules against a snapshot |
 | `issues` | List, check, or update persisted recommendation issues |
 | `jvm` | List or inspect running JVM processes |
@@ -94,10 +95,16 @@ alongside the full JSON snapshot blob.
 
 ```bash
 spectra snapshot                   # full snapshot, persisted + printed
+spectra snapshot create            # explicit form; same as `snapshot`
 spectra snapshot --no-apps         # ~50ms, just the host facts
+spectra snapshot create --baseline pre-incident
 spectra snapshot --json | jq .host
 spectra snapshot --no-store        # ephemeral — do not write to DB
 ```
+
+`spectra snapshot create` is an explicit alias for `spectra snapshot`.
+When `--baseline` is set, a single positional argument is accepted as
+the baseline name; `--name pre-incident` remains equivalent.
 
 ## `spectra snapshot list`
 
@@ -160,6 +167,34 @@ by-ui:
   ComposeDesktop             3
   Electron                  17
   ...
+```
+
+## `spectra diff`
+
+Diffs two stored snapshots. `live` can be used as either side to
+capture an ephemeral current snapshot without storing it.
+
+### Examples
+
+```bash
+spectra diff snap-20260504T095749Z-4829 live
+spectra diff baseline                  # newest baseline against live
+spectra diff baseline pre-incident live
+```
+
+`spectra diff baseline <name|id> [live|id]` resolves the first operand
+to a baseline by ID first, then by baseline name. When the name/id is
+omitted, the newest baseline is used.
+
+## `spectra baseline`
+
+Convenience alias for `spectra snapshot baseline`.
+
+### Examples
+
+```bash
+spectra baseline list
+spectra baseline drop snap-20260504T095749Z-4829
 ```
 
 ## `spectra version`

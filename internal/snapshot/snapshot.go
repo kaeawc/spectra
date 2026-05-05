@@ -20,7 +20,6 @@ import (
 )
 
 // Kind distinguishes a live snapshot from an immutable baseline.
-// Today only Live is produced; baselines arrive with the daemon.
 type Kind string
 
 const (

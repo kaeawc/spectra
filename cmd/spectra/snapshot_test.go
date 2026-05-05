@@ -36,6 +36,96 @@ func TestResolveSnapshotNotFoundReturnsError(t *testing.T) {
 	}
 }
 
+func TestSnapshotNameFromArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseline     bool
+		explicitName string
+		args         []string
+		wantName     string
+		wantOK       bool
+	}{
+		{name: "no name", wantOK: true},
+		{name: "explicit name", explicitName: "release", wantName: "release", wantOK: true},
+		{name: "baseline positional", baseline: true, args: []string{"pre-incident"}, wantName: "pre-incident", wantOK: true},
+		{name: "live positional rejected", args: []string{"pre-incident"}, wantOK: false},
+		{name: "ambiguous name rejected", baseline: true, explicitName: "a", args: []string{"b"}, wantOK: false},
+		{name: "too many args rejected", baseline: true, args: []string{"a", "b"}, wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := snapshotNameFromArgs(tc.baseline, tc.explicitName, tc.args)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if got != tc.wantName {
+				t.Fatalf("name = %q, want %q", got, tc.wantName)
+			}
+		})
+	}
+}
+
+func TestResolveBaselineSnapshotByNameAndLatest(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	old := testSnapshot("snap-old", snapshot.KindBaseline, time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC))
+	newer := testSnapshot("snap-new", snapshot.KindBaseline, time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC))
+	live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
+	saveTestSnapshot(t, db, old, "pre-incident")
+	saveTestSnapshot(t, db, newer, "release")
+	saveTestSnapshot(t, db, live, "")
+
+	got, err := resolveBaselineSnapshot(ctx, db, "pre-incident")
+	if err != nil {
+		t.Fatalf("resolve by name: %v", err)
+	}
+	if got.ID != old.ID {
+		t.Fatalf("resolve by name ID = %q, want %q", got.ID, old.ID)
+	}
+
+	got, err = resolveBaselineSnapshot(ctx, db, "")
+	if err != nil {
+		t.Fatalf("resolve latest: %v", err)
+	}
+	if got.ID != newer.ID {
+		t.Fatalf("latest ID = %q, want %q", got.ID, newer.ID)
+	}
+}
+
+func TestResolveBaselineSnapshotRejectsLiveID(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
+	saveTestSnapshot(t, db, live, "")
+
+	if _, err := resolveBaselineSnapshot(ctx, db, live.ID); err == nil {
+		t.Fatal("expected live snapshot ID to be rejected as a baseline")
+	}
+}
+
+func testSnapshot(id string, kind snapshot.Kind, takenAt time.Time) snapshot.Snapshot {
+	return snapshot.Snapshot{
+		ID:      id,
+		TakenAt: takenAt,
+		Kind:    kind,
+		Host: snapshot.HostInfo{
+			Hostname:    "test.local",
+			MachineUUID: "TEST-MACHINE",
+			OSName:      "macOS",
+		},
+	}
+}
+
+func saveTestSnapshot(t *testing.T, db *store.DB, snap snapshot.Snapshot, name string) {
+	t.Helper()
+	input := store.FromSnapshot(snap)
+	input.Name = name
+	if err := db.SaveSnapshot(context.Background(), input); err != nil {
+		t.Fatalf("SaveSnapshot(%s): %v", snap.ID, err)
+	}
+}
+
 func TestSaveSnapshotNamedPersistsChildTables(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
