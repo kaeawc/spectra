@@ -43,6 +43,22 @@ func touch(t *testing.T, path string) {
 	}
 }
 
+func writeFrameworkPlist(t *testing.T, path, version string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>` + version + `</string>
+<key>CFBundleVersion</key><string>` + version + `</string>
+</dict></plist>`
+	if err := os.WriteFile(path, []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDetectElectron(t *testing.T) {
 	app := makeBundle(t, "FakeElectron")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
@@ -70,9 +86,13 @@ func TestDetectFlutter(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
 	r, _ := Detect(app)
 	if r.UI != "Flutter" || r.Language != "Dart" {
 		t.Errorf("got UI=%q lang=%q", r.UI, r.Language)
+	}
+	if r.FrameworkVersions["Flutter"] != "3.22.0" {
+		t.Errorf("Flutter version = %q", r.FrameworkVersions["Flutter"])
 	}
 }
 
@@ -81,9 +101,24 @@ func TestDetectQt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
 	r, _ := Detect(app)
 	if r.UI != "Qt" {
 		t.Errorf("UI = %q, want Qt", r.UI)
+	}
+	if r.FrameworkVersions["Qt"] != "6.7.2" {
+		t.Errorf("Qt version = %q", r.FrameworkVersions["Qt"])
+	}
+}
+
+func TestReadTauriVersion(t *testing.T) {
+	app := makeBundle(t, "FakeTauri")
+	conf := filepath.Join(app, "Contents", "Resources", "tauri.conf.json")
+	if err := os.WriteFile(conf, []byte(`{"package":{"version":"2.1.0"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTauriVersion(app); got != "2.1.0" {
+		t.Errorf("readTauriVersion = %q, want 2.1.0", got)
 	}
 }
 

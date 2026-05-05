@@ -114,6 +114,8 @@ See [native-modules.md](native-modules.md).
 
 - **Specific Electron app frameworks** (Forge, electron-builder,
   electron-packager). Not visible from the bundle layout.
-- **Specific Flutter / Tauri / Qt versions.** Possible but not yet useful.
+- **Framework versions.** Electron, Flutter, Qt, and Tauri versions are
+  populated best-effort in `FrameworkVersions` when the bundle exposes
+  framework plists or Tauri config metadata.
 - **Game engines** (Unity, Unreal, Godot's own classification). Treat
   as "AppKit native" — game apps don't fit the framework taxonomy.

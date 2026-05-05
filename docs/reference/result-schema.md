@@ -26,6 +26,7 @@ Source of truth: `internal/detect/detect.go`.
 | `AppVersion` | string | `Info.plist` `CFBundleShortVersionString` |
 | `BuildNumber` | string | `Info.plist` `CFBundleVersion` |
 | `ElectronVersion` | string | Electron framework's own Info.plist |
+| `FrameworkVersions` | map[string]string | Best-effort framework version map, such as Electron, Flutter, Qt, Tauri |
 | `Architectures` | []string | `arm64`, `x86_64`, or both |
 | `BundleSizeBytes` | int64 | Sparse-file-correct on-disk allocation |
 | `TeamID` | string | `codesign -dv` TeamIdentifier |
