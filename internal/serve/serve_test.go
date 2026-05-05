@@ -563,3 +563,19 @@ func TestDaemonToolchainRuntimesReturnsObject(t *testing.T) {
 		}
 	}
 }
+
+func TestDaemonPowerStateReturnsObject(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 60, "power.state", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("power.state: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if _, exists := m["on_battery"]; !exists {
+		t.Error("power.state: expected on_battery field in result")
+	}
+}

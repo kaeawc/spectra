@@ -29,6 +29,7 @@ import (
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/storagestate"
+	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -698,6 +699,11 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	})
+
+	// power.state — battery level, thermal pressure, assertions, and top energy users.
+	d.Register("power.state", func(_ json.RawMessage) (any, error) {
+		return sysinfo.CollectPower(sysinfo.DefaultRunner), nil
 	})
 
 	// storage.system — disk volumes + ~/Library usage summary.
