@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,7 +20,13 @@ func runServe(args []string) int {
 	fs := flag.NewFlagSet("spectra serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	sockPath := fs.String("sock", "", "Unix socket path (default: ~/.spectra/sock)")
+	tcpAddr := fs.String("tcp", "", "Optional TCP listen address, such as 127.0.0.1:7878")
+	allowRemote := fs.Bool("allow-remote", false, "Allow --tcp to bind a non-loopback address")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *tcpAddr != "" && !*allowRemote && !isLoopbackListenAddr(*tcpAddr) {
+		fmt.Fprintln(os.Stderr, "spectra serve: --tcp is limited to loopback unless --allow-remote is set")
 		return 2
 	}
 
@@ -36,6 +43,12 @@ func runServe(args []string) int {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "spectra serve: listening on %s\n", sock)
+	if *tcpAddr != "" {
+		if *allowRemote {
+			fmt.Fprintln(os.Stderr, "spectra serve: warning: TCP RPC has no Spectra-layer authentication; rely on SSH/Tailscale/firewall controls")
+		}
+		fmt.Fprintf(os.Stderr, "spectra serve: listening on tcp %s\n", *tcpAddr)
+	}
 
 	var detectStore *cache.ShardedStore
 	if cacheStores != nil {
@@ -43,6 +56,7 @@ func runServe(args []string) int {
 	}
 	if err := serve.Run(ctx, serve.Options{
 		SockPath:       sock,
+		TCPAddr:        *tcpAddr,
 		SpectraVersion: version,
 		DetectStore:    detectStore,
 	}); err != nil {
@@ -50,6 +64,18 @@ func runServe(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // runStatus sends a health request to the running daemon and prints the result.

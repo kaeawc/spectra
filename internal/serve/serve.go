@@ -50,6 +50,7 @@ func DefaultSockPath() (string, error) {
 // Options configures the daemon.
 type Options struct {
 	SockPath       string
+	TCPAddr        string
 	SpectraVersion string
 	DBPath         string              // empty = store.DefaultPath()
 	CacheRegistry  *cache.Registry     // nil = cache.Default
@@ -82,10 +83,19 @@ func Run(ctx context.Context, opts Options) error {
 		ln.Close()
 		return fmt.Errorf("serve: chmod %s: %w", sockPath, err)
 	}
-	defer func() {
-		ln.Close()
-		os.Remove(sockPath)
-	}()
+
+	listeners := []net.Listener{ln}
+	if opts.TCPAddr != "" {
+		tcpLn, err := net.Listen("tcp", opts.TCPAddr)
+		if err != nil {
+			ln.Close()
+			os.Remove(sockPath)
+			return fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err)
+		}
+		listeners = append(listeners, tcpLn)
+	}
+	defer os.Remove(sockPath)
+	defer closeListeners(listeners)
 
 	dbPath := opts.DBPath
 	if dbPath == "" {
@@ -122,10 +132,32 @@ func Run(ctx context.Context, opts Options) error {
 	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
 		<-ctx.Done()
-		ln.Close()
+		closeListeners(listeners)
 	}()
 
-	return d.ServeListener(ln)
+	return serveAll(d, listeners)
+}
+
+func serveAll(d *rpc.Dispatcher, listeners []net.Listener) error {
+	errCh := make(chan error, len(listeners))
+	for _, ln := range listeners {
+		go func(ln net.Listener) {
+			errCh <- d.ServeListener(ln)
+		}(ln)
+	}
+	for range listeners {
+		if err := <-errCh; err != nil {
+			closeListeners(listeners)
+			return err
+		}
+	}
+	return nil
+}
+
+func closeListeners(listeners []net.Listener) {
+	for _, ln := range listeners {
+		_ = ln.Close()
+	}
 }
 
 // flushMetricsLoop writes 1-minute aggregates from the ring buffer to SQLite
