@@ -307,6 +307,13 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 		add("bazel", v, "system")
 	}
 
+	// Make — check brew cellar first, then Xcode command line tools.
+	if v := brewVersion(opts.BrewCellars, "make"); v != "" {
+		add("make", v, "brew")
+	} else if v := versionFromCmd(opts.CmdRunner, "xcrun", "make", "--version"); v != "" {
+		add("make", v, "system")
+	}
+
 	// CMake — check brew cellar first.
 	if v := brewVersion(opts.BrewCellars, "cmake"); v != "" {
 		add("cmake", v, "brew")
