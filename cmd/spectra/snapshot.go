@@ -391,6 +391,7 @@ func sortStrings(s []string) {
 }
 
 // runSnapshotDiff loads two snapshots by ID and prints a structured diff.
+// Either ID may be the sentinel "live" to capture a fresh snapshot on the fly.
 func runSnapshotDiff(args []string) int {
 	fs := flag.NewFlagSet("spectra snapshot diff", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -399,7 +400,7 @@ func runSnapshotDiff(args []string) int {
 		return 2
 	}
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b>")
+		fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
 		return 2
 	}
 	idA, idB := fs.Arg(0), fs.Arg(1)
@@ -417,12 +418,12 @@ func runSnapshotDiff(args []string) int {
 	defer db.Close()
 
 	ctx := context.Background()
-	snapA, err := loadSnapshotFromDB(ctx, db, idA)
+	snapA, err := resolveSnapshot(ctx, db, idA)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idA, err)
 		return 1
 	}
-	snapB, err := loadSnapshotFromDB(ctx, db, idB)
+	snapB, err := resolveSnapshot(ctx, db, idB)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "snapshot %q: %v\n", idB, err)
 		return 1
@@ -439,6 +440,16 @@ func runSnapshotDiff(args []string) int {
 
 	printDiff(result)
 	return 0
+}
+
+// resolveSnapshot loads a snapshot from the DB by ID, or captures a fresh
+// live snapshot when id is the sentinel "live".
+func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+	if id == "live" {
+		snap := snapshot.Build(ctx, snapshot.Options{SpectraVersion: version})
+		return &snap, nil
+	}
+	return loadSnapshotFromDB(ctx, db, id)
 }
 
 // loadSnapshotFromDB retrieves the full snapshot JSON blob for id and unmarshals
