@@ -648,6 +648,15 @@ func TestDaemonHelperPowermetricsRequiresHelper(t *testing.T) {
 	}
 }
 
+func TestDaemonHelperFirewallRulesRequiresHelper(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 155, "helper.firewall.rules", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when helper not running")
+	}
+}
+
 func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()

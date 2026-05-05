@@ -235,6 +235,21 @@ spectra jvm jfr summary --json /tmp/app.jfr
 spectra jvm jfr stop 4012 --name spectra
 ```
 
+## `spectra network`
+
+Shows unprivileged network state by default. `spectra network firewall`
+asks the privileged helper for current pf firewall rules.
+
+### Examples
+
+```bash
+spectra network
+spectra network --json
+spectra network connections --proto tcp --state established
+spectra network firewall
+spectra network firewall --json
+```
+
 ## `spectra serve`
 
 Runs the JSON-RPC daemon. By default it listens only on the current

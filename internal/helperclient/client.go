@@ -134,3 +134,13 @@ func (c *Client) ProcessTree() (map[string]any, error) {
 	var m map[string]any
 	return m, json.Unmarshal(raw, &m)
 }
+
+// FirewallRules returns the current pf firewall rules via the helper.
+func (c *Client) FirewallRules() (map[string]any, error) {
+	raw, err := c.call("helper.firewall.rules", nil)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(raw, &m)
+}

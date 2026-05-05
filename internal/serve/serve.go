@@ -939,6 +939,17 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return result, nil
 	})
 
+	d.Register("helper.firewall.rules", func(_ json.RawMessage) (any, error) {
+		result, err := hc.FirewallRules()
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
 	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
 		var p struct {
 			BundleID string `json:"bundle_id"`

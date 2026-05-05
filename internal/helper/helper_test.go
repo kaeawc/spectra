@@ -233,3 +233,30 @@ func TestTCCQueryRequiresBundleID(t *testing.T) {
 		t.Error("expected error when bundle_id missing")
 	}
 }
+
+func TestFirewallRulesUsesPFCTL(t *testing.T) {
+	d := NewDispatcher()
+	var gotName string
+	var gotArgs []string
+	RegisterAll(d, func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = args
+		return []byte("block drop all\npass out all\n"), nil
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":4,"method":"helper.firewall.rules"}`)
+	resp := d.handle(501, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	if gotName != "pfctl" || len(gotArgs) != 2 || gotArgs[0] != "-s" || gotArgs[1] != "rules" {
+		t.Fatalf("command = %s %v, want pfctl -s rules", gotName, gotArgs)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if m["raw_rules"] != "block drop all\npass out all\n" {
+		t.Errorf("raw_rules = %q", m["raw_rules"])
+	}
+}

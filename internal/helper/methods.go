@@ -55,6 +55,14 @@ func RegisterAll(d *Dispatcher, run CmdRunner) {
 		return map[string]any{"raw_ps": string(out)}, nil
 	})
 
+	d.Register("helper.firewall.rules", func(_ uint32, _ json.RawMessage) (any, error) {
+		out, err := run("pfctl", "-s", "rules")
+		if err != nil {
+			return nil, fmt.Errorf("pfctl rules: %w", err)
+		}
+		return map[string]any{"raw_rules": string(out)}, nil
+	})
+
 	d.Register("helper.tcc.system.query", func(_ uint32, params json.RawMessage) (any, error) {
 		var p struct {
 			BundleID string `json:"bundle_id"`

@@ -52,7 +52,7 @@ limiting (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
-| `pfctl -s rules` | firewall rules | helper | one-shot | (planned) fw audit |
+| `pfctl -s rules` | firewall rules | helper | one-shot | `helper.firewall.rules`, `spectra network firewall` |
 | `tcpdump -i <iface>` | raw packet capture | helper | streaming, high | (planned) targeted capture |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,

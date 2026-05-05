@@ -48,6 +48,8 @@ JSON-RPC 2.0 methods, organized by concern:
   `snapshot.granted_perms`, `snapshot.prune`
 - **Live state** — `process.live`, `process.history`, `process.list`,
   `process.tree`, `process.sample`
+- **Helper** — `helper.health`, `helper.powermetrics.sample`,
+  `helper.tcc.system.query`, `helper.firewall.rules`
 - **JVM** — `jvm.list`, `jvm.inspect`, `jvm.threadDump`, `jvm.heapDump`,
   `jvm.heapHistogram`, `jvm.gcStats`, `jvm.jfr.start`, `jvm.jfr.stop`,
   `jvm.jfr.dump`, `jvm.jfr.summary`
