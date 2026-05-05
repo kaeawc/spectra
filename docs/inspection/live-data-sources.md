@@ -1,8 +1,8 @@
 # Live data sources
 
-Reference table of every macOS observability primitive Spectra will
-integrate. Captures what each gives, what privileges it needs, what
-its costs are, and which collector it backs.
+Reference table of the macOS observability primitives Spectra uses or
+intentionally leaves for later. Captures what each gives, what privileges
+it needs, what its costs are, and which collector it backs.
 
 This page is the anchor for the live-data roadmap so we don't
 accidentally collect the same thing two different ways or pay the
@@ -12,22 +12,24 @@ fork cost twice.
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `ps -axwwo pid,ppid,uid,rss,pcpu,etime,comm` | full process table | user | ~30ms / call | `scanRunningProcesses` (today), daemon ring buffer (planned) |
+| `ps -axwwo pid,ppid,pcpu,rss,vsz,uid,user,lstart,command` | full process table | user | ~30ms / call | `process.CollectAll`, snapshots, daemon ring buffer |
 | `libproc` (cgo) | richer per-process: thread count, fd count, region info | user | ~per-process | future replacement for `ps` |
 | `proc_pidinfo` (syscall) | structured per-process, no fork | user | microseconds | future ring buffer |
-| `top -l 1 -n 0 -stats pid,rsize,cpu,power` | system-wide energy attribution | user | ~200ms | planned `power` collector |
+| `top -l 1 -n 10 -o power -stats pid,power,command` | flat per-process energy attribution | user | ~200ms | `power.energy_top_users` |
 | `sample <pid> 1` | one-second user-space sample, kernel sample optional | user (own procs); root (others) | ~1s + binding cost | `spectra sample` |
 
-`ps` is what we use today. The natural upgrade path is direct
-syscalls via `libproc` — eliminates the fork cost and gives access to
-per-process detail (threads, file descriptors, memory regions) that
-`ps` can't surface in a single call.
+`ps` is what we use today for snapshots, `spectra process`, and the
+daemon's ~1Hz metrics sampler. `--deep` process scans add one batched
+`lsof -p pid1,pid2,...` call to populate open file descriptor counts,
+listening ports, and outbound remote addresses. The natural upgrade path
+is direct syscalls via `libproc` / `proc_pidinfo`, which would eliminate
+the fork cost and add richer per-process detail.
 
 ## File and disk activity
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `lsof -p <pid>` | open files + sockets per process | user (own); helper for others | ~50ms per pid | `process.open_fds`, `process.listening_ports` |
+| `lsof -p <pid[,pid...]>` | open files + sockets per process | user (own); helper for others | ~50-100ms batched | `process.open_fds`, `process.listening_ports`, `process.outbound_connections` |
 | `lsof -i -P -n` | system-wide network connections | user (limited); helper for full | ~100ms | network connections collector |
 | `fs_usage -w -f filesys` | live file system trace | helper-only | streaming | `fs_usage` collector via helper |
 | `fs_usage -e <pid>` | per-process file activity | helper-only | streaming | targeted file-activity capture |
@@ -43,17 +45,19 @@ limiting (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `nettop -P -L 0 -t external` | per-process network bytes/sec | user (limited) | streaming, low | network-by-app live counters |
-| `lsof -i -P -n` | current TCP/UDP sockets | user | one-shot | listening ports + connections |
-| `netstat -an` | system-wide socket state | user | low | fallback when `lsof` unavailable |
+| `nettop -P -L 0 -t external` | per-process network bytes/sec | user (limited) | streaming, low | future live throughput counters |
+| `lsof -i -P -n -sTCP:LISTEN` | current listening TCP sockets | user | one-shot | `network.listening_ports` |
+| `lsof -i -P -n` | current TCP/UDP sockets | user | one-shot | `network.connections`, `network.byApp`, established count |
+| `netstat -an` | system-wide socket state | user | low | future fallback when `lsof` unavailable |
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
 | `pfctl -s rules` | firewall rules | helper | one-shot | (planned) fw audit |
 | `tcpdump -i <iface>` | raw packet capture | helper | streaming, high | (planned) targeted capture |
 
-We default to `nettop` and `lsof` for the unprivileged daemon. Packet
-capture is reserved for explicit request via the helper.
+The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
+and `/etc/hosts`. `nettop` throughput counters and raw packet capture are
+reserved for explicit future live workflows.
 
 ## Energy and power
 
@@ -62,11 +66,12 @@ capture is reserved for explicit request via the helper.
 | `pmset -g assertions` | active wake/sleep assertions | user | <10ms | `power.active_assertions` |
 | `pmset -g batt` | battery state | user | <10ms | `power.on_battery` |
 | `pmset -g therm` | thermal state | user | <10ms | `power.thermal_pressure` |
-| `powermetrics -s tasks -n 1` | per-process energy attribution | helper-only | ~1s | `power.energy_top_users` |
-| `top -l 1 -o power` | flat per-process power column | user | ~200ms | fallback when helper absent |
+| `powermetrics --samplers cpu_power,gpu_power,network,disk -n 1` | deeper energy attribution | helper-only | ~1s | `helper.powermetrics.sample` |
+| `top -l 1 -n 10 -o power -stats pid,power,command` | flat per-process power column | user | ~200ms | `power.energy_top_users` |
 
-`pmset` covers ~80% of the power story without root. `powermetrics`
-provides the deep CPU/GPU/disk energy breakdown but needs the helper.
+`pmset` plus `top` covers the unprivileged power story. `powermetrics`
+provides deeper CPU/GPU/network/disk energy breakdown when the privileged
+helper is installed and reachable.
 
 ## JVM observation
 
@@ -80,11 +85,12 @@ provides the deep CPU/GPU/disk energy breakdown but needs the helper.
 | `jcmd <pid> GC.heap_dump <path>` | full heap dump | same UID | seconds-minutes, GBs | `jvm.heapDump` artifact |
 | `jcmd <pid> JFR.start name=spectra` | start JFR recording | same UID | low | `jvm.jfr.start` |
 | `jcmd <pid> JFR.dump name=spectra filename=...` | stop+dump JFR | same UID | low | `jvm.jfr.dump` |
-| `jstat -gc <pid> 1000` | GC counters polling | same UID | streaming, low | `jvm.gc` ring buffer |
+| `jstat -gc <pid>` | GC counters snapshot | same UID | low | `jvm.gc_stats` |
 
 All require a JDK in `$PATH` — see [toolchains.md](toolchains.md) for
-JDK discovery. Spectra picks the JDK most-recently used to launch the
-target JVM (each process's `java.home` system property tells us which).
+JDK discovery. Running JVM inspection records each process's `java.home`,
+`java.vendor`, and `java.version`; higher-level attribution back to a
+discovered JDK install is still future work.
 
 ## Code-signing and entitlements
 
@@ -99,7 +105,7 @@ target JVM (each process's `java.home` system property tells us which).
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
 | `~/Library/Application Support/com.apple.TCC/TCC.db` | per-user grants | user | ~20ms | `GrantedPermissions` (today) |
-| `/Library/Application Support/com.apple.TCC/TCC.db` | system-wide grants | helper-only | ~20ms | `GrantedPermissions` system rows (planned) |
+| `/Library/Application Support/com.apple.TCC/TCC.db` | system-wide grants | helper-only | ~20ms | `helper.tcc.system.query`; direct scan when readable |
 | `tccutil reset <service>` | reset specific permission | user (own); helper for system | <100ms | not used; mutation only |
 
 ## App bundle structure
@@ -148,8 +154,9 @@ Per-snapshot cost summary for a typical Mac with ~100 apps installed,
 
 ```
 ps                                 30ms
-lsof (per app, only when matched)   N × 50ms  (skipped without --deep)
-nettop -L 0 (5s sample)             5s   (only when --deep or live)
+lsof -p batch                       50-100ms  (only with process --deep)
+lsof -i                             ~100ms
+top power sample                    ~200ms
 codesign + plutil per app           100ms × (apps inspected)
 TCC.db query per bundle             20ms
 JVM jcmd per Java pid               300ms × (Java pids)
