@@ -67,7 +67,7 @@ ProcessInfo {
   command, full_command_line
   cpu_pct                  # over the last sample interval
   rss_kib, vsize_kib
-  thread_count             # currently 0; future libproc/proc_pidinfo
+  thread_count             # proc_pidinfo on Darwin when visible
   start_time
   app_path                 # nullable; populated when bundle attribution succeeds
   open_fds                 # via lsof, only when --deep

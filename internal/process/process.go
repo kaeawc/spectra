@@ -3,8 +3,8 @@
 // docs/design/system-inventory.md and docs/inspection/running-processes.md.
 //
 // Collection is a single fork of `ps`; per-app attribution is a string-prefix
-// match (no extra forks). CPU% is captured from ps; thread counts land with a
-// future libproc/proc_pidinfo collector.
+// match (no extra forks). CPU% is captured from ps; thread counts are filled
+// from proc_pidinfo on Darwin when available.
 package process
 
 import (
@@ -25,7 +25,7 @@ type Info struct {
 	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
 	RSSKiB          int64     `json:"rss_kib"`
 	VSizeKiB        int64     `json:"vsize_kib"`
-	ThreadCount     int       `json:"thread_count"`         // number of threads (nlwp)
+	ThreadCount     int       `json:"thread_count"`         // number of process threads
 	CPUPct          float64   `json:"cpu_pct"`              // CPU % at sample time (pcpu)
 	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
 
@@ -53,6 +53,9 @@ type CollectOptions struct {
 
 	// CmdRunner overrides exec.Command for testing.
 	CmdRunner func(name string, args ...string) ([]byte, error)
+
+	// ThreadCounter overrides the platform thread-count collector for testing.
+	ThreadCounter func([]Info) map[int]int
 }
 
 // CollectAll returns all running processes. Any parse errors for individual
@@ -64,13 +67,14 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	}
 	// Column order: pid ppid pcpu rss vsz uid user lstart command...
 	// lstart produces a 5-token date "Dow Mon DD HH:MM:SS YYYY".
-	// macOS ps does not support nlwp; ThreadCount is populated by separate
-	// collectors when available.
+	// macOS ps does not support nlwp; ThreadCount is populated below by the
+	// platform collector when available.
 	out, err := run("ps", "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=")
 	if err != nil {
 		return nil
 	}
 	procs := parsePS(string(out))
+	applyThreadCounts(procs, opts.ThreadCounter)
 	if len(opts.BundlePaths) > 0 {
 		attributeBundles(procs, opts.BundlePaths)
 	}
@@ -78,6 +82,21 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 		enrichDeep(procs, run)
 	}
 	return procs
+}
+
+func applyThreadCounts(procs []Info, counter func([]Info) map[int]int) {
+	if len(procs) == 0 {
+		return
+	}
+	if counter == nil {
+		counter = collectThreadCounts
+	}
+	counts := counter(procs)
+	for i := range procs {
+		if count := counts[procs[i].PID]; count > 0 {
+			procs[i].ThreadCount = count
+		}
+	}
 }
 
 // defaultRunner runs the real ps command.
