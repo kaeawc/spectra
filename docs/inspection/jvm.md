@@ -1,11 +1,42 @@
 # JVM inspection
 
-> **Status: planned.** Captured here so the data model and architecture
-> can be built with JVM-class introspection in mind from the start.
+Spectra implements the JDK shell-tool layer of JVM inspection today:
+running-process discovery, structured per-PID metadata, thread dumps,
+heap histograms, heap dumps, one-shot GC stats, and JFR start/dump/stop.
+The planned in-process Java agent layer is still future work.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
 first-class subsystem alongside the app scanner, not a bolt-on.
+
+Entry points:
+
+```bash
+spectra jvm
+spectra jvm --json
+spectra jvm <pid>
+spectra jvm thread-dump <pid>
+spectra jvm heap-histogram <pid>
+spectra jvm heap-dump [--out <path>] <pid>
+spectra jvm gc-stats [--json] <pid>
+spectra jvm jfr start <pid> [--name spectra]
+spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
+spectra jvm jfr stop <pid> [--name spectra] [--out <path>]
+```
+
+Daemon methods:
+
+- `jvm.list`
+- `jvm.inspect`
+- `jvm.thread_dump` / `jvm.threadDump`
+- `jvm.heap_histogram` / `jvm.heapHistogram`
+- `jvm.heap_dump` / `jvm.heapDump`
+- `jvm.gc_stats` / `jvm.gcStats`
+- `jvm.jfr.start`
+- `jvm.jfr.dump`
+- `jvm.jfr.stop`
+- `jdk.list`
+- `jdk.scan`
 
 ## Two implementation layers
 
@@ -23,32 +54,35 @@ JDK commands:
 | Process discovery | `jps -l` |
 | JVM args, system props | `jcmd <pid> VM.system_properties`, `VM.command_line` |
 | Live thread dump | `jcmd <pid> Thread.print` |
-| GC stats over time | `jstat -gc <pid> 1000` |
+| GC stats snapshot | `jstat -gc <pid>` |
 | Heap histogram | `jcmd <pid> GC.class_histogram` |
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
 | JFR start / stop / dump | `jcmd <pid> JFR.start`, `JFR.dump` |
 
-Output is parsed into structured JSON. The captured artifacts (.hprof,
-.jfr, thread dump text) go into the [sharded blob store](../design/storage.md)
-keyed by content hash; SQLite holds the metadata row pointing at them.
+`spectra jvm` and `spectra jvm <pid>` parse output into structured JSON
+when `--json` is passed. Thread dump text and JFR dump files are copied
+into the [sharded blob store](../design/storage.md) when the cache stores
+are initialized. Heap dumps are written to the requested path or to
+`~/.spectra/<pid>-<timestamp>.hprof`.
 
 ### Layer 2 — Java agent (in-process)
 
-The remaining capabilities require code running inside the target JVM:
+The remaining capabilities require code running inside the target JVM and
+are not implemented yet:
 
 - Live MBean browsing (JMX over RMI).
 - Async-profiler-grade flame graphs (bytecode instrumentation).
 - Custom counters and probes.
 
-Spectra ships a small `spectra-agent.jar` alongside the Go binary. On
-demand, it's attached via the Attach API:
+The planned shape is a small `spectra-agent.jar` alongside the Go binary,
+attached on demand through the Attach API:
 
 ```bash
 spectra jvm attach <pid>      # loads the agent into a running JVM
 spectra jvm flamegraph <pid>  # async-profiler over the agent
 ```
 
-The agent exposes its capabilities over a Unix socket so the Go daemon
+The agent would expose its capabilities over a Unix socket so the Go daemon
 can drive it without speaking JMX/RMI directly.
 
 ## JDK installation discovery
@@ -74,27 +108,29 @@ IMPLEMENTOR="Eclipse Adoptium"
 JAVA_RUNTIME_VERSION="21.0.6+7-LTS"
 ```
 
-Cross-referenced with running Java processes (each JVM's `java.home`
-property): Spectra knows which JVM each process is using, and which
-installed JDK that JVM came from.
+Running Java processes expose their `java.home`, `java.vendor`, and
+`java.version` properties through `jcmd VM.system_properties`. Spectra
+prints and serializes those fields today; explicit matching back to the
+installed-JDK inventory is still a higher-level correlation step.
 
-## Sample output (planned)
+## Sample output
 
 ```
 $ spectra jvm
-PID    JDK                           HEAP/MAX        UPTIME    APP
-4012   Adoptium 21.0.6 (toolbox)     1.2GB/4GB       6h 12m    Android Studio
-8410   Zulu 17.0.10                  450MB/2GB       2h 3m     gradle daemon
-9123   Adoptium 21.0.6 (toolbox)     1.8GB/2GB       45m       IntelliJ IDEA
+PID      VERSION       THREADS   MAIN CLASS
+----------------------------------------------------------------------
+4012     21.0.6        87        com.intellij.idea.Main
+8410     17.0.10       42        org.gradle.launcher.daemon.bootstrap.GradleDaemon
 
 $ spectra jvm 4012
-JVM            Adoptium 21.0.6 (Eclipse Adoptium)
-Path           ~/Library/Application Support/JetBrains/Toolbox/apps/.../jbr/Contents/Home
-Args           -Xmx4g -Xms256m -XX:+UseG1GC ...
-Threads        87 (12 daemon, 5 blocked)
-GC             G1, last full GC 12m ago
-Loaded classes 18,432
-Recent issues  jvm-heap-vs-system: 50% of system RAM at -Xmx4g
+PID           4012
+Main class    com.intellij.idea.Main
+JDK vendor    JetBrains s.r.o.
+JDK version   21.0.6
+Java home     /Users/me/Library/Application Support/JetBrains/Toolbox/apps/.../jbr/Contents/Home
+VM args       -Xmx4g -Xms256m ...
+VM flags      -XX:+UseG1GC ...
+Threads       87
 ```
 
 ## Why this matters
@@ -105,20 +141,28 @@ beyond JMX-over-RMI port forwarding. Spectra's JVM subsystem is
 purpose-built for the workflow that exists today:
 
 - **Remote-by-default.** Same `spectra connect work-mac` portal as the
-  rest of Spectra ([../design/remote-portal.md](../design/remote-portal.md)).
-- **Persistent.** Heap dumps and JFR recordings stored in the blob
-  cache; reusable across sessions, comparable across time.
+  rest of Spectra once the remote portal lands
+  ([../design/remote-portal.md](../design/remote-portal.md)).
+- **Persistent.** Thread dumps and JFR recordings can be stored in the blob
+  cache; heap dumps are written as explicit `.hprof` artifacts.
 - **Catalog-driven.** Recommendations engine fires JVM-specific rules
   (EOL versions, heap-vs-RAM ratios, GC pressure) the same way as
   every other inspection ([../design/recommendations-engine.md](../design/recommendations-engine.md)).
 
-## Implementation order
+## Implementation status
+
+Implemented:
 
 1. JDK installation discovery (no live JVM required).
-2. `jps`-based process discovery + JDK attribution.
-3. `jcmd`-based read-only collectors (system props, command line,
-   thread dump, class histogram).
-4. Heap dump + JFR capture into the blob store.
-5. Java agent JAR for in-process capabilities.
-6. JFR file parser (the binary format is documented; OpenJDK has a
-   reference implementation worth reading).
+2. `jps`-based running-JVM discovery.
+3. `jcmd`-based system properties, command-line parsing, VM flags,
+   thread count, thread dump, class histogram, heap dump, and JFR control.
+4. `jstat -gc` one-shot GC counter parsing.
+5. CLI and daemon RPC surfaces for the implemented collectors.
+
+Future:
+
+1. Java agent JAR for in-process capabilities.
+2. Async-profiler / flamegraph integration.
+3. JFR file parser and structured JFR summaries.
+4. Higher-level JDK install attribution for each running process.
