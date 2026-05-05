@@ -358,6 +358,11 @@ func buildToolConfigPath(home, name string) string {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
+	case "bazel":
+		path := filepath.Join(home, ".bazelrc")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
 	return ""
 }
