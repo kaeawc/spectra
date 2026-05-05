@@ -413,6 +413,31 @@ func TestDiscoverBuildToolsGradleFromCmdUsesDocumentedFlag(t *testing.T) {
 	}
 }
 
+func TestDiscoverBuildToolsBazelReportsConfigPath(t *testing.T) {
+	home := t.TempDir()
+	bazelrcPath := filepath.Join(home, ".bazelrc")
+	if err := os.WriteFile(bazelrcPath, []byte("build --color=yes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "bazel" && len(args) == 1 && args[0] == "version" {
+				return []byte("Build label: 7.2.1\n"), nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "bazel" {
+		t.Fatalf("expected [bazel], got %v", tools)
+	}
+	if tools[0].ConfigPath != bazelrcPath {
+		t.Fatalf("config path = %q, want %q", tools[0].ConfigPath, bazelrcPath)
+	}
+}
+
 func TestDiscoverBuildToolsMakeFromBrew(t *testing.T) {
 	home := t.TempDir()
 	cellar := filepath.Join(home, "Cellar")
