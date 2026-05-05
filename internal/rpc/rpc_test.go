@@ -101,3 +101,38 @@ func TestServeOverUnixSocket(t *testing.T) {
 		t.Errorf("result = %v, want pong", resp.Result)
 	}
 }
+
+func FuzzHandle(f *testing.F) {
+	seeds := [][]byte{
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{"value":"ok"}}`),
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"missing"}`),
+		[]byte(`{"jsonrpc":"2.0","id":1}`),
+		[]byte(`{bad json`),
+		[]byte(""),
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	d := NewDispatcher()
+	d.Register("echo", func(params json.RawMessage) (any, error) {
+		var v any
+		if len(params) > 0 {
+			_ = json.Unmarshal(params, &v)
+		}
+		return v, nil
+	})
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		resp := d.handle(raw)
+		if resp.JSONRPC != "2.0" {
+			t.Fatalf("JSONRPC = %q, want 2.0 for raw %q", resp.JSONRPC, string(raw))
+		}
+		if resp.Error != nil && resp.Result != nil {
+			t.Fatalf("response has both result and error: %+v", resp)
+		}
+		if _, err := json.Marshal(resp); err != nil {
+			t.Fatalf("response is not JSON-serializable: %v", err)
+		}
+	})
+}

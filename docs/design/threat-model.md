@@ -143,8 +143,8 @@ attacker-chosen files.
   which prints an explicit warning that Spectra does not add its own
   authentication layer.
 
-**Residual risk:** A bug in input validation. Mitigated by
-fuzz-testing the RPC layer (planned) and keeping the surface
+**Residual risk:** A bug in input validation. Mitigated by native Go fuzz
+coverage for RPC request handling (`FuzzHandle`) and keeping the surface
 intentionally narrow.
 
 ### T3: Heap-dump exfiltration
@@ -230,7 +230,7 @@ Things Spectra commits to before v1 release:
 - [x] Helper install path provisions `_spectra` and sets socket group
       ownership, or moves to `SMAppService` / `SMJobBless` with
       code-signing requirement checks.
-- [ ] Fuzz-test the JSON-RPC dispatcher for malformed payloads.
+- [x] Fuzz-test the JSON-RPC dispatcher for malformed payloads.
 - [x] Static analysis (`gosec`) runs in CI.
 - [ ] No `os/exec` calls take user-supplied arguments without an
       allowlist.
