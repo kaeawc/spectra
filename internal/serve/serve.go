@@ -33,7 +33,10 @@ import (
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
-var collectToolchains = toolchain.Collect
+var (
+	collectToolchains = toolchain.Collect
+	runJFRDump        = jvm.JFRDump
+)
 
 // DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
 func DefaultSockPath() (string, error) {
@@ -580,6 +583,29 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("jfr start pid %d: %w", p.PID, err)
 		}
 		return map[string]any{"pid": p.PID, "name": name, "started": true}, nil
+	})
+
+	// jvm.jfr.dump — dump a running JFR recording. Required: {"pid": <pid>, "dest": "/path/to/out.jfr"}.
+	d.Register("jvm.jfr.dump", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID  int    `json:"pid"`
+			Name string `json:"name"`
+			Dest string `json:"dest"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.jfr.dump requires {\"pid\": <pid>, \"dest\": \"...\"}")
+		}
+		if p.Dest == "" {
+			return nil, fmt.Errorf("jvm.jfr.dump requires {\"dest\": \"...\"}")
+		}
+		name := p.Name
+		if name == "" {
+			name = "spectra"
+		}
+		if err := runJFRDump(p.PID, name, p.Dest, nil); err != nil {
+			return nil, fmt.Errorf("jfr dump pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "dumped": true}, nil
 	})
 
 	// jvm.jfr.stop — stop a JFR recording. Optional: {"dest": "/path/to/out.jfr"}.

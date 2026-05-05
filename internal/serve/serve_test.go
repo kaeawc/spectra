@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/store"
@@ -411,6 +412,54 @@ func TestDaemonJVMJFRStartMissingPID(t *testing.T) {
 	resp := rpcCall(t, enc, dec, 33, "jvm.jfr.start", `{}`)
 	if resp.Error == nil {
 		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJFRDumpMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 35, "jvm.jfr.dump", `{"dest":"/tmp/out.jfr"}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJFRDumpMissingDest(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 36, "jvm.jfr.dump", `{"pid":42}`)
+	if resp.Error == nil {
+		t.Error("expected error when dest missing")
+	}
+}
+
+func TestDaemonJVMJFRDumpUsesDefaultName(t *testing.T) {
+	var gotPID int
+	var gotName, gotDest string
+	orig := runJFRDump
+	runJFRDump = func(pid int, name, dest string, _ jvm.CmdRunner) error {
+		gotPID = pid
+		gotName = name
+		gotDest = dest
+		return nil
+	}
+	t.Cleanup(func() { runJFRDump = orig })
+
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 37, "jvm.jfr.dump", `{"pid":42,"dest":"/tmp/out.jfr"}`)
+	if resp.Error != nil {
+		t.Fatalf("jvm.jfr.dump: %v", resp.Error)
+	}
+	if gotPID != 42 || gotName != "spectra" || gotDest != "/tmp/out.jfr" {
+		t.Fatalf("dump args = (%d, %q, %q), want (42, spectra, /tmp/out.jfr)", gotPID, gotName, gotDest)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T, want map", resp.Result)
+	}
+	if m["dumped"] != true {
+		t.Errorf("dumped = %v, want true", m["dumped"])
 	}
 }
 
