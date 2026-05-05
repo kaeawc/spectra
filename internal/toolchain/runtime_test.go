@@ -333,3 +333,53 @@ func TestDiscoverBuildToolsGradleFromCmd(t *testing.T) {
 		t.Errorf("version = %q, want 8.5", tools[0].Version)
 	}
 }
+
+func TestDiscoverBuildToolsMakeFromBrew(t *testing.T) {
+	home := t.TempDir()
+	cellar := filepath.Join(home, "Cellar")
+	makeDir := filepath.Join(cellar, "make", "4.4.1")
+	if err := os.MkdirAll(makeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{cellar},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "make" {
+		t.Errorf("expected [make], got %v", tools)
+	}
+	if tools[0].Version != "4.4.1" {
+		t.Errorf("version = %q, want 4.4.1", tools[0].Version)
+	}
+	if tools[0].Source != "brew" {
+		t.Errorf("source = %q, want brew", tools[0].Source)
+	}
+}
+
+func TestDiscoverBuildToolsMakeFromXcrun(t *testing.T) {
+	home := t.TempDir()
+	opts := CollectOptions{
+		Home:        home,
+		BrewCellars: []string{filepath.Join(home, "Cellar")},
+		CmdRunner: func(name string, args ...string) ([]byte, error) {
+			if name == "xcrun" && len(args) == 2 && args[0] == "make" && args[1] == "--version" {
+				return []byte("GNU Make 3.81\n"), nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+	tools := discoverBuildTools(opts)
+	if len(tools) != 1 || tools[0].Name != "make" {
+		t.Errorf("expected [make], got %v", tools)
+	}
+	if tools[0].Version != "3.81" {
+		t.Errorf("version = %q, want 3.81", tools[0].Version)
+	}
+	if tools[0].Source != "system" {
+		t.Errorf("source = %q, want system", tools[0].Source)
+	}
+}
