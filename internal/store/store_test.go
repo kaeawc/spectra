@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -657,5 +658,36 @@ func TestGrantedPermsFromSnapshot(t *testing.T) {
 	rows := GrantedPermsFromSnapshot(snap)
 	if len(rows) != 3 {
 		t.Fatalf("len = %d, want 3", len(rows))
+	}
+}
+
+func TestDeleteSnapshotRemovesRow(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	in := sampleInput()
+	in.ID = "snap-del-01"
+	in.Kind = "baseline"
+	if err := db.SaveSnapshot(ctx, in); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	if err := db.DeleteSnapshot(ctx, in.ID); err != nil {
+		t.Fatalf("DeleteSnapshot: %v", err)
+	}
+
+	_, err := db.GetSnapshot(ctx, in.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestDeleteSnapshotNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	err := db.DeleteSnapshot(ctx, "does-not-exist")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
