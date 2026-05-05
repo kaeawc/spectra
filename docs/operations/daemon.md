@@ -117,7 +117,9 @@ authentication is future work with the remote portal.
 - All RPC calls are read-only by default. State-changing calls
   (`snapshot.create`, `cache.clear`, `issues.acknowledge`,
   `issues.dismiss`, `issues.fix.record`, `snapshot.prune`, JVM heap/JFR
-  capture) are explicit methods.
+  capture) are explicit methods. Sensitive artifact writes
+  (`jvm.heap_dump`, `jvm.jfr.dump`) also require
+  `confirm_sensitive: true` in the request.
 - The daemon is intended to be a low-privilege observer, not a remote
   shell. Method surface is intentionally narrow; arbitrary
   `exec.Command` is not exposed over RPC.
