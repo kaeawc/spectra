@@ -1,8 +1,8 @@
 # Daemon mode
 
 `spectra serve` runs the local long-lived collector and JSON-RPC server.
-It is implemented today for the Unix-socket local workflow; remote tsnet
-and TCP listeners remain future work.
+It is implemented today for the Unix-socket local workflow and optional
+explicit TCP JSON-RPC. Remote tsnet integration remains future work.
 
 Most CLI commands still run in-process. `spectra status`, `spectra metrics`,
 and direct JSON-RPC clients use the daemon socket today; the same RPC surface
@@ -18,6 +18,7 @@ Tailscale integration that makes remote operation a first-class case.
 ```bash
 spectra serve              # foreground, logs to stdout
 spectra serve --sock /tmp/spectra.sock
+spectra serve --tcp 127.0.0.1:7878
 ```
 
 The current CLI runs in the foreground until interrupted. A launchd-managed
@@ -28,11 +29,14 @@ agent or detached `--daemon` mode is still future packaging work.
 | Surface | Default | Use |
 |---|---|---|
 | Unix socket | `~/.spectra/sock` | local CLI, local TUI/GUI clients |
+| TCP localhost | opt-in via `--tcp 127.0.0.1:7878` | explicit local/forwarded JSON-RPC clients |
+| TCP remote | opt-in via `--tcp <addr>:7878 --allow-remote` | trusted SSH/Tailscale/firewall paths |
 | Tailscale `tsnet` | _not implemented_ | future remote clients via Tailscale |
-| TCP localhost | _not implemented_ | future explicit loopback listener |
 
 The Unix socket is created with `0600` permissions and removed on clean
-shutdown.
+shutdown. TCP RPC has no Spectra-layer authentication; non-loopback
+binds require `--allow-remote` and should only be used on a trusted
+network path.
 
 ## RPC surface
 
@@ -93,7 +97,8 @@ mediates and applies its own access control.
 
 ## Authentication
 
-Current local mode relies on Unix socket filesystem permissions. Remote
+Current local mode relies on Unix socket filesystem permissions. Current
+TCP mode relies on the network path that exposes it. Spectra-layer remote
 authentication is future work with the remote portal.
 
 ## Security posture
@@ -111,9 +116,11 @@ authentication is future work with the remote portal.
 ## Health
 
 Each daemon exposes a JSON-RPC `health` method returning
-`{ ok: true, version: ... }` on the Unix socket. Used by:
+`{ ok: true, version: ... }` on the Unix socket and any opted-in TCP
+listener. Used by:
 
 - `spectra status` — local health check.
+- `spectra connect <target>` — Unix or TCP health check.
 - future TUI/GUI clients — show connection state.
 
 ## Implementation order
@@ -127,10 +134,11 @@ Implemented:
 4. Live process metrics ring buffer and periodic live snapshots.
 5. Local `spectra status` and `spectra metrics` clients.
 6. Privileged helper proxy methods for implemented helper capabilities.
+7. Optional TCP JSON-RPC listener and `spectra connect <target> call`.
 
 Future:
 
 1. CLI-wide RPC dispatch instead of in-process command execution.
 2. launchd or detached daemon lifecycle.
-3. tsnet and optional TCP listeners.
+3. tsnet listener and Tailscale identity integration.
 4. TUI/GUI clients.
