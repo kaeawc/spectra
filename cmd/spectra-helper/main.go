@@ -29,7 +29,19 @@ var version = "dev"
 const sockPath = "/var/run/spectra-helper.sock"
 
 func main() {
-	os.Exit(run())
+	os.Exit(runWithArgs(os.Args[1:]))
+}
+
+func runWithArgs(args []string) int {
+	if helperVersionArg(args) {
+		fmt.Println(version)
+		return 0
+	}
+	return run()
+}
+
+func helperVersionArg(args []string) bool {
+	return len(args) == 1 && (args[0] == "--version" || args[0] == "version")
 }
 
 func run() int {

@@ -18,10 +18,13 @@ Spectra exists to answer questions Activity Monitor structurally cannot:
 - "Which engineers on my tailnet have Slack running right now, with how much
   RSS, talking to which hosts?"
 
-## What's here today
+## What's Here Today
 
-The current implementation is a single-binary CLI (`spectra`) that does deep,
-single-host inspection of `.app` bundles. See
+The current implementation is a CLI (`spectra`) plus an optional daemon
+and privileged helper. It does deep single-host inspection of `.app`
+bundles, live process/network/storage/toolchain inventory, snapshots,
+baseline diffs, recommendations, and JSON-RPC calls to a local or explicit
+TCP daemon. See
 [detection/overview.md](detection/overview.md) for the framework detection
 model, [inspection/](inspection/) for what we extract from each bundle, and
 [design/architecture.md](design/architecture.md) for where this is heading.
@@ -31,31 +34,30 @@ model, [inspection/](inspection/) for what we extract from each bundle, and
 ./spectra -v /Applications/Claude.app       # full inspection
 ./spectra --all                             # scan /Applications
 ./spectra --json --network /Applications/*  # JSON, with embedded URL hosts
+./spectra snapshot --baseline pre-incident  # save a baseline
+./spectra diff baseline pre-incident live   # compare baseline to now
+./spectra serve --tcp 127.0.0.1:7878        # opt-in TCP JSON-RPC
+./spectra connect 127.0.0.1:7878            # health check over RPC
 ```
 
-## What's planned
+## What's Planned
 
-- **Daemon mode** — `spectra serve` exposes the inspection RPC over a Unix
-  socket and over Tailscale via `tsnet`. See
-  [design/architecture.md](design/architecture.md).
-- **Remote portal** — `spectra connect work-mac` from your laptop to inspect a
-  teammate's machine over the tailnet. See
+- **tsnet remote portal** — `spectra connect work-mac` from your laptop to
+  inspect a teammate's machine over the tailnet without manually exposing a
+  TCP listener. See
   [design/remote-portal.md](design/remote-portal.md).
-- **JVM inspection** — VisualVM-class introspection of running JVMs and
-  installed JDKs. See [inspection/jvm.md](inspection/jvm.md).
-- **Cross-host snapshot diff** — "diff my Mac vs your Mac" on apps,
-  toolchains, env, and config drift.
-- **Recommendations engine** — rules-driven catalog of issues with severity
-  and remediation steps. See
-  [design/recommendations-engine.md](design/recommendations-engine.md).
-- **Persistent storage** — SQLite for relational facts, krit-style sharded
-  blob store for heap dumps and JFR recordings. See
-  [design/storage.md](design/storage.md).
+- **Typed remote commands and fan-out** — ergonomic wrappers around the
+  generic `spectra connect <host> call <method>` escape hatch, plus
+  cross-host aggregation.
+- **TUI client** — Bubble Tea UI against the same local-or-remote daemon
+  RPC surface.
+- **Release packaging** — Homebrew formula, prebuilt binaries, signing, and
+  notarization.
 
 ## Distribution
 
-Spectra ships through Homebrew, with an optional `sudo` step that installs a
-privileged helper for root-only telemetry (Full Disk Access, `fs_usage`,
-`powermetrics`). The Mac App Store is incompatible with the live-monitoring
-features. See [design/distribution.md](design/distribution.md) for the full
-analysis.
+Spectra currently installs from source. Homebrew and prebuilt binaries are
+planned, with an optional `sudo` step that installs a privileged helper for
+root-only telemetry (Full Disk Access, `fs_usage`, `powermetrics`). The Mac
+App Store is incompatible with the live-monitoring features. See
+[design/distribution.md](design/distribution.md) for the full analysis.

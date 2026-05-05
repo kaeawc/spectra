@@ -15,18 +15,26 @@ make build
 ./spectra /Applications/Slack.app
 ```
 
+To build the optional privileged helper next to the CLI:
+
+```bash
+make build-all
+```
+
 ## Make targets
 
 | Target | What it does |
 |---|---|
 | `make build` | Build the `spectra` binary |
+| `make build-helper` | Build the `spectra-helper` binary |
+| `make build-all` | Build both binaries |
 | `make test` | Run the test suite (`go test ./... -count=1`) |
 | `make vet` | `go vet ./...` |
 | `make fmt` | `gofmt -s -w .` |
 | `make lint` | `golangci-lint run` |
-| `make complexity` | `gocyclo -over 10` |
+| `make complexity` | `gocyclo -over 15` |
 | `make tidy` | `go mod tidy` |
-| `make ci` | vet + test + complexity, the local CI mirror |
+| `make ci` | vet + test + complexity + lint + security + licenses + docs |
 | `make clean` | Remove build artifacts |
 
 ## Cross-compiling
