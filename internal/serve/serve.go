@@ -428,6 +428,36 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return map[string]any{"id": p.ID, "status": p.Status}, nil
 	})
 
+	// issues.acknowledge — shorthand for issues.update with status=acknowledged.
+	// { "id": "..." }
+	d.Register("issues.acknowledge", func(params json.RawMessage) (any, error) {
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+			return nil, fmt.Errorf("issues.acknowledge requires {\"id\": \"...\"}")
+		}
+		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueAcknowledged); err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": p.ID, "status": "acknowledged"}, nil
+	})
+
+	// issues.dismiss — shorthand for issues.update with status=dismissed.
+	// { "id": "..." }
+	d.Register("issues.dismiss", func(params json.RawMessage) (any, error) {
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
+			return nil, fmt.Errorf("issues.dismiss requires {\"id\": \"...\"}")
+		}
+		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueDismissed); err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": p.ID, "status": "dismissed"}, nil
+	})
+
 	// issues.fix.record — log a fix attempt against an issue.
 	// { "issue_id": "...", "applied_by": "user", "command": "...", "output": "...", "exit_code": 0 }
 	d.Register("issues.fix.record", func(params json.RawMessage) (any, error) {

@@ -579,3 +579,21 @@ func TestDaemonPowerStateReturnsObject(t *testing.T) {
 		t.Error("power.state: expected on_battery field in result")
 	}
 }
+
+func TestDaemonIssuesAcknowledgeMissingID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 61, "issues.acknowledge", `{}`)
+	if resp.Error == nil {
+		t.Fatal("expected error for missing id, got nil")
+	}
+}
+
+func TestDaemonIssuesDismissMissingID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 62, "issues.dismiss", `{}`)
+	if resp.Error == nil {
+		t.Fatal("expected error for missing id, got nil")
+	}
+}
