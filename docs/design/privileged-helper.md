@@ -1,7 +1,8 @@
 # Privileged helper
 
-> **Status: planned.** Captures the security boundary and protocol
-> between Spectra's unprivileged daemon and its optional root helper.
+Spectra has an optional root helper for telemetry that user-mode Spectra
+cannot collect. The current implementation is a separate `spectra-helper`
+binary installed as a LaunchDaemon and reached over a local Unix socket.
 
 Most of Spectra works as the user. But three categories of telemetry
 require root:
@@ -12,10 +13,10 @@ require root:
    root-only.
 3. **`powermetrics`** — root-only energy attribution.
 
-Spectra's design splits these out into a separately-installed
-LaunchDaemon helper. The unprivileged daemon talks to it over a local
-Unix socket when (and only when) it needs root data. Users who don't
-install the helper still get every other capability.
+Spectra splits these out into a separately-installed LaunchDaemon helper.
+The unprivileged daemon talks to it over a local Unix socket when (and only
+when) it needs root data. Users who don't install the helper still get every
+other capability.
 
 ## Why two processes
 
@@ -46,10 +47,8 @@ What this does:
 4. Prompts the user to grant Full Disk Access to the helper in System
    Settings → Privacy & Security → Full Disk Access.
 
-Modern path: register via `SMAppService.daemon` (macOS 13+) so the
-user approves once via Login Items rather than navigating launchctl.
-The deprecated `SMJobBless` path is supported as a fallback for older
-macOS but new installs go through `SMAppService`.
+`SMAppService.daemon` / `SMJobBless` packaging is future distribution work.
+The current installer is intentionally explicit and shell-based.
 
 ```bash
 sudo spectra uninstall-helper
@@ -61,17 +60,20 @@ is hard to remove.
 ## What the helper exposes
 
 The helper's RPC surface is intentionally narrow. It listens on
-`/var/run/spectra-helper.sock` (root:wheel `0660`, group `_spectra`
-which the user is added to at install time):
+`/var/run/spectra-helper.sock` with `0660` permissions:
 
 | Method | Purpose |
 |---|---|
 | `helper.tcc.system.query(bundleID)` | Query system TCC.db for granted services |
-| `helper.fs_usage.start(filter)` | Begin streaming filesystem activity |
-| `helper.fs_usage.stop(handle)` | Stop a started stream |
 | `helper.powermetrics.sample(duration)` | One-shot powermetrics output |
 | `helper.process.tree()` | Process tree including processes the user can't see (e.g. system daemons) |
 | `helper.health()` | Liveness + version |
+
+Planned but not implemented yet:
+
+- `helper.fs_usage.start(filter)`
+- `helper.fs_usage.stop(handle)`
+- `_spectra` group provisioning and socket group ownership hardening
 
 Notably absent:
 
@@ -95,14 +97,15 @@ streams: framing makes recovery from partial reads trivial.
 
 ## Authentication and authorization
 
-- **Filesystem permissions** (`0660 root:_spectra`) gate which users
-  can connect. Joining the `_spectra` group requires admin privilege.
+- **Filesystem permissions** on `/var/run/spectra-helper.sock` gate which
+  users can connect. The planned hardened install creates an `_spectra`
+  group and assigns the socket to it.
 - **Caller credential check** via `getpeereid(2)` on the connected
-  socket. The helper logs every call with the calling UID.
+  socket is implemented and passed to method handlers.
 - **Method allowlist** is hardcoded in the helper. There is no dynamic
   capability negotiation.
-- **Rate limiting** per UID to prevent a compromised unprivileged
-  daemon from DOSing the system.
+- **Rate limiting** per UID is planned to prevent a compromised
+  unprivileged daemon from DOSing the system.
 
 ## What the unprivileged daemon does without the helper
 
@@ -136,7 +139,7 @@ go through the unprivileged daemon; if they need root data, the
 unprivileged daemon mediates with the helper locally and applies its
 own access control on the remote-facing side.
 
-## Code layout (planned)
+## Code layout
 
 ```
 cmd/
@@ -144,11 +147,10 @@ cmd/
   spectra-helper/         # privileged helper, separate main package
 internal/
   helper/
-    rpc.go                # method dispatch
-    auth.go               # getpeereid, group membership
-    tcc.go                # TCC.db reader
-    fsusage.go            # fs_usage streaming
-    powermetrics.go       # powermetrics wrapper
+    dispatcher.go         # method dispatch
+    framing.go            # length-prefixed JSON-RPC framing
+    peeruid_darwin.go     # getpeereid
+    methods.go            # TCC, powermetrics, process tree
   helperclient/           # used by the unprivileged daemon
     client.go
     fallback.go           # graceful "no helper installed" path
@@ -156,8 +158,8 @@ internal/
 
 ## Audit log
 
-Every helper call writes a structured line to
-`/var/log/spectra-helper.log` with rotation:
+The LaunchDaemon plist sends stderr to `/var/log/spectra-helper.log`.
+Structured per-call audit logging and rotation are planned.
 
 ```
 2026-05-04T18:33:21Z uid=501 method=tcc.system.query bundleID=com.anthropic.claudefordesktop result=ok rows=2
@@ -168,13 +170,11 @@ it. The unprivileged daemon never writes to this log directly.
 
 ## Code signing and notarization
 
-- Helper is signed with the same Developer ID as the main binary,
-  hardened runtime enabled.
-- `SMAppService.daemon` registration verifies the embedded helper's
-  code-signing requirements before loading.
-- Notarization staples to both binaries. Without notarization, macOS
-  refuses to load the LaunchDaemon at all on machines with default
-  Gatekeeper settings.
+- Release builds should sign the helper with the same Developer ID as
+  the main binary, hardened runtime enabled.
+- Future `SMAppService.daemon` registration should verify the embedded
+  helper's code-signing requirements before loading.
+- Notarization should staple both binaries for end-user distribution.
 
 ## Why not a System Extension instead
 
