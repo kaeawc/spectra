@@ -8,12 +8,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/netstate"
 )
 
 func runNetwork(args []string) int {
 	if len(args) > 0 && args[0] == "connections" {
 		return runNetworkConnections(args[1:])
+	}
+	if len(args) > 0 && args[0] == "firewall" {
+		return runNetworkFirewall(args[1:])
 	}
 
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
@@ -33,6 +37,40 @@ func runNetwork(args []string) int {
 	}
 
 	printNetworkState(state)
+	return 0
+}
+
+func runNetworkFirewall(args []string) int {
+	fs := flag.NewFlagSet("spectra network firewall", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of raw pf rules")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	result, err := helperclient.New().FirewallRules()
+	if err != nil {
+		if helperclient.IsUnavailable(err) {
+			fmt.Fprintln(os.Stderr, "privileged helper not running; install with: sudo spectra install-helper")
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "firewall rules: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	if raw, _ := result["raw_rules"].(string); raw != "" {
+		fmt.Print(raw)
+		if !strings.HasSuffix(raw, "\n") {
+			fmt.Println()
+		}
+		return 0
+	}
+	fmt.Println("no firewall rules")
 	return 0
 }
 
