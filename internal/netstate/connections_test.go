@@ -13,6 +13,14 @@ firefox    789   alice  41u  IPv4 0xdef          0t0  UDP  192.168.1.100:54812->
 netbiosd   999   root   6u   IPv4 0x111          0t0  UDP  *:138
 `
 
+const netstatFixture = `Active Internet connections (including servers)
+Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
+tcp4       0      0  192.168.1.100.55123   52.1.2.3.443          ESTABLISHED
+tcp4       0      0  *.3000                *.*                   LISTEN
+udp4       0      0  192.168.1.100.54812   8.8.8.8.53
+udp4       0      0  *.138                 *.*
+`
+
 func TestParseLSOFConnectionsCount(t *testing.T) {
 	conns := parseLSOFConnections(lsofFixture)
 	// Expect 3: the LISTEN entry is excluded.
@@ -72,12 +80,45 @@ func TestParseLSOFConnectionsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseNetstatConnections(t *testing.T) {
+	conns := parseNetstatConnections(netstatFixture)
+	if len(conns) != 3 {
+		t.Fatalf("got %d connections, want 3; conns: %+v", len(conns), conns)
+	}
+	if conns[0].PID != 0 || conns[0].Command != "" {
+		t.Fatalf("netstat connection has attribution: %+v", conns[0])
+	}
+	if conns[0].Proto != "tcp" || conns[0].LocalAddr != "192.168.1.100:55123" || conns[0].RemoteAddr != "52.1.2.3:443" || conns[0].State != "established" {
+		t.Fatalf("tcp connection = %+v", conns[0])
+	}
+	if conns[1].Proto != "udp" || conns[1].RemoteAddr != "8.8.8.8:53" {
+		t.Fatalf("udp connection = %+v", conns[1])
+	}
+}
+
 func TestCollectConnectionsError(t *testing.T) {
 	run := func(string, ...string) ([]byte, error) {
 		return nil, errors.New("lsof failed")
 	}
 	if conns := CollectConnections(run); len(conns) != 0 {
 		t.Errorf("expected nil on lsof error, got %d conns", len(conns))
+	}
+}
+
+func TestCollectConnectionsFallsBackToNetstat(t *testing.T) {
+	run := func(name string, args ...string) ([]byte, error) {
+		switch name {
+		case "lsof":
+			return nil, errors.New("lsof failed")
+		case "netstat":
+			return []byte(netstatFixture), nil
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	}
+	conns := CollectConnections(run)
+	if len(conns) != 3 {
+		t.Errorf("CollectConnections fallback: got %d, want 3", len(conns))
 	}
 }
 

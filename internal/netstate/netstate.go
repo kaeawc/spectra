@@ -80,10 +80,18 @@ func Collect(run CmdRunner) State {
 		s.VPNInterfaces = parseVPNInterfaces(string(out))
 		s.VPNActive = len(s.VPNInterfaces) > 0
 	}
-	if out, err := run("lsof", "-i", "-P", "-n"); err == nil {
-		s.EstablishedConnectionsCount = len(parseLSOFConnections(string(out)))
-	}
+	s.EstablishedConnectionsCount = len(collectConnectionRows(run))
 	return s
+}
+
+func collectConnectionRows(run CmdRunner) []Connection {
+	if out, err := run("lsof", "-i", "-P", "-n"); err == nil {
+		return parseLSOFConnections(string(out))
+	}
+	if out, err := run("netstat", "-an"); err == nil {
+		return parseNetstatConnections(string(out))
+	}
+	return nil
 }
 
 // parseRoute extracts interface and gateway from `route -n get default`.

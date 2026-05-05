@@ -101,7 +101,9 @@ Useful for:
 - **Bundle-only.** This isn't live network observation. For current live
   sockets use `spectra network connections` or the daemon's
   `network.connections` / `network.byApp` methods, which are backed by
-  `lsof -i -P -n`. Per-process throughput via `nettop` is still future work.
+  `lsof -i -P -n` with a `netstat -an` fallback when `lsof` is unavailable.
+  The fallback is system-wide and does not include PID or app attribution.
+  Per-process throughput via `nettop` is still future work.
 
 ## Implementation reference
 
@@ -112,7 +114,8 @@ Useful for:
 - Deduped via map, then sorted for stable output.
 
 Related live-network collectors:
-- `internal/netstate/connections.go` — `lsof -i -P -n` socket list.
+- `internal/netstate/connections.go` — `lsof -i -P -n` socket list with
+  `netstat -an` fallback.
 - `internal/netstate/netstate.go` — routes, DNS, proxy config, VPN state,
   listening ports, and connection counts.
 

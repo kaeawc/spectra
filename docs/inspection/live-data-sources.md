@@ -48,7 +48,7 @@ limiting (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `nettop -P -L 0 -t external` | per-process network bytes/sec | user (limited) | streaming, low | future live throughput counters |
 | `lsof -i -P -n -sTCP:LISTEN` | current listening TCP sockets | user | one-shot | `network.listening_ports` |
 | `lsof -i -P -n` | current TCP/UDP sockets | user | one-shot | `network.connections`, `network.byApp`, established count |
-| `netstat -an` | system-wide socket state | user | low | future fallback when `lsof` unavailable |
+| `netstat -an` | system-wide TCP/UDP socket state without PID/app attribution | user | low | fallback when `lsof` unavailable |
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
