@@ -97,6 +97,31 @@ func TestCollectAll(t *testing.T) {
 	}
 }
 
+func TestCollectAllAppliesThreadCounts(t *testing.T) {
+	opts := CollectOptions{
+		CmdRunner: fakePS(psFixture),
+		ThreadCounter: func(procs []Info) map[int]int {
+			if len(procs) != 4 {
+				t.Fatalf("thread counter saw %d procs, want 4", len(procs))
+			}
+			return map[int]int{
+				412: 13,
+				415: 7,
+			}
+		},
+	}
+	procs := CollectAll(context.Background(), opts)
+	if procs[1].ThreadCount != 13 {
+		t.Errorf("Slack ThreadCount = %d, want 13", procs[1].ThreadCount)
+	}
+	if procs[2].ThreadCount != 7 {
+		t.Errorf("Slack Helper ThreadCount = %d, want 7", procs[2].ThreadCount)
+	}
+	if procs[0].ThreadCount != 0 {
+		t.Errorf("launchd ThreadCount = %d, want 0", procs[0].ThreadCount)
+	}
+}
+
 func TestCollectAllPSError(t *testing.T) {
 	opts := CollectOptions{
 		CmdRunner: func(name string, args ...string) ([]byte, error) {

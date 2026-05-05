@@ -87,9 +87,11 @@ The `RunningProcesses` field on the JSON result holds the full list:
   Activity Monitor has the same issue.
 - **CPU% is point-in-time.** It is useful for "what is hot right now,"
   but trends require the daemon metrics ring buffer.
-- **No thread counts yet.** macOS `ps` does not expose Linux-style
-  `nlwp`/`thcount` fields on this host. Thread counts are still a
-  future `libproc`/`proc_pidinfo` collector.
+- **Thread counts are best effort.** macOS `ps` does not expose
+  Linux-style `nlwp`/`thcount` fields on this host, so Spectra fills
+  `thread_count` with `proc_pidinfo(PROC_PIDTASKINFO)` on Darwin when
+  the process is visible to the current user. Processes that cannot be
+  queried keep `thread_count: 0`.
 
 ## Implementation reference
 
@@ -101,12 +103,14 @@ Per-app attribution in `internal/detect/detect.go`:
 
 Full process inventory in `internal/process/`:
 - `CollectAll(ctx, opts)` — parses `ps` rows, including `pcpu`
+- `collectThreadCounts(procs)` — Darwin `proc_pidinfo` enrichment for
+  per-process thread counts
 - `enrichDeep(procs, run)` — one batched `lsof -p` call for FD and
   socket detail when `--deep` is set
 
 ## Future ideas
 
 - Switch to `libproc` via cgo (or `process.NewProcess` from
-  `gopsutil`) to get richer per-process data without forking.
-- Add thread count via `proc_pidinfo`.
+  `gopsutil`) to get richer per-process data without forking the
+  initial `ps` inventory.
 - Compute "app uptime" from the oldest matching process's start time.
