@@ -42,6 +42,8 @@ type Dispatcher struct {
 	auditMu  sync.Mutex
 	audit    io.Writer
 	now      func() time.Time
+	limitMu  sync.Mutex
+	limit    *rateLimiter
 }
 
 // NewDispatcher returns an empty Dispatcher.
@@ -77,6 +79,22 @@ func (d *Dispatcher) SetClock(now func() time.Time) {
 	d.now = now
 }
 
+// SetRateLimit enables a per-UID sliding-window request limit. Passing
+// maxRequests <= 0 or window <= 0 disables rate limiting.
+func (d *Dispatcher) SetRateLimit(maxRequests int, window time.Duration) {
+	d.limitMu.Lock()
+	defer d.limitMu.Unlock()
+	if maxRequests <= 0 || window <= 0 {
+		d.limit = nil
+		return
+	}
+	d.limit = &rateLimiter{
+		maxRequests: maxRequests,
+		window:      window,
+		seen:        make(map[uint32][]time.Time),
+	}
+}
+
 // Serve handles one connection using the length-framed protocol.
 func (d *Dispatcher) Serve(conn net.Conn) {
 	defer conn.Close()
@@ -110,6 +128,10 @@ func (d *Dispatcher) handle(uid uint32, raw []byte) Response {
 	if req.JSONRPC != "2.0" || req.Method == "" {
 		d.auditRequest(start, uid, req.Method, false, "invalid request")
 		return Response{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32600, Message: "invalid request"}}
+	}
+	if !d.allowRequest(uid, start) {
+		d.auditRequest(start, uid, req.Method, false, "rate limit exceeded")
+		return Response{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32001, Message: "rate limit exceeded"}}
 	}
 
 	d.mu.RLock()
@@ -156,6 +178,35 @@ func (d *Dispatcher) auditRequest(start time.Time, uid uint32, method string, ok
 		Error:      msg,
 	}
 	_ = json.NewEncoder(d.audit).Encode(event)
+}
+
+type rateLimiter struct {
+	maxRequests int
+	window      time.Duration
+	seen        map[uint32][]time.Time
+}
+
+func (d *Dispatcher) allowRequest(uid uint32, now time.Time) bool {
+	d.limitMu.Lock()
+	defer d.limitMu.Unlock()
+	if d.limit == nil {
+		return true
+	}
+	cutoff := now.Add(-d.limit.window)
+	hits := d.limit.seen[uid]
+	keep := hits[:0]
+	for _, ts := range hits {
+		if ts.After(cutoff) {
+			keep = append(keep, ts)
+		}
+	}
+	if len(keep) >= d.limit.maxRequests {
+		d.limit.seen[uid] = keep
+		return false
+	}
+	keep = append(keep, now)
+	d.limit.seen[uid] = keep
+	return true
 }
 
 // ServeListener accepts connections and serves each in its own goroutine.

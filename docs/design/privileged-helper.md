@@ -104,8 +104,9 @@ streams: framing makes recovery from partial reads trivial.
   socket is implemented and passed to method handlers.
 - **Method allowlist** is hardcoded in the helper. There is no dynamic
   capability negotiation.
-- **Rate limiting** per UID is planned to prevent a compromised
-  unprivileged daemon from DOSing the system.
+- **Rate limiting** is enforced per caller UID in the helper dispatcher.
+  The installed helper allows 120 requests per minute per UID before
+  returning a JSON-RPC rate-limit error.
 
 ## What the unprivileged daemon does without the helper
 

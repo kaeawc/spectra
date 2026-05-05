@@ -177,6 +177,35 @@ func TestDispatcherAuditLogSuccessAndFailure(t *testing.T) {
 	}
 }
 
+func TestDispatcherRateLimitsPerUID(t *testing.T) {
+	d := NewDispatcher()
+	now := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	d.SetClock(func() time.Time { return now })
+	d.SetRateLimit(2, time.Minute)
+	d.Register("helper.ok", func(uint32, json.RawMessage) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.ok"}`)
+
+	if resp := d.handle(501, req); resp.Error != nil {
+		t.Fatalf("first request error: %+v", resp.Error)
+	}
+	if resp := d.handle(501, req); resp.Error != nil {
+		t.Fatalf("second request error: %+v", resp.Error)
+	}
+	if resp := d.handle(502, req); resp.Error != nil {
+		t.Fatalf("different UID should not be limited: %+v", resp.Error)
+	}
+	if resp := d.handle(501, req); resp.Error == nil || resp.Error.Code != -32001 {
+		t.Fatalf("third request error = %+v, want rate limit", resp.Error)
+	}
+
+	now = now.Add(time.Minute + time.Millisecond)
+	if resp := d.handle(501, req); resp.Error != nil {
+		t.Fatalf("request after window error: %+v", resp.Error)
+	}
+}
+
 func TestTCCQueryRequiresBundleID(t *testing.T) {
 	d := NewDispatcher()
 	RegisterAll(d, func(string, ...string) ([]byte, error) {
