@@ -29,6 +29,9 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 	if len(report.Processes) != 1 || len(report.Connections) != 1 || len(report.Throughput) != 1 {
 		t.Fatalf("report process state = %+v", report)
 	}
+	if len(report.TopThroughput) != 2 || report.TopThroughput[0].Command != "backupd" {
+		t.Fatalf("top throughput = %+v", report.TopThroughput)
+	}
 	if len(report.Endpoints) != 1 || report.Endpoints[0].Host != "api.example.com" {
 		t.Fatalf("endpoints = %+v", report.Endpoints)
 	}
@@ -47,7 +50,7 @@ func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 		"scutil --dns":         []byte("nameserver[0] : 1.1.1.1\n"),
 		"scutil --proxy":       []byte("HTTPSEnable : 1\nHTTPSProxy : zscaler.example\nHTTPSPort : 9443\n"),
 		"ifconfig":             []byte("utun4: flags=8051<UP,POINTOPOINT,RUNNING>\n\tinet 100.64.0.1\n"),
-		"nettop -P -L 2 -x -d -J bytes_in,bytes_out -t external": []byte(",bytes_in,bytes_out,\nSlack.412,100,50,\n"),
+		"nettop -P -L 2 -x -d -J bytes_in,bytes_out -t external": []byte(",bytes_in,bytes_out,\nSlack.412,100,50,\nbackupd.900,1000,1000,\n"),
 		"lsof -i -P -n": []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nSlack 412 alice 29u IPv4 0xabc 0t0 TCP 192.0.2.10:55123->api.example.com:443 (ESTABLISHED)\n"),
 		"dig +short +time=2 +tries=1 api.example.com": []byte("203.0.113.10\n"),
 		"traceroute -n -m 12 -w 1 api.example.com":    []byte("1 192.0.2.1 1.0 ms\n2 203.0.113.10 10.0 ms\n"),

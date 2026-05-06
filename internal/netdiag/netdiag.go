@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,15 +45,16 @@ type TLSProber interface {
 
 // Report is the app-centric diagnosis result.
 type Report struct {
-	AppPath     string                `json:"app_path,omitempty"`
-	PID         int                   `json:"pid,omitempty"`
-	Command     string                `json:"command,omitempty"`
-	Network     netstate.State        `json:"network"`
-	Processes   []ProcessSummary      `json:"processes,omitempty"`
-	Connections []netstate.Connection `json:"connections,omitempty"`
-	Throughput  []netstate.Throughput `json:"throughput,omitempty"`
-	Endpoints   []EndpointDiagnosis   `json:"endpoints,omitempty"`
-	Findings    []Finding             `json:"findings,omitempty"`
+	AppPath       string                `json:"app_path,omitempty"`
+	PID           int                   `json:"pid,omitempty"`
+	Command       string                `json:"command,omitempty"`
+	Network       netstate.State        `json:"network"`
+	Processes     []ProcessSummary      `json:"processes,omitempty"`
+	Connections   []netstate.Connection `json:"connections,omitempty"`
+	Throughput    []netstate.Throughput `json:"throughput,omitempty"`
+	TopThroughput []netstate.Throughput `json:"top_throughput,omitempty"`
+	Endpoints     []EndpointDiagnosis   `json:"endpoints,omitempty"`
+	Findings      []Finding             `json:"findings,omitempty"`
 }
 
 // ProcessSummary is the process identity included in reports.
@@ -158,6 +160,7 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 	report.Processes = filterProcesses(procs, opts)
 	report.Connections = filterConnections(conns, report.Processes, opts)
 	report.Throughput = filterThroughput(state.ProcessThroughput, report.Processes, opts)
+	report.TopThroughput = topThroughput(state.ProcessThroughput, 5)
 
 	targets := endpointTargets(opts.Targets, report.Connections, opts.Ports)
 	for _, target := range targets {
@@ -234,6 +237,24 @@ func filterThroughput(rows []netstate.Throughput, procs []ProcessSummary, opts O
 		out = append(out, row)
 	}
 	return out
+}
+
+func topThroughput(rows []netstate.Throughput, limit int) []netstate.Throughput {
+	if limit <= 0 || len(rows) == 0 {
+		return nil
+	}
+	out := append([]netstate.Throughput(nil), rows...)
+	sort.Slice(out, func(i, j int) bool {
+		return throughputTotal(out[i]) > throughputTotal(out[j])
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func throughputTotal(row netstate.Throughput) int64 {
+	return row.BytesInPerSec + row.BytesOutPerSec
 }
 
 func processPIDSet(procs []ProcessSummary) map[int]bool {
@@ -439,6 +460,15 @@ func tlsVersion(v uint16) string {
 
 func findings(report Report) []Finding {
 	var out []Finding
+	if len(report.Processes) == 0 && (report.AppPath != "" || report.PID > 0 || report.Command != "") {
+		out = append(out, Finding{Severity: "warning", Title: "no matching running process", Detail: "diagnosis may only reflect explicit targets and host network state"})
+	}
+	if len(report.Connections) == 0 && len(report.Processes) > 0 {
+		out = append(out, Finding{Severity: "info", Title: "matched app has no active network sockets"})
+	}
+	if f, ok := bandwidthFinding(report); ok {
+		out = append(out, f)
+	}
 	if report.Network.Proxy.HTTP != "" || report.Network.Proxy.HTTPS != "" || report.Network.Proxy.SOCKS != "" {
 		out = append(out, Finding{Severity: "info", Title: "system proxy configured", Detail: proxyDetail(report.Network.Proxy)})
 	}
@@ -446,22 +476,56 @@ func findings(report Report) []Finding {
 		out = append(out, Finding{Severity: "info", Title: "vpn/tunnel interfaces active", Detail: strings.Join(report.Network.VPNInterfaces, ", ")})
 	}
 	for _, ep := range report.Endpoints {
-		if !ep.DNS.OK {
-			out = append(out, Finding{Severity: "warning", Title: "dns lookup failed", Detail: ep.Host + ": " + ep.DNS.Error})
-		}
-		if len(ep.Traceroute.Hops) > 0 && ep.Traceroute.Hops[len(ep.Traceroute.Hops)-1].Timeout {
-			out = append(out, Finding{Severity: "info", Title: "traceroute has unanswered hops", Detail: ep.Host})
-		}
-		for _, port := range ep.Ports {
-			if !port.TCP.OK {
-				out = append(out, Finding{Severity: "warning", Title: "tcp connect failed", Detail: fmt.Sprintf("%s:%d %s", ep.Host, port.Port, port.TCP.Error)})
-			}
-			if port.TLS != nil && port.TLS.ZscalerHint {
-				out = append(out, Finding{Severity: "info", Title: "zscaler tls issuer/subject observed", Detail: ep.Host})
-			}
-		}
+		out = append(out, endpointFindings(ep)...)
 	}
 	return out
+}
+
+func endpointFindings(ep EndpointDiagnosis) []Finding {
+	var out []Finding
+	if !ep.DNS.OK {
+		out = append(out, Finding{Severity: "warning", Title: "dns lookup failed", Detail: ep.Host + ": " + ep.DNS.Error})
+	}
+	if len(ep.Traceroute.Hops) > 0 && ep.Traceroute.Hops[len(ep.Traceroute.Hops)-1].Timeout {
+		out = append(out, Finding{Severity: "info", Title: "traceroute has unanswered hops", Detail: ep.Host})
+	}
+	for _, port := range ep.Ports {
+		out = append(out, portFindings(ep.Host, port)...)
+	}
+	return out
+}
+
+func portFindings(host string, port PortDiagnosis) []Finding {
+	var out []Finding
+	if !port.TCP.OK {
+		out = append(out, Finding{Severity: "warning", Title: "tcp connect failed", Detail: fmt.Sprintf("%s:%d %s", host, port.Port, port.TCP.Error)})
+	}
+	if port.TLS != nil && port.TLS.ZscalerHint {
+		out = append(out, Finding{Severity: "info", Title: "zscaler tls issuer/subject observed", Detail: host})
+	}
+	return out
+}
+
+func bandwidthFinding(report Report) (Finding, bool) {
+	appPIDs := processPIDSet(report.Processes)
+	var appBytes int64
+	for _, row := range report.Throughput {
+		appBytes += throughputTotal(row)
+	}
+	for _, row := range report.TopThroughput {
+		if appPIDs[row.PID] {
+			continue
+		}
+		total := throughputTotal(row)
+		if total > 0 && (appBytes == 0 || total >= appBytes*4) {
+			return Finding{
+				Severity: "info",
+				Title:    "other process dominates current network throughput",
+				Detail:   fmt.Sprintf("pid=%d %s total=%d B/s diagnosed_app_total=%d B/s", row.PID, row.Command, total, appBytes),
+			}, true
+		}
+	}
+	return Finding{}, false
 }
 
 func proxyDetail(proxy netstate.ProxyConfig) string {
