@@ -139,6 +139,12 @@ attacker-chosen files.
   helper paths (see `internal/bundleid.Valid`).
 - RPC handler dispatch is method-allowlist; unknown methods return
   errors rather than passing through.
+- Subprocess use behind daemon/helper RPC is fixed per method: command
+  names are not accepted from RPC params; PIDs and durations are numeric;
+  `fs_usage` modes and TCC bundle IDs are allowlisted before reaching
+  `os/exec`.
+- Helper installation is the only root `sudo` path, and it rejects command
+  names outside the fixed installer utility allowlist.
 - TCP listen is opt-in. Non-loopback binds require `--allow-remote`,
   which prints an explicit warning that Spectra does not add its own
   authentication layer.
@@ -230,7 +236,7 @@ Things Spectra commits to before v1 release:
       code-signing requirement checks.
 - [x] Fuzz-test the JSON-RPC dispatcher for malformed payloads.
 - [x] Static analysis (`gosec`) runs in CI.
-- [ ] No `os/exec` calls take user-supplied arguments without an
+- [x] No `os/exec` calls take user-supplied arguments without an
       allowlist.
 - [x] No `database/sql` queries take user-supplied strings without
       parameterization (where supported) or strict allowlist

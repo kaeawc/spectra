@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,23 @@ func TestInstallRootTextFileCopiesTemporaryContent(t *testing.T) {
 	wantCalls := [][]string{{"cp", "/tmp/spectra-helper-test", "/etc/newsyslog.d/spectra-helper.conf"}}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
+func TestSudoCommandAllowedCoversHelperManagementCommands(t *testing.T) {
+	for _, name := range []string{"chmod", "chown", "cp", "dseditgroup", "launchctl", "mkdir", "rm"} {
+		if !sudoCommandAllowed(name) {
+			t.Fatalf("sudoCommandAllowed(%q) = false", name)
+		}
+	}
+}
+
+func TestSudoRunRejectsNonAllowlistedCommand(t *testing.T) {
+	err := sudoRun("sh", "-c", "echo should-not-run")
+	if err == nil {
+		t.Fatal("sudoRun accepted a non-allowlisted command")
+	}
+	if !strings.Contains(err.Error(), `sudo command "sh" is not allowlisted`) {
+		t.Fatalf("error = %v", err)
 	}
 }

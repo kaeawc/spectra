@@ -234,12 +234,24 @@ func runHelperStatus(args []string) int {
 }
 
 func sudoRun(name string, args ...string) error {
+	if !sudoCommandAllowed(name) {
+		return fmt.Errorf("sudo command %q is not allowlisted", name)
+	}
 	// #nosec G204 -- sudo is invoked only for the fixed helper management commands.
 	cmd := exec.Command("sudo", append([]string{name}, args...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func sudoCommandAllowed(name string) bool {
+	switch name {
+	case "chmod", "chown", "cp", "dseditgroup", "launchctl", "mkdir", "rm":
+		return true
+	default:
+		return false
+	}
 }
 
 // installHelperCmd dispatches install-helper subcommands.
