@@ -3,12 +3,16 @@ package netcap
 import (
 	"bytes"
 	"io"
+	"net/netip"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/netproto"
 )
 
 const DefaultSummaryEventLimit = 100
+
+const maxTCPReassemblyBytes = 256 * 1024
+const tcpFlagSYN = 0x02
 
 // PCAPSummary is a bounded metadata-only summary of a classic pcap stream.
 type PCAPSummary struct {
@@ -61,6 +65,7 @@ func SummarizePCAP(r io.Reader, eventLimit int) (PCAPSummary, error) {
 		eventLimit = DefaultSummaryEventLimit
 	}
 	summary := PCAPSummary{LinkType: reader.LinkType}
+	tcpStreams := newTCPSummaryStreams()
 	for {
 		pkt, err := reader.Next()
 		if err != nil {
@@ -76,11 +81,11 @@ func SummarizePCAP(r io.Reader, eventLimit int) (PCAPSummary, error) {
 			continue
 		}
 		summary.DecodedFlows++
-		summarizeFlow(&summary, flow, eventLimit)
+		summarizeFlow(&summary, flow, eventLimit, tcpStreams)
 	}
 }
 
-func summarizeFlow(summary *PCAPSummary, flow FlowPacket, eventLimit int) {
+func summarizeFlow(summary *PCAPSummary, flow FlowPacket, eventLimit int, tcpStreams *tcpSummaryStreams) {
 	if len(flow.Payload) == 0 {
 		return
 	}
@@ -91,16 +96,25 @@ func summarizeFlow(summary *PCAPSummary, flow FlowPacket, eventLimit int) {
 		}
 		return
 	}
-	if flow.TransportProto == "tcp" && isTLSClientHelloPayload(flow.Payload) {
-		hello, err := netproto.ParseTLSClientHello(flow.Payload)
+	if flow.TransportProto != "tcp" {
+		return
+	}
+	stream, ok := tcpStreams.add(flow)
+	if !ok {
+		return
+	}
+	if !stream.parsedTLS && isTLSClientHelloPayload(stream.data) {
+		hello, err := netproto.ParseTLSClientHello(stream.data)
 		if err == nil {
+			stream.parsedTLS = true
 			appendTLSSummary(summary, flow, hello, eventLimit)
 		}
 		return
 	}
-	if flow.TransportProto == "tcp" && isHTTP1Payload(flow.Payload) {
-		msg, err := netproto.ParseHTTP1Headers(flow.Payload)
+	if !stream.parsedHTTP && isHTTP1Payload(stream.data) && hasHTTPHeaderTerminator(stream.data) {
+		msg, err := netproto.ParseHTTP1Headers(stream.data)
 		if err == nil {
+			stream.parsedHTTP = true
 			appendHTTPSummary(summary, flow, msg, eventLimit)
 		}
 	}
@@ -128,6 +142,70 @@ func isHTTP1Payload(payload []byte) bool {
 	default:
 		return false
 	}
+}
+
+func hasHTTPHeaderTerminator(payload []byte) bool {
+	return bytes.Contains(payload, []byte("\r\n\r\n")) || bytes.Contains(payload, []byte("\n\n"))
+}
+
+type tcpFlowKey struct {
+	srcAddr netip.Addr
+	dstAddr netip.Addr
+	srcPort uint16
+	dstPort uint16
+}
+
+type tcpSummaryStreams struct {
+	streams map[tcpFlowKey]*tcpSummaryStream
+}
+
+type tcpSummaryStream struct {
+	data       []byte
+	nextSeq    uint32
+	parsedTLS  bool
+	parsedHTTP bool
+}
+
+func newTCPSummaryStreams() *tcpSummaryStreams {
+	return &tcpSummaryStreams{streams: make(map[tcpFlowKey]*tcpSummaryStream)}
+}
+
+func (s *tcpSummaryStreams) add(flow FlowPacket) (*tcpSummaryStream, bool) {
+	key := tcpFlowKey{
+		srcAddr: flow.SrcAddr,
+		dstAddr: flow.DstAddr,
+		srcPort: flow.SrcPort,
+		dstPort: flow.DstPort,
+	}
+	dataSeq := flow.TCPSeq
+	if flow.TCPFlags&tcpFlagSYN != 0 {
+		dataSeq++
+	}
+	stream := s.streams[key]
+	if stream == nil {
+		stream = &tcpSummaryStream{nextSeq: dataSeq}
+		s.streams[key] = stream
+	}
+	payload := flow.Payload
+	if dataSeq < stream.nextSeq {
+		overlap := int(stream.nextSeq - dataSeq)
+		if overlap >= len(payload) {
+			return stream, true
+		}
+		payload = payload[overlap:]
+	} else if dataSeq > stream.nextSeq {
+		return stream, false
+	}
+	if len(stream.data) >= maxTCPReassemblyBytes {
+		return stream, true
+	}
+	remaining := maxTCPReassemblyBytes - len(stream.data)
+	if len(payload) > remaining {
+		payload = payload[:remaining]
+	}
+	stream.data = append(stream.data, payload...)
+	stream.nextSeq += uint32(len(payload))
+	return stream, true
 }
 
 func appendDNSSummary(summary *PCAPSummary, flow FlowPacket, msg netproto.DNSMessage, limit int) {
