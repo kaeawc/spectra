@@ -78,7 +78,7 @@ func runNetworkDiagnose(args []string) int {
 	app := fs.String("app", "", "App bundle path to diagnose")
 	pid := fs.Int("pid", 0, "PID to diagnose")
 	command := fs.String("command", "", "Process command/name to diagnose")
-	portsRaw := fs.String("ports", "443", "Comma-separated ports to probe for explicit host targets")
+	portsRaw := fs.String("ports", "", "Comma-separated remote ports to include (filters inferred app endpoints)")
 	timeout := fs.Duration("timeout", 3*time.Second, "Per-probe timeout")
 	if err := fs.Parse(args); err != nil {
 		return 2
