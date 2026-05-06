@@ -15,6 +15,11 @@ devfs                                  386       386         0   100% /dev
 /dev/disk3s5                     971309944   5312168 444843444     2% /data
 `
 
+const mountOutput = `/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
+devfs on /dev (devfs, local, nobrowse)
+/dev/disk3s5 on /data (apfs, local, journaled)
+`
+
 func TestParseDF(t *testing.T) {
 	vols := parseDF(dfOutput)
 	// Should include /, /data but skip devfs and /System/Volumes/*
@@ -42,6 +47,29 @@ func TestParseDFBytes(t *testing.T) {
 	// 971309944 * 1024
 	if root.TotalBytes != 971309944*1024 {
 		t.Errorf("TotalBytes = %d, want %d", root.TotalBytes, 971309944*1024)
+	}
+}
+
+func TestParseMountFSTypes(t *testing.T) {
+	got := parseMountFSTypes(mountOutput)
+	if got["/"] != "apfs" {
+		t.Fatalf("root fs type = %q, want apfs", got["/"])
+	}
+	if got["/dev"] != "devfs" {
+		t.Fatalf("/dev fs type = %q, want devfs", got["/dev"])
+	}
+}
+
+func TestApplyFSTypes(t *testing.T) {
+	vols := parseDF(dfOutput)
+	applyFSTypes(vols, parseMountFSTypes(mountOutput))
+	for _, v := range vols {
+		switch v.MountPoint {
+		case "/", "/data":
+			if v.FSType != "apfs" {
+				t.Fatalf("%s fs type = %q, want apfs", v.MountPoint, v.FSType)
+			}
+		}
 	}
 }
 
@@ -114,6 +142,9 @@ func TestCollect(t *testing.T) {
 	os.WriteFile(filepath.Join(cacheDir, "test.dat"), make([]byte, 2048), 0o644)
 
 	stub := func(name string, args ...string) ([]byte, error) {
+		if name == "mount" {
+			return []byte(mountOutput), nil
+		}
 		return []byte(dfOutput), nil
 	}
 
@@ -123,6 +154,9 @@ func TestCollect(t *testing.T) {
 	})
 	if len(s.Volumes) == 0 {
 		t.Error("expected volumes from stubbed df")
+	}
+	if s.Volumes[0].FSType == "" {
+		t.Error("expected fs_type from stubbed mount")
 	}
 	if s.AppCachesBytes == 0 {
 		t.Error("AppCachesBytes should be > 0")

@@ -72,6 +72,11 @@ func Collect(opts CollectOptions) State {
 	if out, err := run("df", "-Pk"); err == nil {
 		s.Volumes = parseDF(string(out))
 	}
+	if len(s.Volumes) > 0 {
+		if out, err := run("mount"); err == nil {
+			applyFSTypes(s.Volumes, parseMountFSTypes(string(out)))
+		}
+	}
 	s.UserLibraryBytes = dirBytes(filepath.Join(opts.Home, "Library"))
 	s.AppCachesBytes = dirBytes(filepath.Join(opts.Home, "Library", "Caches"))
 	if len(opts.AppPaths) > 0 {
@@ -111,6 +116,46 @@ func parseDF(out string) []Volume {
 		})
 	}
 	return volumes
+}
+
+func applyFSTypes(volumes []Volume, fsTypes map[string]string) {
+	for i := range volumes {
+		if fsType := fsTypes[volumes[i].MountPoint]; fsType != "" {
+			volumes[i].FSType = fsType
+		}
+	}
+}
+
+func parseMountFSTypes(out string) map[string]string {
+	fsTypes := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		mountPoint, fsType, ok := parseMountLine(line)
+		if ok {
+			fsTypes[mountPoint] = fsType
+		}
+	}
+	return fsTypes
+}
+
+func parseMountLine(line string) (mountPoint string, fsType string, ok bool) {
+	_, rest, ok := strings.Cut(line, " on ")
+	if !ok {
+		return "", "", false
+	}
+	mountPoint, options, ok := strings.Cut(rest, " (")
+	if !ok {
+		return "", "", false
+	}
+	fields := strings.Split(options, ",")
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	fsType = strings.TrimSpace(strings.TrimSuffix(fields[0], ")"))
+	mountPoint = strings.TrimSpace(mountPoint)
+	if mountPoint == "" || fsType == "" {
+		return "", "", false
+	}
+	return mountPoint, fsType, true
 }
 
 // dirBytes returns the total on-disk size of all files under dir using
