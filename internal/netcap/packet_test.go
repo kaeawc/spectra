@@ -62,13 +62,28 @@ func TestDecodeLoopIPv4UDP(t *testing.T) {
 	}
 }
 
+func TestDecodeLinuxSLLIPv4TCP(t *testing.T) {
+	payload := []byte("GET /linux HTTP/1.1\r\n\r\n")
+	packet := linuxSLLPacket(ipv4Packet(6, tcpSegment(53124, 8080, payload)))
+
+	pkt, err := DecodeFlowPacket(LinkTypeLinuxSLL, packet)
+	if err != nil {
+		t.Fatalf("DecodeFlowPacket: %v", err)
+	}
+	if pkt.TransportProto != "tcp" || pkt.SrcPort != 53124 || pkt.DstPort != 8080 || !bytes.Equal(pkt.Payload, payload) {
+		t.Fatalf("linux sll packet = %+v", pkt)
+	}
+}
+
 func TestDecodeFlowPacketRejectsUnsupportedPackets(t *testing.T) {
 	tests := []struct {
 		name string
 		link uint32
 		data []byte
 	}{
-		{name: "link", link: LinkTypeLinuxSLL, data: []byte{1, 2, 3}},
+		{name: "link", link: 999, data: []byte{1, 2, 3}},
+		{name: "short linux sll", link: LinkTypeLinuxSLL, data: []byte{1, 2, 3}},
+		{name: "non ipv4 linux sll", link: LinkTypeLinuxSLL, data: append(make([]byte, 14), 0x86, 0xdd)},
 		{name: "short ethernet", link: LinkTypeEthernet, data: []byte{1, 2, 3}},
 		{name: "non ipv4 ethernet", link: LinkTypeEthernet, data: append(make([]byte, 12), 0x86, 0xdd)},
 		{name: "short loopback", link: LinkTypeNull, data: []byte{1, 2, 3}},
@@ -106,6 +121,13 @@ func loopbackPacket(order binary.ByteOrder, ip []byte) []byte {
 	packet := make([]byte, 4+len(ip))
 	order.PutUint32(packet[:4], loopFamilyIPv4)
 	copy(packet[4:], ip)
+	return packet
+}
+
+func linuxSLLPacket(ip []byte) []byte {
+	packet := make([]byte, 16+len(ip))
+	binary.BigEndian.PutUint16(packet[14:16], etherTypeIPv4)
+	copy(packet[16:], ip)
 	return packet
 }
 

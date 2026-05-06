@@ -39,9 +39,21 @@ func DecodeFlowPacket(linkType uint32, data []byte) (FlowPacket, error) {
 		return decodeIPv4Flow(data)
 	case LinkTypeNull, LinkTypeLoop:
 		return decodeLoopbackFlow(data)
+	case LinkTypeLinuxSLL:
+		return decodeLinuxSLLFlow(data)
 	default:
 		return FlowPacket{}, fmt.Errorf("unsupported link type %d", linkType)
 	}
+}
+
+func decodeLinuxSLLFlow(data []byte) (FlowPacket, error) {
+	if len(data) < 16 {
+		return FlowPacket{}, fmt.Errorf("linux sll packet too short")
+	}
+	if binary.BigEndian.Uint16(data[14:16]) != etherTypeIPv4 {
+		return FlowPacket{}, fmt.Errorf("unsupported linux sll protocol")
+	}
+	return decodeIPv4Flow(data[16:])
 }
 
 func decodeLoopbackFlow(data []byte) (FlowPacket, error) {
