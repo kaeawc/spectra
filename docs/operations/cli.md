@@ -31,6 +31,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `process` | List running processes sorted by memory |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
+| `fan` | Run one daemon RPC call against multiple explicit targets |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -281,7 +282,7 @@ spectra serve --tcp 100.64.0.5:7878 --allow-remote
 
 Calls a running daemon using the same JSON-RPC protocol as the local
 Unix-socket client. This is the implemented remote transport today;
-automatic tsnet registration and cross-host fan-out remain future work.
+automatic tsnet registration and host discovery remain future work.
 
 | Target | Meaning |
 |---|---|
@@ -343,6 +344,31 @@ spectra connect work-mac toolchains
 spectra connect work-mac snapshot
 spectra connect work-mac snapshot diff snap-before snap-after
 spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":true}'
+```
+
+## `spectra fan`
+
+Runs one `spectra connect` call against multiple daemon targets in
+parallel and prints a JSON envelope with one result per target. This is
+explicit-host fan-out; automatic host discovery is still planned.
+
+| Flag | Default | Meaning |
+|---|---:|---|
+| `--hosts` | required | Comma-separated daemon targets (`local`, `host`, `host:port`, `unix:/path`) |
+| `--timeout` | `3s` | Dial/read timeout per target |
+
+The command accepts the same typed shortcuts and raw `call` form as
+`spectra connect`.
+
+### Examples
+
+```bash
+spectra fan --hosts work-mac,alice-laptop status
+spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
+spectra fan --hosts work-mac,alice-laptop jvm
+spectra fan --hosts work-mac,alice-laptop jdk
+spectra fan --hosts work-mac,alice-laptop snapshot
+spectra fan --hosts work-mac,alice-laptop call network.connections
 ```
 
 ## `spectra version`

@@ -48,11 +48,19 @@ V1 will be Tailscale-ACL-only.
 
 ## The killer feature: cross-host correlation
 
-Once each Mac is a tailnet node running the daemon, queries fan out:
+Once each Mac is running the daemon, queries can fan out. Explicit-host
+fan-out is implemented today; tailnet discovery is the planned next step:
+
+```bash
+spectra fan --hosts laptop,work-mac inspect /Applications/Slack.app
+# both daemons inspect Slack and return one JSON envelope
+```
+
+The intended discovered-host workflow remains:
 
 ```bash
 spectra list --all-hosts
-# tailnet roundtrip: every Mac running spectra reports its app inventory
+# every Mac running spectra reports its app inventory
 # aggregated and grouped, with version drift highlighted
 ```
 
@@ -98,9 +106,11 @@ These will get pinned down before the first daemon commit:
 3. Add explicit TCP JSON-RPC transport plus typed `spectra connect <host>
    ...` shortcuts. **Implemented; authentication is still delegated to the
    network path.**
-4. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
+4. Add explicit-host `spectra fan --hosts ...` fan-out over the typed
+   connect surface. **Implemented.**
+5. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
    Tailscale's discovery.
-5. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
+6. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
 6. Privileged helper as `spectra install-helper` subcommand. Same binary
    ships the helper; SMAppService-registered LaunchDaemon.
 7. Ring buffer + history for replay (requires SQLite from
