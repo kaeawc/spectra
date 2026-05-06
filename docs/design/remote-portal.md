@@ -30,7 +30,8 @@ Three consequences:
    registers as `work-mac.tailnet-name.ts.net`, and `spectra connect work-mac`
    Just Works with MagicDNS. The current implementation stops one step
    earlier: the daemon can opt into an explicit TCP listener and the
-   client can call JSON-RPC methods with `spectra connect <host> call ...`.
+   client can use typed `spectra connect <host> ...` shortcuts or call
+   JSON-RPC methods directly with `spectra connect <host> call ...`.
 
 ## Authentication
 
@@ -94,8 +95,9 @@ These will get pinned down before the first daemon commit:
    so the same code path serves CLI and daemon.
 2. `spectra serve` over a local Unix socket first. Validates the RPC shape
    without touching networking. **Implemented.**
-3. Add explicit TCP JSON-RPC transport for `spectra connect <host> call`.
-   **Implemented; authentication is still delegated to the network path.**
+3. Add explicit TCP JSON-RPC transport plus typed `spectra connect <host>
+   ...` shortcuts. **Implemented; authentication is still delegated to the
+   network path.**
 4. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
    Tailscale's discovery.
 5. TUI client. Bubble Tea, talks to local-or-remote daemon identically.

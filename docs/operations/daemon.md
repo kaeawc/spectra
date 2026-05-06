@@ -158,7 +158,8 @@ Implemented:
 4. Live process metrics ring buffer and periodic live snapshots.
 5. Local `spectra status` and `spectra metrics` clients.
 6. Privileged helper proxy methods for implemented helper capabilities.
-7. Optional TCP JSON-RPC listener and `spectra connect <target> call`.
+7. Optional TCP JSON-RPC listener, typed `spectra connect <target> ...`
+   shortcuts, and the raw `spectra connect <target> call` escape hatch.
 
 Future:
 

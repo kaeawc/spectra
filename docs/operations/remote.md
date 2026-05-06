@@ -37,23 +37,38 @@ generic `call` form:
 
 ```bash
 spectra connect work-mac status
-spectra connect work-mac call inspect.app '{"path":"/Applications/Slack.app"}'
-spectra connect work-mac call jvm.list
-spectra connect work-mac call jvm.thread_dump '{"pid":4012}'
-spectra connect work-mac call snapshot.create
-```
-
-Common typed remote shortcuts are available for frequent read-only calls:
-
-```bash
 spectra connect work-mac inspect /Applications/Slack.app
 spectra connect work-mac jvm
-spectra connect work-mac processes
-spectra connect work-mac network
-spectra connect work-mac toolchains
+spectra connect work-mac jvm-threads 4012
+spectra connect work-mac snapshot
 ```
 
-Use `call` for everything else.
+Typed remote shortcuts cover the common local-debugging workflows:
+
+```bash
+spectra connect work-mac host
+spectra connect work-mac inspect /Applications/Slack.app
+spectra connect work-mac jvm
+spectra connect work-mac jvm-gc 4012
+spectra connect work-mac jvm-heap 4012
+spectra connect work-mac processes
+spectra connect work-mac process-tree /Applications/Slack.app
+spectra connect work-mac network
+spectra connect work-mac connections
+spectra connect work-mac network-by-app /Applications/Slack.app
+spectra connect work-mac storage
+spectra connect work-mac storage /Applications/Slack.app
+spectra connect work-mac power
+spectra connect work-mac rules
+spectra connect work-mac snapshot list
+spectra connect work-mac snapshot diff snap-before snap-after
+spectra connect work-mac toolchains
+spectra connect work-mac jdk
+spectra connect work-mac brew
+```
+
+Use `call` for less common or sensitive methods such as heap dumps and JFR
+artifact writes.
 
 ## Cross-host operations
 
@@ -130,10 +145,10 @@ the full RPC surface.
 ### "Why is my teammate's IDE slow?"
 
 ```bash
-spectra connect alice-laptop call jvm.list
+spectra connect alice-laptop jvm
 # → see all JVMs running, GC stats, heap usage
 
-spectra connect alice-laptop call jvm.thread_dump '{"pid":4012}' > intellij-threads.json
+spectra connect alice-laptop jvm-threads 4012 > intellij-threads.json
 # → captured to local disk for analysis
 ```
 
@@ -166,7 +181,5 @@ remote work:
 
 1. Add tsnet integration so the daemon can join a tailnet without an
    externally managed listener.
-2. Add typed `spectra connect <host> <subcommand>` adapters over the
-   generic JSON-RPC `call` command.
-3. Add host discovery and fan-out commands.
-4. Add TUI support against local-or-remote daemon targets.
+2. Add host discovery and fan-out commands.
+3. Add TUI support against local-or-remote daemon targets.

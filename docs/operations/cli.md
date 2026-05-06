@@ -295,11 +295,37 @@ automatic tsnet registration and cross-host fan-out remain future work.
 |---|---|
 | `spectra connect <target>` | Call `health` |
 | `spectra connect <target> status` | Call `health` |
+| `spectra connect <target> host` | Call `inspect.host` |
 | `spectra connect <target> inspect <App.app>` | Call `inspect.app` |
 | `spectra connect <target> jvm` | Call `jvm.list` |
+| `spectra connect <target> jvm <pid>` | Call `jvm.inspect` |
+| `spectra connect <target> jvm-gc <pid>` | Call `jvm.gc_stats` |
+| `spectra connect <target> jvm-threads <pid>` | Call `jvm.thread_dump` |
+| `spectra connect <target> jvm-heap <pid>` | Call `jvm.heap_histogram` |
 | `spectra connect <target> processes` | Call `process.list` |
+| `spectra connect <target> processes <App.app>` | Call `process.list` scoped to bundles |
+| `spectra connect <target> process-tree [App.app ...]` | Call `process.tree` |
+| `spectra connect <target> sample <pid> [duration] [interval]` | Call `process.sample` |
 | `spectra connect <target> network` | Call `network.state` |
+| `spectra connect <target> connections` | Call `network.connections` |
+| `spectra connect <target> network-by-app [App.app ...]` | Call `network.byApp` |
+| `spectra connect <target> storage` | Call `storage.system` |
+| `spectra connect <target> storage <App.app> [more.apps]` | Call `storage.byApp` |
+| `spectra connect <target> power` | Call `power.state` |
+| `spectra connect <target> rules [snapshot-id]` | Call `rules.check` |
+| `spectra connect <target> snapshot` | Call `snapshot.create` |
+| `spectra connect <target> snapshot list` | Call `snapshot.list` |
+| `spectra connect <target> snapshot get <id>` | Call `snapshot.get` |
+| `spectra connect <target> snapshot diff <id-a> <id-b>` | Call `snapshot.diff` |
+| `spectra connect <target> snapshot processes <id>` | Call `snapshot.processes` |
+| `spectra connect <target> snapshot login-items <id>` | Call `snapshot.login_items` |
+| `spectra connect <target> snapshot granted-perms <id>` | Call `snapshot.granted_perms` |
+| `spectra connect <target> snapshot prune [keep]` | Call `snapshot.prune` |
 | `spectra connect <target> toolchains` | Call `toolchain.scan` |
+| `spectra connect <target> jdk` | Call `jdk.list` |
+| `spectra connect <target> brew` | Call `toolchain.brew` |
+| `spectra connect <target> runtimes` | Call `toolchain.runtimes` |
+| `spectra connect <target> build-tools` | Call `toolchain.build_tools` |
 | `spectra connect <target> call <method> [json-params]` | Call an RPC method directly |
 
 ### Examples
@@ -309,11 +335,14 @@ spectra connect local
 spectra connect 127.0.0.1:7878 status
 spectra connect work-mac inspect /Applications/Slack.app
 spectra connect work-mac jvm
+spectra connect work-mac jvm-threads 4012
 spectra connect work-mac processes
 spectra connect work-mac network
+spectra connect work-mac storage /Applications/Slack.app
 spectra connect work-mac toolchains
-spectra connect work-mac call snapshot.create
-spectra connect work-mac call inspect.app '{"path":"/Applications/Slack.app"}'
+spectra connect work-mac snapshot
+spectra connect work-mac snapshot diff snap-before snap-after
+spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":true}'
 ```
 
 ## `spectra version`
