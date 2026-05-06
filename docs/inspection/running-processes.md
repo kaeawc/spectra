@@ -10,7 +10,11 @@ otherwise static inspection.
 `ps -axwwo pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=`
 for the full process subcommand. Equals signs suppress the column
 headers; `axww` gets every process with full unwrapped command lines.
-A process is attributed to the app when its executable path starts
+For full process inventory, Darwin builds with cgo enrich those rows with
+`libproc` calls (`proc_pidinfo(PROC_PIDTASKALLINFO)` and `proc_pidpath`)
+to collect thread counts, BSD process names, and executable paths without
+extra forks. In that collector, a process is attributed to the app when
+its libproc executable path, falling back to its command line, starts
 with `<app-path>/`.
 
 For each match Spectra captures:
@@ -21,6 +25,8 @@ For each match Spectra captures:
 - **Start time** — parsed from `lstart`
 - **Command** — bundle-relative path (so `Contents/MacOS/Slack Helper`
   rather than the full `/Applications/Slack.app/...`)
+- **Executable path** — direct `proc_pidpath` value when visible
+- **BSD name** — direct `p_comm` value when visible
 
 For app-level inspection, Spectra also computes `AppStartedAt` from the
 oldest matching process and `AppUptimeSeconds` from that timestamp to the
@@ -95,7 +101,7 @@ The `RunningProcesses` field on the JSON result holds the full list:
   but trends require the daemon metrics ring buffer.
 - **Thread counts are best effort.** macOS `ps` does not expose
   Linux-style `nlwp`/`thcount` fields on this host, so Spectra fills
-  `thread_count` with `proc_pidinfo(PROC_PIDTASKINFO)` on Darwin when
+  `thread_count` with `proc_pidinfo(PROC_PIDTASKALLINFO)` on Darwin when
   the process is visible to the current user. Processes that cannot be
   queried keep `thread_count: 0`.
 
@@ -109,13 +115,14 @@ Per-app attribution in `internal/detect/detect.go`:
 
 Full process inventory in `internal/process/`:
 - `CollectAll(ctx, opts)` — parses `ps` rows, including `pcpu`
-- `collectThreadCounts(procs)` — Darwin `proc_pidinfo` enrichment for
-  per-process thread counts
+- `collectProcessDetails(procs)` — Darwin `libproc` enrichment for
+  thread counts, BSD process names, and executable paths
 - `enrichDeep(procs, run)` — one batched `lsof -p` call for FD and
   socket detail when `--deep` is set
 
 ## Future ideas
 
-- Switch to `libproc` via cgo (or `process.NewProcess` from
-  `gopsutil`) to get richer per-process data without forking the
-  initial `ps` inventory.
+- Continue moving fields from forked tools to `libproc`, especially
+  descriptor metadata that can reduce `lsof` dependence for process-only
+  views. Socket peer attribution still needs either richer direct socket
+  inspection or the privileged helper path.

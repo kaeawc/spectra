@@ -92,7 +92,7 @@ LRU today.
 ## Live data ring buffer
 
 Process-level metrics (CPU%, RSS, virtual size) are sampled at ~1Hz into
-an in-memory ring buffer. The last 5 minutes per process are kept in RAM
+an in-memory ring buffer. The last 30 minutes per process are kept in RAM
 and flushed as 1-minute aggregates to SQLite. `spectra metrics` reads the
 stored rows; the `process.live` RPC returns recent in-memory samples.
 

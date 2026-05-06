@@ -65,6 +65,8 @@ ProcessInfo {
   pid, ppid
   uid, user
   command, full_command_line
+  bsd_name                  # proc_pidinfo on Darwin when visible
+  executable_path           # proc_pidpath on Darwin when visible
   cpu_pct                  # over the last sample interval
   rss_kib, vsize_kib
   thread_count             # proc_pidinfo on Darwin when visible

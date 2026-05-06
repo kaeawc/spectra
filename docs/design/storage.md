@@ -104,7 +104,7 @@ queued / completed / failed / bytes. Borrowed from
 ## Tier 3: In-memory ring buffer
 
 Live data (CPU%, RSS, network bytes/sec, GC ticks) at ~1Hz is too dense
-to write straight to SQLite. The collector keeps the most recent 5
+to write straight to SQLite. The collector keeps the most recent 30
 minutes per process in RAM, then aggregates to 1-minute rows when
 flushing. Per-second resolution is reachable for "what just happened"
 queries but doesn't bloat persistent storage.

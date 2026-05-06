@@ -567,6 +567,64 @@ func TestProcessesFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestSaveAndGetProcessMetrics(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	minute := time.Date(2026, 5, 6, 15, 4, 0, 0, time.UTC)
+
+	rows := []ProcessMetricRow{
+		{PID: 412, MinuteAt: minute, AvgRSSKiB: 1000, MaxRSSKiB: 1200, AvgCPUPct: 1.5, MaxCPUPct: 2.0, SampleCount: 30},
+		{PID: 412, MinuteAt: minute.Add(time.Minute), AvgRSSKiB: 2000, MaxRSSKiB: 2400, AvgCPUPct: 2.5, MaxCPUPct: 3.0, SampleCount: 60},
+	}
+	if err := db.SaveProcessMetrics(ctx, rows); err != nil {
+		t.Fatalf("SaveProcessMetrics: %v", err)
+	}
+
+	got, err := db.GetProcessMetrics(ctx, 412, 10)
+	if err != nil {
+		t.Fatalf("GetProcessMetrics: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if !got[0].MinuteAt.Equal(minute.Add(time.Minute)) {
+		t.Fatalf("newest row first = %v, want %v", got[0].MinuteAt, minute.Add(time.Minute))
+	}
+	if got[0].SampleCount != 60 || got[0].MaxRSSKiB != 2400 {
+		t.Fatalf("newest row = %+v", got[0])
+	}
+}
+
+func TestSaveProcessMetricsUpsertsDuplicateMinute(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	minute := time.Date(2026, 5, 6, 15, 4, 0, 0, time.UTC)
+
+	first := []ProcessMetricRow{
+		{PID: 412, MinuteAt: minute, AvgRSSKiB: 1000, MaxRSSKiB: 1200, AvgCPUPct: 1.5, MaxCPUPct: 2.0, SampleCount: 30},
+	}
+	second := []ProcessMetricRow{
+		{PID: 412, MinuteAt: minute, AvgRSSKiB: 1500, MaxRSSKiB: 2200, AvgCPUPct: 2.5, MaxCPUPct: 4.0, SampleCount: 60},
+	}
+	if err := db.SaveProcessMetrics(ctx, first); err != nil {
+		t.Fatalf("first SaveProcessMetrics: %v", err)
+	}
+	if err := db.SaveProcessMetrics(ctx, second); err != nil {
+		t.Fatalf("second SaveProcessMetrics: %v", err)
+	}
+
+	got, err := db.GetProcessMetrics(ctx, 412, 10)
+	if err != nil {
+		t.Fatalf("GetProcessMetrics: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AvgRSSKiB != 1500 || got[0].MaxRSSKiB != 2200 || got[0].AvgCPUPct != 2.5 || got[0].MaxCPUPct != 4.0 || got[0].SampleCount != 60 {
+		t.Fatalf("upserted row = %+v, want second aggregate", got[0])
+	}
+}
+
 func TestSaveAndGetLoginItems(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

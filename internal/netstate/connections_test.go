@@ -3,6 +3,8 @@ package netstate
 import (
 	"errors"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 // lsof -i -P -n output fixture (header + representative rows).
@@ -129,5 +131,41 @@ func TestCollectConnectionsSuccess(t *testing.T) {
 	conns := CollectConnections(run)
 	if len(conns) != 3 {
 		t.Errorf("CollectConnections: got %d, want 3", len(conns))
+	}
+}
+
+func TestGroupConnectionsByApp(t *testing.T) {
+	conns := []Connection{
+		{PID: 412, Command: "Slack", Proto: "tcp", RemoteAddr: "52.1.2.3:443"},
+		{PID: 789, Command: "firefox", Proto: "udp", RemoteAddr: "8.8.8.8:53"},
+		{PID: 999, Command: "netbiosd", Proto: "udp", LocalAddr: "*:138"},
+	}
+	procs := []process.Info{
+		{PID: 412, AppPath: "/Applications/Slack.app"},
+		{PID: 789, AppPath: "/Applications/Firefox.app"},
+	}
+
+	grouped := GroupConnectionsByApp(conns, procs)
+	if len(grouped["/Applications/Slack.app"]) != 1 {
+		t.Fatalf("Slack group = %+v, want one connection", grouped["/Applications/Slack.app"])
+	}
+	if grouped["/Applications/Slack.app"][0].AppPath != "/Applications/Slack.app" {
+		t.Fatalf("Slack AppPath = %q", grouped["/Applications/Slack.app"][0].AppPath)
+	}
+	if len(grouped["/Applications/Firefox.app"]) != 1 {
+		t.Fatalf("Firefox group = %+v, want one connection", grouped["/Applications/Firefox.app"])
+	}
+	if len(grouped[""]) != 1 {
+		t.Fatalf("unattributed group = %+v, want one connection", grouped[""])
+	}
+	if grouped[""][0].AppPath != "" {
+		t.Fatalf("unattributed AppPath = %q, want empty", grouped[""][0].AppPath)
+	}
+}
+
+func TestGroupConnectionsByAppEmptyInputs(t *testing.T) {
+	grouped := GroupConnectionsByApp(nil, nil)
+	if len(grouped) != 0 {
+		t.Fatalf("GroupConnectionsByApp(nil, nil) = %+v, want empty map", grouped)
 	}
 }

@@ -21,7 +21,9 @@ type Info struct {
 	PPID            int       `json:"ppid"`
 	UID             int       `json:"uid"`
 	User            string    `json:"user,omitempty"`
-	Command         string    `json:"command"`           // short (comm) — just the exe name
+	Command         string    `json:"command"`            // short (comm) — just the exe name
+	BSDName         string    `json:"bsd_name,omitempty"` // p_comm from libproc when available
+	ExecutablePath  string    `json:"executable_path,omitempty"`
 	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
 	RSSKiB          int64     `json:"rss_kib"`
 	VSizeKiB        int64     `json:"vsize_kib"`
@@ -54,8 +56,21 @@ type CollectOptions struct {
 	// CmdRunner overrides exec.Command for testing.
 	CmdRunner func(name string, args ...string) ([]byte, error)
 
+	// DetailCollector overrides the platform process-detail collector for
+	// testing. On Darwin this is backed by libproc/proc_pidinfo.
+	DetailCollector func([]Info) map[int]Details
+
 	// ThreadCounter overrides the platform thread-count collector for testing.
+	// Deprecated: use DetailCollector for new tests.
 	ThreadCounter func([]Info) map[int]int
+}
+
+// Details contains direct per-process metadata collected without spawning
+// extra tools where the platform exposes it.
+type Details struct {
+	ThreadCount    int
+	BSDName        string
+	ExecutablePath string
 }
 
 // CollectAll returns all running processes. Any parse errors for individual
@@ -74,6 +89,7 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 		return nil
 	}
 	procs := parsePS(string(out))
+	applyProcessDetails(procs, opts.DetailCollector)
 	applyThreadCounts(procs, opts.ThreadCounter)
 	if len(opts.BundlePaths) > 0 {
 		attributeBundles(procs, opts.BundlePaths)
@@ -84,12 +100,34 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	return procs
 }
 
+func applyProcessDetails(procs []Info, collector func([]Info) map[int]Details) {
+	if len(procs) == 0 {
+		return
+	}
+	if collector == nil {
+		collector = collectProcessDetails
+	}
+	details := collector(procs)
+	for i := range procs {
+		d := details[procs[i].PID]
+		if d.ThreadCount > 0 {
+			procs[i].ThreadCount = d.ThreadCount
+		}
+		if d.BSDName != "" {
+			procs[i].BSDName = d.BSDName
+		}
+		if d.ExecutablePath != "" {
+			procs[i].ExecutablePath = d.ExecutablePath
+		}
+	}
+}
+
 func applyThreadCounts(procs []Info, counter func([]Info) map[int]int) {
 	if len(procs) == 0 {
 		return
 	}
 	if counter == nil {
-		counter = collectThreadCounts
+		return
 	}
 	counts := counter(procs)
 	for i := range procs {
@@ -145,7 +183,7 @@ func parseRow(line string) Info {
 	// fields[6] = user; fields[7:12] = lstart (5 tokens); fields[12:] = command
 	lstartStr := strings.Join(fields[7:12], " ")
 	var startTime time.Time
-	if t, err := time.Parse(lstartLayout, lstartStr); err == nil {
+	if t, err := time.ParseInLocation(lstartLayout, lstartStr, time.Local); err == nil {
 		startTime = t
 	}
 	full := strings.Join(fields[12:], " ")
@@ -167,7 +205,11 @@ func parseRow(line string) Info {
 // For absolute paths, it returns the last path component minus any flags.
 // "/Applications/Slack.app/Contents/MacOS/Slack --args" → "Slack"
 func shortName(cmd string) string {
-	exe := strings.Fields(cmd)[0] // strip flags
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return ""
+	}
+	exe := fields[0] // strip flags
 	if idx := strings.LastIndex(exe, "/"); idx >= 0 {
 		return exe[idx+1:]
 	}
@@ -175,18 +217,31 @@ func shortName(cmd string) string {
 }
 
 // attributeBundles sets AppPath for each process whose full command line
-// starts with one of the bundle paths. O(N*M) but both N and M are small
-// enough that a simple loop is fine.
+// or executable path starts with one of the bundle paths. O(N*M) but both N
+// and M are small enough that a simple loop is fine.
 func attributeBundles(procs []Info, bundles []string) {
 	for i := range procs {
-		cmd := procs[i].FullCommandLine
 		for _, b := range bundles {
-			if strings.HasPrefix(cmd, b) {
+			if processBelongsToBundle(procs[i], b) {
 				procs[i].AppPath = b
 				break
 			}
 		}
 	}
+}
+
+func processBelongsToBundle(p Info, bundle string) bool {
+	if pathInsideBundle(p.ExecutablePath, bundle) {
+		return true
+	}
+	return strings.HasPrefix(p.FullCommandLine, bundle)
+}
+
+func pathInsideBundle(path, bundle string) bool {
+	if path == "" || bundle == "" {
+		return false
+	}
+	return path == bundle || strings.HasPrefix(path, strings.TrimRight(bundle, "/")+"/")
 }
 
 // GroupByApp returns processes grouped by AppPath. Processes with no
