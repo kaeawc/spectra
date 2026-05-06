@@ -69,6 +69,8 @@ The helper's RPC surface is intentionally narrow. It listens on
 | `helper.firewall.rules()` | Current pf firewall rules |
 | `helper.fs_usage.start(pid, mode, duration)` | Start a bounded root `fs_usage` trace for one PID |
 | `helper.fs_usage.stop(handle)` | Stop a trace and return captured output |
+| `helper.net_capture.start(interface, duration, filters)` | Start a bounded root `tcpdump` capture with validated filters |
+| `helper.net_capture.stop(handle)` | Stop a capture and return capture path + size metadata |
 | `helper.process.tree()` | Process tree including processes the user can't see (e.g. system daemons) |
 | `helper.health()` | Liveness + version |
 
@@ -77,6 +79,15 @@ The helper's RPC surface is intentionally narrow. It listens on
 `filesys`, caps trace duration at 60 seconds, and never accepts an
 arbitrary command string or file path. Handles are removed when stopped
 or when the bounded trace reaches its duration limit.
+
+`helper.net_capture.start` requires an interface name and accepts only
+structured duration, snap length, host, port, and TCP/UDP protocol
+filters. The helper generates output paths under a per-caller-UID
+directory in `/var/tmp/spectra-netcap`, chowns that directory and the
+completed pcap to the caller, and never accepts a caller-supplied output
+path. This keeps the method from becoming a root arbitrary-file writer.
+Captures are capped at 60 seconds. `helper.net_capture.stop` returns the
+generated path and file size, not packet contents.
 
 Notably absent:
 
