@@ -21,6 +21,9 @@ type FlowPacket struct {
 	DstAddr        netip.Addr
 	SrcPort        uint16
 	DstPort        uint16
+	TCPSeq         uint32
+	TCPAck         uint32
+	TCPFlags       uint8
 	Payload        []byte
 }
 
@@ -113,6 +116,9 @@ func decodeTCPFlow(out FlowPacket, data []byte) (FlowPacket, error) {
 	out.TransportProto = "tcp"
 	out.SrcPort = binary.BigEndian.Uint16(data[:2])
 	out.DstPort = binary.BigEndian.Uint16(data[2:4])
+	out.TCPSeq = binary.BigEndian.Uint32(data[4:8])
+	out.TCPAck = binary.BigEndian.Uint32(data[8:12])
+	out.TCPFlags = data[13]
 	out.Payload = data[headerLen:]
 	return out, nil
 }
