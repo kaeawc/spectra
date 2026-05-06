@@ -171,7 +171,7 @@ func readUint8(data []byte, pos *int) (uint8, bool) {
 		return 0, false
 	}
 	v := data[*pos]
-	*pos += 1
+	(*pos)++
 	return v, true
 }
 

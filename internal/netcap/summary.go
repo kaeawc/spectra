@@ -2,6 +2,7 @@ package netcap
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/netip"
 	"strings"
@@ -69,7 +70,7 @@ func SummarizePCAP(r io.Reader, eventLimit int) (PCAPSummary, error) {
 	for {
 		pkt, err := reader.Next()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return summary, nil
 			}
 			return PCAPSummary{}, err
@@ -192,11 +193,11 @@ func (s *tcpSummaryStreams) add(flow FlowPacket) (*tcpSummaryStream, bool) {
 		return prependTCPPayload(stream, dataSeq, payload)
 	}
 	if dataSeq < stream.nextSeq {
-		overlap := int(stream.nextSeq - dataSeq)
-		if overlap >= len(payload) {
+		overlap := stream.nextSeq - dataSeq
+		if overlap >= uint32(len(payload)) { // #nosec G115 -- len(payload) is bounded by maxTCPReassemblyBytes (256KiB).
 			return stream, true
 		}
-		payload = payload[overlap:]
+		payload = payload[int(overlap):]
 	} else if dataSeq > stream.nextSeq {
 		return stream, false
 	}
@@ -208,21 +209,21 @@ func (s *tcpSummaryStreams) add(flow FlowPacket) (*tcpSummaryStream, bool) {
 		payload = payload[:remaining]
 	}
 	stream.data = append(stream.data, payload...)
-	stream.nextSeq += uint32(len(payload))
+	stream.nextSeq += uint32(len(payload)) // #nosec G115 -- len(payload) is bounded by maxTCPReassemblyBytes (256KiB).
 	return stream, true
 }
 
 func prependTCPPayload(stream *tcpSummaryStream, dataSeq uint32, payload []byte) (*tcpSummaryStream, bool) {
-	endSeq := dataSeq + uint32(len(payload))
+	endSeq := dataSeq + uint32(len(payload)) // #nosec G115 -- len(payload) is bounded by maxTCPReassemblyBytes (256KiB).
 	if endSeq < stream.startSeq {
 		return stream, false
 	}
 	if endSeq > stream.startSeq {
-		overlap := int(endSeq - stream.startSeq)
-		if overlap >= len(payload) {
+		overlap := endSeq - stream.startSeq
+		if overlap >= uint32(len(payload)) { // #nosec G115 -- len(payload) is bounded by maxTCPReassemblyBytes (256KiB).
 			return stream, true
 		}
-		payload = payload[:len(payload)-overlap]
+		payload = payload[:len(payload)-int(overlap)]
 	}
 	if len(stream.data) >= maxTCPReassemblyBytes {
 		return stream, true
@@ -230,7 +231,7 @@ func prependTCPPayload(stream *tcpSummaryStream, dataSeq uint32, payload []byte)
 	remaining := maxTCPReassemblyBytes - len(stream.data)
 	if len(payload) > remaining {
 		payload = payload[len(payload)-remaining:]
-		dataSeq = stream.startSeq - uint32(len(payload))
+		dataSeq = stream.startSeq - uint32(len(payload)) // #nosec G115 -- len(payload) is bounded by maxTCPReassemblyBytes (256KiB).
 	}
 	next := make([]byte, 0, len(payload)+len(stream.data))
 	next = append(next, payload...)

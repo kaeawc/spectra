@@ -870,10 +870,19 @@ func TestDaemonNetworkStateReturnsObject(t *testing.T) {
 	}
 }
 
+func TestDaemonNetworkFirewallRequiresHelper(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 19, "network.firewall", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when helper not running")
+	}
+}
+
 func TestDaemonProcessListReturnsSlice(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()
-	resp := rpcCall(t, enc, dec, 19, "process.list", `{}`)
+	resp := rpcCall(t, enc, dec, 20, "process.list", `{}`)
 	if resp.Error != nil {
 		t.Fatalf("process.list: %v", resp.Error)
 	}

@@ -430,6 +430,7 @@ or MagicDNS names for daemons started with `--tsnet`.
 | `spectra connect <target> jvm-threads <pid>` | Call `jvm.thread_dump` |
 | `spectra connect <target> jvm-heap <pid>` | Call `jvm.heap_histogram` |
 | `spectra connect <target> jvm-heap-dump <pid> [dest]` | Call `jvm.heap_dump` |
+| `spectra connect <target> diff <id-a> <id-b>` | Call `snapshot.diff` |
 | `spectra connect <target> metrics` | Call `process.live` |
 | `spectra connect <target> metrics <pid> [limit]` | Call `process.history` |
 | `spectra connect <target> processes` | Call `process.list` |
@@ -438,6 +439,7 @@ or MagicDNS names for daemons started with `--tsnet`.
 | `spectra connect <target> sample <pid> [duration] [interval]` | Call `process.sample` |
 | `spectra connect <target> network` | Call `network.state` |
 | `spectra connect <target> connections` | Call `network.connections` |
+| `spectra connect <target> network firewall` | Call `network.firewall` |
 | `spectra connect <target> network-by-app [App.app ...]` | Call `network.byApp` |
 | `spectra connect <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp\|udp] [host=HOST] [port=N]` | Call `helper.net_capture.start` |
 | `spectra connect <target> network-capture-stop <handle>` | Call `helper.net_capture.stop` |
@@ -499,12 +501,14 @@ spectra connect work-mac jvm-heap-dump 4012
 spectra connect work-mac jvm-heap-dump 4012 /tmp/heap.hprof
 spectra connect work-mac processes
 spectra connect work-mac network
+spectra connect work-mac network firewall
 spectra connect work-mac storage /Applications/Slack.app
 spectra connect work-mac issues check
 spectra connect work-mac issues check snap-1
 spectra connect work-mac toolchains
 spectra connect work-mac snapshot
 spectra connect work-mac snapshot diff snap-before snap-after
+spectra connect work-mac diff snap-a snap-b
 spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":true}'
 ```
 
