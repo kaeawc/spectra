@@ -89,6 +89,10 @@ func printConnectUsage(w io.Writer) {
 }
 
 func parseConnectTarget(raw string) (connectTarget, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return connectTarget{}, fmt.Errorf("empty connect target")
+	}
 	switch {
 	case raw == "local":
 		sock, err := serve.DefaultSockPath()
