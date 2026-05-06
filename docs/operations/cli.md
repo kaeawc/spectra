@@ -478,6 +478,7 @@ of machines Spectra has seen. `spectra fan` uses this list when
 |---|---:|---|
 | `--json` | false | Emit JSON instead of a table |
 | `--probe` | false | Probe each host with `health` RPC and show reachability |
+| `--discover` | false | Merge tailscale peers from `tailscale status --json` into host list |
 
 ### Examples
 
@@ -486,7 +487,8 @@ spectra hosts
 spectra hosts --json
 spectra hosts --probe
 spectra hosts --probe --json
-```
+spectra hosts --discover
+``` 
 
 ## `spectra fan`
 

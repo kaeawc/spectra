@@ -93,6 +93,7 @@ fully managed tsnet fan-out:
 
 ```bash
 spectra hosts
+spectra hosts --discover
 spectra fan --hosts work-mac,alice-laptop status
 spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
 spectra fan inspect /Applications/Slack.app
