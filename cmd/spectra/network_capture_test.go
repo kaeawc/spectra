@@ -75,6 +75,58 @@ func TestRunNetworkCaptureStopCallsHelper(t *testing.T) {
 	}
 }
 
+func TestRunNetworkCaptureStopSummarizesOutputPath(t *testing.T) {
+	restoreStop := stubNetworkCaptureStop(t, func(handle string) (map[string]any, error) {
+		if handle != "netcap-1" {
+			t.Fatalf("handle = %q, want netcap-1", handle)
+		}
+		return map[string]any{"handle": handle, "output_path": "/tmp/capture.pcap", "size_bytes": 128}, nil
+	})
+	defer restoreStop()
+	restoreSummary := stubNetworkCaptureSummarize(t, func(path string, limit int) (netcap.PCAPSummary, error) {
+		if path != "/tmp/capture.pcap" || limit != 3 {
+			t.Fatalf("summary params = %q %d", path, limit)
+		}
+		return netcap.PCAPSummary{Packets: 2, DecodedFlows: 1}, nil
+	})
+	defer restoreSummary()
+
+	out := captureStdout(t, func() {
+		code := runNetwork([]string{"capture", "stop", "--summarize", "--limit", "3", "netcap-1"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{"capture stopped", "output_path: /tmp/capture.pcap", "capture summary", "packets: 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestRunNetworkCaptureStopSummarizesJSON(t *testing.T) {
+	restoreStop := stubNetworkCaptureStop(t, func(string) (map[string]any, error) {
+		return map[string]any{"handle": "netcap-1", "output_path": "/tmp/capture.pcap"}, nil
+	})
+	defer restoreStop()
+	restoreSummary := stubNetworkCaptureSummarize(t, func(string, int) (netcap.PCAPSummary, error) {
+		return netcap.PCAPSummary{Packets: 2}, nil
+	})
+	defer restoreSummary()
+
+	out := captureStdout(t, func() {
+		code := runNetwork([]string{"capture", "stop", "--summarize", "--json", "netcap-1"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{`"capture":`, `"summary":`, `"packets": 2`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want %q", out, want)
+		}
+	}
+}
+
 func TestRunNetworkCaptureSummarize(t *testing.T) {
 	restore := stubNetworkCaptureSummarize(t, func(path string, limit int) (netcap.PCAPSummary, error) {
 		if path != "/tmp/capture.pcap" || limit != 2 {

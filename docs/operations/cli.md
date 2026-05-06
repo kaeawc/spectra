@@ -314,7 +314,7 @@ spectra network
 spectra network --json
 spectra network connections --proto tcp --state established
 spectra network capture start --interface en0 --duration 30s --proto tcp --host api.example.com --port 443
-spectra network capture stop netcap-1
+spectra network capture stop --summarize netcap-1
 spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
 spectra network firewall
 spectra network firewall --json
