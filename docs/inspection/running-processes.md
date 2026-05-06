@@ -22,6 +22,10 @@ For each match Spectra captures:
 - **Command** — bundle-relative path (so `Contents/MacOS/Slack Helper`
   rather than the full `/Applications/Slack.app/...`)
 
+For app-level inspection, Spectra also computes `AppStartedAt` from the
+oldest matching process and `AppUptimeSeconds` from that timestamp to the
+inspection time.
+
 With `spectra process --deep`, Spectra also runs one batched
 `lsof -p <pid1,pid2,...>` call to collect:
 
@@ -33,7 +37,7 @@ With `spectra process --deep`, Spectra also runs one batched
 
 ```
 Claude
-  running: 35 processes, 2.4 GB RSS
+  running: 35 processes, 2.4 GB RSS, uptime 3h42m
 ```
 
 The 35 procs are Chromium's main + helper architecture: one main
@@ -65,7 +69,9 @@ The `RunningProcesses` field on the JSON result holds the full list:
   {"PID": 412, "RSSKiB": 184320, "Command": "Contents/MacOS/Claude"},
   {"PID": 415, "RSSKiB": 92160,  "Command": "Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"},
   ...
-]
+],
+"AppStartedAt": "2026-05-06T08:18:00Z",
+"AppUptimeSeconds": 13320
 ```
 
 ## Why this matters
@@ -113,4 +119,3 @@ Full process inventory in `internal/process/`:
 - Switch to `libproc` via cgo (or `process.NewProcess` from
   `gopsutil`) to get richer per-process data without forking the
   initial `ps` inventory.
-- Compute "app uptime" from the oldest matching process's start time.

@@ -81,6 +81,8 @@ type Result struct {
 	// RunningProcesses lists currently-running processes whose executable
 	// path is inside this app bundle.
 	RunningProcesses []ProcessInfo
+	AppStartedAt     *time.Time `json:",omitempty"` // oldest matching process start time
+	AppUptimeSeconds int64      `json:",omitempty"` // seconds since AppStartedAt at inspection time
 
 	// GrantedPermissions are the privacy permissions actually granted to
 	// this bundle by the user (TCC.db). Distinct from PrivacyDescriptions
@@ -165,6 +167,7 @@ type NativeModule struct {
 // Options controls optional, more expensive sub-detections.
 type Options struct {
 	ScanNetwork bool // scan binary + app.asar for embedded URL hosts
+	Now         func() time.Time
 }
 
 // Detect inspects the bundle at appPath and returns a Result.
@@ -222,12 +225,20 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.Helpers = scanHelpers(appPath)
 	r.LoginItems = scanLoginItems(appPath, r.BundleID)
 	r.RunningProcesses = scanRunningProcesses(appPath)
+	r.AppStartedAt, r.AppUptimeSeconds = appUptime(r.RunningProcesses, detectNow(opts))
 	r.GrantedPermissions = scanGrantedPermissions(r.BundleID)
 	r.GatekeeperStatus = readGatekeeperStatus(appPath)
 	if opts.ScanNetwork {
 		r.NetworkEndpoints = scanNetworkEndpoints(appPath, exe)
 	}
 	return r, nil
+}
+
+func detectNow(opts Options) time.Time {
+	if opts.Now != nil {
+		return opts.Now()
+	}
+	return time.Now()
 }
 
 // populateMetadata fills the metadata fields on Result. Each piece is
@@ -1477,7 +1488,7 @@ func scanRunningProcesses(appPath string) []ProcessInfo {
 		}
 
 		lstartStr := strings.Join(fields[2:7], " ")
-		startTime, _ := time.Parse(lstartLayout, lstartStr)
+		startTime := parseLstart(lstartStr)
 
 		procs = append(procs, ProcessInfo{
 			PID:       pid,
@@ -1487,6 +1498,32 @@ func scanRunningProcesses(appPath string) []ProcessInfo {
 		})
 	}
 	return procs
+}
+
+func parseLstart(s string) time.Time {
+	t, _ := time.ParseInLocation(lstartLayout, s, time.Local)
+	return t
+}
+
+func appUptime(procs []ProcessInfo, now time.Time) (*time.Time, int64) {
+	var oldest time.Time
+	for _, p := range procs {
+		if p.StartTime.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || p.StartTime.Before(oldest) {
+			oldest = p.StartTime
+		}
+	}
+	if oldest.IsZero() {
+		return nil, 0
+	}
+	seconds := int64(now.Sub(oldest).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	started := oldest
+	return &started, seconds
 }
 
 // readPrivacyDescriptions returns the NS*UsageDescription keys declared

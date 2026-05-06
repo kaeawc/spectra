@@ -428,6 +428,47 @@ func TestNativeModuleRiskHintsFromPackageName(t *testing.T) {
 	}
 }
 
+func TestAppUptimeUsesOldestProcessStart(t *testing.T) {
+	newer := time.Date(2026, 5, 6, 11, 30, 0, 0, time.UTC)
+	older := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	started, seconds := appUptime([]ProcessInfo{
+		{PID: 10, StartTime: newer},
+		{PID: 11, StartTime: older},
+	}, now)
+	if started == nil || !started.Equal(older) {
+		t.Fatalf("started = %v, want %v", started, older)
+	}
+	if seconds != 7200 {
+		t.Fatalf("seconds = %d, want 7200", seconds)
+	}
+}
+
+func TestAppUptimeIgnoresMissingStartTimes(t *testing.T) {
+	started, seconds := appUptime([]ProcessInfo{{PID: 10}}, time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC))
+	if started != nil {
+		t.Fatalf("started = %v, want nil", started)
+	}
+	if seconds != 0 {
+		t.Fatalf("seconds = %d, want 0", seconds)
+	}
+}
+
+func TestParseLstartUsesLocalTimeZone(t *testing.T) {
+	oldLocal := time.Local
+	loc := time.FixedZone("Spectra/Test", -5*60*60)
+	time.Local = loc
+	t.Cleanup(func() { time.Local = oldLocal })
+
+	got := parseLstart("Wed May  6 12:34:56 2026")
+	if got.Location() != loc {
+		t.Fatalf("location = %v, want %v", got.Location(), loc)
+	}
+	if got.Hour() != 12 || got.Minute() != 34 || got.Second() != 56 {
+		t.Fatalf("parsed time = %v", got)
+	}
+}
+
 func hasHint(hints []string, want string) bool {
 	for _, hint := range hints {
 		if hint == want {

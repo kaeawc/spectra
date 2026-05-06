@@ -299,16 +299,12 @@ func loginItemLabel(li detect.LoginItem) string {
 func printRuntimeMeta(r detect.Result) {
 	if len(r.RunningProcesses) > 0 {
 		var totalRSS int
-		var oldest time.Time
 		for _, p := range r.RunningProcesses {
 			totalRSS += p.RSSKiB
-			if !p.StartTime.IsZero() && (oldest.IsZero() || p.StartTime.Before(oldest)) {
-				oldest = p.StartTime
-			}
 		}
 		uptimeStr := ""
-		if !oldest.IsZero() {
-			d := time.Since(oldest).Round(time.Second)
+		if r.AppStartedAt != nil {
+			d := time.Duration(r.AppUptimeSeconds) * time.Second
 			uptimeStr = fmt.Sprintf(", uptime %s", formatDuration(d))
 		}
 		fmt.Printf("    running: %d processes, %s RSS%s\n",

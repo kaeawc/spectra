@@ -51,6 +51,8 @@ Source of truth: `internal/detect/detect.go`.
 | `Helpers` | *Helpers | Helper apps, XPC services, plugins |
 | `LoginItems` | []LoginItem | Attributed launchd plists |
 | `RunningProcesses` | []ProcessInfo | Currently-running processes for this bundle |
+| `AppStartedAt` | *time.Time | Oldest matching process start time |
+| `AppUptimeSeconds` | int64 | Seconds between inspection time and `AppStartedAt` |
 | `Storage` | *StorageFootprint | Per-`~/Library`-location size sweep |
 | `Dependencies` | *Dependencies | Third-party frameworks, npm packages, jar count |
 | `NetworkEndpoints` | []string | URL hosts (only when `--network` set) |
