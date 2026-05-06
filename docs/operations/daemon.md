@@ -21,10 +21,13 @@ spectra serve --sock /tmp/spectra.sock
 spectra serve --tcp 127.0.0.1:7878
 spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
+spectra serve --daemon       # start detached and return
 ```
 
-The current CLI runs in the foreground until interrupted. A launchd-managed
-agent or detached `--daemon` mode is still future packaging work.
+By default the CLI runs in the foreground until interrupted. `--daemon`
+starts a detached `spectra serve` child with the same serve flags and
+returns immediately. Launchd-managed agent packaging remains future
+distribution work.
 
 By default, structured daemon lifecycle logs are appended to
 `~/Library/Logs/Spectra/daemon.jsonl` with `0600` permissions. Foreground
@@ -160,6 +163,6 @@ Implemented:
 Future:
 
 1. CLI-wide RPC dispatch instead of in-process command execution.
-2. launchd or detached daemon lifecycle.
+2. launchd-managed daemon lifecycle.
 3. tsnet listener and Tailscale identity integration.
 4. TUI/GUI clients.
