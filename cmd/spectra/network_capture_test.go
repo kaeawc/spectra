@@ -157,7 +157,7 @@ func TestRunNetworkCaptureSummarize(t *testing.T) {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
 	})
-	for _, want := range []string{"capture summary", "packets: 3", "dns_query: example.com A", "tls_client_hello: example.com", "http_request: GET /chat"} {
+	for _, want := range []string{"capture summary", "packets: 3", "websocket_upgrades: 1", "dns_query: example.com A", "tls_client_hello: example.com", "websocket_upgrade: GET /chat"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout = %q, want %q", out, want)
 		}
