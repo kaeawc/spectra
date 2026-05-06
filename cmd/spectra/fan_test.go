@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +53,10 @@ func TestRunFanWithTypedShortcut(t *testing.T) {
 			result, _ := json.Marshal(map[string]string{"address": target.Address})
 			return result, nil
 		},
+		func(context.Context) ([]fanTarget, error) {
+			t.Fatal("discover should not be used when --hosts provided")
+			return nil, nil
+		},
 	)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
@@ -88,6 +93,10 @@ func TestRunFanWithPartialFailure(t *testing.T) {
 			}
 			return json.RawMessage(`{"ok":true}`), nil
 		},
+		func(context.Context) ([]fanTarget, error) {
+			t.Fatal("discover should not be used when --hosts provided")
+			return nil, nil
+		},
 	)
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
@@ -119,11 +128,75 @@ func TestRunFanWithBadShortcut(t *testing.T) {
 			t.Fatal("caller should not run")
 			return nil, nil
 		},
+		func(context.Context) ([]fanTarget, error) {
+			t.Fatal("discover should not be used when --hosts provided")
+			return nil, nil
+		},
 	)
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), "requires <pid>") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunFanWithDiscoveredHosts(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runFanWith(
+		[]string{"host"},
+		&stdout,
+		&stderr,
+		func(target connectTarget, _ time.Duration, _ string, _ json.RawMessage) (json.RawMessage, error) {
+			return json.Marshal(map[string]string{"address": target.Address})
+		},
+		func(_ context.Context) ([]fanTarget, error) {
+			return []fanTarget{
+				{Name: "work-mac", Target: connectTarget{Network: "tcp", Address: "work-mac:7878"}},
+				{Name: "alice-laptop", Target: connectTarget{Network: "tcp", Address: "alice-laptop:7878"}},
+			}, nil
+		},
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+
+	var out fanOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(out.Targets))
+	}
+	targetNames := map[string]bool{}
+	for _, result := range out.Targets {
+		targetNames[result.Target] = result.OK
+	}
+	if !targetNames["work-mac"] || !targetNames["alice-laptop"] {
+		t.Fatalf("targets = %+v", targetNames)
+	}
+}
+
+func TestRunFanWithDiscoveredHostsError(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runFanWith(
+		[]string{"host"},
+		&stdout,
+		&stderr,
+		func(connectTarget, time.Duration, string, json.RawMessage) (json.RawMessage, error) {
+			t.Fatal("caller should not run")
+			return nil, nil
+		},
+		func(context.Context) ([]fanTarget, error) {
+			return nil, nil
+		},
+	)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "requires --hosts") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }

@@ -218,6 +218,54 @@ spectra baseline list
 spectra baseline drop snap-20260504T095749Z-4829
 ```
 
+## `spectra rules`
+
+Evaluates the recommendations catalog against a live snapshot or a stored
+snapshot. `./spectra.yml` is loaded automatically when present; use
+`--rules-config` to point at a different override file.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--json` | false | Emit JSON findings |
+| `--snapshot` | empty | Evaluate a stored snapshot by ID |
+| `--rules-config` | `./spectra.yml` if present | Rule override file |
+
+Supported `spectra.yml` rule overrides:
+
+```yaml
+rules:
+  disabled:
+    - app-unsigned
+  severity:
+    jvm-eol-version: high
+```
+
+### Examples
+
+```bash
+spectra rules
+spectra rules --json
+spectra rules --snapshot snap-20260504T095749Z-4829
+spectra rules --rules-config team-spectra.yml
+```
+
+## `spectra issues`
+
+Persists recommendation findings as issues and lets users manage their
+lifecycle. `spectra issues check` accepts the same `--snapshot` and
+`--rules-config` flags as `spectra rules`.
+
+### Examples
+
+```bash
+spectra issues check
+spectra issues check --rules-config team-spectra.yml
+spectra issues list --status open
+spectra issues acknowledge issue-123
+spectra issues dismiss issue-123
+spectra issues update --status fixed issue-123
+```
+
 ## `spectra jvm`
 
 Lists or inspects running JVM processes and exposes JDK-tool diagnostics.
@@ -383,7 +431,8 @@ spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":tru
 
 Lists hosts already known to the local SQLite store from persisted
 snapshots. This is not live daemon discovery yet; it is the local record
-of machines Spectra has seen.
+of machines Spectra has seen. `spectra fan` uses this list when
+`--hosts` is omitted.
 
 | Flag | Default | Meaning |
 |---|---:|---|
@@ -399,12 +448,12 @@ spectra hosts --json
 ## `spectra fan`
 
 Runs one `spectra connect` call against multiple daemon targets in
-parallel and prints a JSON envelope with one result per target. This is
-explicit-host fan-out; automatic host discovery is still planned.
+parallel and prints a JSON envelope with one result per target. `--hosts`
+is optional; when omitted, fan-out uses hosts from the local store.
 
 | Flag | Default | Meaning |
 |---|---:|---|
-| `--hosts` | required | Comma-separated daemon targets (`local`, `host`, `host:port`, `unix:/path`) |
+| `--hosts` | optional | Comma-separated daemon targets (`local`, `host`, `host:port`, `unix:/path`). Omit to use hosts from local `spectra hosts` data. |
 | `--timeout` | `3s` | Dial/read timeout per target |
 
 The command accepts the same typed shortcuts and raw `call` form as
@@ -419,6 +468,7 @@ spectra fan --hosts work-mac,alice-laptop jvm
 spectra fan --hosts work-mac,alice-laptop jdk
 spectra fan --hosts work-mac,alice-laptop snapshot
 spectra fan --hosts work-mac,alice-laptop call network.connections
+spectra fan inspect /Applications/Slack.app
 ```
 
 ## `spectra version`
