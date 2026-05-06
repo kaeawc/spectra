@@ -128,8 +128,6 @@ Tailscale ACLs, or firewall rules to limit access.
 The planned tsnet mode will make Tailscale identity the default
 authorization layer. The Tailscale ACL example for a personal tailnet:
 
-The Tailscale ACL example for a personal tailnet:
-
 ```hujson
 {
   "acls": [
