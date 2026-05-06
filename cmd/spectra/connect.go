@@ -76,6 +76,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jfr-start <pid> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
@@ -146,6 +147,12 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectInspect(args)
 	case "jvm":
 		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
+	case "jvm-jfr-start":
+		return parseConnectJFRStart(args)
+	case "jvm-jfr-stop":
+		return parseConnectJFRStop(args)
+	case "jvm-jfr-summary":
+		return parseConnectJFRSummary(args)
 	case "metrics":
 		return parseConnectMetrics(args)
 	case "sample":
@@ -169,6 +176,43 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectSnapshot(args)
 	}
 	return "", nil, false, nil
+}
+
+func parseConnectJFRStart(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return "", nil, true, fmt.Errorf("connect jvm-jfr-start requires <pid> [name]")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	params := map[string]any{"pid": pid}
+	if len(args) == 3 {
+		params["name"] = args[2]
+	}
+	return "jvm.jfr.start", connectParams(params), true, nil
+}
+
+func parseConnectJFRStop(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return "", nil, true, fmt.Errorf("connect jvm-jfr-stop requires <pid> [dest]")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	params := map[string]any{"pid": pid}
+	if len(args) == 3 {
+		params["dest"] = args[2]
+	}
+	return "jvm.jfr.stop", connectParams(params), true, nil
+}
+
+func parseConnectJFRSummary(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect jvm-jfr-summary requires <path>")
+	}
+	return "jvm.jfr.summary", connectParams(map[string]string{"path": args[1]}), true, nil
 }
 
 func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {

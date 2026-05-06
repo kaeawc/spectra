@@ -408,6 +408,9 @@ automatic tsnet registration and host discovery remain future work.
 | `spectra connect <target> issues update <issue-id> <status>` | Call `issues.update` |
 | `spectra connect <target> issues acknowledge <issue-id>` | Call `issues.acknowledge` |
 | `spectra connect <target> issues dismiss <issue-id>` | Call `issues.dismiss` |
+| `spectra connect <target> jvm-jfr-start <pid> [name]` | Call `jvm.jfr.start` |
+| `spectra connect <target> jvm-jfr-stop <pid> [dest]` | Call `jvm.jfr.stop` |
+| `spectra connect <target> jvm-jfr-summary <path>` | Call `jvm.jfr.summary` |
 | `spectra connect <target> snapshot` | Call `snapshot.create` |
 | `spectra connect <target> snapshot list` | Call `snapshot.list` |
 | `spectra connect <target> snapshot get <id>` | Call `snapshot.get` |
@@ -443,6 +446,10 @@ spectra connect work-mac issues local-machine open
 spectra connect work-mac issues update issue-123 fixed
 spectra connect work-mac issues acknowledge issue-123
 spectra connect work-mac issues dismiss issue-456
+spectra connect work-mac jvm-jfr-start 4012
+spectra connect work-mac jvm-jfr-start 4012 spectra
+spectra connect work-mac jvm-jfr-stop 4012 /tmp/recording.jfr
+spectra connect work-mac jvm-jfr-summary /tmp/recording.jfr
 spectra connect work-mac processes
 spectra connect work-mac network
 spectra connect work-mac storage /Applications/Slack.app
