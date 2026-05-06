@@ -401,6 +401,31 @@ func TestNativeModuleCapabilityHintsFromPackageName(t *testing.T) {
 	if !hasHint(m.Hints, "uses macOS Keychain") {
 		t.Fatalf("hints = %v, want macOS Keychain hint", m.Hints)
 	}
+	if !hasHint(m.RiskHints, "credential store access") {
+		t.Fatalf("risk hints = %v, want credential store access", m.RiskHints)
+	}
+}
+
+func TestNativeModuleRiskHintsFromPackageName(t *testing.T) {
+	app := makeBundle(t, "FakeInputHookNativeModule")
+	root := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/uiohook-napi")
+	mod := filepath.Join(root, "prebuilds/darwin-arm64/uiohook.node")
+	if err := os.MkdirAll(filepath.Dir(mod), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mod, []byte("native addon"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"uiohook-napi","version":"1.5.4"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := classifyNativeModule(mod, "Contents/Resources/app.asar.unpacked/node_modules/uiohook-napi/prebuilds/darwin-arm64/uiohook.node")
+	if !hasHint(m.Hints, "can observe global input events") {
+		t.Fatalf("hints = %v, want input capability hint", m.Hints)
+	}
+	if !hasHint(m.RiskHints, "global input monitoring") {
+		t.Fatalf("risk hints = %v, want global input monitoring", m.RiskHints)
+	}
 }
 
 func hasHint(hints []string, want string) bool {
