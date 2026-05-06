@@ -19,27 +19,8 @@ import (
 
 func runJVM(args []string) int {
 	// Dispatch subcommands before flag parsing so "--help" on a subcommand works.
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		switch args[0] {
-		case "thread-dump":
-			return runJVMThreadDump(args[1:])
-		case "heap-histogram":
-			return runJVMHeapHistogram(args[1:])
-		case "heap-dump":
-			return runJVMHeapDump(args[1:])
-		case "jfr":
-			return runJVMJFR(args[1:])
-		case "gc-stats":
-			return runJVMGCStats(args[1:])
-		case "vm-memory":
-			return runJVMVMMemory(args[1:])
-		case "jmx":
-			return runJVMJMX(args[1:])
-		case "flamegraph":
-			return runJVMFlamegraph(args[1:])
-		case "explain":
-			return runJVMExplain(args[1:])
-		}
+	if handler, ok := resolveJVMSubcommand(args); ok {
+		return handler(args[1:])
 	}
 
 	fs := flag.NewFlagSet("spectra jvm", flag.ContinueOnError)
@@ -87,6 +68,25 @@ func runJVM(args []string) int {
 		printJVMDetail(infos[0])
 	}
 	return 0
+}
+
+func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return nil, false
+	}
+	handlers := map[string]func([]string) int{
+		"thread-dump":    runJVMThreadDump,
+		"heap-histogram": runJVMHeapHistogram,
+		"heap-dump":      runJVMHeapDump,
+		"jfr":            runJVMJFR,
+		"gc-stats":       runJVMGCStats,
+		"vm-memory":      runJVMVMMemory,
+		"jmx":            runJVMJMX,
+		"flamegraph":     runJVMFlamegraph,
+		"explain":        runJVMExplain,
+	}
+	handler, ok := handlers[args[0]]
+	return handler, ok
 }
 
 func jvmOptions(ctx context.Context) jvm.CollectOptions {

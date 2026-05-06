@@ -118,7 +118,7 @@ func parseFanTargets(raw string) ([]fanTarget, error) {
 }
 
 var fanProbeTarget fanTargetProber = probeFanTarget
-var fanDiscoverPeers func() ([]string, error) = discoverTailscalePeers
+var fanDiscoverPeers = discoverTailscalePeers
 
 func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover bool, discoverDaemons bool) ([]fanTarget, error) {
 	dbPath, err := store.DefaultPath()
@@ -135,60 +135,20 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover boo
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(rows))
 	targets := make([]fanTarget, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		name := strings.TrimSpace(row.Hostname)
-		if name == "" {
-			continue
-		}
-		target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
-		if err != nil {
-			continue
-		}
-		key := target.Address
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		targets = append(targets, fanTarget{Name: name, Target: target})
+		appendFanTarget(&targets, &seen, row.Hostname)
 	}
 	if discover || discoverDaemons {
 		discovered, err := fanDiscoverPeers()
 		if err != nil && len(targets) == 0 {
 			return nil, fmt.Errorf("discover remote hosts: %w", err)
 		}
-		for _, host := range discovered {
-			name := strings.TrimSpace(host)
-			if name == "" {
-				continue
-			}
-			target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
-			if err != nil {
-				continue
-			}
-			key := target.Address
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			if discoverDaemons {
-				if err := fanProbeTarget(ctx, target, 3*time.Second); err != nil {
-					continue
-				}
-			}
-			seen[key] = struct{}{}
-			targets = append(targets, fanTarget{Name: name, Target: target})
-		}
+		appendDiscoveredFanTargets(ctx, discoverDaemons, discovered, &targets, seen)
 	}
 	if probeUnreachable {
-		filtered := make([]fanTarget, 0, len(targets))
-		for _, target := range targets {
-			if err := fanProbeTarget(ctx, target.Target, 3*time.Second); err != nil {
-				continue
-			}
-			filtered = append(filtered, target)
-		}
-		targets = filtered
+		targets = filterReachableFanTargets(ctx, targets)
 	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("fan requires --hosts target[,target...]")
@@ -197,6 +157,57 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover boo
 		return targets[i].Name < targets[j].Name
 	})
 	return targets, nil
+}
+
+func appendFanTarget(targets *[]fanTarget, seen *map[string]struct{}, rawName string) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return
+	}
+	target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
+	if err != nil {
+		return
+	}
+	key := target.Address
+	if _, ok := (*seen)[key]; ok {
+		return
+	}
+	(*seen)[key] = struct{}{}
+	*targets = append(*targets, fanTarget{Name: name, Target: target})
+}
+
+func appendDiscoveredFanTargets(ctx context.Context, discoverDaemons bool, rawHosts []string, targets *[]fanTarget, seen map[string]struct{}) {
+	for _, host := range rawHosts {
+		name := strings.TrimSpace(host)
+		if name == "" {
+			continue
+		}
+		target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[target.Address]; ok {
+			continue
+		}
+		if discoverDaemons {
+			if err := fanProbeTarget(ctx, target, 3*time.Second); err != nil {
+				continue
+			}
+		}
+		seen[target.Address] = struct{}{}
+		*targets = append(*targets, fanTarget{Name: name, Target: target})
+	}
+}
+
+func filterReachableFanTargets(ctx context.Context, targets []fanTarget) []fanTarget {
+	filtered := make([]fanTarget, 0, len(targets))
+	for _, target := range targets {
+		if err := fanProbeTarget(ctx, target.Target, 3*time.Second); err != nil {
+			continue
+		}
+		filtered = append(filtered, target)
+	}
+	return filtered
 }
 
 func discoverTailscalePeers() ([]string, error) {

@@ -139,6 +139,16 @@ func parseConnectCall(args []string) (string, json.RawMessage, error) {
 }
 
 func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) {
+	if method, params, ok, err := parseConnectCommonShortcuts(args); ok || err != nil {
+		return method, params, ok, err
+	}
+	if parser, ok := connectShortcutParsers()[args[0]]; ok {
+		return parser(args)
+	}
+	return "", nil, false, nil
+}
+
+func parseConnectCommonShortcuts(args []string) (string, json.RawMessage, bool, error) {
 	if args[0] == "cache" {
 		return parseConnectCache(args)
 	}
@@ -148,63 +158,69 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 	if shortcut, ok := connectStringSliceShortcuts()[args[0]]; ok {
 		return parseConnectStringSliceCall(args, shortcut.method, shortcut.paramKey)
 	}
-	if method, ok := connectNoArgShortcuts()[args[0]]; ok {
-		if len(args) != 1 {
-			return "", nil, true, fmt.Errorf("connect %s takes no extra arguments", args[0])
-		}
+	if method, ok := parseConnectNoArgShortcut(args); ok {
 		return method, nil, true, nil
 	}
-	switch args[0] {
-	case "diff":
-		if len(args) != 3 {
-			return "", nil, true, fmt.Errorf("connect diff requires <id-a> <id-b>")
-		}
-		return "snapshot.diff", connectParams(map[string]string{"id_a": args[1], "id_b": args[2]}), true, nil
-	case "inspect":
-		return parseConnectInspect(args)
-	case "network":
-		return parseConnectNetwork(args)
-	case "jvm":
-		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
-	case "jvm-jfr-start":
-		return parseConnectJFRStart(args)
-	case "jvm-flamegraph":
-		return parseConnectJVMFlamegraph(args)
-	case "jvm-heap-dump":
-		return parseConnectJVMHeapDump(args)
-	case "jvm-jfr-dump":
-		return parseConnectJFRDump(args)
-	case "jvm-jfr-stop":
-		return parseConnectJFRStop(args)
-	case "jvm-jfr-summary":
-		return parseConnectJFRSummary(args)
-	case "metrics":
-		return parseConnectMetrics(args)
-	case "network-capture-start", "netcap-start":
-		return parseConnectNetworkCaptureStart(args)
-	case "network-capture-stop", "netcap-stop":
-		return parseConnectNetworkCaptureStop(args)
-	case "sample":
-		return parseConnectSample(args)
-	case "storage":
-		if len(args) == 1 {
-			return "storage.system", nil, true, nil
-		}
-		return parseConnectStringSliceCall(args, "storage.byApp", "paths")
-	case "rules":
-		if len(args) == 1 {
-			return "rules.check", nil, true, nil
-		}
-		if len(args) == 2 {
-			return "rules.check", connectParams(map[string]string{"snapshot_id": args[1]}), true, nil
-		}
-		return "", nil, true, fmt.Errorf("connect rules accepts at most one snapshot id")
-	case "issues":
-		return parseConnectIssues(args)
-	case "snapshot":
-		return parseConnectSnapshot(args)
-	}
 	return "", nil, false, nil
+}
+
+func parseConnectNoArgShortcut(args []string) (string, bool) {
+	method, ok := connectNoArgShortcuts()[args[0]]
+	if !ok || len(args) != 1 {
+		return "", false
+	}
+	return method, true
+}
+
+func parseConnectSnapshotDiff(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 3 {
+		return "", nil, true, fmt.Errorf("connect diff requires <id-a> <id-b>")
+	}
+	return "snapshot.diff", connectParams(map[string]string{"id_a": args[1], "id_b": args[2]}), true, nil
+}
+
+func parseConnectStorage(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) == 1 {
+		return "storage.system", nil, true, nil
+	}
+	return parseConnectStringSliceCall(args, "storage.byApp", "paths")
+}
+
+func parseConnectRules(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) == 1 {
+		return "rules.check", nil, true, nil
+	}
+	if len(args) == 2 {
+		return "rules.check", connectParams(map[string]string{"snapshot_id": args[1]}), true, nil
+	}
+	return "", nil, true, fmt.Errorf("connect rules accepts at most one snapshot id")
+}
+
+func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage, bool, error) {
+	return map[string]func([]string) (string, json.RawMessage, bool, error){
+		"diff":    parseConnectSnapshotDiff,
+		"inspect": parseConnectInspect,
+		"network": parseConnectNetwork,
+		"jvm": func(args []string) (string, json.RawMessage, bool, error) {
+			return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
+		},
+		"jvm-jfr-start":         parseConnectJFRStart,
+		"jvm-jfr-stop":          parseConnectJFRStop,
+		"jvm-jfr-dump":          parseConnectJFRDump,
+		"jvm-jfr-summary":       parseConnectJFRSummary,
+		"jvm-flamegraph":        parseConnectJVMFlamegraph,
+		"jvm-heap-dump":         parseConnectJVMHeapDump,
+		"metrics":               parseConnectMetrics,
+		"network-capture-start": parseConnectNetworkCaptureStart,
+		"netcap-start":          parseConnectNetworkCaptureStart,
+		"network-capture-stop":  parseConnectNetworkCaptureStop,
+		"netcap-stop":           parseConnectNetworkCaptureStop,
+		"sample":                parseConnectSample,
+		"storage":               parseConnectStorage,
+		"rules":                 parseConnectRules,
+		"issues":                parseConnectIssues,
+		"snapshot":              parseConnectSnapshot,
+	}
 }
 
 func parseConnectJFRStart(args []string) (string, json.RawMessage, bool, error) {
@@ -299,42 +315,59 @@ func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
 	}
 	switch args[1] {
 	case "check":
-		switch len(args) {
-		case 2:
-			return "issues.check", nil, true, nil
-		case 3:
-			return "issues.check", connectParams(map[string]string{"snapshot_id": args[2]}), true, nil
-		default:
-			return "", nil, true, fmt.Errorf("connect issues check accepts an optional snapshot id")
-		}
+		return parseConnectIssuesCheck(args)
 	case "list":
-		if len(args) < 3 {
-			return "", nil, true, fmt.Errorf("connect issues list requires <machine-id> [status]")
-		}
-		params := map[string]string{"machine_uuid": args[2]}
-		if len(args) == 4 {
-			params["status"] = args[3]
-		}
-		if len(args) != 3 && len(args) != 4 {
-			return "", nil, true, fmt.Errorf("connect issues list supports at most one optional status")
-		}
-		return "issues.list", connectParams(params), true, nil
+		return parseConnectIssuesList(args)
 	case "update":
+		return parseConnectMachineIDOp(args, "issues.update")
+	case "acknowledge":
+		return parseConnectMachineIDOp(args, "issues.acknowledge")
+	case "dismiss":
+		return parseConnectMachineIDOp(args, "issues.dismiss")
+	}
+	return parseConnectIssuesListFallback(args)
+}
+
+func parseConnectIssuesCheck(args []string) (string, json.RawMessage, bool, error) {
+	switch len(args) {
+	case 2:
+		return "issues.check", nil, true, nil
+	case 3:
+		return "issues.check", connectParams(map[string]string{"snapshot_id": args[2]}), true, nil
+	default:
+		return "", nil, true, fmt.Errorf("connect issues check accepts an optional snapshot id")
+	}
+}
+
+func parseConnectIssuesList(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 3 {
+		return "", nil, true, fmt.Errorf("connect issues list requires <machine-id> [status]")
+	}
+	if len(args) > 4 {
+		return "", nil, true, fmt.Errorf("connect issues list supports at most one optional status")
+	}
+	params := map[string]string{"machine_uuid": args[2]}
+	if len(args) == 4 {
+		params["status"] = args[3]
+	}
+	return "issues.list", connectParams(params), true, nil
+}
+
+func parseConnectMachineIDOp(args []string, method string) (string, json.RawMessage, bool, error) {
+	paramKey := "id"
+	if method == "issues.update" {
 		if len(args) != 4 {
 			return "", nil, true, fmt.Errorf("connect issues update requires <issue-id> <status>")
 		}
 		return "issues.update", connectParams(map[string]string{"id": args[2], "status": args[3]}), true, nil
-	case "acknowledge":
-		if len(args) != 3 {
-			return "", nil, true, fmt.Errorf("connect issues acknowledge requires <issue-id>")
-		}
-		return "issues.acknowledge", connectParams(map[string]string{"id": args[2]}), true, nil
-	case "dismiss":
-		if len(args) != 3 {
-			return "", nil, true, fmt.Errorf("connect issues dismiss requires <issue-id>")
-		}
-		return "issues.dismiss", connectParams(map[string]string{"id": args[2]}), true, nil
 	}
+	if len(args) != 3 {
+		return "", nil, true, fmt.Errorf("connect %s %s requires <issue-id>", args[0], args[1])
+	}
+	return method, connectParams(map[string]string{paramKey: args[2]}), true, nil
+}
+
+func parseConnectIssuesListFallback(args []string) (string, json.RawMessage, bool, error) {
 	switch len(args) {
 	case 2:
 		return "issues.list", connectParams(map[string]string{"machine_uuid": args[1]}), true, nil

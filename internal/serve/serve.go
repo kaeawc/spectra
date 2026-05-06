@@ -81,63 +81,87 @@ func Run(ctx context.Context, opts Options) error {
 	if log == nil {
 		log = logger.Discard()
 	}
+
+	listeners, tsNode, tsnetStatus, sockPath, err := initListeners(opts, log)
+	if err != nil {
+		return err
+	}
+	if tsNode != nil {
+		defer tsNode.Close()
+	}
+	return runDaemon(ctx, log, opts, listeners, tsNode, tsnetStatus, sockPath)
+}
+
+func initListeners(opts Options, log logger.Logger) ([]net.Listener, TsnetNode, *TsnetStatus, string, error) {
 	sockPath := opts.SockPath
 	if sockPath == "" {
 		var err error
 		sockPath, err = DefaultSockPath()
 		if err != nil {
-			return fmt.Errorf("serve: resolve sock path: %w", err)
+			return nil, nil, nil, "", fmt.Errorf("serve: resolve sock path: %w", err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
-		return fmt.Errorf("serve: mkdir: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("serve: mkdir: %w", err)
 	}
 	// Remove stale socket file if daemon was not cleanly shut down.
 	_ = os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
+	unixLn, err := net.Listen("unix", sockPath)
 	if err != nil {
-		return fmt.Errorf("serve: listen %s: %w", sockPath, err)
+		return nil, nil, nil, "", fmt.Errorf("serve: listen %s: %w", sockPath, err)
 	}
-	// Restrict access to the running user.
 	if err := os.Chmod(sockPath, 0o600); err != nil {
-		ln.Close()
-		return fmt.Errorf("serve: chmod %s: %w", sockPath, err)
+		unixLn.Close()
+		return nil, nil, nil, "", fmt.Errorf("serve: chmod %s: %w", sockPath, err)
 	}
 	log.Info("daemon unix listener ready", "socket", sockPath)
 
-	listeners := []net.Listener{ln}
-	var ts TsnetNode
-	var tsnetStatus *TsnetStatus
+	listeners := []net.Listener{unixLn}
+	tsnetStatus := (*TsnetStatus)(nil)
 	if opts.TCPAddr != "" {
 		tcpLn, err := net.Listen("tcp", opts.TCPAddr)
 		if err != nil {
-			ln.Close()
+			unixLn.Close()
 			os.Remove(sockPath)
-			return fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err)
+			return nil, nil, nil, "", fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err)
 		}
 		listeners = append(listeners, tcpLn)
 		log.Warn("daemon tcp listener ready", "address", opts.TCPAddr)
 	}
+	var tsNode TsnetNode
 	if opts.TsnetEnabled {
-		tsLn, tsServer, status, err := listenTsnet(opts, log)
+		tsListener, tsServer, status, listenErr := maybeInitTsnetListener(opts, log)
+		err = listenErr
 		if err != nil {
 			closeListeners(listeners)
 			os.Remove(sockPath)
-			return err
+			return nil, nil, nil, "", err
 		}
-		ts = tsServer
+		listeners = append(listeners, tsListener)
+		tsNode = tsServer
 		tsnetStatus = status
-		listeners = append(listeners, tsLn)
 	}
+
+	return listeners, tsNode, tsnetStatus, sockPath, nil
+}
+
+func maybeInitTsnetListener(opts Options, log logger.Logger) (net.Listener, TsnetNode, *TsnetStatus, error) {
+	return listenTsnet(opts, log)
+}
+
+func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners []net.Listener, tsNode TsnetNode, tsnetStatus *TsnetStatus, sockPath string) error {
+	if len(listeners) == 0 {
+		os.Remove(sockPath)
+		return fmt.Errorf("serve: no listeners configured")
+	}
+
 	defer os.Remove(sockPath)
 	defer closeListeners(listeners)
-	if ts != nil {
-		defer ts.Close()
-	}
 
 	dbPath := opts.DBPath
 	if dbPath == "" {
+		var err error
 		dbPath, err = store.DefaultPath()
 		if err != nil {
 			return fmt.Errorf("serve: resolve db path: %w", err)
@@ -150,15 +174,10 @@ func Run(ctx context.Context, opts Options) error {
 	defer db.Close()
 	log.Info("daemon storage ready", "db", dbPath)
 
-	// Start the ~1Hz process metrics sampler.
 	collector := metrics.NewCollector()
 	sampler := metrics.NewSampler(collector, time.Second, nil)
 	go sampler.Run(ctx)
-
-	// Flush aggregates to SQLite every minute.
 	go flushMetricsLoop(ctx, collector, db)
-
-	// Capture a live snapshot every minute; prune to the last 100 live snapshots.
 	go snapshotLoop(ctx, opts.SpectraVersion, db)
 
 	cacheReg := opts.CacheRegistry
@@ -167,10 +186,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, tsnetStatus, ts)
+	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
-	// Close the listener when ctx is cancelled to unblock Accept.
 	go func() {
 		<-ctx.Done()
 		closeListeners(listeners)
@@ -184,7 +202,6 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// DefaultTsnetStateDir returns the canonical tsnet state directory.
 func DefaultTsnetStateDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -217,7 +234,7 @@ func listenTsnet(opts Options, log logger.Logger) (net.Listener, TsnetNode, *Tsn
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, nil, nil, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
 	}
-	if err := os.Chmod(stateDir, 0o700); err != nil {
+	if err := os.Chmod(stateDir, 0o700); err != nil { // #nosec G302 -- tsnet state dir must remain owner-private.
 		return nil, nil, nil, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
 	}
 	addr := opts.TsnetAddr

@@ -3,6 +3,7 @@
 package netdiag
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -410,7 +411,7 @@ func probeDNS(run netstate.CmdRunner, host string) DNSProbe {
 		probe.Error = err.Error()
 		return probe
 	}
-	probe = parseDig(string(out))
+	probe = parseDig(out)
 	if probe.DurationMS == 0 {
 		probe.DurationMS = time.Since(start).Milliseconds()
 	}
@@ -424,19 +425,19 @@ func probeDNS(run netstate.CmdRunner, host string) DNSProbe {
 	return probe
 }
 
-func parseDig(out string) DNSProbe {
+func parseDig(out []byte) DNSProbe {
 	var probe DNSProbe
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
+	for _, rawLine := range bytes.Split(out, []byte("\n")) {
+		line := bytes.TrimSpace(rawLine)
 		switch {
-		case strings.Contains(line, "status:"):
-			probe.Status = parseDigStatus(line)
-		case strings.HasPrefix(line, ";; Query time:"):
-			probe.QueryMS = parseDigQueryMS(line)
-		case strings.HasPrefix(line, ";; SERVER:"):
-			probe.Server = strings.TrimSpace(strings.TrimPrefix(line, ";; SERVER:"))
+		case bytes.Contains(line, []byte("status:")):
+			probe.Status = parseDigStatus(string(line))
+		case bytes.HasPrefix(line, []byte(";; Query time:")):
+			probe.QueryMS = parseDigQueryMS(string(line))
+		case bytes.HasPrefix(line, []byte(";; SERVER:")):
+			probe.Server = strings.TrimSpace(strings.TrimPrefix(string(line), ";; SERVER:"))
 		default:
-			if ip := firstIPField(line); ip != "" {
+			if ip := firstIPField(string(line)); ip != "" {
 				probe.Addresses = append(probe.Addresses, ip)
 			}
 		}
@@ -494,14 +495,19 @@ func probeTrace(run netstate.CmdRunner, host string) TraceProbe {
 	if err != nil {
 		return TraceProbe{Error: err.Error()}
 	}
-	hops := parseTraceroute(string(out))
+	hops := parseTracerouteBytes(out)
 	return TraceProbe{OK: len(hops) > 0, Hops: hops}
 }
 
 func parseTraceroute(out string) []TraceHop {
+	return parseTracerouteBytes([]byte(out))
+}
+
+func parseTracerouteBytes(out []byte) []TraceHop {
 	var hops []TraceHop
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		lineStr := string(line)
+		fields := strings.Fields(lineStr)
 		if len(fields) < 2 {
 			continue
 		}
@@ -510,7 +516,7 @@ func parseTraceroute(out string) []TraceHop {
 			continue
 		}
 		hop := TraceHop{TTL: ttl}
-		if strings.Contains(line, "*") {
+		if strings.Contains(lineStr, "*") {
 			hop.Timeout = true
 		}
 		for _, f := range fields[1:] {
@@ -537,9 +543,15 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 	if d == nil {
 		d = &net.Dialer{Timeout: timeout}
 	}
-	conn, err := tls.DialWithDialer(d, "tcp", net.JoinHostPort(host, strconv.Itoa(port)), &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	rawConn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	probe := TLSProbe{ServerName: host, DurationMS: time.Since(start).Milliseconds()}
 	if err != nil {
+		probe.Error = err.Error()
+		return probe, nil
+	}
+	conn := tls.Client(rawConn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	if err := conn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
 		probe.Error = err.Error()
 		return probe, nil
 	}

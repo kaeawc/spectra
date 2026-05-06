@@ -163,7 +163,7 @@ func ensureCaptureDir(path string, uid uint32) error {
 			return err
 		}
 	}
-	return os.Chmod(path, 0o700)
+	return os.Chmod(path, 0o700) // #nosec G302 -- capture directory should be private to owner.
 }
 
 func makeCaptureReadableByOwner(path string, uid uint32) error {

@@ -156,11 +156,11 @@ func TestEndpointTargetsUseExplicitHostWhenNoConnections(t *testing.T) {
 }
 
 func TestParseDigStatuses(t *testing.T) {
-	ok := parseDig(digNOERRORFixture)
+	ok := parseDig([]byte(digNOERRORFixture))
 	if ok.Status != "NOERROR" || ok.QueryMS != 7 || ok.Server != "1.1.1.1#53(1.1.1.1)" || len(ok.Addresses) != 1 {
 		t.Fatalf("NOERROR dig = %+v", ok)
 	}
-	nx := parseDig(";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1\n;; Query time: 5 msec\n;; SERVER: 10.0.0.2#53(10.0.0.2)\n")
+	nx := parseDig([]byte(";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1\n;; Query time: 5 msec\n;; SERVER: 10.0.0.2#53(10.0.0.2)\n"))
 	if nx.Status != "NXDOMAIN" || len(nx.Addresses) != 0 {
 		t.Fatalf("NXDOMAIN dig = %+v", nx)
 	}
