@@ -160,6 +160,8 @@ Implemented:
 6. Privileged helper proxy methods for implemented helper capabilities.
 7. Optional TCP JSON-RPC listener, typed `spectra connect <target> ...`
    shortcuts, and the raw `spectra connect <target> call` escape hatch.
+8. Explicit-host `spectra fan --hosts ...` fan-out over the same remote
+   call surface.
 
 Future:
 

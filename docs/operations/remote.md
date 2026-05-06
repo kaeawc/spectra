@@ -72,17 +72,24 @@ artifact writes.
 
 ## Cross-host operations
 
-Cross-host fan-out is still planned. The intended shape is:
+Explicit-host fan-out is implemented with `spectra fan --hosts`. Host
+discovery is still planned, so callers provide the daemon targets today:
 
 ```bash
-spectra hosts                                # list discovered Spectra daemons
-spectra fan inspect /Applications/Slack.app  # inspect Slack on every host
-spectra fan jvm                              # JVM snapshot from every host
-spectra diff laptop work-mac                 # compare two hosts
+spectra fan --hosts work-mac,alice-laptop status
+spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
+spectra fan --hosts work-mac,alice-laptop jvm
+spectra fan --hosts work-mac,alice-laptop network-by-app /Applications/Slack.app
 ```
 
 The client makes parallel RPC calls to each daemon and aggregates
-results locally.
+results locally into one JSON envelope. The remaining intended shape is:
+
+```bash
+spectra hosts                                # list discovered Spectra daemons
+spectra fan inspect /Applications/Slack.app  # inspect Slack on every discovered host
+spectra diff laptop work-mac                 # compare two hosts
+```
 
 ## TUI mode
 
@@ -155,9 +162,8 @@ spectra connect alice-laptop jvm-threads 4012 > intellij-threads.json
 ### "Are we on the same JDK?"
 
 ```bash
-spectra fan jdk list
-# → tabulates installed JDKs across all hosts in the tailnet,
-#   highlights drift
+spectra fan --hosts alice-laptop,bob-laptop jdk
+# → returns one JDK inventory per host for drift comparison
 ```
 
 ### "What does this app do that mine doesn't?"
@@ -171,7 +177,7 @@ spectra diff me work-mac --filter app=Slack
 ### "Snapshot the whole team's machines as a baseline"
 
 ```bash
-spectra fan snapshot create --name pre-incident
+spectra fan --hosts alice-laptop,bob-laptop snapshot
 ```
 
 ## Implementation order
@@ -181,5 +187,6 @@ remote work:
 
 1. Add tsnet integration so the daemon can join a tailnet without an
    externally managed listener.
-2. Add host discovery and fan-out commands.
+2. Add host discovery so `spectra fan` can target every discovered daemon
+   without an explicit `--hosts` list.
 3. Add TUI support against local-or-remote daemon targets.

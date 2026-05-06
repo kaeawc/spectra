@@ -48,6 +48,7 @@ func subcommandList() []subcommand {
 		{"baseline", "Manage baseline snapshots (list, drop)", runSnapshotBaseline},
 		{"serve", "Run the local daemon (Unix socket JSON-RPC server)", runServe},
 		{"connect", "Call a Spectra daemon over Unix socket or TCP JSON-RPC", runConnect},
+		{"fan", "Run one daemon RPC call against multiple targets", runFan},
 		{"status", "Check whether the local daemon is running", runStatus},
 		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
