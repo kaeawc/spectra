@@ -168,6 +168,54 @@ func TestListSnapshotsByMachine(t *testing.T) {
 	}
 }
 
+func TestListHosts(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	older := sampleInput()
+	older.ID = "snap-old"
+	older.MachineUUID = "UUID-OLD"
+	older.Hostname = "old.local"
+	older.TakenAt = time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	if err := db.SaveSnapshot(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+
+	newer := sampleInput()
+	newer.ID = "snap-new"
+	newer.MachineUUID = "UUID-NEW"
+	newer.Hostname = "new.local"
+	newer.TakenAt = time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	if err := db.SaveSnapshot(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	newer.ID = "snap-new-2"
+	newer.TakenAt = time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC)
+	if err := db.SaveSnapshot(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.ListHosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].MachineUUID != "UUID-NEW" || rows[0].Hostname != "new.local" {
+		t.Fatalf("rows[0] = %+v", rows[0])
+	}
+	if rows[0].SnapshotCount != 2 {
+		t.Fatalf("snapshot count = %d, want 2", rows[0].SnapshotCount)
+	}
+	if !rows[0].LastSeen.Equal(newer.TakenAt) {
+		t.Fatalf("last seen = %s, want %s", rows[0].LastSeen, newer.TakenAt)
+	}
+	if rows[1].MachineUUID != "UUID-OLD" {
+		t.Fatalf("rows[1] = %+v", rows[1])
+	}
+}
+
 // --- Baseline snapshots (name field) ---
 
 func TestBaselineNameRoundTrip(t *testing.T) {

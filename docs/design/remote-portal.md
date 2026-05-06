@@ -108,11 +108,13 @@ These will get pinned down before the first daemon commit:
    network path.**
 4. Add explicit-host `spectra fan --hosts ...` fan-out over the typed
    connect surface. **Implemented.**
-5. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
+5. Add stored `spectra hosts` listing for machines seen through snapshots.
+   **Implemented; live daemon discovery is still planned.**
+6. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
    Tailscale's discovery.
-6. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
-6. Privileged helper as `spectra install-helper` subcommand. Same binary
+7. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
+8. Privileged helper as `spectra install-helper` subcommand. Same binary
    ships the helper; SMAppService-registered LaunchDaemon.
-7. Ring buffer + history for replay (requires SQLite from
+9. Ring buffer + history for replay (requires SQLite from
    [storage.md](storage.md)).
-8. Native GUI after the TUI proves the data model.
+10. Native GUI after the TUI proves the data model.

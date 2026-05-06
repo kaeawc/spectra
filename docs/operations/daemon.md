@@ -162,6 +162,7 @@ Implemented:
    shortcuts, and the raw `spectra connect <target> call` escape hatch.
 8. Explicit-host `spectra fan --hosts ...` fan-out over the same remote
    call surface.
+9. `spectra hosts` listing for hosts known from stored snapshots.
 
 Future:
 

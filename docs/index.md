@@ -47,8 +47,9 @@ model, [inspection/](inspection/) for what we extract from each bundle, and
   TCP listener. See
   [design/remote-portal.md](design/remote-portal.md).
 - **Remote fan-out** — `spectra fan --hosts ...` runs one typed remote
-  call across multiple explicit daemon targets; automatic discovery is
-  still planned.
+  call across multiple explicit daemon targets; `spectra hosts` lists
+  locally known hosts from snapshots while automatic discovery is still
+  planned.
 - **TUI client** — Bubble Tea UI against the same local-or-remote daemon
   RPC surface.
 - **Release packaging** — Homebrew formula, prebuilt binaries, signing, and
