@@ -53,6 +53,7 @@ func subcommandList() []subcommand {
 		{"status", "Check whether the local daemon is running", runStatus},
 		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
+		{"install-daemon", "Install the user LaunchAgent for spectra serve", runInstallDaemonCmd},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},

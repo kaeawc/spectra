@@ -95,8 +95,14 @@ brew install kaeawc/tap/spectra
 ```
 
 The first Homebrew formula should build the unprivileged CLI and helper
-binary, but should not install or start the helper automatically. Root
-visibility stays behind the same explicit command:
+binary, but should not install or start the helper automatically.
+User-daemon lifecycle is available after install through:
+
+```bash
+spectra install-daemon
+```
+
+Root visibility stays behind the same explicit command:
 
 ```bash
 sudo spectra install-helper

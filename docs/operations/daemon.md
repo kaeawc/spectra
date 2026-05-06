@@ -22,12 +22,14 @@ spectra serve --tcp 127.0.0.1:7878
 spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
 spectra serve --daemon       # start detached and return
+spectra install-daemon       # install and load the per-user LaunchAgent
 ```
 
 By default the CLI runs in the foreground until interrupted. `--daemon`
 starts a detached `spectra serve` child with the same serve flags and
-returns immediately. Launchd-managed agent packaging remains future
-distribution work.
+returns immediately. `spectra install-daemon` writes
+`~/Library/LaunchAgents/dev.spectra.daemon.plist` atomically and uses
+`launchctl bootstrap`/`kickstart` to run the daemon under launchd.
 
 By default, structured daemon lifecycle logs are appended to
 `~/Library/Logs/Spectra/daemon.jsonl` with `0600` permissions. Foreground
@@ -163,10 +165,10 @@ Implemented:
 8. Explicit-host `spectra fan --hosts ...` fan-out over the same remote
    call surface.
 9. `spectra hosts` listing for hosts known from stored snapshots.
+10. Per-user launchd lifecycle through `spectra install-daemon`.
 
 Future:
 
 1. CLI-wide RPC dispatch instead of in-process command execution.
-2. launchd-managed daemon lifecycle.
-3. tsnet listener and Tailscale identity integration.
-4. TUI/GUI clients.
+2. tsnet listener and Tailscale identity integration.
+3. TUI/GUI clients.

@@ -52,13 +52,15 @@ model, [inspection/](inspection/) for what we extract from each bundle, and
   planned.
 - **TUI client** — Bubble Tea UI against the same local-or-remote daemon
   RPC surface.
-- **Release packaging** — Homebrew formula, prebuilt binaries, signing, and
-  notarization.
+- **Release packaging** — the user LaunchAgent installer exists;
+  Homebrew formula, prebuilt binaries, signing, and notarization are
+  still planned.
 
 ## Distribution
 
 Spectra currently installs from source with an optional `sudo` helper
 install for root-only telemetry (system TCC, firewall rules, and
-`powermetrics`). Homebrew and prebuilt binaries are planned. The Mac App
-Store is incompatible with the live-monitoring features. See
+`powermetrics`) and a per-user `spectra install-daemon` LaunchAgent for
+daemon lifecycle. Homebrew and prebuilt binaries are planned. The Mac
+App Store is incompatible with the live-monitoring features. See
 [design/distribution.md](design/distribution.md) for the full analysis.
