@@ -161,6 +161,7 @@ func runIssuesCheck(args []string) int {
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit findings JSON")
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: live)")
+	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -183,7 +184,12 @@ func runIssuesCheck(args []string) int {
 		}
 	}
 
-	findings := rules.Evaluate(snap, rules.V1Catalog())
+	catalog, err := loadRuleCatalog(*rulesConfig, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issues check: %v\n", err)
+		return 1
+	}
+	findings := rules.Evaluate(snap, catalog)
 
 	// Record findings as issues.
 	db, machineUUID, err := openIssuesDB()
