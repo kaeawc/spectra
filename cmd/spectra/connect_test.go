@@ -118,6 +118,10 @@ func TestParseConnectTypedCalls(t *testing.T) {
 		{name: "snapshot granted perms", args: []string{"snapshot", "granted-perms", "snap-1"}, wantMethod: "snapshot.granted_perms", wantParams: `{"id":"snap-1"}`},
 		{name: "snapshot prune default", args: []string{"snapshot", "prune"}, wantMethod: "snapshot.prune"},
 		{name: "snapshot prune keep", args: []string{"snapshot", "prune", "25"}, wantMethod: "snapshot.prune", wantParams: `{"keep":25}`},
+		{name: "cache", args: []string{"cache"}, wantMethod: "cache.stats"},
+		{name: "cache stats", args: []string{"cache", "stats"}, wantMethod: "cache.stats"},
+		{name: "cache clear", args: []string{"cache", "clear"}, wantMethod: "cache.clear"},
+		{name: "cache clear kind", args: []string{"cache", "clear", "detect"}, wantMethod: "cache.clear", wantParams: `{"kind":"detect"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -157,6 +161,8 @@ func TestParseConnectTypedCallErrors(t *testing.T) {
 		{"host", "extra"},
 		{"status", "extra"},
 		{"health", "extra"},
+		{"cache", "clear", "too", "many"},
+		{"cache", "weird"},
 	}
 	for _, args := range tests {
 		t.Run(args[0], func(t *testing.T) {
