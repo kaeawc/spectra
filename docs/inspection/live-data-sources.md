@@ -56,6 +56,9 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
+| `dig +short +time=2 +tries=1 <host>` | bounded DNS resolution probe for an app endpoint | user | active network probe, capped | `spectra network diagnose` |
+| `traceroute -n -m 12 -w 1 <host>` | hop path, unanswered hops, rough latency by hop | user | active network probe, capped | `spectra network diagnose` |
+| TCP/TLS connect probe | connect timing, TLS version, ALPN, issuer/subject interception hints | user | active network probe, capped | `spectra network diagnose` |
 | `pfctl -s rules` | firewall rules | helper | one-shot | `helper.firewall.rules`, `spectra network firewall` |
 | `tcpdump -i <iface>` | raw packet capture to helper-generated pcap path | helper | streaming, high | `helper.net_capture.start` / `helper.net_capture.stop` |
 | `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for targeted capture |

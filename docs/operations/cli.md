@@ -306,6 +306,9 @@ DNS, VPN state, listening ports, and active per-process throughput from
 bounded tcpdump captures and can summarize completed pcap files without
 retaining request or response bodies. `spectra network firewall` asks the
 privileged helper for current pf firewall rules.
+`spectra network diagnose` starts from a running application, PID, command,
+or explicit host target and joins current sockets, per-process throughput,
+DNS, route/proxy/VPN context, TCP/TLS probes, and traceroute output.
 
 ### Examples
 
@@ -313,6 +316,8 @@ privileged helper for current pf firewall rules.
 spectra network
 spectra network --json
 spectra network connections --proto tcp --state established
+spectra network diagnose --app /Applications/Slack.app api.example.com
+spectra network diagnose --pid 412 --ports 443,8443 api.example.com
 spectra network capture start --interface en0 --duration 30s --proto tcp --host api.example.com --port 443
 spectra network capture stop --summarize netcap-1
 spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
