@@ -302,8 +302,9 @@ spectra jvm jfr stop 4012 --name spectra
 Shows unprivileged network state by default, including current routes,
 DNS, VPN state, listening ports, and active per-process throughput from
 `nettop`. Listening ports include bind address and process attribution when
-`lsof` exposes it. `spectra network firewall` asks the privileged helper for
-current pf firewall rules.
+`lsof` exposes it. `spectra network capture` asks the privileged helper for
+bounded tcpdump captures. `spectra network firewall` asks the privileged helper
+for current pf firewall rules.
 
 ### Examples
 
@@ -311,6 +312,8 @@ current pf firewall rules.
 spectra network
 spectra network --json
 spectra network connections --proto tcp --state established
+spectra network capture start --interface en0 --duration 30s --proto tcp --host api.example.com --port 443
+spectra network capture stop netcap-1
 spectra network firewall
 spectra network firewall --json
 ```

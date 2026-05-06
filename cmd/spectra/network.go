@@ -6,10 +6,21 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/netstate"
+)
+
+var (
+	networkCaptureStart = func(iface string, durationMS, snapLen int, proto, host string, port int) (map[string]any, error) {
+		return helperclient.New().NetCaptureStart(iface, durationMS, snapLen, proto, host, port)
+	}
+	networkCaptureStop = func(handle string) (map[string]any, error) {
+		return helperclient.New().NetCaptureStop(handle)
+	}
 )
 
 func runNetwork(args []string) int {
@@ -18,6 +29,9 @@ func runNetwork(args []string) int {
 	}
 	if len(args) > 0 && args[0] == "firewall" {
 		return runNetworkFirewall(args[1:])
+	}
+	if len(args) > 0 && args[0] == "capture" {
+		return runNetworkCapture(args[1:])
 	}
 
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
@@ -38,6 +52,101 @@ func runNetwork(args []string) int {
 
 	printNetworkState(state)
 	return 0
+}
+
+func runNetworkCapture(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: spectra network capture [start|stop] ...")
+		return 2
+	}
+	switch args[0] {
+	case "start":
+		return runNetworkCaptureStart(args[1:])
+	case "stop":
+		return runNetworkCaptureStop(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown network capture command %q\n", args[0])
+		return 2
+	}
+}
+
+func runNetworkCaptureStart(args []string) int {
+	fs := flag.NewFlagSet("spectra network capture start", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	iface := fs.String("interface", "", "Network interface to capture, e.g. en0 or utun3")
+	duration := fs.Duration("duration", 30*time.Second, "Maximum capture duration")
+	snapLen := fs.Int("snaplen", 0, "tcpdump snapshot length (0 = default)")
+	proto := fs.String("proto", "", "Optional protocol filter: tcp or udp")
+	host := fs.String("host", "", "Optional host filter")
+	port := fs.Int("port", 0, "Optional port filter")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *iface == "" {
+		fmt.Fprintln(os.Stderr, "network capture start requires --interface")
+		return 2
+	}
+	durationMS := int(duration.Milliseconds())
+	result, err := networkCaptureStart(*iface, durationMS, *snapLen, *proto, *host, *port)
+	if err != nil {
+		if helperclient.IsUnavailable(err) {
+			fmt.Fprintln(os.Stderr, "privileged helper not running; install with: sudo spectra install-helper")
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "network capture start: %v\n", err)
+		return 1
+	}
+	return printNetworkCaptureResult(result, *asJSON, "capture started")
+}
+
+func runNetworkCaptureStop(args []string) int {
+	fs := flag.NewFlagSet("spectra network capture stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra network capture stop <handle>")
+		return 2
+	}
+	result, err := networkCaptureStop(fs.Arg(0))
+	if err != nil {
+		if helperclient.IsUnavailable(err) {
+			fmt.Fprintln(os.Stderr, "privileged helper not running; install with: sudo spectra install-helper")
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "network capture stop: %v\n", err)
+		return 1
+	}
+	return printNetworkCaptureResult(result, *asJSON, "capture stopped")
+}
+
+func printNetworkCaptureResult(result map[string]any, asJSON bool, label string) int {
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	fmt.Println(label)
+	for _, key := range []string{"handle", "interface", "duration_ms", "output_path", "size_bytes", "wait_error", "owner_error", "stat_error"} {
+		if v, ok := result[key]; ok && fmt.Sprint(v) != "" {
+			fmt.Printf("  %s: %s\n", key, formatCaptureValue(v))
+		}
+	}
+	return 0
+}
+
+func formatCaptureValue(v any) string {
+	switch n := v.(type) {
+	case float64:
+		if n == float64(int64(n)) {
+			return strconv.FormatInt(int64(n), 10)
+		}
+	}
+	return fmt.Sprint(v)
 }
 
 func runNetworkFirewall(args []string) int {
