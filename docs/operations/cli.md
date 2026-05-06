@@ -428,6 +428,8 @@ or MagicDNS names for daemons started with `--tsnet`.
 | `spectra connect <target> network` | Call `network.state` |
 | `spectra connect <target> connections` | Call `network.connections` |
 | `spectra connect <target> network-by-app [App.app ...]` | Call `network.byApp` |
+| `spectra connect <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp\|udp] [host=HOST] [port=N]` | Call `helper.net_capture.start` |
+| `spectra connect <target> network-capture-stop <handle>` | Call `helper.net_capture.stop` |
 | `spectra connect <target> storage` | Call `storage.system` |
 | `spectra connect <target> storage <App.app> [more.apps]` | Call `storage.byApp` |
 | `spectra connect <target> power` | Call `power.state` |

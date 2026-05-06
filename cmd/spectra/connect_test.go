@@ -115,6 +115,8 @@ func TestParseConnectTypedCalls(t *testing.T) {
 		{name: "network", args: []string{"network"}, wantMethod: "network.state"},
 		{name: "connections", args: []string{"connections"}, wantMethod: "network.connections"},
 		{name: "network by app", args: []string{"network-by-app", "/Applications/Slack.app"}, wantMethod: "network.byApp", wantParams: `{"bundles":["/Applications/Slack.app"]}`},
+		{name: "network capture start", args: []string{"network-capture-start", "en0", "duration_ms=5000", "snap_len=4096", "proto=tcp", "host=api.example.com", "port=443"}, wantMethod: "helper.net_capture.start", wantParams: `{"duration_ms":5000,"host":"api.example.com","interface":"en0","port":443,"proto":"tcp","snap_len":4096}`},
+		{name: "network capture stop", args: []string{"network-capture-stop", "netcap-1"}, wantMethod: "helper.net_capture.stop", wantParams: `{"handle":"netcap-1"}`},
 		{name: "storage system", args: []string{"storage"}, wantMethod: "storage.system"},
 		{name: "storage by app", args: []string{"storage", "/Applications/Slack.app", "/Applications/Cursor.app"}, wantMethod: "storage.byApp", wantParams: `{"paths":["/Applications/Slack.app","/Applications/Cursor.app"]}`},
 		{name: "power", args: []string{"power"}, wantMethod: "power.state"},

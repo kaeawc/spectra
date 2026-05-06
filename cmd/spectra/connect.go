@@ -81,6 +81,8 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-flamegraph <pid> [dest]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-heap-dump <pid> [dest] | jvm-jfr-start <pid> [name] | jvm-jfr-dump <pid> <dest> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp|udp] [host=HOST] [port=N]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-stop <handle>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
@@ -169,6 +171,10 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectJFRSummary(args)
 	case "metrics":
 		return parseConnectMetrics(args)
+	case "network-capture-start", "netcap-start":
+		return parseConnectNetworkCaptureStart(args)
+	case "network-capture-stop", "netcap-stop":
+		return parseConnectNetworkCaptureStop(args)
 	case "sample":
 		return parseConnectSample(args)
 	case "storage":
@@ -373,6 +379,44 @@ func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
 	default:
 		return "", nil, true, fmt.Errorf("connect metrics accepts optional pid and limit only")
 	}
+}
+
+func parseConnectNetworkCaptureStart(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 {
+		return "", nil, true, fmt.Errorf("connect %s requires <iface>", args[0])
+	}
+	params := map[string]any{"interface": args[1]}
+	for _, raw := range args[2:] {
+		key, value, ok := strings.Cut(raw, "=")
+		if !ok || value == "" {
+			return "", nil, true, fmt.Errorf("connect %s optional args must be key=value", args[0])
+		}
+		switch key {
+		case "duration_ms", "snap_len", "port":
+			n, err := parseConnectPositiveInt(value, key)
+			if err != nil {
+				return "", nil, true, err
+			}
+			params[key] = n
+		case "proto":
+			if value != "tcp" && value != "udp" {
+				return "", nil, true, fmt.Errorf("connect %s proto must be tcp or udp", args[0])
+			}
+			params[key] = value
+		case "host":
+			params[key] = value
+		default:
+			return "", nil, true, fmt.Errorf("connect %s unknown option %q", args[0], key)
+		}
+	}
+	return "helper.net_capture.start", connectParams(params), true, nil
+}
+
+func parseConnectNetworkCaptureStop(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect %s requires <handle>", args[0])
+	}
+	return "helper.net_capture.stop", connectParams(map[string]string{"handle": args[1]}), true, nil
 }
 
 func connectPIDShortcuts() map[string]string {
