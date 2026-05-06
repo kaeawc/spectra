@@ -305,6 +305,10 @@ java_command: com.example.Server
 "GC Thread" #2
 `), nil
 			}
+		case "jstat":
+			return []byte(`S0C S1C S0U S1U EC EU OC OU MC MU CCSC CCSU YGC YGCT FGC FGCT GCT
+0.0 0.0 0.0 0.0 40960.0 20480.0 204800.0 4096.0 61440.0 59900.3 8064.0 7678.7 5 0.078 0 0.000 0.078
+`), nil
 		}
 		return nil, fmt.Errorf("unexpected: %s %v", name, args)
 	}
@@ -334,6 +338,9 @@ java_command: com.example.Server
 	}
 	if info.SysProps["java.home"] != "/usr/lib/jvm/temurin-21" {
 		t.Errorf("java.home = %q", info.SysProps["java.home"])
+	}
+	if info.GC == nil || info.GC.YGC != 5 {
+		t.Fatalf("GC = %#v, want YGC=5", info.GC)
 	}
 }
 

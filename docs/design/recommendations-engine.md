@@ -150,6 +150,7 @@ Implemented rules:
 
 - `jvm-eol-version`
 - `jvm-heap-vs-system`
+- `jvm-gc-pressure`
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`

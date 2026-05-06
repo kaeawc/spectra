@@ -88,6 +88,9 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []t
 
 	info.VMFlags, info.VMArgs = collectCommandLine(pid, run)
 	info.ThreadCount = collectThreadCount(pid, run)
+	if gc, err := CollectGCStats(pid, run); err == nil {
+		info.GC = gc
+	}
 	attributeJDK(&info, jdks)
 
 	return info
