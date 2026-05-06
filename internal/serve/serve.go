@@ -1325,6 +1325,45 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return result, nil
 	})
 
+	d.Register("helper.net_capture.start", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Interface  string `json:"interface"`
+			DurationMS int    `json:"duration_ms"`
+			SnapLen    int    `json:"snap_len"`
+			Proto      string `json:"proto"`
+			Host       string `json:"host"`
+			Port       int    `json:"port"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Interface == "" {
+			return nil, fmt.Errorf("helper.net_capture.start requires {\"interface\": \"...\"}")
+		}
+		result, err := hc.NetCaptureStart(p.Interface, p.DurationMS, p.SnapLen, p.Proto, p.Host, p.Port)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
+	d.Register("helper.net_capture.stop", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Handle string `json:"handle"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Handle == "" {
+			return nil, fmt.Errorf("helper.net_capture.stop requires {\"handle\": \"...\"}")
+		}
+		result, err := hc.NetCaptureStop(p.Handle)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
 	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
 		var p struct {
 			BundleID string `json:"bundle_id"`

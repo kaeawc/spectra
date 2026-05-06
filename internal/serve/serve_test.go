@@ -1272,6 +1272,33 @@ func TestDaemonHelperFSUsageStopRequiresHandle(t *testing.T) {
 	}
 }
 
+func TestDaemonHelperNetCaptureStartRequiresInterface(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 158, "helper.net_capture.start", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when interface missing")
+	}
+}
+
+func TestDaemonHelperNetCaptureStopRequiresHandle(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 159, "helper.net_capture.stop", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when handle missing")
+	}
+}
+
+func TestDaemonHelperNetCaptureStartRequiresHelper(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 160, "helper.net_capture.start", `{"interface":"en0"}`)
+	if resp.Error == nil {
+		t.Error("expected error when helper not running")
+	}
+}
+
 func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()

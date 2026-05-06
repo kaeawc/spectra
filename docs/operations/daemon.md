@@ -77,7 +77,8 @@ JSON-RPC 2.0 methods, organized by concern:
   `process.tree`, `process.sample`
 - **Helper** — `helper.health`, `helper.powermetrics.sample`,
   `helper.tcc.system.query`, `helper.firewall.rules`,
-  `helper.fs_usage.start`, `helper.fs_usage.stop`
+  `helper.fs_usage.start`, `helper.fs_usage.stop`,
+  `helper.net_capture.start`, `helper.net_capture.stop`
 - **JVM** — `jvm.list`, `jvm.inspect`, `jvm.explain`,
   `jvm.threadDump`, `jvm.heapDump`, `jvm.heapHistogram`, `jvm.gcStats`, `jvm.vmMemory`,
   `jvm.jmx.status`, `jvm.jmx.startLocal`, `jvm.flamegraph`,
@@ -94,7 +95,8 @@ JSON-RPC 2.0 methods, organized by concern:
 - **Cache** — `cache.stats`, `cache.clear`
 - **Helper proxy** — `helper.health`, `helper.powermetrics.sample`,
   `helper.tcc.system.query`, `helper.firewall.rules`,
-  `helper.fs_usage.start`, `helper.fs_usage.stop`
+  `helper.fs_usage.start`, `helper.fs_usage.stop`,
+  `helper.net_capture.start`, `helper.net_capture.stop`
 
 Snake-case and camel-case aliases exist for selected older JVM methods
 (`jvm.thread_dump` / `jvm.threadDump`, etc.).
