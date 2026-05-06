@@ -31,15 +31,14 @@ eliminate more fork cost and add richer per-process detail.
 |---|---|---|---|---|
 | `lsof -p <pid[,pid...]>` | open files + sockets per process | user (own); helper for others | ~50-100ms batched | `process.open_fds`, `process.listening_ports`, `process.outbound_connections` |
 | `lsof -i -P -n` | system-wide network connections | user (limited); helper for full | ~100ms | network connections collector |
-| `fs_usage -w -f filesys` | live file system trace | helper-only | streaming | `fs_usage` collector via helper |
-| `fs_usage -e <pid>` | per-process file activity | helper-only | streaming | targeted file-activity capture |
+| `fs_usage -w -f <mode> <pid>` | bounded live trace for one process | helper-only | streaming, capped | `helper.fs_usage.start` / `helper.fs_usage.stop` |
 | `iostat 1` | per-volume IOPS and throughput | user | streaming, low | volume IO ring buffer |
 | `du -sk` | directory disk usage | user | seconds for large trees | not used; we walk + `Stat_t.Blocks` instead |
 
 `fs_usage` is the killer: per-process, syscall-level filesystem
-events. But it requires root and produces a high-volume stream;
-exposing it through the helper requires careful filtering and rate
-limiting (see [../design/privileged-helper.md](../design/privileged-helper.md)).
+events. It requires root and produces a high-volume stream, so Spectra
+only exposes bounded helper traces for a specific PID and allowlisted
+mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 
 ## Network state
 

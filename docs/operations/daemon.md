@@ -56,7 +56,8 @@ JSON-RPC 2.0 methods, organized by concern:
 - **Live state** — `process.live`, `process.history`, `process.list`,
   `process.tree`, `process.sample`
 - **Helper** — `helper.health`, `helper.powermetrics.sample`,
-  `helper.tcc.system.query`, `helper.firewall.rules`
+  `helper.tcc.system.query`, `helper.firewall.rules`,
+  `helper.fs_usage.start`, `helper.fs_usage.stop`
 - **JVM** — `jvm.list`, `jvm.inspect`, `jvm.threadDump`, `jvm.heapDump`,
   `jvm.heapHistogram`, `jvm.gcStats`, `jvm.jfr.start`, `jvm.jfr.stop`,
   `jvm.jfr.dump`, `jvm.jfr.summary`
@@ -71,7 +72,8 @@ JSON-RPC 2.0 methods, organized by concern:
   `issues.fix.list`
 - **Cache** — `cache.stats`, `cache.clear`
 - **Helper proxy** — `helper.health`, `helper.powermetrics.sample`,
-  `helper.tcc.system.query`, `helper.firewall.rules`
+  `helper.tcc.system.query`, `helper.firewall.rules`,
+  `helper.fs_usage.start`, `helper.fs_usage.stop`
 
 Snake-case and camel-case aliases exist for selected older JVM methods
 (`jvm.thread_dump` / `jvm.threadDump`, etc.).
@@ -98,7 +100,7 @@ that loop to keep the tick cheap.
 For root-only data, the unprivileged daemon can proxy to a separately
 installed privileged helper over a local Unix socket. Implemented helper
 proxy methods cover health, system TCC query, and one-shot `powermetrics`
-sampling, plus pf firewall rule reads. `fs_usage` remains future work. See
+sampling, pf firewall rule reads, and bounded `fs_usage` traces. See
 [../design/distribution.md](../design/distribution.md).
 
 The remote client never talks to the helper directly — the daemon

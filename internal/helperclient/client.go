@@ -144,3 +144,27 @@ func (c *Client) FirewallRules() (map[string]any, error) {
 	var m map[string]any
 	return m, json.Unmarshal(raw, &m)
 }
+
+// FSUsageStart starts a bounded fs_usage trace for pid using an allowlisted mode.
+func (c *Client) FSUsageStart(pid int, mode string, durationMS int) (map[string]any, error) {
+	raw, err := c.call("helper.fs_usage.start", map[string]any{
+		"pid":         pid,
+		"mode":        mode,
+		"duration_ms": durationMS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(raw, &m)
+}
+
+// FSUsageStop stops a running fs_usage trace and returns its captured output.
+func (c *Client) FSUsageStop(handle string) (map[string]any, error) {
+	raw, err := c.call("helper.fs_usage.stop", map[string]any{"handle": handle})
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(raw, &m)
+}

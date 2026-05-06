@@ -34,7 +34,7 @@ sudo ./spectra install-helper
 | System TCC.db | ✗ | ✓ via helper | ✓ via helper | ✓ via helper |
 | `lsof -i`, `nettop` | ✗ | ✓ | ✓ | ✓ |
 | `powermetrics`, system TCC, pf rules | ✗ | ✓ via helper | ✓ via helper | ✓ via helper |
-| `fs_usage` | ✗ | planned helper method | planned helper method | planned helper method |
+| bounded `fs_usage` traces | ✗ | ✓ via helper | ✓ via helper | ✓ via helper |
 | Listen on TCP / Unix socket | ✗ | ✓ | ✓ | ✓ |
 | Embed `tsnet` (Tailscale) | ✗ | ✓ | ✓ | ✓ |
 | Install LaunchDaemon | ✗ | ✓ via `sudo spectra install-helper` | ✓ via opt-in command | planned signed helper |
@@ -105,8 +105,8 @@ sudo spectra install-helper
 ## Why an optional sudo helper
 
 The capabilities that need root (`powermetrics`, system TCC.db, pf
-firewall rules, and future `fs_usage`) require a separately installed
-privileged helper. The user grants this once, explicitly:
+firewall rules, and bounded `fs_usage` traces) require a separately
+installed privileged helper. The user grants this once, explicitly:
 
 ```bash
 sudo spectra install-helper
