@@ -443,12 +443,15 @@ of machines Spectra has seen. `spectra fan` uses this list when
 | Flag | Default | Meaning |
 |---|---:|---|
 | `--json` | false | Emit JSON instead of a table |
+| `--probe` | false | Probe each host with `health` RPC and show reachability |
 
 ### Examples
 
 ```bash
 spectra hosts
 spectra hosts --json
+spectra hosts --probe
+spectra hosts --probe --json
 ```
 
 ## `spectra fan`
