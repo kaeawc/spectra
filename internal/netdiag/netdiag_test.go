@@ -35,7 +35,7 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 	if len(report.Endpoints) != 1 || report.Endpoints[0].Host != "api.example.com" {
 		t.Fatalf("endpoints = %+v", report.Endpoints)
 	}
-	if !report.Endpoints[0].DNS.OK || !report.Endpoints[0].Ports[0].TCP.OK {
+	if !report.Endpoints[0].DNS.OK || report.Endpoints[0].DNS.Status != "NOERROR" || report.Endpoints[0].DNS.QueryMS != 7 || !report.Endpoints[0].Ports[0].TCP.OK {
 		t.Fatalf("probes = %+v", report.Endpoints[0])
 	}
 	if len(report.Findings) < 3 {
@@ -51,9 +51,9 @@ func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 		"scutil --proxy":       []byte("HTTPSEnable : 1\nHTTPSProxy : zscaler.example\nHTTPSPort : 9443\n"),
 		"ifconfig":             []byte("utun4: flags=8051<UP,POINTOPOINT,RUNNING>\n\tinet 100.64.0.1\n"),
 		"nettop -P -L 2 -x -d -J bytes_in,bytes_out -t external": []byte(",bytes_in,bytes_out,\nSlack.412,100,50,\nbackupd.900,1000,1000,\n"),
-		"lsof -i -P -n": []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nSlack 412 alice 29u IPv4 0xabc 0t0 TCP 192.0.2.10:55123->api.example.com:443 (ESTABLISHED)\n"),
-		"dig +short +time=2 +tries=1 api.example.com": []byte("203.0.113.10\n"),
-		"traceroute -n -m 12 -w 1 api.example.com":    []byte("1 192.0.2.1 1.0 ms\n2 203.0.113.10 10.0 ms\n"),
+		"lsof -i -P -n":                            []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nSlack 412 alice 29u IPv4 0xabc 0t0 TCP 192.0.2.10:55123->api.example.com:443 (ESTABLISHED)\n"),
+		"dig +time=2 +tries=1 api.example.com":     []byte(digNOERRORFixture),
+		"traceroute -n -m 12 -w 1 api.example.com": []byte("1 192.0.2.1 1.0 ms\n2 203.0.113.10 10.0 ms\n"),
 	}
 	return func(name string, args ...string) ([]byte, error) {
 		cmd := fakeCommand(name, args...)
@@ -105,12 +105,33 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 	}
 }
 
+func TestParseDigStatuses(t *testing.T) {
+	ok := parseDig(digNOERRORFixture)
+	if ok.Status != "NOERROR" || ok.QueryMS != 7 || ok.Server != "1.1.1.1#53(1.1.1.1)" || len(ok.Addresses) != 1 {
+		t.Fatalf("NOERROR dig = %+v", ok)
+	}
+	nx := parseDig(";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1\n;; Query time: 5 msec\n;; SERVER: 10.0.0.2#53(10.0.0.2)\n")
+	if nx.Status != "NXDOMAIN" || len(nx.Addresses) != 0 {
+		t.Fatalf("NXDOMAIN dig = %+v", nx)
+	}
+}
+
 func fakeCommand(name string, args ...string) string {
 	if len(args) == 0 {
 		return name
 	}
 	return name + " " + strings.Join(args, " ")
 }
+
+const digNOERRORFixture = `; <<>> DiG 9.10 <<>> api.example.com
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 123
+;; QUESTION SECTION:
+;api.example.com. IN A
+;; ANSWER SECTION:
+api.example.com. 60 IN A 203.0.113.10
+;; Query time: 7 msec
+;; SERVER: 1.1.1.1#53(1.1.1.1)
+`
 
 func TestParseTraceroute(t *testing.T) {
 	hops := parseTraceroute("1 192.0.2.1 1.2 ms\n2 * * *\n3 203.0.113.10 12.0 ms\n")
