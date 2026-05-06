@@ -965,6 +965,7 @@ func nativeModuleRoots(appPath string) []string {
 func classifyNativeModule(absPath, relPath string) NativeModule {
 	m := NativeModule{Name: filepath.Base(absPath), Path: relPath, Language: "C++"}
 	readNativeModulePackage(absPath, &m)
+	appendNativeModuleCapabilityHints(&m)
 	libs := otoolL(absPath)
 	joined := strings.Join(libs, "\n")
 
@@ -1014,6 +1015,29 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 		m.Hints = append(m.Hints, "links libc++")
 	}
 	return m
+}
+
+var nativeModuleCapabilityHints = map[string][]string{
+	"@serialport/bindings-cpp": {"uses serial devices"},
+	"better-sqlite3":           {"uses local SQLite native binding"},
+	"fsevents":                 {"watches filesystem events"},
+	"iohook":                   {"can observe global input events"},
+	"keytar":                   {"uses macOS Keychain"},
+	"node-hid":                 {"uses HID devices"},
+	"node-keytar":              {"uses macOS Keychain"},
+	"node-mac-notifier":        {"uses Notification Center"},
+	"node-pty":                 {"uses pseudoterminals"},
+	"robotjs":                  {"can synthesize keyboard/mouse input"},
+	"sqlite3":                  {"uses local SQLite native binding"},
+	"uiohook-napi":             {"can observe global input events"},
+	"usb":                      {"uses USB devices"},
+}
+
+func appendNativeModuleCapabilityHints(m *NativeModule) {
+	if m.PackageName == "" {
+		return
+	}
+	m.Hints = append(m.Hints, nativeModuleCapabilityHints[strings.ToLower(m.PackageName)]...)
 }
 
 func readNativeModulePackage(absPath string, m *NativeModule) {

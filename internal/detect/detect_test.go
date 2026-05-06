@@ -384,6 +384,34 @@ func TestNativeModulePackageRootHandlesScopedPackages(t *testing.T) {
 	}
 }
 
+func TestNativeModuleCapabilityHintsFromPackageName(t *testing.T) {
+	app := makeBundle(t, "FakeKeytarNativeModule")
+	root := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/keytar")
+	mod := filepath.Join(root, "build/Release/keytar.node")
+	if err := os.MkdirAll(filepath.Dir(mod), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mod, []byte("native addon"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"keytar","version":"7.9.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := classifyNativeModule(mod, "Contents/Resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node")
+	if !hasHint(m.Hints, "uses macOS Keychain") {
+		t.Fatalf("hints = %v, want macOS Keychain hint", m.Hints)
+	}
+}
+
+func hasHint(hints []string, want string) bool {
+	for _, hint := range hints {
+		if hint == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {
 	app := makeBundle(t, "FakeNativeRoots")
 	if roots := nativeModuleRoots(app); len(roots) != 0 {

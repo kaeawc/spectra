@@ -15,6 +15,17 @@ For each `.node` file, Spectra first walks up to the owning
 surfaced alongside the module filename so output can distinguish
 `pty.node` from `node-pty@x.y.z`.
 
+Known high-signal packages also add capability hints. Examples:
+
+| Package | Hint |
+|---|---|
+| `keytar` / `node-keytar` | uses macOS Keychain |
+| `node-mac-notifier` | uses Notification Center |
+| `node-pty` | uses pseudoterminals |
+| `fsevents` | watches filesystem events |
+| `@serialport/bindings-cpp` | uses serial devices |
+| `usb` / `node-hid` | uses USB or HID devices |
+
 Then language classification runs in order:
 
 1. **Rust signal #1 — Cargo target path.** If the link map contains
@@ -99,8 +110,5 @@ useful classification than "Electron."
 
 ## Future ideas
 
-- Detect specific high-signal modules by name (e.g. `node-keytar` →
-  "uses macOS Keychain"; `node-mac-notifier` → "uses Notification Center")
-  and surface that as a capability hint.
 - Cross-reference with Electron's known security-sensitive modules to
   flag risk patterns.
