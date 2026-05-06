@@ -35,6 +35,11 @@ func TestParseConnectTarget(t *testing.T) {
 			raw:  "work-mac",
 			want: connectTarget{Network: "tcp", Address: "work-mac:7878"},
 		},
+		{
+			name: "trimmed host default port",
+			raw:  "  work-mac  ",
+			want: connectTarget{Network: "tcp", Address: "work-mac:7878"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,6 +51,14 @@ func TestParseConnectTarget(t *testing.T) {
 				t.Fatalf("target = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseConnectTargetErrors(t *testing.T) {
+	for _, raw := range []string{"", "   "} {
+		if _, err := parseConnectTarget(raw); err == nil {
+			t.Fatalf("parseConnectTarget(%q) succeeded, want error", raw)
+		}
 	}
 }
 
