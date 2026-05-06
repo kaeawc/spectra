@@ -62,6 +62,8 @@ spectra connect work-mac storage
 spectra connect work-mac storage /Applications/Slack.app
 spectra connect work-mac power
 spectra connect work-mac rules
+spectra connect work-mac cache
+spectra connect work-mac cache clear detect
 spectra connect work-mac snapshot list
 spectra connect work-mac snapshot diff snap-before snap-after
 spectra connect work-mac toolchains

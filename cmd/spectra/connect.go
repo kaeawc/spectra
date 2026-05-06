@@ -77,6 +77,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network-by-app [App.app ...]")
@@ -125,6 +126,9 @@ func parseConnectCall(args []string) (string, json.RawMessage, error) {
 }
 
 func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) {
+	if args[0] == "cache" {
+		return parseConnectCache(args)
+	}
 	if method, ok := connectPIDShortcuts()[args[0]]; ok {
 		return parseConnectPIDCall(args, method)
 	}
@@ -163,6 +167,26 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectSnapshot(args)
 	}
 	return "", nil, false, nil
+}
+
+func parseConnectCache(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) == 1 {
+		return "cache.stats", nil, true, nil
+	}
+	if len(args) == 2 {
+		switch args[1] {
+		case "stats":
+			return "cache.stats", nil, true, nil
+		case "clear":
+			return "cache.clear", nil, true, nil
+		default:
+			return "", nil, true, fmt.Errorf("connect cache supports `stats` and `clear`")
+		}
+	}
+	if len(args) == 3 {
+		return "cache.clear", connectParams(map[string]string{"kind": args[2]}), true, nil
+	}
+	return "", nil, true, fmt.Errorf("connect cache clear accepts at most one kind")
 }
 
 func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
@@ -220,7 +244,6 @@ func connectNoArgShortcuts() map[string]string {
 	return map[string]string{
 		"build-tools":         "toolchain.build_tools",
 		"brew":                "toolchain.brew",
-		"cache":               "cache.stats",
 		"cache-stats":         "cache.stats",
 		"connections":         "network.connections",
 		"health":              "health",

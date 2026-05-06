@@ -416,6 +416,9 @@ automatic tsnet registration and host discovery remain future work.
 | `spectra connect <target> brew` | Call `toolchain.brew` |
 | `spectra connect <target> runtimes` | Call `toolchain.runtimes` |
 | `spectra connect <target> build-tools` | Call `toolchain.build_tools` |
+| `spectra connect <target> cache` | Call `cache.stats` |
+| `spectra connect <target> cache stats` | Call `cache.stats` |
+| `spectra connect <target> cache clear [kind]` | Call `cache.clear` |
 | `spectra connect <target> call <method> [json-params]` | Call an RPC method directly |
 
 ### Examples
@@ -428,6 +431,8 @@ spectra connect work-mac jvm
 spectra connect work-mac jvm-threads 4012
 spectra connect work-mac metrics
 spectra connect work-mac metrics 4012 120
+spectra connect work-mac cache
+spectra connect work-mac cache clear detect
 spectra connect work-mac processes
 spectra connect work-mac network
 spectra connect work-mac storage /Applications/Slack.app
