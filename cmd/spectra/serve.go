@@ -30,6 +30,8 @@ func runServe(args []string) int {
 	tsnetStateDir := fs.String("tsnet-state-dir", "", "tsnet state directory (default: ~/.spectra/tsnet)")
 	tsnetEphemeral := fs.Bool("tsnet-ephemeral", false, "Register the tsnet node as ephemeral")
 	tsnetTags := fs.String("tsnet-tags", "", "Comma-separated Tailscale tags to advertise, such as tag:engineer")
+	tsnetAllowLogins := fs.String("tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
+	tsnetAllowNodes := fs.String("tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
@@ -90,17 +92,19 @@ func runServe(args []string) int {
 		detectStore = cacheStores.Detect
 	}
 	if err := serve.Run(ctx, serve.Options{
-		SockPath:       sock,
-		TCPAddr:        *tcpAddr,
-		TsnetEnabled:   *tsnetEnabled,
-		TsnetAddr:      *tsnetAddr,
-		TsnetHostname:  *tsnetHostname,
-		TsnetStateDir:  *tsnetStateDir,
-		TsnetEphemeral: *tsnetEphemeral,
-		TsnetTags:      splitCommaList(*tsnetTags),
-		SpectraVersion: version,
-		DetectStore:    detectStore,
-		Logger:         daemonLog,
+		SockPath:         sock,
+		TCPAddr:          *tcpAddr,
+		TsnetEnabled:     *tsnetEnabled,
+		TsnetAddr:        *tsnetAddr,
+		TsnetHostname:    *tsnetHostname,
+		TsnetStateDir:    *tsnetStateDir,
+		TsnetEphemeral:   *tsnetEphemeral,
+		TsnetTags:        splitCommaList(*tsnetTags),
+		TsnetAllowLogins: splitCommaList(*tsnetAllowLogins),
+		TsnetAllowNodes:  splitCommaList(*tsnetAllowNodes),
+		SpectraVersion:   version,
+		DetectStore:      detectStore,
+		Logger:           daemonLog,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

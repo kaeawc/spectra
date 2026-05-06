@@ -16,7 +16,7 @@ import (
 func TestRunHostsWithTable(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return []store.HostRow{
 			{
 				MachineUUID:   "UUID-1234567890",
@@ -40,7 +40,7 @@ func TestRunHostsWithTable(t *testing.T) {
 func TestRunHostsWithJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith([]string{"--json"}, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith([]string{"--json"}, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return []store.HostRow{{MachineUUID: "UUID-A", Hostname: "a.local"}}, nil
 	}, nil)
 	if code != 0 {
@@ -58,7 +58,7 @@ func TestRunHostsWithJSON(t *testing.T) {
 func TestRunHostsWithEmptyList(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return nil, nil
 	}, nil)
 	if code != 0 {
@@ -72,7 +72,7 @@ func TestRunHostsWithEmptyList(t *testing.T) {
 func TestRunHostsWithListError(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith(nil, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return nil, errors.New("db unavailable")
 	}, nil)
 	if code != 1 {
@@ -86,7 +86,7 @@ func TestRunHostsWithListError(t *testing.T) {
 func TestRunHostsWithProbe(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith([]string{"--probe"}, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith([]string{"--probe"}, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return []store.HostRow{
 			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
 			{MachineUUID: "UUID-B", Hostname: "deadbox.local", OSName: "macOS", OSVersion: "15.6.1"},
@@ -112,7 +112,7 @@ func TestRunHostsWithProbe(t *testing.T) {
 func TestRunHostsWithProbeJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith([]string{"--probe", "--json"}, &stdout, &stderr, func(context.Context, bool) ([]store.HostRow, error) {
+	code := runHostsWith([]string{"--probe", "--json"}, &stdout, &stderr, func(context.Context, bool, bool) ([]store.HostRow, error) {
 		return []store.HostRow{
 			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
 		}, nil
@@ -142,9 +142,34 @@ func TestRunHostsWithProbeJSON(t *testing.T) {
 func TestRunHostsWithDiscover(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := runHostsWith([]string{"--discover"}, &stdout, &stderr, func(_ context.Context, discover bool) ([]store.HostRow, error) {
+	code := runHostsWith([]string{"--discover"}, &stdout, &stderr, func(_ context.Context, discover bool, discoverDaemons bool) ([]store.HostRow, error) {
 		if !discover {
 			t.Fatal("discover flag was not passed")
+		}
+		if discoverDaemons {
+			t.Fatal("discover-daemons flag should not be passed")
+		}
+		return []store.HostRow{
+			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
+		}, nil
+	}, nil)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "work-mac.local") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunHostsWithDiscoverDaemons(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runHostsWith([]string{"--discover-daemons"}, &stdout, &stderr, func(_ context.Context, discover bool, discoverDaemons bool) ([]store.HostRow, error) {
+		if discover {
+			t.Fatal("discover flag should not be passed")
+		}
+		if !discoverDaemons {
+			t.Fatal("discover-daemons flag was not passed")
 		}
 		return []store.HostRow{
 			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
@@ -194,7 +219,7 @@ func TestListHostRowsWithDiscoveredPeers(t *testing.T) {
 		discoverHostRowsNow = origNow
 	})
 
-	rows, err := listHostRows(ctx, db, true)
+	rows, err := listHostRows(ctx, db, true, false)
 	if err != nil {
 		t.Fatalf("listHostRows = %v", err)
 	}
@@ -206,6 +231,46 @@ func TestListHostRowsWithDiscoveredPeers(t *testing.T) {
 	}
 	if rows[1].Hostname != "work-mac" || rows[1].MachineUUID != "uuid-work-mac" {
 		t.Fatalf("rows[1] = %+v", rows[1])
+	}
+}
+
+func TestListHostRowsWithDiscoveredDaemons(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dbPath := filepath.Join(home, ".spectra", "spectra.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	origDiscoverPeers := fanDiscoverPeers
+	fanDiscoverPeers = func() ([]string, error) {
+		return []string{"work-mac", "deadbox", "work-mac"}, nil
+	}
+	origProbe := discoverHostProbe
+	discoverHostProbe = func(_ context.Context, host string) error {
+		if host == "work-mac" {
+			return nil
+		}
+		return errors.New("unreachable")
+	}
+	t.Cleanup(func() {
+		fanDiscoverPeers = origDiscoverPeers
+		discoverHostProbe = origProbe
+	})
+
+	rows, err := listHostRows(ctx, db, false, true)
+	if err != nil {
+		t.Fatalf("listHostRows = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].Hostname != "work-mac" || rows[0].MachineUUID != "work-mac" {
+		t.Fatalf("row = %+v", rows[0])
 	}
 }
 
@@ -240,7 +305,7 @@ func TestListHostRowsDiscoveryErrorFallback(t *testing.T) {
 	}
 	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
 
-	rows, err := listHostRows(ctx, db, true)
+	rows, err := listHostRows(ctx, db, true, false)
 	if err != nil {
 		t.Fatalf("listHostRows = %v", err)
 	}
@@ -267,7 +332,7 @@ func TestListHostRowsDiscoveryErrorWithoutDb(t *testing.T) {
 	}
 	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
 
-	_, err = listHostRows(ctx, db, true)
+	_, err = listHostRows(ctx, db, true, false)
 	if err == nil {
 		t.Fatal("listHostRows succeeded, want error")
 	}

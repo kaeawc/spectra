@@ -3,10 +3,14 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,7 +76,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, nil, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -171,6 +175,257 @@ func TestRunLogsLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunTsnetUsesFactoryAndServesRPC(t *testing.T) {
+	dir, err := os.MkdirTemp("", "sp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sockPath := filepath.Join(dir, "s.sock")
+	dbPath := filepath.Join(dir, "t.db")
+	stateDir := filepath.Join(dir, "tsnet")
+	fake := newFakeTsnetFactory(t)
+	logs := logger.NewCapture(slog.LevelInfo)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, Options{
+			SockPath:         sockPath,
+			DBPath:           dbPath,
+			TsnetEnabled:     true,
+			TsnetAddr:        ":7879",
+			TsnetHostname:    "Work Mac.local",
+			TsnetStateDir:    stateDir,
+			TsnetEphemeral:   true,
+			TsnetTags:        []string{"tag:engineer", "tag:spectra"},
+			TsnetAllowLogins: []string{"alice@example.com"},
+			TsnetAllowNodes:  []string{"alice-mac.tailnet.ts.net"},
+			TsnetFactory:     fake.newNode,
+			SpectraVersion:   "test-version",
+			CacheRegistry:    cache.Default,
+			Logger:           logs,
+		})
+	}()
+
+	addr := fake.waitAddr(t)
+	conn, err := rpc.DialNetwork("tcp", addr)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "health",
+	}); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	var resp rpc.Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if resp.Error != nil {
+		cancel()
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	var health struct {
+		OK      bool   `json:"ok"`
+		Version string `json:"version"`
+		Tsnet   struct {
+			Enabled    bool   `json:"enabled"`
+			Hostname   string `json:"hostname"`
+			ListenAddr string `json:"listen_addr"`
+			IPv4       string `json:"ipv4"`
+			IPv6       string `json:"ipv6"`
+		} `json:"tsnet"`
+	}
+	raw, err := json.Marshal(resp.Result)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &health); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if !health.Tsnet.Enabled || health.Tsnet.Hostname != "work-mac" || health.Tsnet.ListenAddr != ":7879" {
+		cancel()
+		t.Fatalf("health tsnet = %+v", health.Tsnet)
+	}
+	if health.Tsnet.IPv4 != "100.64.0.10" || health.Tsnet.IPv6 != "fd7a:115c:a1e0::10" {
+		cancel()
+		t.Fatalf("health tsnet IPs = %s %s", health.Tsnet.IPv4, health.Tsnet.IPv6)
+	}
+	fake.waitWhoIs(t)
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancellation")
+	}
+
+	cfg := fake.config()
+	if cfg.StateDir != stateDir {
+		t.Fatalf("state dir = %q, want %q", cfg.StateDir, stateDir)
+	}
+	if cfg.Hostname != "work-mac" {
+		t.Fatalf("hostname = %q, want work-mac", cfg.Hostname)
+	}
+	if !cfg.Ephemeral {
+		t.Fatal("ephemeral = false, want true")
+	}
+	if !slices.Equal(cfg.Tags, []string{"tag:engineer", "tag:spectra"}) {
+		t.Fatalf("tags = %v", cfg.Tags)
+	}
+	if !slices.Equal(cfg.AllowLogins, []string{"alice@example.com"}) {
+		t.Fatalf("allow logins = %v", cfg.AllowLogins)
+	}
+	if !slices.Equal(cfg.AllowNodes, []string{"alice-mac.tailnet.ts.net"}) {
+		t.Fatalf("allow nodes = %v", cfg.AllowNodes)
+	}
+	if cfg.UserLogf == nil {
+		t.Fatal("UserLogf is nil")
+	}
+	if !fake.closed() {
+		t.Fatal("fake tsnet node was not closed")
+	}
+	waitForLog(t, logs, "daemon tsnet peer connected")
+	if got := fake.whoIsRemoteAddr(); got == "" {
+		t.Fatal("WhoIs was not called with a remote address")
+	}
+	info, err := os.Stat(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("state dir mode = %o, want 700", got)
+	}
+}
+
+func TestTsnetPolicyAllowsLoginOrNode(t *testing.T) {
+	policy := tsnetPolicy{
+		AllowedLogins: []string{"alice@example.com"},
+		AllowedNodes:  []string{"work-mac.tailnet.ts.net"},
+	}
+	tests := []struct {
+		name string
+		peer *TsnetPeer
+		want bool
+	}{
+		{
+			name: "login match",
+			peer: &TsnetPeer{LoginName: "Alice@Example.com", NodeName: "other.tailnet.ts.net."},
+			want: true,
+		},
+		{
+			name: "node match",
+			peer: &TsnetPeer{LoginName: "bob@example.com", NodeName: "work-mac.tailnet.ts.net."},
+			want: true,
+		},
+		{
+			name: "no match",
+			peer: &TsnetPeer{LoginName: "bob@example.com", NodeName: "other.tailnet.ts.net."},
+			want: false,
+		},
+		{
+			name: "nil peer",
+			peer: nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := policy.Allows(tt.peer); got != tt.want {
+				t.Fatalf("Allows = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTsnetIdentityListenerRejectsDisallowedPeer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	logs := logger.NewCapture(slog.LevelInfo)
+	fake := newFakeTsnetFactory(t)
+	fake.peer = TsnetPeer{
+		LoginName:   "bob@example.com",
+		DisplayName: "Bob Example",
+		NodeName:    "bob-mac.tailnet.ts.net.",
+	}
+	wrapped := &tsnetIdentityListener{
+		Listener: ln,
+		node:     fake.newNode(TsnetConfig{}),
+		log:      logs,
+		policy:   tsnetPolicy{AllowedLogins: []string{"alice@example.com"}},
+	}
+	errCh := make(chan error, 1)
+	connCh := make(chan net.Conn, 1)
+	go func() {
+		conn, err := wrapped.Accept()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		connCh <- conn
+	}()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	fake.waitWhoIs(t)
+	_ = ln.Close()
+
+	select {
+	case conn := <-connCh:
+		conn.Close()
+		t.Fatal("disallowed peer was accepted")
+	case <-errCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Accept did not return after listener close")
+	}
+	waitForLog(t, logs, "daemon tsnet peer rejected")
+}
+
+func TestListenTsnetClosesNodeOnListenError(t *testing.T) {
+	dir := t.TempDir()
+	wantErr := errors.New("listen failed")
+	fake := newFakeTsnetFactory(t)
+	fake.listenErr = wantErr
+
+	ln, node, status, err := listenTsnet(Options{
+		TsnetAddr:     ":7879",
+		TsnetHostname: "work-mac",
+		TsnetStateDir: dir,
+		TsnetFactory:  fake.newNode,
+	}, logger.Discard())
+	if err == nil {
+		t.Fatal("listenTsnet err = nil, want error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("listenTsnet err = %v, want %v", err, wantErr)
+	}
+	if ln != nil || node != nil || status != nil {
+		t.Fatalf("listenTsnet returned values on error: %v %v %v", ln, node, status)
+	}
+	if !fake.closed() {
+		t.Fatal("fake tsnet node was not closed after Listen error")
+	}
+}
+
 func TestSanitizeTsnetHostname(t *testing.T) {
 	tests := map[string]string{
 		"Work Mac.local": "work-mac",
@@ -185,6 +440,131 @@ func TestSanitizeTsnetHostname(t *testing.T) {
 	}
 }
 
+type fakeTsnetFactory struct {
+	t *testing.T
+
+	mu          sync.Mutex
+	ready       chan struct{}
+	whois       chan struct{}
+	cfg         TsnetConfig
+	ln          net.Listener
+	listenErr   error
+	closeCalled bool
+	whoisCalled bool
+	remoteAddr  string
+	peer        TsnetPeer
+}
+
+func newFakeTsnetFactory(t *testing.T) *fakeTsnetFactory {
+	t.Helper()
+	return &fakeTsnetFactory{
+		t:     t,
+		ready: make(chan struct{}),
+		whois: make(chan struct{}),
+		peer: TsnetPeer{
+			LoginName:   "alice@example.com",
+			DisplayName: "Alice Example",
+			NodeName:    "alice-mac.tailnet.ts.net.",
+		},
+	}
+}
+
+func (f *fakeTsnetFactory) newNode(cfg TsnetConfig) TsnetNode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cfg = cfg
+	return (*fakeTsnetNode)(f)
+}
+
+func (f *fakeTsnetFactory) config() TsnetConfig {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cfg
+}
+
+func (f *fakeTsnetFactory) waitAddr(t *testing.T) string {
+	t.Helper()
+	select {
+	case <-f.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake tsnet listener was not created")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ln == nil {
+		t.Fatal("fake tsnet listener was not created")
+	}
+	return f.ln.Addr().String()
+}
+
+func (f *fakeTsnetFactory) closed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closeCalled
+}
+
+func (f *fakeTsnetFactory) waitWhoIs(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.whois:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake tsnet WhoIs was not called")
+	}
+}
+
+func (f *fakeTsnetFactory) whoIsRemoteAddr() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.remoteAddr
+}
+
+type fakeTsnetNode fakeTsnetFactory
+
+func (n *fakeTsnetNode) Listen(network string, _ string) (net.Listener, error) {
+	f := (*fakeTsnetFactory)(n)
+	if f.listenErr != nil {
+		return nil, f.listenErr
+	}
+	ln, err := net.Listen(network, "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	f.ln = ln
+	f.mu.Unlock()
+	close(f.ready)
+	return ln, nil
+}
+
+func (n *fakeTsnetNode) TailscaleIPs() (netip.Addr, netip.Addr) {
+	return netip.MustParseAddr("100.64.0.10"), netip.MustParseAddr("fd7a:115c:a1e0::10")
+}
+
+func (n *fakeTsnetNode) WhoIs(_ context.Context, remoteAddr string) (*TsnetPeer, error) {
+	f := (*fakeTsnetFactory)(n)
+	f.mu.Lock()
+	f.remoteAddr = remoteAddr
+	if !f.whoisCalled {
+		f.whoisCalled = true
+		close(f.whois)
+	}
+	peer := f.peer
+	f.mu.Unlock()
+	return &peer, nil
+}
+
+func (n *fakeTsnetNode) Close() error {
+	f := (*fakeTsnetFactory)(n)
+	f.mu.Lock()
+	f.closeCalled = true
+	ln := f.ln
+	f.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
+	}
+	return nil
+}
+
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -195,6 +575,18 @@ func waitForSocket(t *testing.T, path string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("socket %s was not created", path)
+}
+
+func waitForLog(t *testing.T, logs *logger.Capture, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if logs.HasMessage(msg) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("missing log %q: %+v", msg, logs.Records())
 }
 
 func TestDaemonSnapshotList(t *testing.T) {

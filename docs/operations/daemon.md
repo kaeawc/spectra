@@ -59,6 +59,12 @@ Tailscale login URL to the daemon log or stderr. `--tsnet-hostname`
 controls the MagicDNS name, and `--tsnet-tags` advertises comma-separated
 tags for ACL-managed tailnets.
 
+By default, any peer allowed by Tailscale ACLs can connect to the tsnet
+listener. Add `--tsnet-allow-logins` or `--tsnet-allow-nodes` to enforce a
+Spectra-side allowlist using Tailscale `WhoIs` identity. Login names and node
+names are exact matches after case normalization; node names may include or
+omit the trailing dot returned by Tailscale.
+
 ## RPC surface
 
 JSON-RPC 2.0 methods, organized by concern:
@@ -125,8 +131,9 @@ mediates and applies its own access control.
 
 Current local mode relies on Unix socket filesystem permissions. TCP mode
 relies on the network path that exposes it. `tsnet` mode relies on
-Tailscale identity and ACLs. Spectra-layer remote tokens remain future
-work with the remote portal.
+Tailscale identity and ACLs, with optional `WhoIs`-based allowlists for
+login names and node names. Spectra-layer remote tokens remain future work
+with the remote portal.
 
 ## Security posture
 
@@ -147,8 +154,10 @@ work with the remote portal.
 ## Health
 
 Each daemon exposes a JSON-RPC `health` method returning
-`{ ok: true, version: ... }` on the Unix socket and any opted-in TCP
-listener. Used by:
+`{ ok: true, version: ... }` on the Unix socket and any opted-in TCP or
+tsnet listener. When `--tsnet` is enabled, the result also includes a
+`tsnet` object with the managed node hostname, listen address, and current
+Tailscale IPs when assigned. Used by:
 
 - `spectra status` — local health check.
 - `spectra connect <target>` — Unix or TCP health check.
@@ -158,9 +167,10 @@ listener. Used by:
 
 The daemon writes JSONL records for listener startup, storage readiness,
 serving start, and shutdown/error events. These records include socket paths,
-TCP listen addresses, database path, version, and listener count. They do not
-include heap-dump contents, JFR contents, process command-line arguments, or
-RPC payloads.
+TCP listen addresses, database path, version, and listener count. For tsnet
+connections, the daemon also logs Tailscale `WhoIs` identity metadata for the
+connecting peer when available. Logs do not include heap-dump contents, JFR
+contents, process command-line arguments, or RPC payloads.
 
 ## Implementation order
 
@@ -184,5 +194,4 @@ Implemented:
 Future:
 
 1. CLI-wide RPC dispatch instead of in-process command execution.
-2. Managed tsnet host discovery.
-3. TUI/GUI clients.
+2. TUI/GUI clients.

@@ -14,7 +14,7 @@ import (
 	"github.com/kaeawc/spectra/internal/store"
 )
 
-type hostLister func(context.Context, bool) ([]store.HostRow, error)
+type hostLister func(context.Context, bool, bool) ([]store.HostRow, error)
 type hostProber func(ctx context.Context, host string) error
 
 func runHosts(args []string) int {
@@ -29,8 +29,8 @@ func runHosts(args []string) int {
 		return 1
 	}
 	defer db.Close()
-	return runHostsWith(args, os.Stdout, os.Stderr, func(ctx context.Context, discover bool) ([]store.HostRow, error) {
-		return listHostRows(ctx, db, discover)
+	return runHostsWith(args, os.Stdout, os.Stderr, func(ctx context.Context, discover bool, discoverDaemons bool) ([]store.HostRow, error) {
+		return listHostRows(ctx, db, discover, discoverDaemons)
 	}, probeHost)
 }
 
@@ -40,15 +40,16 @@ func runHostsWith(args []string, stdout io.Writer, stderr io.Writer, list hostLi
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	probeFlag := fs.Bool("probe", false, "Probe each known host and report reachability")
 	discoverFlag := fs.Bool("discover", false, "Merge tailscale peer discovery from `tailscale status --json`")
+	discoverDaemonsFlag := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from Tailscale peers")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe] [--discover]")
+		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe] [--discover|--discover-daemons]")
 		return 2
 	}
 
-	rows, err := list(context.Background(), *discoverFlag)
+	rows, err := list(context.Background(), *discoverFlag, *discoverDaemonsFlag)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -146,8 +147,9 @@ type hostProbeRow struct {
 }
 
 var discoverHostRowsNow = time.Now
+var discoverHostProbe hostProber = probeHost
 
-func listHostRows(ctx context.Context, db *store.DB, discover bool) ([]store.HostRow, error) {
+func listHostRows(ctx context.Context, db *store.DB, discover bool, discoverDaemons bool) ([]store.HostRow, error) {
 	rows, err := db.ListHosts(ctx)
 	if err != nil {
 		return nil, err
@@ -165,7 +167,7 @@ func listHostRows(ctx context.Context, db *store.DB, discover bool) ([]store.Hos
 		seen[name] = struct{}{}
 		out = append(out, row)
 	}
-	if discover {
+	if discover || discoverDaemons {
 		discovered, err := fanDiscoverPeers()
 		if err != nil && len(rows) == 0 {
 			return nil, fmt.Errorf("discover remote hosts: %w", err)
@@ -177,6 +179,11 @@ func listHostRows(ctx context.Context, db *store.DB, discover bool) ([]store.Hos
 			}
 			if _, ok := seen[name]; ok {
 				continue
+			}
+			if discoverDaemons {
+				if err := discoverHostProbe(ctx, name); err != nil {
+					continue
+				}
 			}
 			seen[name] = struct{}{}
 			out = append(out, store.HostRow{

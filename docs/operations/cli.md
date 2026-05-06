@@ -331,6 +331,8 @@ user's Unix socket at `~/.spectra/sock`.
 | `--tsnet-state-dir` | `~/.spectra/tsnet` | tsnet state directory |
 | `--tsnet-ephemeral` | false | Register the tsnet node as ephemeral |
 | `--tsnet-tags` | empty | Comma-separated Tailscale tags to advertise |
+| `--tsnet-allow-logins` | empty | Comma-separated Tailscale login names allowed to connect |
+| `--tsnet-allow-nodes` | empty | Comma-separated Tailscale node names allowed to connect |
 | `--log-file` | `~/Library/Logs/Spectra/daemon.jsonl` | JSONL daemon log path |
 | `--no-log-file` | false | Disable daemon JSONL logging |
 | `--daemon` | false | Start detached and return |
@@ -339,7 +341,9 @@ TCP RPC has no Spectra-layer authentication today. Keep it on loopback
 for local use or expose it only through SSH, Tailscale, or firewall
 controls you trust. `--tsnet` uses Tailscale identity and ACLs; first-run
 enrollment uses existing tsnet state, `TS_AUTHKEY`, or a login URL written
-to the daemon log or stderr.
+to the daemon log or stderr. `--tsnet-allow-logins` and
+`--tsnet-allow-nodes` add an optional Spectra-side allowlist on top of
+Tailscale ACLs.
 
 ### Examples
 
@@ -351,6 +355,7 @@ spectra serve --tcp 127.0.0.1:7878
 spectra serve --tcp 100.64.0.5:7878 --allow-remote
 spectra serve --tsnet --tsnet-hostname work-mac
 spectra serve --tsnet --tsnet-hostname work-mac --tsnet-tags tag:engineer
+spectra serve --tsnet --tsnet-allow-logins alice@example.com,bob@example.com
 ```
 
 ## `spectra install-daemon`
@@ -371,7 +376,8 @@ launchd go to `~/Library/Logs/Spectra/daemon.launchd.*.log`.
 The install and `print-plist` forms accept the serve-listener flags
 `--sock`, `--tcp`, `--allow-remote`, `--tsnet`, `--tsnet-addr`,
 `--tsnet-hostname`, `--tsnet-state-dir`, `--tsnet-ephemeral`,
-`--tsnet-tags`, `--log-file`, and `--no-log-file`.
+`--tsnet-tags`, `--tsnet-allow-logins`, `--tsnet-allow-nodes`,
+`--log-file`, and `--no-log-file`.
 
 ### Examples
 
@@ -498,6 +504,7 @@ of machines Spectra has seen. `spectra fan` uses this list when
 | `--json` | false | Emit JSON instead of a table |
 | `--probe` | false | Probe each host with `health` RPC and show reachability |
 | `--discover` | false | Merge tailscale peers from `tailscale status --json` into host list |
+| `--discover-daemons` | false | Discover Tailscale peers running reachable Spectra daemons |
 
 ### Examples
 
@@ -507,6 +514,7 @@ spectra hosts --json
 spectra hosts --probe
 spectra hosts --probe --json
 spectra hosts --discover
+spectra hosts --discover-daemons
 ``` 
 
 ## `spectra fan`
@@ -520,6 +528,7 @@ is optional; when omitted, fan-out uses hosts from the local store.
 | `--hosts` | optional | Comma-separated daemon targets (`local`, `host`, `host:port`, `unix:/path`). Omit to use hosts from local `spectra hosts` data. |
 | `--probe` | false | Probe each target with `health` RPC and skip unreachable hosts when true. |
 | `--discover` | false | Include tailscale peers from `tailscale status --json` and merge with local-known hosts. |
+| `--discover-daemons` | false | Discover Tailscale peers running reachable Spectra daemons and merge with local-known hosts. |
 | `--timeout` | `3s` | Dial/read timeout per target |
 
 The command accepts the same typed shortcuts and raw `call` form as
@@ -536,6 +545,7 @@ spectra fan --hosts work-mac,alice-laptop snapshot
 spectra fan --hosts work-mac,alice-laptop call network.connections
 spectra fan inspect /Applications/Slack.app
 spectra fan --discover status
+spectra fan --discover-daemons status
 spectra fan --discover --probe inspect /Applications/Slack.app
 ```
 
