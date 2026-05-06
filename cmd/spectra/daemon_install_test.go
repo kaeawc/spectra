@@ -11,16 +11,18 @@ import (
 
 func TestDaemonAgentServeArgs(t *testing.T) {
 	opts := daemonAgentOptions{
-		SockPath:       "/tmp/spectra.sock",
-		TCPAddr:        "127.0.0.1:7878",
-		AllowRemote:    true,
-		TsnetEnabled:   true,
-		TsnetAddr:      ":7879",
-		TsnetHostname:  "work-mac",
-		TsnetStateDir:  "/tmp/spectra-tsnet",
-		TsnetEphemeral: true,
-		TsnetTags:      "tag:engineer,tag:spectra",
-		LogFile:        "/tmp/spectra.jsonl",
+		SockPath:         "/tmp/spectra.sock",
+		TCPAddr:          "127.0.0.1:7878",
+		AllowRemote:      true,
+		TsnetEnabled:     true,
+		TsnetAddr:        ":7879",
+		TsnetHostname:    "work-mac",
+		TsnetStateDir:    "/tmp/spectra-tsnet",
+		TsnetEphemeral:   true,
+		TsnetTags:        "tag:engineer,tag:spectra",
+		TsnetAllowLogins: "alice@example.com,bob@example.com",
+		TsnetAllowNodes:  "alice-mac,bob-mac.tailnet.ts.net.",
+		LogFile:          "/tmp/spectra.jsonl",
 	}
 	got := opts.serveArgs()
 	want := []string{
@@ -34,6 +36,8 @@ func TestDaemonAgentServeArgs(t *testing.T) {
 		"--tsnet-state-dir", "/tmp/spectra-tsnet",
 		"--tsnet-ephemeral",
 		"--tsnet-tags", "tag:engineer,tag:spectra",
+		"--tsnet-allow-logins", "alice@example.com,bob@example.com",
+		"--tsnet-allow-nodes", "alice-mac,bob-mac.tailnet.ts.net.",
 		"--log-file", "/tmp/spectra.jsonl",
 	}
 	if !slices.Equal(got, want) {

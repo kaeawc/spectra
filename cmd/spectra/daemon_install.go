@@ -18,18 +18,20 @@ import (
 const daemonAgentLabel = "dev.spectra.daemon"
 
 type daemonAgentOptions struct {
-	SockPath       string
-	TCPAddr        string
-	AllowRemote    bool
-	TsnetEnabled   bool
-	TsnetAddr      string
-	TsnetHostname  string
-	TsnetStateDir  string
-	TsnetEphemeral bool
-	TsnetTags      string
-	LogFile        string
-	NoLogFile      bool
-	NoLoad         bool
+	SockPath         string
+	TCPAddr          string
+	AllowRemote      bool
+	TsnetEnabled     bool
+	TsnetAddr        string
+	TsnetHostname    string
+	TsnetStateDir    string
+	TsnetEphemeral   bool
+	TsnetTags        string
+	TsnetAllowLogins string
+	TsnetAllowNodes  string
+	LogFile          string
+	NoLogFile        bool
+	NoLoad           bool
 }
 
 type daemonAgentDeps struct {
@@ -145,6 +147,8 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 	fs.StringVar(&opts.TsnetStateDir, "tsnet-state-dir", "", "tsnet state directory passed to spectra serve")
 	fs.BoolVar(&opts.TsnetEphemeral, "tsnet-ephemeral", false, "Register the tsnet node as ephemeral")
 	fs.StringVar(&opts.TsnetTags, "tsnet-tags", "", "Comma-separated Tailscale tags to advertise")
+	fs.StringVar(&opts.TsnetAllowLogins, "tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
+	fs.StringVar(&opts.TsnetAllowNodes, "tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
 	fs.StringVar(&opts.LogFile, "log-file", "", "JSONL daemon log path")
 	fs.BoolVar(&opts.NoLogFile, "no-log-file", false, "Disable daemon JSONL log file")
 	fs.BoolVar(&opts.NoLoad, "no-load", false, "Write plist but do not bootstrap with launchd")
@@ -152,7 +156,7 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 		return daemonAgentOptions{}, false
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--log-file path|--no-log-file] [--no-load]")
+		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--tsnet-allow-logins users] [--tsnet-allow-nodes nodes] [--log-file path|--no-log-file] [--no-load]")
 		return daemonAgentOptions{}, false
 	}
 	if opts.LogFile != "" && opts.NoLogFile {
@@ -194,6 +198,12 @@ func (o daemonAgentOptions) serveArgs() []string {
 	}
 	if o.TsnetTags != "" {
 		args = append(args, "--tsnet-tags", o.TsnetTags)
+	}
+	if o.TsnetAllowLogins != "" {
+		args = append(args, "--tsnet-allow-logins", o.TsnetAllowLogins)
+	}
+	if o.TsnetAllowNodes != "" {
+		args = append(args, "--tsnet-allow-nodes", o.TsnetAllowNodes)
 	}
 	if o.LogFile != "" {
 		args = append(args, "--log-file", o.LogFile)

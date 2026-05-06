@@ -34,7 +34,6 @@ import (
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
-	"tailscale.com/tsnet"
 )
 
 var (
@@ -55,19 +54,22 @@ func DefaultSockPath() (string, error) {
 
 // Options configures the daemon.
 type Options struct {
-	SockPath       string
-	TCPAddr        string
-	TsnetEnabled   bool
-	TsnetAddr      string
-	TsnetHostname  string
-	TsnetStateDir  string
-	TsnetEphemeral bool
-	TsnetTags      []string
-	SpectraVersion string
-	DBPath         string              // empty = store.DefaultPath()
-	CacheRegistry  *cache.Registry     // nil = cache.Default
-	DetectStore    *cache.ShardedStore // nil = no detect caching
-	Logger         logger.Logger       // nil = discard
+	SockPath         string
+	TCPAddr          string
+	TsnetEnabled     bool
+	TsnetAddr        string
+	TsnetHostname    string
+	TsnetStateDir    string
+	TsnetEphemeral   bool
+	TsnetTags        []string
+	TsnetAllowLogins []string
+	TsnetAllowNodes  []string
+	TsnetFactory     TsnetFactory
+	SpectraVersion   string
+	DBPath           string              // empty = store.DefaultPath()
+	CacheRegistry    *cache.Registry     // nil = cache.Default
+	DetectStore      *cache.ShardedStore // nil = no detect caching
+	Logger           logger.Logger       // nil = discard
 }
 
 const DefaultTsnetAddr = ":7878"
@@ -105,7 +107,8 @@ func Run(ctx context.Context, opts Options) error {
 	log.Info("daemon unix listener ready", "socket", sockPath)
 
 	listeners := []net.Listener{ln}
-	var ts *tsnet.Server
+	var ts TsnetNode
+	var tsnetStatus *TsnetStatus
 	if opts.TCPAddr != "" {
 		tcpLn, err := net.Listen("tcp", opts.TCPAddr)
 		if err != nil {
@@ -117,13 +120,14 @@ func Run(ctx context.Context, opts Options) error {
 		log.Warn("daemon tcp listener ready", "address", opts.TCPAddr)
 	}
 	if opts.TsnetEnabled {
-		tsLn, tsServer, err := listenTsnet(opts, log)
+		tsLn, tsServer, status, err := listenTsnet(opts, log)
 		if err != nil {
 			closeListeners(listeners)
 			os.Remove(sockPath)
 			return err
 		}
 		ts = tsServer
+		tsnetStatus = status
 		listeners = append(listeners, tsLn)
 	}
 	defer os.Remove(sockPath)
@@ -163,7 +167,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore)
+	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, tsnetStatus, ts)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
 	// Close the listener when ctx is cancelled to unblock Accept.
@@ -201,20 +205,20 @@ func DefaultTsnetHostname() string {
 	return "spectra"
 }
 
-func listenTsnet(opts Options, log logger.Logger) (net.Listener, *tsnet.Server, error) {
+func listenTsnet(opts Options, log logger.Logger) (net.Listener, TsnetNode, *TsnetStatus, error) {
 	stateDir := opts.TsnetStateDir
 	if stateDir == "" {
 		var err error
 		stateDir, err = DefaultTsnetStateDir()
 		if err != nil {
-			return nil, nil, fmt.Errorf("serve: resolve tsnet state dir: %w", err)
+			return nil, nil, nil, fmt.Errorf("serve: resolve tsnet state dir: %w", err)
 		}
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
+		return nil, nil, nil, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
 	}
 	if err := os.Chmod(stateDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
+		return nil, nil, nil, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
 	}
 	addr := opts.TsnetAddr
 	if addr == "" {
@@ -226,25 +230,49 @@ func listenTsnet(opts Options, log logger.Logger) (net.Listener, *tsnet.Server, 
 	}
 	hostname = sanitizeTsnetHostname(hostname)
 	if hostname == "" {
-		return nil, nil, fmt.Errorf("serve: invalid empty tsnet hostname")
+		return nil, nil, nil, fmt.Errorf("serve: invalid empty tsnet hostname")
 	}
-	s := &tsnet.Server{
-		Dir:           stateDir,
-		Hostname:      hostname,
-		Ephemeral:     opts.TsnetEphemeral,
-		AdvertiseTags: opts.TsnetTags,
+	factory := opts.TsnetFactory
+	if factory == nil {
+		factory = NewTsnetServer
+	}
+	cfg := TsnetConfig{
+		StateDir:    stateDir,
+		Hostname:    hostname,
+		Ephemeral:   opts.TsnetEphemeral,
+		Tags:        opts.TsnetTags,
+		AllowLogins: opts.TsnetAllowLogins,
+		AllowNodes:  opts.TsnetAllowNodes,
 	}
 	if opts.Logger != nil {
-		s.UserLogf = func(format string, args ...any) {
+		cfg.UserLogf = func(format string, args ...any) {
 			log.Info("daemon tsnet status", "message", fmt.Sprintf(format, args...))
 		}
 	}
+	s := factory(cfg)
 	ln, err := s.Listen("tcp", addr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("serve: listen tsnet %s: %w", addr, err)
+		_ = s.Close()
+		return nil, nil, nil, fmt.Errorf("serve: listen tsnet %s: %w", addr, err)
+	}
+	if opts.Logger != nil || len(opts.TsnetAllowLogins) > 0 || len(opts.TsnetAllowNodes) > 0 {
+		ln = &tsnetIdentityListener{
+			Listener: ln,
+			node:     s,
+			log:      log,
+			policy: tsnetPolicy{
+				AllowedLogins: opts.TsnetAllowLogins,
+				AllowedNodes:  opts.TsnetAllowNodes,
+			},
+		}
+	}
+	status := &TsnetStatus{
+		Enabled:    true,
+		Hostname:   hostname,
+		ListenAddr: addr,
 	}
 	log.Info("daemon tsnet listener ready", "hostname", hostname, "address", addr, "state_dir", stateDir)
-	return ln, s, nil
+	return ln, s, status, nil
 }
 
 func sanitizeTsnetHostname(host string) string {
@@ -364,9 +392,23 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
-		return map[string]any{"ok": true, "version": version}, nil
+		result := map[string]any{"ok": true, "version": version}
+		if tsnetStatus != nil {
+			status := *tsnetStatus
+			if tsnetNode != nil {
+				ip4, ip6 := tsnetNode.TailscaleIPs()
+				if ip4.IsValid() {
+					status.IPv4 = ip4.String()
+				}
+				if ip6.IsValid() {
+					status.IPv6 = ip6.String()
+				}
+			}
+			result["tsnet"] = status
+		}
+		return result, nil
 	})
 
 	d.Register("snapshot.list", func(_ json.RawMessage) (any, error) {

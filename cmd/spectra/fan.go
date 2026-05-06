@@ -18,7 +18,7 @@ import (
 )
 
 type fanRPCCaller func(target connectTarget, timeout time.Duration, method string, params json.RawMessage) (json.RawMessage, error)
-type fanHostLister func(ctx context.Context, probeUnreachable bool, discover bool) ([]fanTarget, error)
+type fanHostLister func(ctx context.Context, probeUnreachable bool, discover bool, discoverDaemons bool) ([]fanTarget, error)
 type fanTargetProber func(ctx context.Context, target connectTarget, timeout time.Duration) error
 
 type fanOutput struct {
@@ -46,6 +46,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	hosts := fs.String("hosts", "", "Comma-separated daemon targets; defaults to discovered hosts")
 	probe := fs.Bool("probe", false, "When discovering hosts, skip entries that fail a health check")
 	discoverHosts := fs.Bool("discover", false, "Include tailscale peers from tailscale status --json")
+	discoverDaemons := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from Tailscale peers")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -53,7 +54,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	var targets []fanTarget
 	var err error
 	if strings.TrimSpace(*hosts) == "" {
-		targets, err = discover(context.Background(), *probe, *discoverHosts)
+		targets, err = discover(context.Background(), *probe, *discoverHosts, *discoverDaemons)
 	} else {
 		targets, err = parseFanTargets(*hosts)
 	}
@@ -91,7 +92,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 }
 
 func printFanUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [--discover] [status|host|jvm|processes|network|storage|power|rules]")
+	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [--discover|--discover-daemons] [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] call <method> [json-params]")
 }
@@ -119,7 +120,7 @@ func parseFanTargets(raw string) ([]fanTarget, error) {
 var fanProbeTarget fanTargetProber = probeFanTarget
 var fanDiscoverPeers func() ([]string, error) = discoverTailscalePeers
 
-func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover bool) ([]fanTarget, error) {
+func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover bool, discoverDaemons bool) ([]fanTarget, error) {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
 		return nil, err
@@ -152,7 +153,7 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover boo
 		seen[key] = struct{}{}
 		targets = append(targets, fanTarget{Name: name, Target: target})
 	}
-	if discover {
+	if discover || discoverDaemons {
 		discovered, err := fanDiscoverPeers()
 		if err != nil && len(targets) == 0 {
 			return nil, fmt.Errorf("discover remote hosts: %w", err)
@@ -169,6 +170,11 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover boo
 			key := target.Address
 			if _, ok := seen[key]; ok {
 				continue
+			}
+			if discoverDaemons {
+				if err := fanProbeTarget(ctx, target, 3*time.Second); err != nil {
+					continue
+				}
 			}
 			seen[key] = struct{}{}
 			targets = append(targets, fanTarget{Name: name, Target: target})

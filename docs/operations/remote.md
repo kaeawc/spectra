@@ -39,6 +39,14 @@ Tailscale login URL to its log or stderr. Once enrolled, peers allowed by
 Tailscale ACLs can connect through the MagicDNS name and the same
 `spectra connect` commands.
 
+To narrow access inside an already-permitted tailnet, add a Spectra-side
+allowlist:
+
+```bash
+spectra serve --tsnet --tsnet-allow-logins alice@example.com,bob@example.com
+spectra serve --tsnet --tsnet-allow-nodes alice-mac.tailnet.ts.net
+```
+
 ## What you can do
 
 Any RPC method the daemon exposes is available remotely through the
@@ -97,8 +105,10 @@ When `--hosts` is omitted, `spectra fan` can merge:
 - hosts from local `spectra hosts` data (`~/.spectra/spectra.db`), and
 - optional tailscale peers (`spectra fan --discover`) from `tailscale status --json`.
 
-This currently supports a manual discovery opt-in path while we migrate toward
-fully managed tsnet fan-out:
+This supports both raw Tailscale peer merge and managed Spectra daemon
+discovery. Use `--discover` to include all Tailscale peers from
+`tailscale status --json`; use `--discover-daemons` to probe those peers and
+keep only reachable Spectra daemons:
 
 ```bash
 spectra hosts
@@ -109,15 +119,16 @@ spectra fan inspect /Applications/Slack.app
 spectra fan --hosts work-mac,alice-laptop jvm
 spectra fan --hosts work-mac,alice-laptop network-by-app /Applications/Slack.app
 spectra fan --discover status
+spectra fan --discover-daemons status
 ```
 
 The client makes parallel RPC calls to each daemon and aggregates
 results locally into one JSON envelope. The remaining intended shape is:
 
 ```bash
-spectra hosts                                # include discovered Spectra hosts
-spectra hosts --probe                         # report reachable hosts
-spectra fan inspect /Applications/Slack.app  # inspect Slack on every discovered host
+spectra hosts --discover-daemons             # include reachable Spectra daemons
+spectra hosts --probe                        # report reachable hosts
+spectra fan --discover-daemons inspect /Applications/Slack.app
 spectra diff laptop work-mac                 # compare two hosts
 ```
 
@@ -222,9 +233,7 @@ spectra fan --hosts alice-laptop,bob-laptop snapshot
 
 ## Implementation order
 
-The local daemon, explicit TCP transport, and embedded tsnet listener are
-implemented. Remaining remote work:
+The local daemon, explicit TCP transport, embedded tsnet listener, and
+managed Tailscale daemon discovery are implemented. Remaining remote work:
 
-1. Add managed tsnet host discovery so `spectra hosts` includes reachable daemons
-   and `spectra fan` can run without an explicit `--hosts` list.
-2. Add TUI support against local-or-remote daemon targets.
+1. Add TUI support against local-or-remote daemon targets.
