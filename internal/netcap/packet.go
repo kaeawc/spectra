@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	etherTypeIPv4 = 0x0800
-	ipProtoTCP    = 6
-	ipProtoUDP    = 17
+	etherTypeIPv4  = 0x0800
+	loopFamilyIPv4 = 2
+	ipProtoTCP     = 6
+	ipProtoUDP     = 17
 )
 
 // FlowPacket is a decoded IPv4 TCP/UDP packet and its transport payload.
@@ -36,9 +37,23 @@ func DecodeFlowPacket(linkType uint32, data []byte) (FlowPacket, error) {
 		return decodeIPv4Flow(data[14:])
 	case LinkTypeRaw:
 		return decodeIPv4Flow(data)
+	case LinkTypeNull, LinkTypeLoop:
+		return decodeLoopbackFlow(data)
 	default:
 		return FlowPacket{}, fmt.Errorf("unsupported link type %d", linkType)
 	}
+}
+
+func decodeLoopbackFlow(data []byte) (FlowPacket, error) {
+	if len(data) < 4 {
+		return FlowPacket{}, fmt.Errorf("loopback packet too short")
+	}
+	familyBE := binary.BigEndian.Uint32(data[:4])
+	familyLE := binary.LittleEndian.Uint32(data[:4])
+	if familyBE != loopFamilyIPv4 && familyLE != loopFamilyIPv4 {
+		return FlowPacket{}, fmt.Errorf("unsupported loopback family")
+	}
+	return decodeIPv4Flow(data[4:])
 }
 
 func decodeIPv4Flow(data []byte) (FlowPacket, error) {

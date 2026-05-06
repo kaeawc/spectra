@@ -36,6 +36,32 @@ func TestDecodeRawIPv4UDP(t *testing.T) {
 	}
 }
 
+func TestDecodeLoopbackIPv4TCP(t *testing.T) {
+	payload := []byte("HTTP/1.1 200 OK\r\n\r\n")
+	packet := loopbackPacket(binary.LittleEndian, ipv4Packet(6, tcpSegment(80, 53124, payload)))
+
+	pkt, err := DecodeFlowPacket(LinkTypeNull, packet)
+	if err != nil {
+		t.Fatalf("DecodeFlowPacket: %v", err)
+	}
+	if pkt.TransportProto != "tcp" || pkt.SrcPort != 80 || pkt.DstPort != 53124 || !bytes.Equal(pkt.Payload, payload) {
+		t.Fatalf("loopback packet = %+v", pkt)
+	}
+}
+
+func TestDecodeLoopIPv4UDP(t *testing.T) {
+	payload := []byte{1, 2, 3}
+	packet := loopbackPacket(binary.BigEndian, ipv4Packet(17, udpDatagram(53, 53000, payload)))
+
+	pkt, err := DecodeFlowPacket(LinkTypeLoop, packet)
+	if err != nil {
+		t.Fatalf("DecodeFlowPacket: %v", err)
+	}
+	if pkt.TransportProto != "udp" || pkt.SrcPort != 53 || pkt.DstPort != 53000 || !bytes.Equal(pkt.Payload, payload) {
+		t.Fatalf("loop packet = %+v", pkt)
+	}
+}
+
 func TestDecodeFlowPacketRejectsUnsupportedPackets(t *testing.T) {
 	tests := []struct {
 		name string
@@ -45,6 +71,8 @@ func TestDecodeFlowPacketRejectsUnsupportedPackets(t *testing.T) {
 		{name: "link", link: LinkTypeLinuxSLL, data: []byte{1, 2, 3}},
 		{name: "short ethernet", link: LinkTypeEthernet, data: []byte{1, 2, 3}},
 		{name: "non ipv4 ethernet", link: LinkTypeEthernet, data: append(make([]byte, 12), 0x86, 0xdd)},
+		{name: "short loopback", link: LinkTypeNull, data: []byte{1, 2, 3}},
+		{name: "non ipv4 loopback", link: LinkTypeNull, data: loopbackPacket(binary.LittleEndian, []byte{0x60, 0})},
 		{name: "short ipv4", link: LinkTypeRaw, data: []byte{0x45, 0}},
 		{name: "unsupported ip proto", link: LinkTypeRaw, data: ipv4Packet(1, []byte{1, 2, 3, 4})},
 		{name: "fragmented ipv4", link: LinkTypeRaw, data: fragmentedIPv4Packet()},
@@ -72,6 +100,13 @@ func ethernetFrame(ip []byte) []byte {
 	frame[13] = 0x00
 	copy(frame[14:], ip)
 	return frame
+}
+
+func loopbackPacket(order binary.ByteOrder, ip []byte) []byte {
+	packet := make([]byte, 4+len(ip))
+	order.PutUint32(packet[:4], loopFamilyIPv4)
+	copy(packet[4:], ip)
+	return packet
 }
 
 func ipv4Packet(proto byte, body []byte) []byte {
