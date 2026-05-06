@@ -733,6 +733,24 @@ func TestDaemonHelperFirewallRulesRequiresHelper(t *testing.T) {
 	}
 }
 
+func TestDaemonHelperFSUsageStartRequiresPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 156, "helper.fs_usage.start", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonHelperFSUsageStopRequiresHandle(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 157, "helper.fs_usage.stop", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when handle missing")
+	}
+}
+
 func TestDaemonHelperTCCRequiresBundleID(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()

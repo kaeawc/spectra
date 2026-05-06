@@ -4,6 +4,7 @@
 //
 //   - System TCC.db queries
 //   - powermetrics samples
+//   - fs_usage traces for a specific PID
 //   - Full process tree (including system daemons)
 //
 // The socket is /var/run/spectra-helper.sock (0660 root:_spectra).

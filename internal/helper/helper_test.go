@@ -2,8 +2,10 @@ package helper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"testing"
@@ -301,5 +303,90 @@ func TestFirewallRulesUsesPFCTL(t *testing.T) {
 	}
 	if m["raw_rules"] != "block drop all\npass out all\n" {
 		t.Errorf("raw_rules = %q", m["raw_rules"])
+	}
+}
+
+type fakeFSUsageProcess struct {
+	ctx context.Context
+}
+
+func (p fakeFSUsageProcess) Wait() error {
+	<-p.ctx.Done()
+	return p.ctx.Err()
+}
+
+func TestFSUsageStartRejectsInvalidParams(t *testing.T) {
+	d := NewDispatcher()
+	called := false
+	registerAll(d, nil, func(context.Context, io.Writer, io.Writer, string, ...string) (fsUsageProcess, error) {
+		called = true
+		return nil, fmt.Errorf("should not be called")
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.fs_usage.start","params":{"mode":"filesys"}}`)
+	resp := d.handle(501, req)
+	if resp.Error == nil {
+		t.Fatal("expected missing pid error")
+	}
+	if called {
+		t.Fatal("fs_usage starter should not be called")
+	}
+
+	req = []byte(`{"jsonrpc":"2.0","id":2,"method":"helper.fs_usage.start","params":{"pid":42,"mode":"bad"}}`)
+	resp = d.handle(501, req)
+	if resp.Error == nil {
+		t.Fatal("expected invalid mode error")
+	}
+	if called {
+		t.Fatal("fs_usage starter should not be called")
+	}
+}
+
+func TestFSUsageStartStop(t *testing.T) {
+	d := NewDispatcher()
+	var gotName string
+	var gotArgs []string
+	registerAll(d, nil, func(ctx context.Context, stdout, _ io.Writer, name string, args ...string) (fsUsageProcess, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		_, _ = io.WriteString(stdout, "open /tmp/example\n")
+		return fakeFSUsageProcess{ctx: ctx}, nil
+	})
+
+	startReq := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.fs_usage.start","params":{"pid":42,"mode":"pathname","duration_ms":1000}}`)
+	startResp := d.handle(501, startReq)
+	if startResp.Error != nil {
+		t.Fatalf("start error: %+v", startResp.Error)
+	}
+	if gotName != "fs_usage" {
+		t.Fatalf("command = %q, want fs_usage", gotName)
+	}
+	wantArgs := []string{"-w", "-f", "pathname", "42"}
+	if fmt.Sprint(gotArgs) != fmt.Sprint(wantArgs) {
+		t.Fatalf("args = %v, want %v", gotArgs, wantArgs)
+	}
+	startResult, ok := startResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("start result type %T, want map", startResp.Result)
+	}
+	handle, _ := startResult["handle"].(string)
+	if handle == "" {
+		t.Fatalf("handle = %q", handle)
+	}
+
+	stopReq := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"helper.fs_usage.stop","params":{"handle":%q}}`, handle))
+	stopResp := d.handle(501, stopReq)
+	if stopResp.Error != nil {
+		t.Fatalf("stop error: %+v", stopResp.Error)
+	}
+	stopResult, ok := stopResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("stop result type %T, want map", stopResp.Result)
+	}
+	if stopResult["raw_output"] != "open /tmp/example\n" {
+		t.Fatalf("raw_output = %q", stopResult["raw_output"])
+	}
+	if stopResult["stopped"] != true {
+		t.Fatalf("stopped = %v, want true", stopResult["stopped"])
 	}
 }

@@ -974,6 +974,42 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return result, nil
 	})
 
+	d.Register("helper.fs_usage.start", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID        int    `json:"pid"`
+			Mode       string `json:"mode"`
+			DurationMS int    `json:"duration_ms"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID <= 0 {
+			return nil, fmt.Errorf("helper.fs_usage.start requires {\"pid\": <pid>}")
+		}
+		result, err := hc.FSUsageStart(p.PID, p.Mode, p.DurationMS)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
+	d.Register("helper.fs_usage.stop", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Handle string `json:"handle"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Handle == "" {
+			return nil, fmt.Errorf("helper.fs_usage.stop requires {\"handle\": \"...\"}")
+		}
+		result, err := hc.FSUsageStop(p.Handle)
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
 	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
 		var p struct {
 			BundleID string `json:"bundle_id"`

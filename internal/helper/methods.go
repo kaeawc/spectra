@@ -19,9 +19,14 @@ func defaultRunner(name string, args ...string) ([]byte, error) {
 // RegisterAll registers all helper methods on d using the provided runner.
 // run may be nil (uses the real commands).
 func RegisterAll(d *Dispatcher, run CmdRunner) {
+	registerAll(d, run, nil)
+}
+
+func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 	if run == nil {
 		run = defaultRunner
 	}
+	fsUsage := newFSUsageManager(fsUsageStarter)
 
 	d.Register("helper.health", func(_ uint32, _ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "helper": true}, nil
@@ -63,6 +68,22 @@ func RegisterAll(d *Dispatcher, run CmdRunner) {
 			return nil, fmt.Errorf("pfctl rules: %w", err)
 		}
 		return map[string]any{"raw_rules": string(out)}, nil
+	})
+
+	d.Register("helper.fs_usage.start", func(_ uint32, params json.RawMessage) (any, error) {
+		var p fsUsageStartParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("helper.fs_usage.start invalid params: %w", err)
+		}
+		return fsUsage.start(p)
+	})
+
+	d.Register("helper.fs_usage.stop", func(_ uint32, params json.RawMessage) (any, error) {
+		var p fsUsageStopParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("helper.fs_usage.stop invalid params: %w", err)
+		}
+		return fsUsage.stop(p)
 	})
 
 	d.Register("helper.tcc.system.query", func(_ uint32, params json.RawMessage) (any, error) {

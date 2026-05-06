@@ -67,13 +67,16 @@ The helper's RPC surface is intentionally narrow. It listens on
 | `helper.tcc.system.query(bundleID)` | Query system TCC.db for granted services |
 | `helper.powermetrics.sample(duration)` | One-shot powermetrics output |
 | `helper.firewall.rules()` | Current pf firewall rules |
+| `helper.fs_usage.start(pid, mode, duration)` | Start a bounded root `fs_usage` trace for one PID |
+| `helper.fs_usage.stop(handle)` | Stop a trace and return captured output |
 | `helper.process.tree()` | Process tree including processes the user can't see (e.g. system daemons) |
 | `helper.health()` | Liveness + version |
 
-Planned but not implemented yet:
-
-- `helper.fs_usage.start(filter)`
-- `helper.fs_usage.stop(handle)`
+`helper.fs_usage.start` requires a numeric PID and an allowlisted mode
+(`filesys`, `pathname`, `exec`, `diskio`, or `network`). It defaults to
+`filesys`, caps trace duration at 60 seconds, and never accepts an
+arbitrary command string or file path. Handles are removed when stopped
+or when the bounded trace reaches its duration limit.
 
 Notably absent:
 
@@ -152,7 +155,7 @@ internal/
     dispatcher.go         # method dispatch
     framing.go            # length-prefixed JSON-RPC framing
     peeruid_darwin.go     # getpeereid
-    methods.go            # TCC, powermetrics, process tree
+    methods.go            # TCC, powermetrics, fs_usage, process tree
   helperclient/           # used by the unprivileged daemon
     client.go
     fallback.go           # graceful "no helper installed" path
