@@ -227,6 +227,10 @@ func TestRunNetworkDiagnose(t *testing.T) {
 			Processes:   []netdiag.ProcessSummary{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack"}},
 			Connections: []netstate.Connection{{PID: 412, Proto: "tcp", State: "established", LocalAddr: "192.0.2.10:50000", RemoteAddr: "api.example.com:443"}},
 			Throughput:  []netstate.Throughput{{PID: 412, Command: "Slack", BytesInPerSec: 100, BytesOutPerSec: 50}},
+			TopThroughput: []netstate.Throughput{
+				{PID: 900, Command: "backupd", BytesInPerSec: 1000, BytesOutPerSec: 1000},
+				{PID: 412, Command: "Slack", BytesInPerSec: 100, BytesOutPerSec: 50},
+			},
 			Endpoints: []netdiag.EndpointDiagnosis{{
 				Host:       "api.example.com",
 				DNS:        netdiag.DNSProbe{OK: true, Addresses: []string{"203.0.113.10"}},
@@ -244,7 +248,7 @@ func TestRunNetworkDiagnose(t *testing.T) {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
 	})
-	for _, want := range []string{"Network diagnosis", "app:      /Applications/Slack.app", "active app connections", "endpoint probes", "vpn/tunnel interfaces active"} {
+	for _, want := range []string{"Network diagnosis", "app:      /Applications/Slack.app", "active app connections", "top network consumers", "endpoint probes", "vpn/tunnel interfaces active"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout = %q, want %q", out, want)
 		}

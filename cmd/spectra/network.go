@@ -112,6 +112,7 @@ func printNetworkDiagnosis(report netdiag.Report) {
 	printNetworkDiagnosisProcesses(report.Processes)
 	printNetworkDiagnosisConnections(report.Connections)
 	printNetworkDiagnosisThroughput(report.Throughput)
+	printNetworkDiagnosisTopThroughput(report.TopThroughput)
 	printNetworkDiagnosisEndpoints(report.Endpoints)
 	printNetworkDiagnosisFindings(report.Findings)
 }
@@ -159,6 +160,17 @@ func printNetworkDiagnosisThroughput(rows []netstate.Throughput) {
 	fmt.Printf("app throughput (%d active):\n", len(rows))
 	for _, t := range rows {
 		fmt.Printf("  pid=%d %-24s in=%d B/s out=%d B/s\n", t.PID, truncate(t.Command, 24), t.BytesInPerSec, t.BytesOutPerSec)
+	}
+}
+
+func printNetworkDiagnosisTopThroughput(rows []netstate.Throughput) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("top network consumers (%d):\n", len(rows))
+	for _, t := range rows {
+		fmt.Printf("  pid=%d %-24s total=%d B/s\n", t.PID, truncate(t.Command, 24), t.BytesInPerSec+t.BytesOutPerSec)
 	}
 }
 
