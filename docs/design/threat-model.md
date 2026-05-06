@@ -24,7 +24,7 @@ What Spectra holds or mediates that's worth protecting:
 | App entitlements + signing identities | low (public-by-bundle) | already in `codesign` |
 | Snapshot history | medium | growing aggregate of the above |
 | TCP RPC listener | medium-high | opt-in `spectra serve --tcp` |
-| Tailnet auth identity | medium | planned embedded `tsnet` state for the daemon |
+| Tailnet auth identity | medium | embedded `tsnet` state for the daemon |
 
 ## Trust boundaries
 
@@ -68,7 +68,8 @@ Spectra is designed to defend against:
 2. **Untrusted network peers.** TCP RPC is disabled by default and
    loopback-only unless `--allow-remote` is explicitly supplied. When
    exposed remotely, access must be constrained by SSH forwarding,
-   Tailscale ACLs, or firewall rules.
+   Tailscale ACLs, or firewall rules. Embedded `tsnet` exposure relies
+   on Tailscale identity and ACLs.
 3. **Compromised peers on a trusted network path.** A reachable peer
    should be unable to escalate beyond what the daemon's RPC exposes —
    no arbitrary command execution, no arbitrary file reads, and no
@@ -193,13 +194,14 @@ attacker-controlled data into a downstream parser.
   content. Mismatch fails verification.
 - Cache directory is `0700` (user-only).
 
-### T6: future tsnet credential theft
+### T6: tsnet credential theft
 
-**Threat:** A local attacker steals the daemon's planned tsnet state directory
+**Threat:** A local attacker steals the daemon's tsnet state directory
 and impersonates the daemon as that tailnet node.
 
 **Mitigation:**
-- Planned tsnet state should live under `~/.spectra/tsnet/`, `0700`.
+- tsnet state lives under `~/.spectra/tsnet/`, `0700`, unless the user
+  explicitly supplies `--tsnet-state-dir`.
 - A user who can read the file already has full read access to the
   user's home — same residual risk as theft of the user's
   Tailscale-on-Mac state (already a known property of Tailscale).
@@ -211,7 +213,7 @@ and impersonates the daemon as that tailnet node.
 | CLI → local daemon (Unix socket) | filesystem perms (`0600`, user-owned) | full RPC surface |
 | Daemon → privileged helper (Unix socket) | filesystem perms + `getpeereid` UID check | hardcoded method allowlist |
 | Remote client → daemon (TCP, opt-in) | external network controls only | full RPC surface |
-| Remote client → daemon (planned tsnet) | Tailscale identity | full read-only surface; state-changing methods require consent flag |
+| Remote client → daemon (tsnet) | Tailscale identity | full read-only surface; state-changing methods require consent flag |
 
 ## Logging
 

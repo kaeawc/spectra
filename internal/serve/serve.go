@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/bundleid"
@@ -33,6 +34,7 @@ import (
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
+	"tailscale.com/tsnet"
 )
 
 var (
@@ -55,12 +57,20 @@ func DefaultSockPath() (string, error) {
 type Options struct {
 	SockPath       string
 	TCPAddr        string
+	TsnetEnabled   bool
+	TsnetAddr      string
+	TsnetHostname  string
+	TsnetStateDir  string
+	TsnetEphemeral bool
+	TsnetTags      []string
 	SpectraVersion string
 	DBPath         string              // empty = store.DefaultPath()
 	CacheRegistry  *cache.Registry     // nil = cache.Default
 	DetectStore    *cache.ShardedStore // nil = no detect caching
 	Logger         logger.Logger       // nil = discard
 }
+
+const DefaultTsnetAddr = ":7878"
 
 // Run starts the daemon: listens on the Unix socket and serves requests until
 // ctx is cancelled. Run blocks until the listener is shut down.
@@ -95,6 +105,7 @@ func Run(ctx context.Context, opts Options) error {
 	log.Info("daemon unix listener ready", "socket", sockPath)
 
 	listeners := []net.Listener{ln}
+	var ts *tsnet.Server
 	if opts.TCPAddr != "" {
 		tcpLn, err := net.Listen("tcp", opts.TCPAddr)
 		if err != nil {
@@ -105,8 +116,21 @@ func Run(ctx context.Context, opts Options) error {
 		listeners = append(listeners, tcpLn)
 		log.Warn("daemon tcp listener ready", "address", opts.TCPAddr)
 	}
+	if opts.TsnetEnabled {
+		tsLn, tsServer, err := listenTsnet(opts, log)
+		if err != nil {
+			closeListeners(listeners)
+			os.Remove(sockPath)
+			return err
+		}
+		ts = tsServer
+		listeners = append(listeners, tsLn)
+	}
 	defer os.Remove(sockPath)
 	defer closeListeners(listeners)
+	if ts != nil {
+		defer ts.Close()
+	}
 
 	dbPath := opts.DBPath
 	if dbPath == "" {
@@ -154,6 +178,108 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	log.Info("daemon stopped")
 	return nil
+}
+
+// DefaultTsnetStateDir returns the canonical tsnet state directory.
+func DefaultTsnetStateDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".spectra", "tsnet"), nil
+}
+
+// DefaultTsnetHostname returns a stable default tailnet hostname for this Mac.
+func DefaultTsnetHostname() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return "spectra"
+	}
+	if out := sanitizeTsnetHostname(host); out != "" {
+		return out
+	}
+	return "spectra"
+}
+
+func listenTsnet(opts Options, log logger.Logger) (net.Listener, *tsnet.Server, error) {
+	stateDir := opts.TsnetStateDir
+	if stateDir == "" {
+		var err error
+		stateDir, err = DefaultTsnetStateDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("serve: resolve tsnet state dir: %w", err)
+		}
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
+	}
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
+	}
+	addr := opts.TsnetAddr
+	if addr == "" {
+		addr = DefaultTsnetAddr
+	}
+	hostname := opts.TsnetHostname
+	if hostname == "" {
+		hostname = DefaultTsnetHostname()
+	}
+	hostname = sanitizeTsnetHostname(hostname)
+	if hostname == "" {
+		return nil, nil, fmt.Errorf("serve: invalid empty tsnet hostname")
+	}
+	s := &tsnet.Server{
+		Dir:           stateDir,
+		Hostname:      hostname,
+		Ephemeral:     opts.TsnetEphemeral,
+		AdvertiseTags: opts.TsnetTags,
+	}
+	if opts.Logger != nil {
+		s.UserLogf = func(format string, args ...any) {
+			log.Info("daemon tsnet status", "message", fmt.Sprintf(format, args...))
+		}
+	}
+	ln, err := s.Listen("tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("serve: listen tsnet %s: %w", addr, err)
+	}
+	log.Info("daemon tsnet listener ready", "hostname", hostname, "address", addr, "state_dir", stateDir)
+	return ln, s, nil
+}
+
+func sanitizeTsnetHostname(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if idx := strings.IndexByte(host, '.'); idx >= 0 {
+		host = host[:idx]
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range host {
+		var out rune
+		switch {
+		case r >= 'a' && r <= 'z':
+			out = r
+		case r >= '0' && r <= '9':
+			out = r
+		case r == '-' || r == '_' || r == ' ':
+			out = '-'
+		default:
+			out = '-'
+		}
+		if out == '-' {
+			if b.Len() == 0 || lastDash {
+				continue
+			}
+			lastDash = true
+		} else {
+			lastDash = false
+		}
+		if b.Len() == 63 {
+			break
+		}
+		b.WriteRune(out)
+	}
+	return strings.TrimRight(b.String(), "-")
 }
 
 func serveAll(d *rpc.Dispatcher, listeners []net.Listener) error {

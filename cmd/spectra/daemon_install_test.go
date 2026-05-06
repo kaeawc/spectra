@@ -11,10 +11,16 @@ import (
 
 func TestDaemonAgentServeArgs(t *testing.T) {
 	opts := daemonAgentOptions{
-		SockPath:    "/tmp/spectra.sock",
-		TCPAddr:     "127.0.0.1:7878",
-		AllowRemote: true,
-		LogFile:     "/tmp/spectra.jsonl",
+		SockPath:       "/tmp/spectra.sock",
+		TCPAddr:        "127.0.0.1:7878",
+		AllowRemote:    true,
+		TsnetEnabled:   true,
+		TsnetAddr:      ":7879",
+		TsnetHostname:  "work-mac",
+		TsnetStateDir:  "/tmp/spectra-tsnet",
+		TsnetEphemeral: true,
+		TsnetTags:      "tag:engineer,tag:spectra",
+		LogFile:        "/tmp/spectra.jsonl",
 	}
 	got := opts.serveArgs()
 	want := []string{
@@ -22,6 +28,12 @@ func TestDaemonAgentServeArgs(t *testing.T) {
 		"--sock", "/tmp/spectra.sock",
 		"--tcp", "127.0.0.1:7878",
 		"--allow-remote",
+		"--tsnet",
+		"--tsnet-addr", ":7879",
+		"--tsnet-hostname", "work-mac",
+		"--tsnet-state-dir", "/tmp/spectra-tsnet",
+		"--tsnet-ephemeral",
+		"--tsnet-tags", "tag:engineer,tag:spectra",
 		"--log-file", "/tmp/spectra.jsonl",
 	}
 	if !slices.Equal(got, want) {

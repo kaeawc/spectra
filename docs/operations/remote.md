@@ -1,9 +1,10 @@
 # Remote operation
 
-Spectra has an initial remote transport: `spectra serve --tcp ...`
-exposes the daemon JSON-RPC API on an explicit TCP listener, and
-`spectra connect <host>` calls that daemon. The default daemon remains
-local-only on `~/.spectra/sock`; TCP must be opted into.
+Spectra has two remote transports. `spectra serve --tcp ...` exposes the
+daemon JSON-RPC API on an explicit TCP listener. `spectra serve --tsnet`
+embeds Tailscale's `tsnet` library so the daemon joins the tailnet as its
+own managed node. The default daemon remains local-only on
+`~/.spectra/sock`; remote listeners must be opted into.
 
 The remote portal is Spectra's defining workflow: running diagnostic
 operations on someone else's Mac to find configuration drift,
@@ -17,18 +18,26 @@ architecture; this page is the operator-facing reference.
 ```bash
 spectra serve --tcp 127.0.0.1:7878                 # local TCP, useful for smoke tests
 spectra serve --tcp 100.64.0.5:7878 --allow-remote # explicit tailnet bind
+spectra serve --tsnet --tsnet-hostname work-mac    # managed tailnet node
 
 spectra connect local                              # default Unix socket
-spectra connect work-mac                           # TCP port 7878
+spectra connect work-mac                           # TCP port 7878, including MagicDNS
 spectra connect 100.64.0.5:7878                    # raw address
 ```
 
-The remote Mac must:
+For explicit TCP, the remote Mac must:
 1. Have `spectra serve --tcp <addr>:7878 --allow-remote` running.
 2. Be reachable through SSH forwarding, a Tailscale interface, or another
    trusted network path.
 3. Be protected by network-layer controls. TCP RPC has no Spectra-layer
    authentication yet.
+
+For managed tailnet mode, the remote Mac must run `spectra serve --tsnet`.
+The daemon stores its node state in `~/.spectra/tsnet` by default. First
+run enrollment uses `TS_AUTHKEY` if set; otherwise the daemon writes a
+Tailscale login URL to its log or stderr. Once enrolled, peers allowed by
+Tailscale ACLs can connect through the MagicDNS name and the same
+`spectra connect` commands.
 
 ## What you can do
 
@@ -125,8 +134,8 @@ The current TCP transport trusts the network path. If a peer can reach
 the listener, it can call daemon RPC methods. Use loopback, SSH tunnels,
 Tailscale ACLs, or firewall rules to limit access.
 
-The planned tsnet mode will make Tailscale identity the default
-authorization layer. The Tailscale ACL example for a personal tailnet:
+Managed `tsnet` mode makes Tailscale identity the default authorization
+layer. The Tailscale ACL example for a personal tailnet:
 
 ```hujson
 {
@@ -201,11 +210,9 @@ spectra fan --hosts alice-laptop,bob-laptop snapshot
 
 ## Implementation order
 
-The local daemon and explicit TCP transport are implemented. Remaining
-remote work:
+The local daemon, explicit TCP transport, and embedded tsnet listener are
+implemented. Remaining remote work:
 
-1. Add tsnet integration so the daemon can join a tailnet without an
-   externally managed listener.
-2. Add managed tsnet host discovery so `spectra hosts` includes reachable daemons
+1. Add managed tsnet host discovery so `spectra hosts` includes reachable daemons
    and `spectra fan` can run without an explicit `--hosts` list.
-3. Add TUI support against local-or-remote daemon targets.
+2. Add TUI support against local-or-remote daemon targets.

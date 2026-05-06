@@ -171,6 +171,20 @@ func TestRunLogsLifecycle(t *testing.T) {
 	}
 }
 
+func TestSanitizeTsnetHostname(t *testing.T) {
+	tests := map[string]string{
+		"Work Mac.local": "work-mac",
+		"_Spectra__":     "spectra",
+		"bad!name":       "bad-name",
+		"---":            "",
+	}
+	for in, want := range tests {
+		if got := sanitizeTsnetHostname(in); got != want {
+			t.Fatalf("sanitizeTsnetHostname(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

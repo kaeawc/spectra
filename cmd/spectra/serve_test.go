@@ -39,8 +39,8 @@ func TestOpenDaemonLoggerCreatesFile(t *testing.T) {
 }
 
 func TestServeChildArgsDropsDaemonFlag(t *testing.T) {
-	got := serveChildArgs([]string{"--daemon", "--sock", "/tmp/spectra.sock", "--no-log-file"})
-	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--no-log-file"}
+	got := serveChildArgs([]string{"--daemon", "--sock", "/tmp/spectra.sock", "--tsnet", "--tsnet-hostname", "work-mac", "--no-log-file"})
+	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--tsnet", "--tsnet-hostname", "work-mac", "--no-log-file"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("serveChildArgs = %v, want %v", got, want)
 	}
@@ -62,5 +62,13 @@ func TestRunServeDaemonStartsDetached(t *testing.T) {
 	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--no-log-file"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("detached args = %v, want %v", got, want)
+	}
+}
+
+func TestSplitCommaList(t *testing.T) {
+	got := splitCommaList(" tag:engineer,tag:spectra, ,tag:debug ")
+	want := []string{"tag:engineer", "tag:spectra", "tag:debug"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitCommaList = %v, want %v", got, want)
 	}
 }
