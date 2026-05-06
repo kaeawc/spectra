@@ -26,6 +26,20 @@ Known high-signal packages also add capability hints. Examples:
 | `@serialport/bindings-cpp` | uses serial devices |
 | `usb` / `node-hid` | uses USB or HID devices |
 
+Security-sensitive packages also populate `RiskHints`, separate from the
+general capability `Hints`, so reviewers can filter for modules that may
+touch credentials, input, devices, shells, or privacy-permission state.
+
+| Package | Risk hint |
+|---|---|
+| `keytar` / `node-keytar` | credential store access |
+| `iohook` / `uiohook-napi` | global input monitoring |
+| `robotjs` | synthetic input control |
+| `node-pty` | shell or terminal process control |
+| `fsevents` | filesystem activity monitoring |
+| `@serialport/bindings-cpp`, `usb`, `node-hid` | external device access |
+| `node-mac-permissions` | privacy permission probing |
+
 Then language classification runs in order:
 
 1. **Rust signal #1 — Cargo target path.** If the link map contains
@@ -110,5 +124,5 @@ useful classification than "Electron."
 
 ## Future ideas
 
-- Cross-reference with Electron's known security-sensitive modules to
-  flag risk patterns.
+- Expand `RiskHints` as more Electron native modules show repeatable
+  security-sensitive patterns in real apps.

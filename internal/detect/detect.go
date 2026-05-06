@@ -159,6 +159,7 @@ type NativeModule struct {
 	PackageVersion string // npm package version when package.json is present
 	Language       string // Rust, Swift, C++, unknown
 	Hints          []string
+	RiskHints      []string // security-sensitive capability patterns to review
 }
 
 // Options controls optional, more expensive sub-detections.
@@ -966,6 +967,7 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 	m := NativeModule{Name: filepath.Base(absPath), Path: relPath, Language: "C++"}
 	readNativeModulePackage(absPath, &m)
 	appendNativeModuleCapabilityHints(&m)
+	appendNativeModuleRiskHints(&m)
 	libs := otoolL(absPath)
 	joined := strings.Join(libs, "\n")
 
@@ -1038,6 +1040,27 @@ func appendNativeModuleCapabilityHints(m *NativeModule) {
 		return
 	}
 	m.Hints = append(m.Hints, nativeModuleCapabilityHints[strings.ToLower(m.PackageName)]...)
+}
+
+var nativeModuleRiskHints = map[string][]string{
+	"@serialport/bindings-cpp": {"external device access"},
+	"fsevents":                 {"filesystem activity monitoring"},
+	"iohook":                   {"global input monitoring"},
+	"keytar":                   {"credential store access"},
+	"node-hid":                 {"external device access"},
+	"node-keytar":              {"credential store access"},
+	"node-mac-permissions":     {"privacy permission probing"},
+	"node-pty":                 {"shell or terminal process control"},
+	"robotjs":                  {"synthetic input control"},
+	"uiohook-napi":             {"global input monitoring"},
+	"usb":                      {"external device access"},
+}
+
+func appendNativeModuleRiskHints(m *NativeModule) {
+	if m.PackageName == "" {
+		return
+	}
+	m.RiskHints = append(m.RiskHints, nativeModuleRiskHints[strings.ToLower(m.PackageName)]...)
 }
 
 func readNativeModulePackage(absPath string, m *NativeModule) {

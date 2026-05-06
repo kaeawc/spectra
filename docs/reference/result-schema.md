@@ -67,6 +67,7 @@ type NativeModule struct {
     PackageVersion string   // npm package version when package.json is present
     Language       string   // Rust, Swift, C++, unknown
     Hints          []string // additional context (linked frameworks, etc.)
+    RiskHints      []string // security-sensitive capability patterns to review
 }
 ```
 

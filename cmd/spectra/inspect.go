@@ -147,6 +147,9 @@ func printTable(rs []detect.Result, verbose bool) {
 					for _, h := range m.Hints {
 						fmt.Printf("           %s\n", h)
 					}
+					for _, h := range m.RiskHints {
+						fmt.Printf("           risk: %s\n", h)
+					}
 				}
 			}
 		}
