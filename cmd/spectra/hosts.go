@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/store"
 )
 
-type hostLister func(context.Context) ([]store.HostRow, error)
+type hostLister func(context.Context, bool) ([]store.HostRow, error)
 type hostProber func(ctx context.Context, host string) error
 
 func runHosts(args []string) int {
@@ -28,7 +29,9 @@ func runHosts(args []string) int {
 		return 1
 	}
 	defer db.Close()
-	return runHostsWith(args, os.Stdout, os.Stderr, db.ListHosts, probeHost)
+	return runHostsWith(args, os.Stdout, os.Stderr, func(ctx context.Context, discover bool) ([]store.HostRow, error) {
+		return listHostRows(ctx, db, discover)
+	}, probeHost)
 }
 
 func runHostsWith(args []string, stdout io.Writer, stderr io.Writer, list hostLister, probe hostProber) int {
@@ -36,15 +39,16 @@ func runHostsWith(args []string, stdout io.Writer, stderr io.Writer, list hostLi
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	probeFlag := fs.Bool("probe", false, "Probe each known host and report reachability")
+	discoverFlag := fs.Bool("discover", false, "Merge tailscale peer discovery from `tailscale status --json`")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe]")
+		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe] [--discover]")
 		return 2
 	}
 
-	rows, err := list(context.Background())
+	rows, err := list(context.Background(), *discoverFlag)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -139,6 +143,53 @@ type hostProbeRow struct {
 	store.HostRow
 	Reachable bool   `json:"reachable"`
 	Error     string `json:"error,omitempty"`
+}
+
+var discoverHostRowsNow = time.Now
+
+func listHostRows(ctx context.Context, db *store.DB, discover bool) ([]store.HostRow, error) {
+	rows, err := db.ListHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]store.HostRow, 0, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Hostname)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, row)
+	}
+	if discover {
+		discovered, err := fanDiscoverPeers()
+		if err != nil && len(rows) == 0 {
+			return nil, fmt.Errorf("discover remote hosts: %w", err)
+		}
+		for _, host := range discovered {
+			name := strings.TrimSpace(host)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, store.HostRow{
+				MachineUUID: name,
+				Hostname:    name,
+				LastSeen:    discoverHostRowsNow().UTC(),
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Hostname < out[j].Hostname
+	})
+	return out, nil
 }
 
 func printHostsTable(w io.Writer, rows []store.HostRow) {

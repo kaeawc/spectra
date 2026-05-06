@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -17,7 +18,7 @@ import (
 )
 
 type fanRPCCaller func(target connectTarget, timeout time.Duration, method string, params json.RawMessage) (json.RawMessage, error)
-type fanHostLister func(ctx context.Context, probeUnreachable bool) ([]fanTarget, error)
+type fanHostLister func(ctx context.Context, probeUnreachable bool, discover bool) ([]fanTarget, error)
 type fanTargetProber func(ctx context.Context, target connectTarget, timeout time.Duration) error
 
 type fanOutput struct {
@@ -44,6 +45,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	timeout := fs.Duration("timeout", 3*time.Second, "Dial/read timeout per target")
 	hosts := fs.String("hosts", "", "Comma-separated daemon targets; defaults to discovered hosts")
 	probe := fs.Bool("probe", false, "When discovering hosts, skip entries that fail a health check")
+	discoverHosts := fs.Bool("discover", false, "Include tailscale peers from tailscale status --json")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -51,7 +53,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	var targets []fanTarget
 	var err error
 	if strings.TrimSpace(*hosts) == "" {
-		targets, err = discover(context.Background(), *probe)
+		targets, err = discover(context.Background(), *probe, *discoverHosts)
 	} else {
 		targets, err = parseFanTargets(*hosts)
 	}
@@ -89,7 +91,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 }
 
 func printFanUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [status|host|jvm|processes|network|storage|power|rules]")
+	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [--discover] [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] call <method> [json-params]")
 }
@@ -115,8 +117,9 @@ func parseFanTargets(raw string) ([]fanTarget, error) {
 }
 
 var fanProbeTarget fanTargetProber = probeFanTarget
+var fanDiscoverPeers func() ([]string, error) = discoverTailscalePeers
 
-func discoverFanTargets(ctx context.Context, probeUnreachable bool) ([]fanTarget, error) {
+func discoverFanTargets(ctx context.Context, probeUnreachable bool, discover bool) ([]fanTarget, error) {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
 		return nil, err
@@ -149,6 +152,28 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool) ([]fanTarget
 		seen[key] = struct{}{}
 		targets = append(targets, fanTarget{Name: name, Target: target})
 	}
+	if discover {
+		discovered, err := fanDiscoverPeers()
+		if err != nil && len(targets) == 0 {
+			return nil, fmt.Errorf("discover remote hosts: %w", err)
+		}
+		for _, host := range discovered {
+			name := strings.TrimSpace(host)
+			if name == "" {
+				continue
+			}
+			target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
+			if err != nil {
+				continue
+			}
+			key := target.Address
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			targets = append(targets, fanTarget{Name: name, Target: target})
+		}
+	}
 	if probeUnreachable {
 		filtered := make([]fanTarget, 0, len(targets))
 		for _, target := range targets {
@@ -166,6 +191,54 @@ func discoverFanTargets(ctx context.Context, probeUnreachable bool) ([]fanTarget
 		return targets[i].Name < targets[j].Name
 	})
 	return targets, nil
+}
+
+func discoverTailscalePeers() ([]string, error) {
+	raw, err := runTailscaleStatus()
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Peers map[string]struct {
+			HostName string `json:"HostName"`
+			DNSName  string `json:"DNSName"`
+		} `json:"Peers"`
+		Peer map[string]struct {
+			HostName string `json:"HostName"`
+			DNSName  string `json:"DNSName"`
+		} `json:"Peer"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(payload.Peers)+len(payload.Peer))
+	addFanPeer := func(p struct {
+		HostName string `json:"HostName"`
+		DNSName  string `json:"DNSName"`
+	}) {
+		switch {
+		case p.DNSName != "":
+			out[p.DNSName] = struct{}{}
+		case p.HostName != "":
+			out[p.HostName] = struct{}{}
+		}
+	}
+	for _, peer := range payload.Peers {
+		addFanPeer(peer)
+	}
+	for _, peer := range payload.Peer {
+		addFanPeer(peer)
+	}
+	hosts := make([]string, 0, len(out))
+	for host := range out {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts, nil
+}
+
+var runTailscaleStatus = func() ([]byte, error) {
+	return exec.Command("tailscale", "status", "--json").Output()
 }
 
 func probeFanTarget(ctx context.Context, target connectTarget, timeout time.Duration) error {
