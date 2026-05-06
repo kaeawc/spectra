@@ -10,6 +10,7 @@ const pcapHeaderLen = 24
 
 // PCAP link-layer types Spectra currently recognizes.
 const (
+	LinkTypeNull     = 0
 	LinkTypeEthernet = 1
 	LinkTypeRaw      = 101
 	LinkTypeLoop     = 108
