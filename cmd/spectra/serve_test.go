@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -34,5 +35,32 @@ func TestOpenDaemonLoggerCreatesFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServeChildArgsDropsDaemonFlag(t *testing.T) {
+	got := serveChildArgs([]string{"--daemon", "--sock", "/tmp/spectra.sock", "--no-log-file"})
+	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--no-log-file"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("serveChildArgs = %v, want %v", got, want)
+	}
+}
+
+func TestRunServeDaemonStartsDetached(t *testing.T) {
+	old := startDetachedServeFunc
+	t.Cleanup(func() { startDetachedServeFunc = old })
+	var got []string
+	startDetachedServeFunc = func(args []string) error {
+		got = append([]string(nil), args...)
+		return nil
+	}
+
+	code := runServe([]string{"--daemon", "--sock", "/tmp/spectra.sock", "--no-log-file"})
+	if code != 0 {
+		t.Fatalf("runServe code = %d, want 0", code)
+	}
+	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--no-log-file"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detached args = %v, want %v", got, want)
 	}
 }

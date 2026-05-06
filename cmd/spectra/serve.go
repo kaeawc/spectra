@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -25,12 +26,21 @@ func runServe(args []string) int {
 	allowRemote := fs.Bool("allow-remote", false, "Allow --tcp to bind a non-loopback address")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
+	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *tcpAddr != "" && !*allowRemote && !isLoopbackListenAddr(*tcpAddr) {
-		fmt.Fprintln(os.Stderr, "spectra serve: --tcp is limited to loopback unless --allow-remote is set")
+	if err := validateServeListen(*tcpAddr, *allowRemote); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 2
+	}
+	if *daemon {
+		if err := startDetachedServeFunc(serveChildArgs(args)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "spectra serve: started in background")
+		return 0
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -80,6 +90,50 @@ func runServe(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func validateServeListen(tcpAddr string, allowRemote bool) error {
+	if tcpAddr != "" && !allowRemote && !isLoopbackListenAddr(tcpAddr) {
+		return fmt.Errorf("spectra serve: --tcp is limited to loopback unless --allow-remote is set")
+	}
+	return nil
+}
+
+var startDetachedServeFunc = startDetachedServe
+
+func serveChildArgs(args []string) []string {
+	child := []string{"serve"}
+	for _, arg := range args {
+		switch arg {
+		case "--daemon", "-daemon", "--daemon=true", "-daemon=true":
+			continue
+		default:
+			child = append(child, arg)
+		}
+	}
+	return child
+}
+
+func startDetachedServe(args []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", os.DevNull, err)
+	}
+	defer null.Close()
+	// #nosec G204 -- restarts this executable with parsed serve flags, no shell.
+	cmd := exec.Command(exe, args...)
+	cmd.Stdin = null
+	cmd.Stdout = null
+	cmd.Stderr = null
+	cmd.SysProcAttr = detachedSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start detached spectra serve: %w", err)
+	}
+	return nil
 }
 
 func openDaemonLogger(path string, disabled bool) (logger.Logger, func(), string, error) {

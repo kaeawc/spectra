@@ -1,0 +1,9 @@
+//go:build darwin
+
+package main
+
+import "syscall"
+
+func detachedSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{Setsid: true}
+}
