@@ -2,12 +2,14 @@
 
 Spectra implements the JDK shell-tool layer of JVM inspection today:
 running-process discovery, structured per-PID metadata, thread dumps,
-heap histograms, heap dumps, one-shot GC stats, and JFR start/dump/stop.
+heap histograms, heap dumps, one-shot GC stats, VM-internal memory
+diagnostics, local JMX management-agent control, and JFR start/dump/stop.
 The JVM snapshot includes one-shot `jstat -gc` counters for each running
 JVM when `jstat` is available. It also parses `jfr summary` output into
 structured event counts and attributes running JVMs back to the
 installed-JDK inventory when `java.home` matches a discovered JDK path.
-The in-process Java agent layer remains future work.
+The in-process Java agent layer remains future work for direct MBean
+enumeration, custom probes, and async-profiler integration.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -19,10 +21,15 @@ Entry points:
 spectra jvm
 spectra jvm --json
 spectra jvm <pid>
+spectra jvm explain [--samples 1] [--interval 1s] <pid>
 spectra jvm thread-dump <pid>
 spectra jvm heap-histogram <pid>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
+spectra jvm vm-memory [--json] <pid>
+spectra jvm jmx status [--json] <pid>
+spectra jvm jmx start-local [--json] <pid>
+spectra jvm flamegraph [--event cpu] [--duration 30] [--out <path>] <pid>
 spectra jvm jfr start <pid> [--name spectra]
 spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
 spectra jvm jfr stop <pid> [--name spectra] [--out <path>]
@@ -33,10 +40,15 @@ Daemon methods:
 
 - `jvm.list`
 - `jvm.inspect`
+- `jvm.explain`
 - `jvm.thread_dump` / `jvm.threadDump`
 - `jvm.heap_histogram` / `jvm.heapHistogram`
 - `jvm.heap_dump` / `jvm.heapDump`
 - `jvm.gc_stats` / `jvm.gcStats`
+- `jvm.vm_memory` / `jvm.vmMemory`
+- `jvm.jmx.status`
+- `jvm.jmx.start_local` / `jvm.jmx.startLocal`
+- `jvm.flamegraph`
 - `jvm.jfr.start`
 - `jvm.jfr.dump`
 - `jvm.jfr.stop`
@@ -48,7 +60,8 @@ Daemon methods:
 
 VisualVM's capabilities split cleanly into "what the JDK gives you for
 free" and "what requires injecting code into the target JVM." Spectra
-implements both, one per layer.
+implements the first layer today and defines the second as the agent
+boundary.
 
 ### Layer 1 — JDK toolchain shell-out (no Java in Spectra)
 
@@ -63,6 +76,13 @@ JDK commands:
 | GC stats snapshot | `jstat -gc <pid>` |
 | Heap histogram | `jcmd <pid> GC.class_histogram` |
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
+| Heap layout | `jcmd <pid> GC.heap_info` |
+| Metaspace / compressed class space | `jcmd <pid> VM.metaspace` |
+| Native memory tracking | `jcmd <pid> VM.native_memory summary` |
+| Classloader metadata | `jcmd <pid> VM.classloader_stats` |
+| JIT code cache | `jcmd <pid> Compiler.codecache`, `Compiler.CodeHeap_Analytics` |
+| Local JMX connector | `jcmd <pid> ManagementAgent.status`, `ManagementAgent.start_local` |
+| Flamegraph capture | `asprof -d <seconds> -e <event> -f <path> <pid>` |
 | JFR start / stop / dump | `jcmd <pid> JFR.start`, `JFR.dump` |
 | JFR summary | `jfr summary <recording.jfr>` |
 
@@ -74,21 +94,52 @@ and JFR dump files are copied into the
 initialized. Heap dumps are written to the requested path or to
 `~/.spectra/<pid>-<timestamp>.hprof`.
 
+`spectra jvm vm-memory --json <pid>` returns every memory section with
+its underlying command, output, and per-section error. Native memory
+tracking, for example, only reports detailed categories when the target JVM
+was started with `-XX:NativeMemoryTracking=summary` or `detail`; Spectra
+keeps the NMT error alongside successful metaspace, classloader, heap, and
+code-cache sections instead of failing the whole inspection.
+
+`spectra jvm jmx start-local <pid>` starts the JVM's local management
+agent. That makes the same local JMX connector available to jconsole and
+VisualVM-style tools, and is the bridge Spectra will use for live MBean
+browsing once the in-process agent is present.
+
+`spectra jvm flamegraph <pid>` drives async-profiler when `asprof` is
+installed. This is an explicit capture action because async-profiler loads
+its own native agent into the target JVM. Output defaults to an HTML file
+under `~/.spectra/`; `--event wall`, `--event alloc`, and `--event lock`
+can be used for non-CPU profiles.
+
+`spectra jvm explain <pid>` turns the raw diagnostics into findings:
+
+- metaspace and classloader footprint, with clear language that a leak
+  requires growth over time;
+- JVM-argument checks for heap sizing, GC selection, OOM heap dumps,
+  native memory tracking, and soft-reference policy;
+- code-cache use, including nmethod/adaptor counts and `full_count`;
+- soft-reference evidence from the class histogram;
+- native-memory availability, including why fragmentation cannot be judged
+  when NMT is off;
+- optional repeated `jstat` samples via `--samples` and `--interval` for
+  short-window old-gen/metaspace/full-GC trends.
+
 ### Layer 2 — Java agent (in-process)
 
-The remaining capabilities require code running inside the target JVM and
-are not implemented yet:
+The remaining capabilities require either JMX client logic or code running
+inside the target JVM and are not implemented yet:
 
-- Live MBean browsing (JMX over RMI).
-- Async-profiler-grade flame graphs (bytecode instrumentation).
-- Custom counters and probes.
+- Live MBean enumeration, attribute reads, and operation invocation.
+- Custom counters, probes, and in-process workflow hooks.
 
 The planned shape is a small `spectra-agent.jar` alongside the Go binary,
 attached on demand through the Attach API:
 
 ```bash
 spectra jvm attach <pid>      # loads the agent into a running JVM
-spectra jvm flamegraph <pid>  # async-profiler over the agent
+spectra jvm mbeans <pid>      # browses live MBeans through the agent/JMX bridge
+spectra jvm probe <pid> ...   # installs a custom in-process probe
 ```
 
 The agent would expose its capabilities over a Unix socket so the Go daemon
@@ -170,15 +221,22 @@ Implemented:
 3. `jcmd`-based system properties, command-line parsing, VM flags,
    thread count, thread dump, class histogram, heap dump, and JFR control.
 4. `jstat -gc` one-shot GC counter parsing and snapshot attachment.
-5. CLI and daemon RPC surfaces for the implemented collectors.
-6. Path-based attribution from each running JVM's `java.home` to the
+5. `jcmd`-based VM memory diagnostics for heap layout, metaspace, native
+   memory tracking, classloader stats, and code cache/code heap state.
+6. Local JMX management-agent status/start commands.
+7. Async-profiler flamegraph capture when `asprof` is installed.
+8. `spectra jvm explain` interpretation for JVM args, GC pressure,
+   metaspace/classloader footprint, code cache, soft references, native
+   memory tracking, and short-window trends.
+9. CLI and daemon RPC surfaces for the implemented collectors.
+10. Path-based attribution from each running JVM's `java.home` to the
    installed-JDK inventory.
-7. `jfr summary` parsing for structured recording metadata and event
+11. `jfr summary` parsing for structured recording metadata and event
    counts.
-8. JVM GC-pressure recommendations from old-generation occupancy and
+12. JVM GC-pressure recommendations from old-generation occupancy and
    full-GC counters.
 
 Future:
 
-1. Java agent JAR for in-process capabilities.
-2. Async-profiler / flamegraph integration.
+1. Java agent JAR for attach, in-process probes, and custom workflows.
+2. MBean browsing and operation invocation over the agent/JMX bridge.

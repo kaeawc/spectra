@@ -174,6 +174,18 @@ the full RPC surface.
 spectra connect alice-laptop jvm
 # → see all JVMs running, GC stats, heap usage
 
+spectra connect alice-laptop jvm-explain 4012
+# → get interpreted JVM args, metaspace, code cache, soft-reference, and NMT findings
+
+spectra connect alice-laptop jvm-vm-memory 4012
+# → inspect metaspace, native memory tracking, classloaders, and code cache
+
+spectra connect alice-laptop jvm-jmx-start-local 4012
+# → enable the target JVM's local JMX connector for MBean-capable tools
+
+spectra connect alice-laptop jvm-flamegraph 4012 /tmp/intellij-profile.html
+# → capture an async-profiler flamegraph on the remote host
+
 spectra connect alice-laptop jvm-threads 4012 > intellij-threads.json
 # → captured to local disk for analysis
 ```

@@ -82,6 +82,14 @@ helper is installed and reachable.
 | `jcmd <pid> Thread.print` | thread dump | same UID | ~200ms-1s | `jvm.threadDump` artifact |
 | `jcmd <pid> GC.class_histogram` | heap class histogram | same UID | ~500ms-5s | `jvm.heap` summary |
 | `jcmd <pid> GC.heap_dump <path>` | full heap dump | same UID | seconds-minutes, GBs | `jvm.heapDump` artifact |
+| `jcmd <pid> GC.heap_info` | heap layout and committed/used regions | same UID | low | `jvm.vm_memory.heap_info` |
+| `jcmd <pid> VM.metaspace` | metaspace and compressed class space usage | same UID | low | `jvm.vm_memory.metaspace` |
+| `jcmd <pid> VM.native_memory summary` | native memory tracking categories | same UID, NMT enabled | low | `jvm.vm_memory.native_memory` |
+| `jcmd <pid> VM.classloader_stats` | classloader/class metadata counts | same UID | low | `jvm.vm_memory.classloader_stats` |
+| `jcmd <pid> Compiler.codecache` | JIT code cache bounds and occupancy | same UID | low | `jvm.vm_memory.code_cache` |
+| `jcmd <pid> Compiler.CodeHeap_Analytics` | code heap analytics | same UID | low-medium | `jvm.vm_memory.code_heap` |
+| `jcmd <pid> ManagementAgent.status/start_local` | local JMX connector state/control | same UID | low | `jvm.jmx.*` |
+| `asprof -d <seconds> -e <event> -f <path> <pid>` | async-profiler flamegraph | same UID, async-profiler installed | seconds-minutes | `jvm.flamegraph` artifact |
 | `jcmd <pid> JFR.start name=spectra` | start JFR recording | same UID | low | `jvm.jfr.start` |
 | `jcmd <pid> JFR.dump name=spectra filename=...` | stop+dump JFR | same UID | low | `jvm.jfr.dump` |
 | `jfr summary <path>` | JFR recording metadata + event counts | user | low | `jvm.jfr.summary` |

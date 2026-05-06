@@ -75,7 +75,10 @@ func runConnect(args []string) int {
 func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
-	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid> | jvm-vm-memory <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-explain <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jmx-status <pid> | jvm-jmx-start-local <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-flamegraph <pid> [dest]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-heap-dump <pid> [dest] | jvm-jfr-start <pid> [name] | jvm-jfr-dump <pid> <dest> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
@@ -154,6 +157,8 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
 	case "jvm-jfr-start":
 		return parseConnectJFRStart(args)
+	case "jvm-flamegraph":
+		return parseConnectJVMFlamegraph(args)
 	case "jvm-heap-dump":
 		return parseConnectJVMHeapDump(args)
 	case "jvm-jfr-dump":
@@ -258,6 +263,21 @@ func parseConnectJVMHeapDump(args []string) (string, json.RawMessage, bool, erro
 	return "jvm.heap_dump", connectParams(params), true, nil
 }
 
+func parseConnectJVMFlamegraph(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return "", nil, true, fmt.Errorf("connect jvm-flamegraph requires <pid> [dest]")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	params := map[string]any{"pid": pid, "confirm_sensitive": true}
+	if len(args) == 3 {
+		params["dest"] = args[2]
+	}
+	return "jvm.flamegraph", connectParams(params), true, nil
+}
+
 func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) < 2 {
 		return "", nil, true, fmt.Errorf("connect issues requires a machine id or command")
@@ -357,11 +377,15 @@ func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
 
 func connectPIDShortcuts() map[string]string {
 	return map[string]string{
-		"jvm-gc":             "jvm.gc_stats",
-		"jvm-heap":           "jvm.heap_histogram",
-		"jvm-heap-histogram": "jvm.heap_histogram",
-		"jvm-thread-dump":    "jvm.thread_dump",
-		"jvm-threads":        "jvm.thread_dump",
+		"jvm-gc":              "jvm.gc_stats",
+		"jvm-explain":         "jvm.explain",
+		"jvm-heap":            "jvm.heap_histogram",
+		"jvm-heap-histogram":  "jvm.heap_histogram",
+		"jvm-jmx-start-local": "jvm.jmx.start_local",
+		"jvm-jmx-status":      "jvm.jmx.status",
+		"jvm-thread-dump":     "jvm.thread_dump",
+		"jvm-threads":         "jvm.thread_dump",
+		"jvm-vm-memory":       "jvm.vm_memory",
 	}
 }
 

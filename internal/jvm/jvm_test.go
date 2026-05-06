@@ -184,6 +184,102 @@ func TestHeapDumpFakeRunner(t *testing.T) {
 	}
 }
 
+func TestCollectVMMemoryDiagnosticsCapturesSectionsAndErrors(t *testing.T) {
+	run := func(name string, args ...string) ([]byte, error) {
+		if name != "jcmd" || len(args) < 2 {
+			return nil, fmt.Errorf("unexpected: %s %v", name, args)
+		}
+		switch args[1] {
+		case "GC.heap_info":
+			return []byte("garbage-first heap total 2048K, used 1024K\n"), nil
+		case "VM.metaspace":
+			return []byte("Usage:\n  Non-Class:  12.00 MB used.\n"), nil
+		case "VM.native_memory":
+			return nil, fmt.Errorf("native memory tracking is not enabled")
+		case "VM.classloader_stats":
+			return []byte("ClassLoader Parent CLD* Classes ChunkSz BlockSz Type\n"), nil
+		case "Compiler.codecache":
+			return []byte("CodeCache: size=245760Kb used=12800Kb max_used=13000Kb free=232960Kb\n"), nil
+		case "Compiler.CodeHeap_Analytics":
+			return []byte("CodeHeap committed size 4096K\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected jcmd args: %v", args)
+	}
+
+	got := CollectVMMemoryDiagnostics(42, run)
+	if got.PID != 42 {
+		t.Fatalf("PID = %d, want 42", got.PID)
+	}
+	if got.HeapInfo.Output == "" || got.Metaspace.Output == "" || got.CodeCache.Output == "" {
+		t.Fatalf("expected heap, metaspace, and code cache outputs: %#v", got)
+	}
+	if got.NativeMemory.Error == "" {
+		t.Fatalf("expected native memory section error")
+	}
+	if len(got.NativeMemory.Command) != 4 || got.NativeMemory.Command[2] != "VM.native_memory" || got.NativeMemory.Command[3] != "summary" {
+		t.Fatalf("native memory command = %v", got.NativeMemory.Command)
+	}
+}
+
+func TestJMXCommandsFakeRunner(t *testing.T) {
+	var calls [][]string
+	run := func(name string, args ...string) ([]byte, error) {
+		if name != "jcmd" {
+			return nil, fmt.Errorf("unexpected command %s", name)
+		}
+		calls = append(calls, append([]string(nil), args...))
+		return []byte("local connector address: service:jmx:local:///jndi/rmi://127.0.0.1/stub\n"), nil
+	}
+	if _, err := JMXStatus(42, run); err != nil {
+		t.Fatalf("JMXStatus: %v", err)
+	}
+	if _, err := JMXStartLocal(42, run); err != nil {
+		t.Fatalf("JMXStartLocal: %v", err)
+	}
+	if len(calls) != 2 || calls[0][1] != "ManagementAgent.status" || calls[1][1] != "ManagementAgent.start_local" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestCaptureFlamegraphFakeRunner(t *testing.T) {
+	var gotName string
+	var gotArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return []byte("Started [cpu] profiling\n"), nil
+	}
+	err := CaptureFlamegraph(42, FlamegraphOptions{
+		AsprofPath:      "/opt/async-profiler/bin/asprof",
+		Event:           "wall",
+		DurationSeconds: 7,
+		OutputPath:      "/tmp/wall.html",
+		CmdRunner:       run,
+	})
+	if err != nil {
+		t.Fatalf("CaptureFlamegraph: %v", err)
+	}
+	if gotName != "/opt/async-profiler/bin/asprof" {
+		t.Fatalf("command = %q", gotName)
+	}
+	want := []string{"-d", "7", "-e", "wall", "-f", "/tmp/wall.html", "42"}
+	if fmt.Sprint(gotArgs) != fmt.Sprint(want) {
+		t.Fatalf("args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestCaptureFlamegraphRequiresOutputPath(t *testing.T) {
+	err := CaptureFlamegraph(42, FlamegraphOptions{
+		CmdRunner: func(string, ...string) ([]byte, error) {
+			t.Fatal("runner should not be called without output path")
+			return nil, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing output path error")
+	}
+}
+
 func TestThreadDumpNilDefaultRunner(t *testing.T) {
 	// nil runner should not panic (uses DefaultRunner which may fail if no jcmd).
 	// We just verify it doesn't panic — error is expected on machines without a JDK.
