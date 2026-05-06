@@ -115,11 +115,13 @@ func runNetworkCaptureStop(args []string) int {
 	fs := flag.NewFlagSet("spectra network capture stop", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	summarize := fs.Bool("summarize", false, "Summarize the completed pcap after stopping")
+	limit := fs.Int("limit", netcap.DefaultSummaryEventLimit, "Maximum protocol events to include when summarizing")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra network capture stop <handle>")
+		fmt.Fprintln(os.Stderr, "usage: spectra network capture stop [--json] [--summarize] [--limit N] <handle>")
 		return 2
 	}
 	result, err := networkCaptureStop(fs.Arg(0))
@@ -130,6 +132,27 @@ func runNetworkCaptureStop(args []string) int {
 		}
 		fmt.Fprintf(os.Stderr, "network capture stop: %v\n", err)
 		return 1
+	}
+	if *summarize {
+		path, _ := result["output_path"].(string)
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "network capture stop: helper result did not include output_path")
+			return 1
+		}
+		summary, err := networkCaptureSummarize(path, *limit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "network capture summarize: %v\n", err)
+			return 1
+		}
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(map[string]any{"capture": result, "summary": summary})
+			return 0
+		}
+		printNetworkCaptureResult(result, false, "capture stopped")
+		printNetworkCaptureSummary(summary)
+		return 0
 	}
 	return printNetworkCaptureResult(result, *asJSON, "capture stopped")
 }
