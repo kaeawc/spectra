@@ -18,6 +18,12 @@ import (
 
 const defaultTimeout = 3 * time.Second
 
+const (
+	slowDNSMS = 500
+	slowTCPMS = 750
+	slowTLSMS = 1000
+)
+
 // Options controls one app-focused network diagnosis.
 type Options struct {
 	AppPath string
@@ -527,6 +533,9 @@ func findings(report Report) []Finding {
 	}
 	if report.Network.Proxy.HTTP != "" || report.Network.Proxy.HTTPS != "" || report.Network.Proxy.SOCKS != "" {
 		out = append(out, Finding{Severity: "info", Title: "system proxy configured", Detail: proxyDetail(report.Network.Proxy)})
+		if proxyZscalerHint(report.Network.Proxy) {
+			out = append(out, Finding{Severity: "info", Title: "zscaler-like proxy configured", Detail: proxyDetail(report.Network.Proxy)})
+		}
 	}
 	if report.Network.VPNActive {
 		out = append(out, Finding{Severity: "info", Title: "vpn/tunnel interfaces active", Detail: strings.Join(report.Network.VPNInterfaces, ", ")})
@@ -542,6 +551,9 @@ func endpointFindings(ep EndpointDiagnosis) []Finding {
 	if !ep.DNS.OK {
 		out = append(out, Finding{Severity: "warning", Title: "dns lookup failed", Detail: ep.Host + ": " + ep.DNS.Error})
 	}
+	if ep.DNS.QueryMS >= slowDNSMS {
+		out = append(out, Finding{Severity: "warning", Title: "slow dns lookup", Detail: fmt.Sprintf("%s query_ms=%d", ep.Host, ep.DNS.QueryMS)})
+	}
 	if len(ep.Traceroute.Hops) > 0 && ep.Traceroute.Hops[len(ep.Traceroute.Hops)-1].Timeout {
 		out = append(out, Finding{Severity: "info", Title: "traceroute has unanswered hops", Detail: ep.Host})
 	}
@@ -556,10 +568,21 @@ func portFindings(host string, port PortDiagnosis) []Finding {
 	if !port.TCP.OK {
 		out = append(out, Finding{Severity: "warning", Title: "tcp connect failed", Detail: fmt.Sprintf("%s:%d %s", host, port.Port, port.TCP.Error)})
 	}
+	if port.TCP.OK && port.TCP.DurationMS >= slowTCPMS {
+		out = append(out, Finding{Severity: "warning", Title: "slow tcp connect", Detail: fmt.Sprintf("%s:%d connect_ms=%d", host, port.Port, port.TCP.DurationMS)})
+	}
+	if port.TLS != nil && port.TLS.OK && port.TLS.DurationMS >= slowTLSMS {
+		out = append(out, Finding{Severity: "warning", Title: "slow tls handshake", Detail: fmt.Sprintf("%s:%d tls_ms=%d", host, port.Port, port.TLS.DurationMS)})
+	}
 	if port.TLS != nil && port.TLS.ZscalerHint {
 		out = append(out, Finding{Severity: "info", Title: "zscaler tls issuer/subject observed", Detail: host})
 	}
 	return out
+}
+
+func proxyZscalerHint(proxy netstate.ProxyConfig) bool {
+	raw := strings.ToLower(proxy.HTTP + " " + proxy.HTTPS + " " + proxy.SOCKS)
+	return strings.Contains(raw, "zscaler") || strings.Contains(raw, "zscloud")
 }
 
 func bandwidthFinding(report Report) (Finding, bool) {

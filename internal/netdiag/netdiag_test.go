@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -114,6 +115,40 @@ func TestParseDigStatuses(t *testing.T) {
 	if nx.Status != "NXDOMAIN" || len(nx.Addresses) != 0 {
 		t.Fatalf("NXDOMAIN dig = %+v", nx)
 	}
+}
+
+func TestLatencyAndZscalerFindings(t *testing.T) {
+	report := Report{
+		Network: netstateStateWithProxy("gateway.zscloud.net:8080"),
+		Endpoints: []EndpointDiagnosis{{
+			Host: "api.example.com",
+			DNS:  DNSProbe{OK: true, Status: "NOERROR", QueryMS: slowDNSMS},
+			Ports: []PortDiagnosis{{
+				Port: 443,
+				TCP:  TCPProbe{OK: true, DurationMS: slowTCPMS},
+				TLS:  &TLSProbe{OK: true, DurationMS: slowTLSMS, ZscalerHint: true},
+			}},
+		}},
+	}
+	got := findings(report)
+	for _, title := range []string{"zscaler-like proxy configured", "slow dns lookup", "slow tcp connect", "slow tls handshake", "zscaler tls issuer/subject observed"} {
+		if !hasFinding(got, title) {
+			t.Fatalf("missing finding %q in %+v", title, got)
+		}
+	}
+}
+
+func hasFinding(findings []Finding, title string) bool {
+	for _, f := range findings {
+		if f.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func netstateStateWithProxy(https string) netstate.State {
+	return netstate.State{Proxy: netstate.ProxyConfig{HTTPS: https}}
 }
 
 func fakeCommand(name string, args ...string) string {
