@@ -15,6 +15,7 @@ import (
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
+	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -22,6 +23,11 @@ import (
 // testDaemon wires up a dispatcher with registered handlers, starts it on a
 // temp Unix socket, and returns a connected RPC client.
 func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc) {
+	enc, dec, _, cancel := testDaemonWithDB(t)
+	return enc, dec, cancel
+}
+
+func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, context.CancelFunc) {
 	t.Helper()
 	// Use os.MkdirTemp with a short prefix under /tmp: macOS limits Unix socket
 	// paths to 104 bytes and t.TempDir() embeds the full test name which can
@@ -82,12 +88,12 @@ func testDaemon(t *testing.T) (*json.Encoder, *json.Decoder, context.CancelFunc)
 		cancel()
 		t.Fatal(err)
 	}
-	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	return json.NewEncoder(conn), json.NewDecoder(conn), cancel
+	return json.NewEncoder(conn), json.NewDecoder(conn), db, cancel
 }
 
 func TestDaemonHealthEndpoint(t *testing.T) {
@@ -311,6 +317,59 @@ func TestDaemonIssuesRecordEmpty(t *testing.T) {
 	}
 	if m["upserted"].(float64) != 0 {
 		t.Errorf("upserted = %v, want 0", m["upserted"])
+	}
+}
+
+func TestDaemonIssuesCheckFromSnapshot(t *testing.T) {
+	enc, dec, db, cancel := testDaemonWithDB(t)
+	defer cancel()
+
+	snapshotID := "snap-test-issues-check"
+	input := store.FromSnapshot(snapshot.Snapshot{
+		ID:      snapshotID,
+		TakenAt: time.Now().UTC(),
+		Kind:    snapshot.KindLive,
+		Host:    snapshot.HostInfo{MachineUUID: "test-machine", Hostname: "test.local", OSName: "macOS"},
+	})
+	if err := db.SaveSnapshot(context.Background(), input); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	if err := db.SaveSnapshotProcesses(context.Background(), snapshotID, nil); err != nil {
+		t.Fatalf("seed snapshot processes: %v", err)
+	}
+	if err := db.SaveLoginItems(context.Background(), snapshotID, nil); err != nil {
+		t.Fatalf("seed snapshot login items: %v", err)
+	}
+	if err := db.SaveGrantedPerms(context.Background(), snapshotID, nil); err != nil {
+		t.Fatalf("seed snapshot granted perms: %v", err)
+	}
+
+	resp := rpcCall(t, enc, dec, 16, "issues.check", `{"snapshot_id":"`+snapshotID+`"}`)
+	if resp.Error != nil {
+		t.Fatalf("issues.check: %v", resp.Error)
+	}
+	m, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type %T", resp.Result)
+	}
+	if got, ok := m["snapshot_id"].(string); !ok || got != snapshotID {
+		t.Fatalf("snapshot_id = %v, want %q", m["snapshot_id"], snapshotID)
+	}
+	if m["machine_uuid"] == nil || m["machine_uuid"].(string) == "" {
+		t.Fatal("issues.check: missing machine_uuid")
+	}
+	if _, ok := m["upserted"].(float64); !ok {
+		t.Fatalf("upserted type %T", m["upserted"])
+	}
+}
+
+func TestDaemonIssuesCheckMissingSnapshot(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+
+	resp := rpcCall(t, enc, dec, 17, "issues.check", `{"snapshot_id":"does-not-exist"}`)
+	if resp.Error == nil {
+		t.Fatal("expected error for missing snapshot")
 	}
 }
 

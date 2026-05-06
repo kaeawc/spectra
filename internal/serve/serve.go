@@ -437,6 +437,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			if err != nil {
 				return nil, err
 			}
+			if raw == nil {
+				return nil, fmt.Errorf("issues.check: snapshot %q has no JSON blob", p.SnapshotID)
+			}
 			if err := json.Unmarshal(raw, &snap); err != nil {
 				return nil, err
 			}
@@ -448,6 +451,67 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			})
 		}
 		return rules.Evaluate(snap, rules.V1Catalog()), nil
+	})
+
+	// issues.check — evaluate rules and persist findings as issues.
+	// Optional: { "snapshot_id": "snap-..." } to evaluate against a stored snapshot.
+	// Without a snapshot_id, build a live snapshot and persist it first.
+	d.Register("issues.check", func(params json.RawMessage) (any, error) {
+		var p struct {
+			SnapshotID string `json:"snapshot_id"`
+		}
+		_ = json.Unmarshal(params, &p)
+
+		var snap snapshot.Snapshot
+		if p.SnapshotID != "" {
+			raw, err := db.GetSnapshotJSON(context.Background(), p.SnapshotID)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(raw, &snap); err != nil {
+				return nil, err
+			}
+		} else {
+			snap = snapshot.Build(context.Background(), snapshot.Options{
+				SpectraVersion: version,
+				DetectOpts:     detect.Options{},
+				DetectStore:    detectStore,
+			})
+			snapInput := store.FromSnapshot(snap)
+			if err := db.SaveSnapshot(context.Background(), snapInput); err != nil {
+				return nil, fmt.Errorf("issues.check: persist snapshot: %w", err)
+			}
+			_ = db.SaveSnapshotProcesses(context.Background(), snap.ID, store.ProcessesFromSnapshot(snap))
+			_ = db.SaveLoginItems(context.Background(), snap.ID, store.LoginItemsFromSnapshot(snap))
+			_ = db.SaveGrantedPerms(context.Background(), snap.ID, store.GrantedPermsFromSnapshot(snap))
+			snap.Host.MachineUUID = snapInput.MachineUUID
+		}
+
+		findings := rules.Evaluate(snap, rules.V1Catalog())
+		findingInputs := make([]store.FindingInput, 0, len(findings))
+		for _, f := range findings {
+			findingInputs = append(findingInputs, store.FindingInput{
+				RuleID:   f.RuleID,
+				Subject:  f.Subject,
+				Severity: string(f.Severity),
+				Message:  f.Message,
+				Fix:      f.Fix,
+			})
+		}
+
+		machineUUID := snap.Host.MachineUUID
+		if machineUUID == "" {
+			machineUUID = snap.Host.Hostname
+		}
+		if machineUUID == "" {
+			machineUUID = "local"
+		}
+
+		ids, err := db.UpsertIssues(context.Background(), machineUUID, snap.ID, findingInputs)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"snapshot_id": snap.ID, "machine_uuid": machineUUID, "upserted": len(ids), "ids": ids}, nil
 	})
 
 	// issues.list — { "machine_uuid": "...", "status": "open" }
