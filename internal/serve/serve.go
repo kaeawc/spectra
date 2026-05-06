@@ -812,6 +812,108 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	d.Register("jvm.gc_stats", jvmGCStats)
 	d.Register("jvm.gcStats", jvmGCStats)
 
+	// jvm.vm_memory — collect VM-internal memory diagnostics: heap info,
+	// metaspace, native memory tracking, classloader stats, and code cache.
+	jvmVMMemory := func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.vm_memory requires {\"pid\": <pid>}")
+		}
+		return jvm.CollectVMMemoryDiagnostics(p.PID, nil), nil
+	}
+	d.Register("jvm.vm_memory", jvmVMMemory)
+	d.Register("jvm.vmMemory", jvmVMMemory)
+
+	// jvm.jmx.status — report the target JVM's local management-agent state.
+	d.Register("jvm.jmx.status", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.jmx.status requires {\"pid\": <pid>}")
+		}
+		out, err := jvm.JMXStatus(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("jmx status pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	})
+
+	// jvm.jmx.start_local — start local JMX for tools that browse live MBeans.
+	jvmJMXStartLocal := func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.jmx.start_local requires {\"pid\": <pid>}")
+		}
+		out, err := jvm.JMXStartLocal(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("jmx start-local pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+	}
+	d.Register("jvm.jmx.start_local", jvmJMXStartLocal)
+	d.Register("jvm.jmx.startLocal", jvmJMXStartLocal)
+
+	// jvm.explain — interpret JVM diagnostics into actionable observations.
+	d.Register("jvm.explain", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID            int   `json:"pid"`
+			Samples        int   `json:"samples"`
+			IntervalMillis int   `json:"interval_millis"`
+			SoftRefs       *bool `json:"soft_refs"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.explain requires {\"pid\": <pid>}")
+		}
+		softRefs := true
+		if p.SoftRefs != nil {
+			softRefs = *p.SoftRefs
+		}
+		explanation, err := jvm.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{
+			Samples:  p.Samples,
+			Interval: time.Duration(p.IntervalMillis) * time.Millisecond,
+			SoftRefs: softRefs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("explain pid %d: %w", p.PID, err)
+		}
+		return explanation, nil
+	})
+
+	// jvm.flamegraph — run async-profiler and write an HTML/SVG flamegraph.
+	d.Register("jvm.flamegraph", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID              int    `json:"pid"`
+			Event            string `json:"event"`
+			DurationSeconds  int    `json:"duration_seconds"`
+			Dest             string `json:"dest"`
+			AsprofPath       string `json:"asprof_path"`
+			ConfirmSensitive bool   `json:"confirm_sensitive"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.flamegraph requires {\"pid\": <pid>}")
+		}
+		if !p.ConfirmSensitive {
+			return nil, fmt.Errorf("jvm.flamegraph requires {\"confirm_sensitive\": true} because profiling artifacts may contain package, class, and method names")
+		}
+		if p.Dest == "" {
+			p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
+		}
+		if err := jvm.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{
+			AsprofPath:      p.AsprofPath,
+			Event:           p.Event,
+			DurationSeconds: p.DurationSeconds,
+			OutputPath:      p.Dest,
+		}); err != nil {
+			return nil, fmt.Errorf("flamegraph pid %d: %w", p.PID, err)
+		}
+		return map[string]any{"pid": p.PID, "dest": p.Dest}, nil
+	})
+
 	// jvm.jfr.start — start a JFR recording on a JVM process.
 	// Required: {"pid": <pid>}. Optional: {"name": "spectra"}.
 	d.Register("jvm.jfr.start", func(params json.RawMessage) (any, error) {

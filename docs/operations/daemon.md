@@ -72,9 +72,10 @@ JSON-RPC 2.0 methods, organized by concern:
 - **Helper** — `helper.health`, `helper.powermetrics.sample`,
   `helper.tcc.system.query`, `helper.firewall.rules`,
   `helper.fs_usage.start`, `helper.fs_usage.stop`
-- **JVM** — `jvm.list`, `jvm.inspect`, `jvm.threadDump`, `jvm.heapDump`,
-  `jvm.heapHistogram`, `jvm.gcStats`, `jvm.jfr.start`, `jvm.jfr.stop`,
-  `jvm.jfr.dump`, `jvm.jfr.summary`
+- **JVM** — `jvm.list`, `jvm.inspect`, `jvm.explain`,
+  `jvm.threadDump`, `jvm.heapDump`, `jvm.heapHistogram`, `jvm.gcStats`, `jvm.vmMemory`,
+  `jvm.jmx.status`, `jvm.jmx.startLocal`, `jvm.flamegraph`,
+  `jvm.jfr.start`, `jvm.jfr.stop`, `jvm.jfr.dump`, `jvm.jfr.summary`
 - **JDK** — `jdk.list`, `jdk.scan`
 - **Toolchain** — `toolchain.scan`, `toolchain.brew`,
   `toolchain.runtimes`, `toolchain.build_tools`
@@ -137,7 +138,7 @@ work with the remote portal.
   (`snapshot.create`, `cache.clear`, `issues.acknowledge`,
   `issues.dismiss`, `issues.fix.record`, `snapshot.prune`, JVM heap/JFR
   capture) are explicit methods. Sensitive artifact writes
-  (`jvm.heap_dump`, `jvm.jfr.dump`) also require
+  (`jvm.heap_dump`, `jvm.jfr.dump`, `jvm.flamegraph`) also require
   `confirm_sensitive: true` in the request.
 - The daemon is intended to be a low-privilege observer, not a remote
   shell. Method surface is intentionally narrow; arbitrary

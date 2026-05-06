@@ -31,6 +31,14 @@ func runJVM(args []string) int {
 			return runJVMJFR(args[1:])
 		case "gc-stats":
 			return runJVMGCStats(args[1:])
+		case "vm-memory":
+			return runJVMVMMemory(args[1:])
+		case "jmx":
+			return runJVMJMX(args[1:])
+		case "flamegraph":
+			return runJVMFlamegraph(args[1:])
+		case "explain":
+			return runJVMExplain(args[1:])
 		}
 	}
 
@@ -225,6 +233,174 @@ func runJVMGCStats(args []string) int {
 	return 0
 }
 
+func runJVMVMMemory(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm vm-memory", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm vm-memory [--json] <pid>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+
+	diagnostics := jvm.CollectVMMemoryDiagnostics(pid, nil)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(diagnostics)
+		return 0
+	}
+
+	fmt.Printf("VM memory diagnostics for PID %d\n", pid)
+	printDiagnosticSection("Heap", diagnostics.HeapInfo)
+	printDiagnosticSection("Metaspace", diagnostics.Metaspace)
+	printDiagnosticSection("Native memory", diagnostics.NativeMemory)
+	printDiagnosticSection("Class loaders", diagnostics.ClassLoaderStats)
+	printDiagnosticSection("Code cache", diagnostics.CodeCache)
+	printDiagnosticSection("Code heap", diagnostics.CodeHeap)
+	return 0
+}
+
+func runJVMJMX(args []string) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm jmx <status|start-local> [--json] <pid>")
+		return 2
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("spectra jvm jmx "+sub, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(os.Stderr, "usage: spectra jvm jmx %s [--json] <pid>\n", sub)
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+
+	var out []byte
+	switch sub {
+	case "status":
+		out, err = jvm.JMXStatus(pid, nil)
+	case "start-local":
+		out, err = jvm.JMXStartLocal(pid, nil)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown jmx subcommand %q; use status or start-local\n", sub)
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jmx %s failed for PID %d: %v\n", sub, pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(map[string]any{"pid": pid, "output": string(out)})
+		return 0
+	}
+	os.Stdout.Write(out)
+	return 0
+}
+
+func runJVMFlamegraph(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm flamegraph", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	event := fs.String("event", "cpu", "async-profiler event: cpu, wall, alloc, lock")
+	duration := fs.Int("duration", 30, "Capture duration in seconds")
+	out := fs.String("out", "", "Output flamegraph path (default: ~/.spectra/<pid>-<ts>-<event>.html)")
+	asprof := fs.String("asprof", "asprof", "async-profiler CLI path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm flamegraph [--event cpu] [--duration 30] [--out <path>] [--asprof asprof] <pid>")
+		return 2
+	}
+	if *duration <= 0 {
+		fmt.Fprintln(os.Stderr, "--duration must be greater than zero")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	dest := *out
+	if dest == "" {
+		var err error
+		dest, err = defaultFlamegraphPath(pid, *event)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+	if err := jvm.CaptureFlamegraph(pid, jvm.FlamegraphOptions{
+		AsprofPath:      *asprof,
+		Event:           *event,
+		DurationSeconds: *duration,
+		OutputPath:      dest,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "flamegraph failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	fmt.Println(dest)
+	return 0
+}
+
+func runJVMExplain(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm explain", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	samples := fs.Int("samples", 1, "Number of jstat samples for trend analysis")
+	interval := fs.Duration("interval", 1*time.Second, "Interval between trend samples")
+	softRefs := fs.Bool("soft-refs", true, "Check java.lang.ref.SoftReference instances with a class histogram")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm explain [--json] [--samples 1] [--interval 1s] [--soft-refs=true] <pid>")
+		return 2
+	}
+	if *samples <= 0 {
+		fmt.Fprintln(os.Stderr, "--samples must be greater than zero")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	explanation, err := jvm.CollectExplanation(context.Background(), pid, jvm.ExplainOptions{
+		Samples:  *samples,
+		Interval: *interval,
+		SoftRefs: *softRefs,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "explain failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(explanation)
+		return 0
+	}
+	printJVMExplanation(*explanation)
+	return 0
+}
+
 func runJVMJFR(args []string) int {
 	if len(args) > 0 && args[0] == "summary" {
 		return runJFRSummary(args[1:])
@@ -331,6 +507,19 @@ func runJFRDump(pid int, name, dest string) int {
 	return 0
 }
 
+func defaultFlamegraphPath(pid int, event string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	dest := filepath.Join(home, ".spectra", fmt.Sprintf("%d-%s-%s.html", pid, ts, event))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
 func defaultJFRPath(pid int) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -382,6 +571,43 @@ func printJFRSummary(summary jvm.JFRSummary) {
 	fmt.Println(strings.Repeat("-", 74))
 	for _, event := range summary.Events {
 		fmt.Printf("%-48s %10d %12d\n", truncate(event.Type, 48), event.Count, event.SizeBytes)
+	}
+}
+
+func printDiagnosticSection(title string, section jvm.DiagnosticSection) {
+	fmt.Printf("\n%s\n", title)
+	fmt.Printf("Command  %s\n", strings.Join(section.Command, " "))
+	if section.Error != "" {
+		fmt.Printf("Error    %s\n", section.Error)
+		return
+	}
+	if section.Output == "" {
+		fmt.Println("(no output)")
+		return
+	}
+	fmt.Println(section.Output)
+}
+
+func printJVMExplanation(explanation jvm.Explanation) {
+	fmt.Printf("JVM explanation for PID %d\n", explanation.PID)
+	fmt.Printf("Main class    %s\n", strOrDash(explanation.MainClass))
+	fmt.Printf("JDK           %s %s\n", strOrDash(explanation.JDKVendor), strOrDash(explanation.JDKVersion))
+	fmt.Printf("Java home     %s\n", strOrDash(explanation.JavaHome))
+	if explanation.Trend != nil {
+		fmt.Printf("Trend         %d samples every %dms\n", explanation.Trend.Samples, explanation.Trend.IntervalMillis)
+	}
+	if explanation.SoftRefs != nil {
+		fmt.Printf("Soft refs     %d instances, %d bytes\n", explanation.SoftRefs.Instances, explanation.SoftRefs.Bytes)
+	}
+	fmt.Println("\nObservations:")
+	for _, obs := range explanation.Observations {
+		fmt.Printf("- [%s] %s: %s\n", obs.Severity, obs.ID, obs.Summary)
+		if obs.Evidence != "" {
+			fmt.Printf("  Evidence: %s\n", obs.Evidence)
+		}
+		if obs.Recommendation != "" {
+			fmt.Printf("  Next: %s\n", obs.Recommendation)
+		}
 	}
 }
 

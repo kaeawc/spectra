@@ -544,6 +544,60 @@ func TestDaemonJVMGCStatsMissingPID(t *testing.T) {
 	}
 }
 
+func TestDaemonJVMVMMemoryMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 132, "jvm.vm_memory", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJMXStatusMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 232, "jvm.jmx.status", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMJMXStartLocalMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 233, "jvm.jmx.start_local", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMFlamegraphMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 234, "jvm.flamegraph", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
+func TestDaemonJVMFlamegraphRequiresSensitiveConfirmation(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 235, "jvm.flamegraph", `{"pid":42}`)
+	if resp.Error == nil {
+		t.Error("expected sensitive confirmation error")
+	}
+}
+
+func TestDaemonJVMExplainMissingPID(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 236, "jvm.explain", `{}`)
+	if resp.Error == nil {
+		t.Error("expected error when pid missing")
+	}
+}
+
 func TestDaemonJVMCamelCaseAliasesRequirePID(t *testing.T) {
 	tests := []struct {
 		method string
@@ -553,6 +607,8 @@ func TestDaemonJVMCamelCaseAliasesRequirePID(t *testing.T) {
 		{method: "jvm.heapHistogram", id: 134},
 		{method: "jvm.gcStats", id: 135},
 		{method: "jvm.heapDump", id: 136},
+		{method: "jvm.vmMemory", id: 137},
+		{method: "jvm.jmx.startLocal", id: 138},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {

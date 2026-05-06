@@ -282,10 +282,15 @@ Lists or inspects running JVM processes and exposes JDK-tool diagnostics.
 spectra jvm
 spectra jvm --json
 spectra jvm 4012
+spectra jvm explain --samples 6 --interval 10s 4012
 spectra jvm thread-dump 4012
 spectra jvm heap-histogram 4012
 spectra jvm heap-dump --out /tmp/app.hprof 4012
 spectra jvm gc-stats --json 4012
+spectra jvm vm-memory --json 4012
+spectra jvm jmx status 4012
+spectra jvm jmx start-local 4012
+spectra jvm flamegraph --event wall --duration 30 --out /tmp/app.html 4012
 spectra jvm jfr start 4012 --name spectra
 spectra jvm jfr dump 4012 --name spectra --out /tmp/app.jfr
 spectra jvm jfr summary --json /tmp/app.jfr
