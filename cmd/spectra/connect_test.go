@@ -113,10 +113,17 @@ func TestParseConnectTypedCalls(t *testing.T) {
 		{name: "metrics pid", args: []string{"metrics", "4012"}, wantMethod: "process.history", wantParams: `{"pid":4012}`},
 		{name: "metrics pid and limit", args: []string{"metrics", "4012", "30"}, wantMethod: "process.history", wantParams: `{"pid":4012,"limit":30}`},
 		{name: "network", args: []string{"network"}, wantMethod: "network.state"},
+		{name: "network state", args: []string{"network", "state"}, wantMethod: "network.state"},
+		{name: "firewall", args: []string{"firewall"}, wantMethod: "network.firewall"},
 		{name: "connections", args: []string{"connections"}, wantMethod: "network.connections"},
+		{name: "network connections", args: []string{"network", "connections"}, wantMethod: "network.connections"},
+		{name: "network by-app (all)", args: []string{"network", "by-app"}, wantMethod: "network.byApp"},
+		{name: "network by-app", args: []string{"network", "by-app", "/Applications/Slack.app", "/Applications/Cursor.app"}, wantMethod: "network.byApp", wantParams: `{"bundles":["/Applications/Slack.app","/Applications/Cursor.app"]}`},
+		{name: "network apps", args: []string{"network", "apps", "/Applications/Slack.app"}, wantMethod: "network.byApp", wantParams: `{"bundles":["/Applications/Slack.app"]}`},
 		{name: "network by app", args: []string{"network-by-app", "/Applications/Slack.app"}, wantMethod: "network.byApp", wantParams: `{"bundles":["/Applications/Slack.app"]}`},
 		{name: "network capture start", args: []string{"network-capture-start", "en0", "duration_ms=5000", "snap_len=4096", "proto=tcp", "host=api.example.com", "port=443"}, wantMethod: "helper.net_capture.start", wantParams: `{"duration_ms":5000,"host":"api.example.com","interface":"en0","port":443,"proto":"tcp","snap_len":4096}`},
 		{name: "network capture stop", args: []string{"network-capture-stop", "netcap-1"}, wantMethod: "helper.net_capture.stop", wantParams: `{"handle":"netcap-1"}`},
+		{name: "network firewall", args: []string{"network", "firewall"}, wantMethod: "network.firewall"},
 		{name: "storage system", args: []string{"storage"}, wantMethod: "storage.system"},
 		{name: "storage by app", args: []string{"storage", "/Applications/Slack.app", "/Applications/Cursor.app"}, wantMethod: "storage.byApp", wantParams: `{"paths":["/Applications/Slack.app","/Applications/Cursor.app"]}`},
 		{name: "power", args: []string{"power"}, wantMethod: "power.state"},
@@ -221,6 +228,7 @@ func TestParseConnectTypedCallErrors(t *testing.T) {
 		{"jvm-jfr-summary"},
 		{"cache", "clear", "too", "many"},
 		{"cache", "weird"},
+		{"network", "weird"},
 	}
 	for _, args := range tests {
 		t.Run(args[0], func(t *testing.T) {

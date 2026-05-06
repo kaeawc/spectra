@@ -77,6 +77,7 @@ spectra connect work-mac metrics
 spectra connect work-mac metrics 4012 60
 spectra connect work-mac storage
 spectra connect work-mac storage /Applications/Slack.app
+spectra connect work-mac network firewall
 spectra connect work-mac power
 spectra connect work-mac rules
 spectra connect work-mac issues check

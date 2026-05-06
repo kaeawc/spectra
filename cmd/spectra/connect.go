@@ -87,7 +87,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> issues check [snapshot-id]")
-	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network-by-app [App.app ...]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network [state|connections|firewall|by-app [App.app ...]] | network-by-app [App.app ...]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "targets: local, unix:/path/to/sock, /path/to/sock, host:port, host")
@@ -155,6 +155,8 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 	switch args[0] {
 	case "inspect":
 		return parseConnectInspect(args)
+	case "network":
+		return parseConnectNetwork(args)
 	case "jvm":
 		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
 	case "jvm-jfr-start":
@@ -336,6 +338,36 @@ func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
 	}
 }
 
+func parseConnectNetwork(args []string) (string, json.RawMessage, bool, error) {
+	switch len(args) {
+	case 1:
+		return "network.state", nil, true, nil
+	case 2:
+		switch args[1] {
+		case "state", "status":
+			return "network.state", nil, true, nil
+		case "connections", "conns":
+			return "network.connections", nil, true, nil
+		case "firewall":
+			return "network.firewall", nil, true, nil
+		case "by-app", "apps":
+			return "network.byApp", nil, true, nil
+		}
+		return "", nil, true, fmt.Errorf("unknown network subcommand %q", args[1])
+	case 3:
+		switch args[1] {
+		case "by-app", "apps":
+			return parseConnectStringSliceCall(args[1:], "network.byApp", "bundles")
+		}
+	default:
+		switch args[1] {
+		case "by-app", "apps":
+			return parseConnectStringSliceCall(args[1:], "network.byApp", "bundles")
+		}
+	}
+	return "", nil, true, fmt.Errorf("network accepts state, connections, firewall, by-app, or no extra args")
+}
+
 func parseConnectCache(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) == 1 {
 		return "cache.stats", nil, true, nil
@@ -455,13 +487,13 @@ func connectNoArgShortcuts() map[string]string {
 		"brew":                "toolchain.brew",
 		"cache-stats":         "cache.stats",
 		"connections":         "network.connections",
+		"firewall":            "network.firewall",
 		"health":              "health",
 		"host":                "inspect.host",
 		"inspect-host":        "inspect.host",
 		"jdk":                 "jdk.list",
 		"jdk-scan":            "jdk.scan",
 		"jdks":                "jdk.list",
-		"network":             "network.state",
 		"network-connections": "network.connections",
 		"power":               "power.state",
 		"runtimes":            "toolchain.runtimes",

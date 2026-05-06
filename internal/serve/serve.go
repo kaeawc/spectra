@@ -1134,6 +1134,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		return netstate.CollectConnections(netstate.DefaultRunner), nil
 	})
 
+	// network.firewall — firewall configuration from the helper (if available).
+	d.Register("network.firewall", func(_ json.RawMessage) (any, error) {
+		result, err := helperclient.New().FirewallRules()
+		if err != nil {
+			if helperclient.IsUnavailable(err) {
+				return nil, fmt.Errorf("privileged helper not running; install with: sudo spectra install-helper")
+			}
+			return nil, err
+		}
+		return result, nil
+	})
+
 	// network.byApp — active connections grouped by app bundle path.
 	// Runs CollectConnections + CollectAll and joins on PID.
 	// Optional: {"bundles": ["/Applications/Foo.app"]} to scope app attribution.
