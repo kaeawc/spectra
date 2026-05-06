@@ -67,6 +67,7 @@ spectra connect work-mac cache clear detect
 spectra connect work-mac issues local-machine
 spectra connect work-mac issues update issue-123 fixed
 spectra connect work-mac jvm-jfr-start 4012
+spectra connect work-mac jvm-jfr-dump 4012 /tmp/recording.jfr
 spectra connect work-mac jvm-jfr-stop 4012 /tmp/recording.jfr
 spectra connect work-mac snapshot list
 spectra connect work-mac snapshot diff snap-before snap-after
@@ -75,8 +76,7 @@ spectra connect work-mac jdk
 spectra connect work-mac brew
 ```
 
-Use `call` for less common or sensitive methods such as heap dumps and JFR
-artifact writes.
+Use `call` for less common methods such as heap dumps and direct JDK calls.
 
 ## Cross-host operations
 

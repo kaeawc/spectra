@@ -76,7 +76,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
-	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jfr-start <pid> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jfr-start <pid> [name] | jvm-jfr-dump <pid> <dest> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
@@ -149,6 +149,8 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
 	case "jvm-jfr-start":
 		return parseConnectJFRStart(args)
+	case "jvm-jfr-dump":
+		return parseConnectJFRDump(args)
 	case "jvm-jfr-stop":
 		return parseConnectJFRStop(args)
 	case "jvm-jfr-summary":
@@ -206,6 +208,25 @@ func parseConnectJFRStop(args []string) (string, json.RawMessage, bool, error) {
 		params["dest"] = args[2]
 	}
 	return "jvm.jfr.stop", connectParams(params), true, nil
+}
+
+func parseConnectJFRDump(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 3 || len(args) > 4 {
+		return "", nil, true, fmt.Errorf("connect jvm-jfr-dump requires <pid> <dest> [name]")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	params := map[string]any{
+		"pid":               pid,
+		"dest":              args[2],
+		"confirm_sensitive": true,
+	}
+	if len(args) == 4 {
+		params["name"] = args[3]
+	}
+	return "jvm.jfr.dump", connectParams(params), true, nil
 }
 
 func parseConnectJFRSummary(args []string) (string, json.RawMessage, bool, error) {

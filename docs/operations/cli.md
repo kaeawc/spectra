@@ -409,6 +409,7 @@ automatic tsnet registration and host discovery remain future work.
 | `spectra connect <target> issues acknowledge <issue-id>` | Call `issues.acknowledge` |
 | `spectra connect <target> issues dismiss <issue-id>` | Call `issues.dismiss` |
 | `spectra connect <target> jvm-jfr-start <pid> [name]` | Call `jvm.jfr.start` |
+| `spectra connect <target> jvm-jfr-dump <pid> <dest> [name]` | Call `jvm.jfr.dump` |
 | `spectra connect <target> jvm-jfr-stop <pid> [dest]` | Call `jvm.jfr.stop` |
 | `spectra connect <target> jvm-jfr-summary <path>` | Call `jvm.jfr.summary` |
 | `spectra connect <target> snapshot` | Call `snapshot.create` |
@@ -448,6 +449,7 @@ spectra connect work-mac issues acknowledge issue-123
 spectra connect work-mac issues dismiss issue-456
 spectra connect work-mac jvm-jfr-start 4012
 spectra connect work-mac jvm-jfr-start 4012 spectra
+spectra connect work-mac jvm-jfr-dump 4012 /tmp/recording.jfr spectra
 spectra connect work-mac jvm-jfr-stop 4012 /tmp/recording.jfr
 spectra connect work-mac jvm-jfr-summary /tmp/recording.jfr
 spectra connect work-mac processes
