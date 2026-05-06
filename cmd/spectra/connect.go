@@ -163,10 +163,55 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 			return "rules.check", connectParams(map[string]string{"snapshot_id": args[1]}), true, nil
 		}
 		return "", nil, true, fmt.Errorf("connect rules accepts at most one snapshot id")
+	case "issues":
+		return parseConnectIssues(args)
 	case "snapshot":
 		return parseConnectSnapshot(args)
 	}
 	return "", nil, false, nil
+}
+
+func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 {
+		return "", nil, true, fmt.Errorf("connect issues requires a machine id")
+	}
+	switch args[1] {
+	case "list":
+		if len(args) < 3 {
+			return "", nil, true, fmt.Errorf("connect issues list requires <machine-id> [status]")
+		}
+		params := map[string]string{"machine_uuid": args[2]}
+		if len(args) == 4 {
+			params["status"] = args[3]
+		}
+		if len(args) != 3 && len(args) != 4 {
+			return "", nil, true, fmt.Errorf("connect issues list supports at most one optional status")
+		}
+		return "issues.list", connectParams(params), true, nil
+	case "update":
+		if len(args) != 4 {
+			return "", nil, true, fmt.Errorf("connect issues update requires <issue-id> <status>")
+		}
+		return "issues.update", connectParams(map[string]string{"id": args[2], "status": args[3]}), true, nil
+	case "acknowledge":
+		if len(args) != 3 {
+			return "", nil, true, fmt.Errorf("connect issues acknowledge requires <issue-id>")
+		}
+		return "issues.acknowledge", connectParams(map[string]string{"id": args[2]}), true, nil
+	case "dismiss":
+		if len(args) != 3 {
+			return "", nil, true, fmt.Errorf("connect issues dismiss requires <issue-id>")
+		}
+		return "issues.dismiss", connectParams(map[string]string{"id": args[2]}), true, nil
+	}
+	switch len(args) {
+	case 2:
+		return "issues.list", connectParams(map[string]string{"machine_uuid": args[1]}), true, nil
+	case 3:
+		return "issues.list", connectParams(map[string]string{"machine_uuid": args[1], "status": args[2]}), true, nil
+	default:
+		return "", nil, true, fmt.Errorf("connect issues supports list [machine-id [status]] or update/acknowledge/dismiss <issue-id>")
+	}
 }
 
 func parseConnectCache(args []string) (string, json.RawMessage, bool, error) {
