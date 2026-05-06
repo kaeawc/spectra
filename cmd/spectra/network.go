@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/netcap"
+	"github.com/kaeawc/spectra/internal/netdiag"
 	"github.com/kaeawc/spectra/internal/netstate"
 )
 
@@ -30,6 +32,9 @@ var (
 		defer f.Close()
 		return netcap.SummarizePCAP(f, limit)
 	}
+	networkDiagnose = func(ctx context.Context, opts netdiag.Options) (netdiag.Report, error) {
+		return netdiag.Diagnose(ctx, opts)
+	}
 )
 
 func runNetwork(args []string) int {
@@ -41,6 +46,9 @@ func runNetwork(args []string) int {
 	}
 	if len(args) > 0 && args[0] == "capture" {
 		return runNetworkCapture(args[1:])
+	}
+	if len(args) > 0 && args[0] == "diagnose" {
+		return runNetworkDiagnose(args[1:])
 	}
 
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
@@ -61,6 +69,165 @@ func runNetwork(args []string) int {
 
 	printNetworkState(state)
 	return 0
+}
+
+func runNetworkDiagnose(args []string) int {
+	fs := flag.NewFlagSet("spectra network diagnose", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	app := fs.String("app", "", "App bundle path to diagnose")
+	pid := fs.Int("pid", 0, "PID to diagnose")
+	command := fs.String("command", "", "Process command/name to diagnose")
+	portsRaw := fs.String("ports", "443", "Comma-separated ports to probe for explicit host targets")
+	timeout := fs.Duration("timeout", 3*time.Second, "Per-probe timeout")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	report, err := networkDiagnose(context.Background(), netdiag.Options{
+		AppPath: *app,
+		PID:     *pid,
+		Command: *command,
+		Targets: fs.Args(),
+		Ports:   parsePortList(*portsRaw),
+		Timeout: *timeout,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "network diagnose: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+		return 0
+	}
+	printNetworkDiagnosis(report)
+	return 0
+}
+
+func printNetworkDiagnosis(report netdiag.Report) {
+	fmt.Println("=== Network diagnosis ===")
+	printNetworkDiagnosisScope(report)
+	printNetworkOverview(report.Network)
+	printNetworkDiagnosisProcesses(report.Processes)
+	printNetworkDiagnosisConnections(report.Connections)
+	printNetworkDiagnosisThroughput(report.Throughput)
+	printNetworkDiagnosisEndpoints(report.Endpoints)
+	printNetworkDiagnosisFindings(report.Findings)
+}
+
+func printNetworkDiagnosisScope(report netdiag.Report) {
+	switch {
+	case report.AppPath != "":
+		fmt.Printf("app:      %s\n", report.AppPath)
+	case report.PID > 0:
+		fmt.Printf("pid:      %d\n", report.PID)
+	case report.Command != "":
+		fmt.Printf("command:  %s\n", report.Command)
+	default:
+		fmt.Println("scope:    explicit targets / current network state")
+	}
+}
+
+func printNetworkDiagnosisProcesses(rows []netdiag.ProcessSummary) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("matched processes (%d):\n", len(rows))
+	for _, p := range rows {
+		fmt.Printf("  pid=%d %-24s %s\n", p.PID, truncate(p.Command, 24), p.ExecutablePath)
+	}
+}
+
+func printNetworkDiagnosisConnections(rows []netstate.Connection) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("active app connections (%d):\n", len(rows))
+	for _, c := range rows {
+		fmt.Printf("  pid=%d %-5s %-11s %s -> %s\n", c.PID, c.Proto, stateOrDash(c.State), c.LocalAddr, c.RemoteAddr)
+	}
+}
+
+func printNetworkDiagnosisThroughput(rows []netstate.Throughput) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("app throughput (%d active):\n", len(rows))
+	for _, t := range rows {
+		fmt.Printf("  pid=%d %-24s in=%d B/s out=%d B/s\n", t.PID, truncate(t.Command, 24), t.BytesInPerSec, t.BytesOutPerSec)
+	}
+}
+
+func printNetworkDiagnosisEndpoints(rows []netdiag.EndpointDiagnosis) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("endpoint probes (%d):\n", len(rows))
+	for _, ep := range rows {
+		fmt.Printf("  %s dns=%s trace_hops=%d\n", ep.Host, okLabel(ep.DNS.OK, ep.DNS.Error), len(ep.Traceroute.Hops))
+		for _, p := range ep.Ports {
+			printNetworkDiagnosisPort(p)
+		}
+	}
+}
+
+func printNetworkDiagnosisPort(p netdiag.PortDiagnosis) {
+	fmt.Printf("    tcp/%d=%s", p.Port, okLabel(p.TCP.OK, p.TCP.Error))
+	if p.TLS != nil {
+		fmt.Printf(" tls=%s", okLabel(p.TLS.OK, p.TLS.Error))
+		if p.TLS.Issuer != "" {
+			fmt.Printf(" issuer=%s", truncate(p.TLS.Issuer, 48))
+		}
+	}
+	fmt.Println()
+}
+
+func printNetworkDiagnosisFindings(rows []netdiag.Finding) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("findings (%d):\n", len(rows))
+	for _, f := range rows {
+		fmt.Printf("  [%s] %s", f.Severity, f.Title)
+		if f.Detail != "" {
+			fmt.Printf(": %s", f.Detail)
+		}
+		fmt.Println()
+	}
+}
+
+func parsePortList(raw string) []int {
+	var ports []int
+	for _, part := range strings.Split(raw, ",") {
+		port, err := strconv.Atoi(strings.TrimSpace(part))
+		if err == nil && port > 0 {
+			ports = append(ports, port)
+		}
+	}
+	return ports
+}
+
+func okLabel(ok bool, errText string) string {
+	if ok {
+		return "ok"
+	}
+	if errText == "" {
+		return "fail"
+	}
+	return "fail(" + truncate(errText, 40) + ")"
+}
+
+func stateOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func runNetworkCapture(args []string) int {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/netcap"
+	"github.com/kaeawc/spectra/internal/netdiag"
 	"github.com/kaeawc/spectra/internal/netproto"
+	"github.com/kaeawc/spectra/internal/netstate"
 )
 
 func TestRunNetworkCaptureStartCallsHelper(t *testing.T) {
@@ -204,6 +207,50 @@ func TestRunNetworkCaptureUnavailableHelper(t *testing.T) {
 	}
 }
 
+func TestRunNetworkDiagnose(t *testing.T) {
+	restore := stubNetworkDiagnose(t, func(_ context.Context, opts netdiag.Options) (netdiag.Report, error) {
+		if opts.AppPath != "/Applications/Slack.app" || opts.PID != 412 || len(opts.Targets) != 1 || opts.Targets[0] != "api.example.com" {
+			t.Fatalf("opts = %+v", opts)
+		}
+		if len(opts.Ports) != 2 || opts.Ports[0] != 443 || opts.Ports[1] != 8443 {
+			t.Fatalf("ports = %+v", opts.Ports)
+		}
+		return netdiag.Report{
+			AppPath: "/Applications/Slack.app",
+			Network: netstate.State{
+				DefaultRouteIface: "en0",
+				DefaultRouteGW:    "192.0.2.1",
+				DNSServers:        []string{"1.1.1.1"},
+				VPNActive:         true,
+				VPNInterfaces:     []string{"utun4"},
+			},
+			Processes:   []netdiag.ProcessSummary{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack"}},
+			Connections: []netstate.Connection{{PID: 412, Proto: "tcp", State: "established", LocalAddr: "192.0.2.10:50000", RemoteAddr: "api.example.com:443"}},
+			Throughput:  []netstate.Throughput{{PID: 412, Command: "Slack", BytesInPerSec: 100, BytesOutPerSec: 50}},
+			Endpoints: []netdiag.EndpointDiagnosis{{
+				Host:       "api.example.com",
+				DNS:        netdiag.DNSProbe{OK: true, Addresses: []string{"203.0.113.10"}},
+				Traceroute: netdiag.TraceProbe{OK: true, Hops: []netdiag.TraceHop{{TTL: 1}}},
+				Ports:      []netdiag.PortDiagnosis{{Port: 443, TCP: netdiag.TCPProbe{OK: true}}},
+			}},
+			Findings: []netdiag.Finding{{Severity: "info", Title: "vpn/tunnel interfaces active", Detail: "utun4"}},
+		}, nil
+	})
+	defer restore()
+
+	out := captureStdout(t, func() {
+		code := runNetwork([]string{"diagnose", "--app", "/Applications/Slack.app", "--pid", "412", "--ports", "443,8443", "api.example.com"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{"Network diagnosis", "app:      /Applications/Slack.app", "active app connections", "endpoint probes", "vpn/tunnel interfaces active"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want %q", out, want)
+		}
+	}
+}
+
 func stubNetworkCaptureStart(t *testing.T, fn func(string, int, int, string, string, int) (map[string]any, error)) func() {
 	t.Helper()
 	old := networkCaptureStart
@@ -223,6 +270,13 @@ func stubNetworkCaptureSummarize(t *testing.T, fn func(string, int) (netcap.PCAP
 	old := networkCaptureSummarize
 	networkCaptureSummarize = fn
 	return func() { networkCaptureSummarize = old }
+}
+
+func stubNetworkDiagnose(t *testing.T, fn func(context.Context, netdiag.Options) (netdiag.Report, error)) func() {
+	t.Helper()
+	old := networkDiagnose
+	networkDiagnose = fn
+	return func() { networkDiagnose = old }
 }
 
 func captureStdout(t *testing.T, fn func()) string {
