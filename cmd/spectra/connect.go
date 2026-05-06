@@ -81,6 +81,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> issues check [snapshot-id]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network-by-app [App.app ...]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
@@ -255,9 +256,18 @@ func parseConnectJVMHeapDump(args []string) (string, json.RawMessage, bool, erro
 
 func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) < 2 {
-		return "", nil, true, fmt.Errorf("connect issues requires a machine id")
+		return "", nil, true, fmt.Errorf("connect issues requires a machine id or command")
 	}
 	switch args[1] {
+	case "check":
+		switch len(args) {
+		case 2:
+			return "issues.check", nil, true, nil
+		case 3:
+			return "issues.check", connectParams(map[string]string{"snapshot_id": args[2]}), true, nil
+		default:
+			return "", nil, true, fmt.Errorf("connect issues check accepts an optional snapshot id")
+		}
 	case "list":
 		if len(args) < 3 {
 			return "", nil, true, fmt.Errorf("connect issues list requires <machine-id> [status]")
@@ -292,7 +302,7 @@ func parseConnectIssues(args []string) (string, json.RawMessage, bool, error) {
 	case 3:
 		return "issues.list", connectParams(map[string]string{"machine_uuid": args[1], "status": args[2]}), true, nil
 	default:
-		return "", nil, true, fmt.Errorf("connect issues supports list [machine-id [status]] or update/acknowledge/dismiss <issue-id>")
+		return "", nil, true, fmt.Errorf("connect issues supports check [snapshot-id], list [machine-id [status]], update/acknowledge/dismiss <issue-id>")
 	}
 }
 

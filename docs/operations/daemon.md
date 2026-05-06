@@ -72,7 +72,7 @@ JSON-RPC 2.0 methods, organized by concern:
 - **Network** — `network.state`, `network.connections`, `network.byApp`
 - **Storage** — `storage.byApp`, `storage.system`
 - **Power** — `power.state`
-- **Issues** — `issues.list`, `issues.record`, `issues.update`,
+- **Issues** — `issues.list`, `issues.check`, `issues.record`, `issues.update`,
   `issues.acknowledge`, `issues.dismiss`, `issues.fix.record`,
   `issues.fix.list`
 - **Cache** — `cache.stats`, `cache.clear`
