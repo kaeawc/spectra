@@ -181,7 +181,14 @@ func printNetworkDiagnosisEndpoints(rows []netdiag.EndpointDiagnosis) {
 	fmt.Println()
 	fmt.Printf("endpoint probes (%d):\n", len(rows))
 	for _, ep := range rows {
-		fmt.Printf("  %s dns=%s trace_hops=%d\n", ep.Host, okLabel(ep.DNS.OK, ep.DNS.Error), len(ep.Traceroute.Hops))
+		fmt.Printf("  %s dns=%s", ep.Host, okLabel(ep.DNS.OK, ep.DNS.Error))
+		if ep.DNS.Status != "" {
+			fmt.Printf(" status=%s", ep.DNS.Status)
+		}
+		if ep.DNS.QueryMS > 0 {
+			fmt.Printf(" dns_ms=%d", ep.DNS.QueryMS)
+		}
+		fmt.Printf(" trace_hops=%d\n", len(ep.Traceroute.Hops))
 		for _, p := range ep.Ports {
 			printNetworkDiagnosisPort(p)
 		}

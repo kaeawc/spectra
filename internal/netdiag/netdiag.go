@@ -83,6 +83,9 @@ type PortDiagnosis struct {
 type DNSProbe struct {
 	OK         bool     `json:"ok"`
 	DurationMS int64    `json:"duration_ms,omitempty"`
+	Status     string   `json:"status,omitempty"`
+	Server     string   `json:"server,omitempty"`
+	QueryMS    int64    `json:"query_ms,omitempty"`
 	Addresses  []string `json:"addresses,omitempty"`
 	Error      string   `json:"error,omitempty"`
 }
@@ -346,23 +349,76 @@ func splitHostPortLoose(addr string) (string, int) {
 
 func probeDNS(run netstate.CmdRunner, host string) DNSProbe {
 	start := time.Now()
-	out, err := run("dig", "+short", "+time=2", "+tries=1", host)
+	out, err := run("dig", "+time=2", "+tries=1", host)
 	probe := DNSProbe{DurationMS: time.Since(start).Milliseconds()}
 	if err != nil {
 		probe.Error = err.Error()
 		return probe
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && net.ParseIP(line) != nil {
-			probe.Addresses = append(probe.Addresses, line)
-		}
+	probe = parseDig(string(out))
+	if probe.DurationMS == 0 {
+		probe.DurationMS = time.Since(start).Milliseconds()
 	}
-	probe.OK = len(probe.Addresses) > 0
-	if !probe.OK {
-		probe.Error = "no A/AAAA answers"
+	if probe.Status == "" {
+		probe.Status = "unknown"
+	}
+	probe.OK = strings.EqualFold(probe.Status, "NOERROR") && len(probe.Addresses) > 0
+	if !probe.OK && probe.Error == "" {
+		probe.Error = "dns status " + probe.Status
 	}
 	return probe
+}
+
+func parseDig(out string) DNSProbe {
+	var probe DNSProbe
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.Contains(line, "status:"):
+			probe.Status = parseDigStatus(line)
+		case strings.HasPrefix(line, ";; Query time:"):
+			probe.QueryMS = parseDigQueryMS(line)
+		case strings.HasPrefix(line, ";; SERVER:"):
+			probe.Server = strings.TrimSpace(strings.TrimPrefix(line, ";; SERVER:"))
+		default:
+			if ip := firstIPField(line); ip != "" {
+				probe.Addresses = append(probe.Addresses, ip)
+			}
+		}
+	}
+	return probe
+}
+
+func parseDigStatus(line string) string {
+	_, after, ok := strings.Cut(line, "status:")
+	if !ok {
+		return ""
+	}
+	status := strings.TrimSpace(after)
+	if idx := strings.Index(status, ","); idx >= 0 {
+		status = status[:idx]
+	}
+	return strings.TrimSpace(status)
+}
+
+func parseDigQueryMS(line string) int64 {
+	fields := strings.Fields(line)
+	for i, field := range fields {
+		if field == "time:" && i+1 < len(fields) {
+			ms, _ := strconv.ParseInt(fields[i+1], 10, 64)
+			return ms
+		}
+	}
+	return 0
+}
+
+func firstIPField(line string) string {
+	for _, field := range strings.Fields(line) {
+		if net.ParseIP(field) != nil {
+			return field
+		}
+	}
+	return ""
 }
 
 func probeTCP(ctx context.Context, dialer Dialer, host string, port int) TCPProbe {
