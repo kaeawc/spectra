@@ -667,7 +667,8 @@ func boolInt(b bool) int {
 }
 
 // SaveProcessMetrics persists a batch of 1-minute aggregates from the ring
-// buffer. Uses INSERT OR IGNORE so duplicate (pid, minute_at) rows are skipped.
+// buffer. Rows are upserted because each flush may include a more complete
+// aggregate for a minute that was already partially written.
 func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -676,9 +677,15 @@ func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) er
 	defer tx.Rollback() //nolint:errcheck
 	for _, a := range aggs {
 		_, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO process_metrics
+			INSERT INTO process_metrics
 			    (pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count)
-			VALUES (?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?)
+			ON CONFLICT(pid, minute_at) DO UPDATE SET
+			    avg_rss_kib=excluded.avg_rss_kib,
+			    max_rss_kib=excluded.max_rss_kib,
+			    avg_cpu_pct=excluded.avg_cpu_pct,
+			    max_cpu_pct=excluded.max_cpu_pct,
+			    sample_count=excluded.sample_count`,
 			a.PID, a.MinuteAt.UTC().Format(time.RFC3339),
 			a.AvgRSSKiB, a.MaxRSSKiB,
 			a.AvgCPUPct, a.MaxCPUPct,

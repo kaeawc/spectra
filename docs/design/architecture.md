@@ -75,7 +75,7 @@ required only for root-grade visibility.
   pure work; a daemon caches it and serves repeat inspections in
   microseconds.
 - **Live state needs continuity.** A ring buffer of recent CPU/RSS/network
-  samples enables "what was this process doing five minutes ago" without
+  samples enables "what was this process doing 30 minutes ago" without
   the user having had Spectra running at the time.
 - **The recommendations engine and issue tracker need persistence.** Both
   imply a single owner of the SQLite database — that's the daemon.

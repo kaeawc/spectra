@@ -3,6 +3,8 @@ package netstate
 import (
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 // Connection is one active TCP or UDP socket from `lsof -i -P -n`.
@@ -13,6 +15,12 @@ type Connection struct {
 	LocalAddr  string `json:"local_addr"`
 	RemoteAddr string `json:"remote_addr,omitempty"` // empty for unconnected UDP
 	State      string `json:"state,omitempty"`       // "established", "close_wait", etc.
+}
+
+// AttributedConnection is a socket row joined to an app bundle path.
+type AttributedConnection struct {
+	Connection
+	AppPath string `json:"app_path,omitempty"`
 }
 
 // CollectConnections returns all active (non-LISTEN) TCP and UDP sockets.
@@ -27,6 +35,27 @@ func CollectConnections(run CmdRunner) []Connection {
 		return nil
 	}
 	return parseNetstatConnections(string(out))
+}
+
+// GroupConnectionsByApp joins active connections to process app attribution by
+// PID. Unattributed connections are grouped under the empty string key.
+func GroupConnectionsByApp(conns []Connection, procs []process.Info) map[string][]AttributedConnection {
+	pidApp := make(map[int]string, len(procs))
+	for _, p := range procs {
+		if p.PID > 0 && p.AppPath != "" {
+			pidApp[p.PID] = p.AppPath
+		}
+	}
+
+	grouped := make(map[string][]AttributedConnection)
+	for _, c := range conns {
+		app := pidApp[c.PID]
+		grouped[app] = append(grouped[app], AttributedConnection{
+			Connection: c,
+			AppPath:    app,
+		})
+	}
+	return grouped
 }
 
 // parseLSOFConnections extracts active connections from `lsof -i -P -n` output.

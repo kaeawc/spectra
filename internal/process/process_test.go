@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // fakePS returns a CmdRunner that feeds canned ps output.
@@ -87,6 +88,9 @@ func TestParsePSStartTime(t *testing.T) {
 	if slack.StartTime.Year() != 2026 {
 		t.Errorf("StartTime year = %d, want 2026", slack.StartTime.Year())
 	}
+	if slack.StartTime.Location() != time.Local {
+		t.Errorf("StartTime location = %v, want time.Local", slack.StartTime.Location())
+	}
 }
 
 func TestCollectAll(t *testing.T) {
@@ -122,6 +126,35 @@ func TestCollectAllAppliesThreadCounts(t *testing.T) {
 	}
 }
 
+func TestCollectAllAppliesProcessDetails(t *testing.T) {
+	opts := CollectOptions{
+		CmdRunner: fakePS(psFixture),
+		DetailCollector: func(procs []Info) map[int]Details {
+			if len(procs) != 4 {
+				t.Fatalf("detail collector saw %d procs, want 4", len(procs))
+			}
+			return map[int]Details{
+				412: {
+					ThreadCount:    13,
+					BSDName:        "Slack",
+					ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack",
+				},
+			}
+		},
+	}
+	procs := CollectAll(context.Background(), opts)
+	slack := procs[1]
+	if slack.ThreadCount != 13 {
+		t.Errorf("ThreadCount = %d, want 13", slack.ThreadCount)
+	}
+	if slack.BSDName != "Slack" {
+		t.Errorf("BSDName = %q, want Slack", slack.BSDName)
+	}
+	if slack.ExecutablePath != "/Applications/Slack.app/Contents/MacOS/Slack" {
+		t.Errorf("ExecutablePath = %q", slack.ExecutablePath)
+	}
+}
+
 func TestCollectAllPSError(t *testing.T) {
 	opts := CollectOptions{
 		CmdRunner: func(name string, args ...string) ([]byte, error) {
@@ -131,6 +164,25 @@ func TestCollectAllPSError(t *testing.T) {
 	procs := CollectAll(context.Background(), opts)
 	if len(procs) != 0 {
 		t.Errorf("expected nil on ps error, got %d procs", len(procs))
+	}
+}
+
+func TestBundleAttributionUsesExecutablePath(t *testing.T) {
+	opts := CollectOptions{
+		CmdRunner:   fakePS("700 1 0.0 1024 2048 501 alice Sat May  2 23:00:00 2026 Helper --flag\n"),
+		BundlePaths: []string{"/Applications/Foo Bar.app"},
+		DetailCollector: func([]Info) map[int]Details {
+			return map[int]Details{
+				700: {ExecutablePath: "/Applications/Foo Bar.app/Contents/MacOS/Helper"},
+			}
+		},
+	}
+	procs := CollectAll(context.Background(), opts)
+	if len(procs) != 1 {
+		t.Fatalf("CollectAll = %d procs, want 1", len(procs))
+	}
+	if procs[0].AppPath != "/Applications/Foo Bar.app" {
+		t.Errorf("AppPath = %q, want /Applications/Foo Bar.app", procs[0].AppPath)
 	}
 }
 

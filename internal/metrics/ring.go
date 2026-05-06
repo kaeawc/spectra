@@ -1,7 +1,7 @@
 // Package metrics implements the live data ring buffer described in
 // docs/operations/daemon.md and docs/design/storage.md (Tier 3).
 //
-// Process-level metrics are sampled at ~1Hz. The last 5 minutes per
+// Process-level metrics are sampled at ~1Hz. The last 30 minutes per
 // process are kept in RAM as a circular buffer. When the buffer wraps
 // or the daemon requests a flush, samples are aggregated to 1-minute
 // rows and written to SQLite.
@@ -12,8 +12,11 @@ import (
 	"time"
 )
 
-// maxSamples is 5 minutes at 1Hz.
-const maxSamples = 300
+// DefaultRetainWindow is the in-memory per-process replay window.
+const DefaultRetainWindow = 30 * time.Minute
+
+// maxSamples is DefaultRetainWindow at 1Hz.
+const maxSamples = int(DefaultRetainWindow / time.Second)
 
 // Sample is one point-in-time observation of a single process.
 type Sample struct {

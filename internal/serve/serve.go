@@ -314,7 +314,7 @@ func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			aggs := c.FlushAggregates(5 * time.Minute)
+			aggs := c.FlushAggregates(metrics.DefaultRetainWindow)
 			if len(aggs) == 0 {
 				continue
 			}
@@ -1003,26 +1003,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		procs := process.CollectAll(context.Background(), process.CollectOptions{
 			BundlePaths: p.Bundles,
 		})
-
-		// Build PID → AppPath map.
-		pidApp := make(map[int]string, len(procs))
-		for _, pr := range procs {
-			if pr.AppPath != "" {
-				pidApp[pr.PID] = pr.AppPath
-			}
-		}
-
-		// Group connections by AppPath ("" for unattributed).
-		type connWithApp struct {
-			netstate.Connection
-			AppPath string `json:"app_path,omitempty"`
-		}
-		grouped := make(map[string][]connWithApp)
-		for _, c := range conns {
-			app := pidApp[c.PID]
-			grouped[app] = append(grouped[app], connWithApp{Connection: c, AppPath: app})
-		}
-		return grouped, nil
+		return netstate.GroupConnectionsByApp(conns, procs), nil
 	})
 
 	// process.list — snapshot of all running processes via ps.
