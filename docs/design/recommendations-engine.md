@@ -1,9 +1,10 @@
 # Recommendations engine
 
 Spectra has an implemented recommendations engine backed by a built-in Go
-rule catalog, persisted issues, and applied-fix history. The long-term
-architecture still points toward CEL/YAML rules, but today's engine is
-compiled Go code so the catalog can ship without adding a dependency.
+rule catalog, project-local override files, persisted issues, and
+applied-fix history. The long-term architecture still points toward
+CEL/YAML rules, but today's executable rules are compiled Go code so the
+catalog can ship without adding a dependency.
 
 The recommendations engine is what turns Spectra from "DataDog Agent for
 Macs" into something genuinely new: **a persistent issue catalog where
@@ -16,7 +17,9 @@ Entry points:
 spectra rules
 spectra rules --json
 spectra rules --snapshot <snapshot-id>
+spectra rules --rules-config spectra.yml
 spectra issues check
+spectra issues check --rules-config spectra.yml
 spectra issues list [--status open]
 spectra issues acknowledge <issue-id>
 spectra issues dismiss <issue-id>
@@ -49,7 +52,9 @@ type Rule struct {
 `rules.Evaluate(snapshot, rules.V1Catalog())` runs the catalog and returns
 sorted findings. `spectra rules` prints findings without persisting them;
 `spectra issues check` evaluates rules, persists the snapshot when needed,
-and upserts findings into the issue catalog.
+and upserts findings into the issue catalog. Both commands load
+project-local rule overrides from `./spectra.yml` when present, or from
+an explicit `--rules-config` path.
 
 ## Future shape
 
@@ -117,11 +122,28 @@ matching finding.
 
 ## Rule sources
 
-The V1 catalog ships with the binary. Future:
+The V1 catalog ships with the binary. Project-local `spectra.yml`
+overrides are implemented for the built-in catalog:
 
-- **Project-local overrides** — per-team `spectra.yml` extends the catalog.
+```yaml
+rules:
+  disabled:
+    - app-unsigned
+  severity:
+    jvm-eol-version: high
+    library-storage-footprint: low
+```
+
+The supported subset is intentionally small: disable built-in rule IDs and
+override emitted severity (`high`, `medium`, `low`, `info`). Unknown rule
+IDs produce warnings so team configs do not silently drift.
+
+Future:
+
 - **Remote catalogs** — pull from a URL or git repo (e.g.
   `kaeawc/spectra-rules-jvm`).
+- **CEL/YAML rules** — evaluate new declarative rules, not just overrides
+  for built-ins.
 - **AI-generated rules** — at the edge: feed the LLM a structured
   snapshot and let it propose new rules to add to the catalog.
 
@@ -173,5 +195,5 @@ Implemented rules:
   independently; we'll deal with conflicts when we see them.
 - **Multi-host rules** that fire on tailnet-wide patterns (e.g. "this
   team has version drift across machines"). V2.
-- **External CEL/YAML catalogs.** The Go `MatchFn` interface is the point
-  where a future CEL evaluator plugs in.
+- **External CEL/YAML catalogs.** Project-local overrides are implemented,
+  but new externally defined CEL rules remain future work.

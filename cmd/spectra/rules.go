@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -19,6 +20,7 @@ func runRules(args []string) int {
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: take a live snapshot)")
+	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -38,7 +40,12 @@ func runRules(args []string) int {
 		})
 	}
 
-	findings := rules.Evaluate(snap, rules.V1Catalog())
+	catalog, err := loadRuleCatalog(*rulesConfig, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rules: %v\n", err)
+		return 1
+	}
+	findings := rules.Evaluate(snap, catalog)
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -54,6 +61,35 @@ func runRules(args []string) int {
 
 	printFindings(findings)
 	return 0
+}
+
+func loadRuleCatalog(configPath string, stderr io.Writer) ([]rules.Rule, error) {
+	catalog := rules.V1Catalog()
+	path, explicit := resolveRulesConfigPath(configPath)
+	if path == "" {
+		return catalog, nil
+	}
+	overrides, err := rules.LoadOverrides(path)
+	if err != nil {
+		if explicit {
+			return nil, err
+		}
+		if os.IsNotExist(err) {
+			return catalog, nil
+		}
+		return nil, err
+	}
+	for _, warning := range rules.OverrideWarnings(overrides, catalog) {
+		fmt.Fprintf(stderr, "warning: %s\n", warning)
+	}
+	return rules.ApplyOverrides(catalog, overrides), nil
+}
+
+func resolveRulesConfigPath(configPath string) (path string, explicit bool) {
+	if configPath != "" {
+		return configPath, true
+	}
+	return "spectra.yml", false
 }
 
 func loadStoredSnapshot(id string) (*snapshot.Snapshot, error) {
