@@ -103,6 +103,29 @@ func TestSummarizePCAPReassemblesSplitTCPHeaders(t *testing.T) {
 	}
 }
 
+func TestSummarizePCAPPrependsOutOfOrderTCPHeaders(t *testing.T) {
+	var b bytes.Buffer
+	writePCAPHeader(t, &b, binary.LittleEndian, false, 2048, LinkTypeEthernet)
+	first := []byte("GET /late HTTP/1.1\r\nHost: ex")
+	second := []byte("ample.com\r\n\r\n")
+	writePCAPPacket(t, &b, binary.LittleEndian, 1, 0,
+		ethernetFrame(ipv4Packet(6, tcpSegmentWithMeta(53125, 80, 1000+uint32(len(first)), 0, 0x18, second))), 0)
+	writePCAPPacket(t, &b, binary.LittleEndian, 2, 0,
+		ethernetFrame(ipv4Packet(6, tcpSegmentWithMeta(53125, 80, 1000, 0, 0x18, first))), 0)
+
+	summary, err := SummarizePCAP(&b, 10)
+	if err != nil {
+		t.Fatalf("SummarizePCAP: %v", err)
+	}
+	if len(summary.HTTP) != 1 {
+		t.Fatalf("http summaries = %+v", summary.HTTP)
+	}
+	msg := summary.HTTP[0].Message
+	if msg.Method != "GET" || msg.Target != "/late" {
+		t.Fatalf("http message = %+v", msg)
+	}
+}
+
 func dnsQuery(name string) []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})

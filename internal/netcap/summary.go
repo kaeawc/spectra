@@ -161,6 +161,7 @@ type tcpSummaryStreams struct {
 
 type tcpSummaryStream struct {
 	data       []byte
+	startSeq   uint32
 	nextSeq    uint32
 	parsedTLS  bool
 	parsedHTTP bool
@@ -183,10 +184,13 @@ func (s *tcpSummaryStreams) add(flow FlowPacket) (*tcpSummaryStream, bool) {
 	}
 	stream := s.streams[key]
 	if stream == nil {
-		stream = &tcpSummaryStream{nextSeq: dataSeq}
+		stream = &tcpSummaryStream{startSeq: dataSeq, nextSeq: dataSeq}
 		s.streams[key] = stream
 	}
 	payload := flow.Payload
+	if dataSeq < stream.startSeq {
+		return prependTCPPayload(stream, dataSeq, payload)
+	}
 	if dataSeq < stream.nextSeq {
 		overlap := int(stream.nextSeq - dataSeq)
 		if overlap >= len(payload) {
@@ -205,6 +209,34 @@ func (s *tcpSummaryStreams) add(flow FlowPacket) (*tcpSummaryStream, bool) {
 	}
 	stream.data = append(stream.data, payload...)
 	stream.nextSeq += uint32(len(payload))
+	return stream, true
+}
+
+func prependTCPPayload(stream *tcpSummaryStream, dataSeq uint32, payload []byte) (*tcpSummaryStream, bool) {
+	endSeq := dataSeq + uint32(len(payload))
+	if endSeq < stream.startSeq {
+		return stream, false
+	}
+	if endSeq > stream.startSeq {
+		overlap := int(endSeq - stream.startSeq)
+		if overlap >= len(payload) {
+			return stream, true
+		}
+		payload = payload[:len(payload)-overlap]
+	}
+	if len(stream.data) >= maxTCPReassemblyBytes {
+		return stream, true
+	}
+	remaining := maxTCPReassemblyBytes - len(stream.data)
+	if len(payload) > remaining {
+		payload = payload[len(payload)-remaining:]
+		dataSeq = stream.startSeq - uint32(len(payload))
+	}
+	next := make([]byte, 0, len(payload)+len(stream.data))
+	next = append(next, payload...)
+	next = append(next, stream.data...)
+	stream.data = next
+	stream.startSeq = dataSeq
 	return stream, true
 }
 
