@@ -27,6 +27,7 @@ type HTTPMessage struct {
 	Reason     string       `json:"reason,omitempty"`
 	Version    string       `json:"version,omitempty"`
 	Headers    []HTTPHeader `json:"headers,omitempty"`
+	WebSocket  bool         `json:"websocket,omitempty"`
 	Truncated  bool         `json:"truncated,omitempty"`
 }
 
@@ -65,6 +66,7 @@ func ParseHTTP1Headers(data []byte) (HTTPMessage, error) {
 	if err := sc.Err(); err != nil {
 		return HTTPMessage{}, fmt.Errorf("scan http headers: %w", err)
 	}
+	msg.WebSocket = isWebSocketUpgrade(msg)
 	return msg, nil
 }
 
@@ -121,4 +123,27 @@ func parseHTTPHeader(line string) (HTTPHeader, bool) {
 		header.Redacted = true
 	}
 	return header, header.Name != ""
+}
+
+func isWebSocketUpgrade(msg HTTPMessage) bool {
+	var hasConnectionUpgrade, hasUpgradeWebSocket bool
+	for _, h := range msg.Headers {
+		name := strings.ToLower(h.Name)
+		value := strings.ToLower(h.Value)
+		switch name {
+		case "connection":
+			for _, part := range strings.Split(value, ",") {
+				if strings.TrimSpace(part) == "upgrade" {
+					hasConnectionUpgrade = true
+					break
+				}
+			}
+		case "upgrade":
+			hasUpgradeWebSocket = strings.TrimSpace(value) == "websocket"
+		}
+	}
+	if msg.IsRequest {
+		return hasConnectionUpgrade && hasUpgradeWebSocket
+	}
+	return msg.StatusCode == 101 && hasConnectionUpgrade && hasUpgradeWebSocket
 }
