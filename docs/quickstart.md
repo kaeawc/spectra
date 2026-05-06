@@ -60,7 +60,7 @@ recommendations engine.
 ```bash
 spectra serve --tcp 127.0.0.1:7878
 spectra connect 127.0.0.1:7878
-spectra connect 127.0.0.1:7878 call snapshot.create
+spectra connect 127.0.0.1:7878 snapshot
 ```
 
 The daemon always listens on the local Unix socket. TCP is opt-in and is
@@ -75,4 +75,4 @@ limited to loopback unless `--allow-remote` is supplied.
 | What can this app do to my machine? | `spectra -v APP.app` (entitlements + granted) |
 | What hosts does this app talk to? | `spectra -v --network APP.app` |
 | Is anything new on my machine since last week? | `spectra diff baseline pre-incident live` |
-| What's running on my work Mac right now? | `spectra connect work-mac call process.list` |
+| What's running on my work Mac right now? | `spectra connect work-mac processes` |

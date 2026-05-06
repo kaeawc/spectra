@@ -34,7 +34,7 @@ It can also run a JSON-RPC daemon:
 spectra serve                         # Unix socket at ~/.spectra/sock
 spectra serve --tcp 127.0.0.1:7878    # opt-in TCP listener
 spectra connect 127.0.0.1:7878        # health check
-spectra connect 127.0.0.1:7878 call snapshot.create
+spectra connect 127.0.0.1:7878 snapshot
 ```
 
 ## Daemon-with-clients

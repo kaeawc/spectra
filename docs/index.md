@@ -46,9 +46,8 @@ model, [inspection/](inspection/) for what we extract from each bundle, and
   inspect a teammate's machine over the tailnet without manually exposing a
   TCP listener. See
   [design/remote-portal.md](design/remote-portal.md).
-- **Typed remote commands and fan-out** — ergonomic wrappers around the
-  generic `spectra connect <host> call <method>` escape hatch, plus
-  cross-host aggregation.
+- **Remote fan-out** — typed `spectra connect <host> ...` wrappers exist
+  for common daemon calls; cross-host aggregation is still planned.
 - **TUI client** — Bubble Tea UI against the same local-or-remote daemon
   RPC surface.
 - **Release packaging** — Homebrew formula, prebuilt binaries, signing, and

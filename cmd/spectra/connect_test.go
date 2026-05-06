@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"testing"
@@ -75,18 +76,48 @@ func TestParseConnectCall(t *testing.T) {
 
 func TestParseConnectTypedCalls(t *testing.T) {
 	tests := []struct {
+		name       string
 		args       []string
 		wantMethod string
 		wantParams string
 	}{
-		{args: []string{"jvm"}, wantMethod: "jvm.list"},
-		{args: []string{"processes"}, wantMethod: "process.list"},
-		{args: []string{"network"}, wantMethod: "network.state"},
-		{args: []string{"toolchains"}, wantMethod: "toolchain.scan"},
-		{args: []string{"inspect", "/Applications/Slack.app"}, wantMethod: "inspect.app", wantParams: `{"path":"/Applications/Slack.app"}`},
+		{name: "inspect app", args: []string{"inspect", "/Applications/Slack.app"}, wantMethod: "inspect.app", wantParams: `{"path":"/Applications/Slack.app"}`},
+		{name: "host", args: []string{"host"}, wantMethod: "inspect.host"},
+		{name: "jvm list", args: []string{"jvm"}, wantMethod: "jvm.list"},
+		{name: "jvm inspect", args: []string{"jvm", "4012"}, wantMethod: "jvm.inspect", wantParams: `{"pid":4012}`},
+		{name: "jvm gc", args: []string{"jvm-gc", "4012"}, wantMethod: "jvm.gc_stats", wantParams: `{"pid":4012}`},
+		{name: "jvm threads", args: []string{"jvm-threads", "4012"}, wantMethod: "jvm.thread_dump", wantParams: `{"pid":4012}`},
+		{name: "jvm heap", args: []string{"jvm-heap", "4012"}, wantMethod: "jvm.heap_histogram", wantParams: `{"pid":4012}`},
+		{name: "processes", args: []string{"processes"}, wantMethod: "process.list"},
+		{name: "processes scoped", args: []string{"processes", "/Applications/Slack.app"}, wantMethod: "process.list", wantParams: `{"bundles":["/Applications/Slack.app"]}`},
+		{name: "process tree", args: []string{"process-tree"}, wantMethod: "process.tree"},
+		{name: "sample", args: []string{"sample", "4012", "2", "20"}, wantMethod: "process.sample", wantParams: `{"duration":2,"interval":20,"pid":4012}`},
+		{name: "network", args: []string{"network"}, wantMethod: "network.state"},
+		{name: "connections", args: []string{"connections"}, wantMethod: "network.connections"},
+		{name: "network by app", args: []string{"network-by-app", "/Applications/Slack.app"}, wantMethod: "network.byApp", wantParams: `{"bundles":["/Applications/Slack.app"]}`},
+		{name: "storage system", args: []string{"storage"}, wantMethod: "storage.system"},
+		{name: "storage by app", args: []string{"storage", "/Applications/Slack.app", "/Applications/Cursor.app"}, wantMethod: "storage.byApp", wantParams: `{"paths":["/Applications/Slack.app","/Applications/Cursor.app"]}`},
+		{name: "power", args: []string{"power"}, wantMethod: "power.state"},
+		{name: "rules", args: []string{"rules"}, wantMethod: "rules.check"},
+		{name: "rules snapshot", args: []string{"rules", "snap-1"}, wantMethod: "rules.check", wantParams: `{"snapshot_id":"snap-1"}`},
+		{name: "jdk", args: []string{"jdk"}, wantMethod: "jdk.list"},
+		{name: "brew", args: []string{"brew"}, wantMethod: "toolchain.brew"},
+		{name: "runtimes", args: []string{"runtimes"}, wantMethod: "toolchain.runtimes"},
+		{name: "build tools", args: []string{"build-tools"}, wantMethod: "toolchain.build_tools"},
+		{name: "toolchains", args: []string{"toolchains"}, wantMethod: "toolchain.scan"},
+		{name: "snapshot create", args: []string{"snapshot"}, wantMethod: "snapshot.create"},
+		{name: "snapshot list", args: []string{"snapshot", "list"}, wantMethod: "snapshot.list"},
+		{name: "snapshots alias", args: []string{"snapshots"}, wantMethod: "snapshot.list"},
+		{name: "snapshot get", args: []string{"snapshot", "get", "snap-1"}, wantMethod: "snapshot.get", wantParams: `{"ID":"snap-1"}`},
+		{name: "snapshot diff", args: []string{"snapshot", "diff", "snap-a", "snap-b"}, wantMethod: "snapshot.diff", wantParams: `{"id_a":"snap-a","id_b":"snap-b"}`},
+		{name: "snapshot processes", args: []string{"snapshot", "processes", "snap-1"}, wantMethod: "snapshot.processes", wantParams: `{"id":"snap-1"}`},
+		{name: "snapshot login items", args: []string{"snapshot", "login-items", "snap-1"}, wantMethod: "snapshot.login_items", wantParams: `{"id":"snap-1"}`},
+		{name: "snapshot granted perms", args: []string{"snapshot", "granted-perms", "snap-1"}, wantMethod: "snapshot.granted_perms", wantParams: `{"id":"snap-1"}`},
+		{name: "snapshot prune default", args: []string{"snapshot", "prune"}, wantMethod: "snapshot.prune"},
+		{name: "snapshot prune keep", args: []string{"snapshot", "prune", "25"}, wantMethod: "snapshot.prune", wantParams: `{"keep":25}`},
 	}
 	for _, tt := range tests {
-		t.Run(tt.wantMethod, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			method, params, err := parseConnectCall(tt.args)
 			if err != nil {
 				t.Fatal(err)
@@ -94,8 +125,37 @@ func TestParseConnectTypedCalls(t *testing.T) {
 			if method != tt.wantMethod {
 				t.Fatalf("method = %q, want %q", method, tt.wantMethod)
 			}
-			if tt.wantParams != "" && string(params) != tt.wantParams {
-				t.Fatalf("params = %s, want %s", string(params), tt.wantParams)
+			if tt.wantParams == "" && params != nil {
+				t.Fatalf("params = %s, want nil", string(params))
+			}
+			if tt.wantParams != "" {
+				assertJSONEqual(t, params, tt.wantParams)
+			}
+		})
+	}
+}
+
+func TestParseConnectTypedCallErrors(t *testing.T) {
+	tests := [][]string{
+		{"inspect"},
+		{"jvm", "nope"},
+		{"jvm-gc"},
+		{"jvm-threads", "0"},
+		{"sample", "4012", "0"},
+		{"rules", "snap-1", "extra"},
+		{"snapshot", "get"},
+		{"snapshot", "diff", "snap-a"},
+		{"snapshot", "processes"},
+		{"snapshot", "prune", "-1"},
+		{"snapshot", "unknown"},
+		{"host", "extra"},
+		{"status", "extra"},
+		{"health", "extra"},
+	}
+	for _, args := range tests {
+		t.Run(args[0], func(t *testing.T) {
+			if _, _, err := parseConnectCall(args); err == nil {
+				t.Fatalf("parseConnectCall(%v) succeeded, want error", args)
 			}
 		})
 	}
@@ -125,6 +185,29 @@ func TestCallRPC(t *testing.T) {
 	}
 	if decoded["value"] != "ok" {
 		t.Fatalf("value = %q, want ok", decoded["value"])
+	}
+}
+
+func assertJSONEqual(t *testing.T, got json.RawMessage, want string) {
+	t.Helper()
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode got params: %v", err)
+	}
+	var wantValue any
+	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
+		t.Fatalf("decode want params: %v", err)
+	}
+	gotCanonical, err := json.Marshal(gotValue)
+	if err != nil {
+		t.Fatalf("encode got params: %v", err)
+	}
+	wantCanonical, err := json.Marshal(wantValue)
+	if err != nil {
+		t.Fatalf("encode want params: %v", err)
+	}
+	if !bytes.Equal(gotCanonical, wantCanonical) {
+		t.Fatalf("params = %s, want %s", string(got), want)
 	}
 }
 

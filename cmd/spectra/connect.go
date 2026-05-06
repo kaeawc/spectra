@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,8 +73,12 @@ func runConnect(args []string) int {
 }
 
 func printConnectUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|health|jvm|processes|network|toolchains]")
+	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network-by-app [App.app ...]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "targets: local, unix:/path/to/sock, /path/to/sock, host:port, host")
@@ -103,7 +108,13 @@ func parseConnectTarget(raw string) (connectTarget, error) {
 }
 
 func parseConnectCall(args []string) (string, json.RawMessage, error) {
-	if len(args) == 0 || args[0] == "status" || args[0] == "health" {
+	if len(args) == 0 {
+		return "health", nil, nil
+	}
+	if args[0] == "status" || args[0] == "health" {
+		if len(args) != 1 {
+			return "", nil, fmt.Errorf("connect %s takes no extra arguments", args[0])
+		}
 		return "health", nil, nil
 	}
 	if method, params, ok, err := parseConnectShortcut(args); ok || err != nil {
@@ -113,28 +124,232 @@ func parseConnectCall(args []string) (string, json.RawMessage, error) {
 }
 
 func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) {
-	shortcuts := map[string]string{
-		"jvm":        "jvm.list",
-		"process":    "process.list",
-		"processes":  "process.list",
-		"network":    "network.state",
-		"toolchain":  "toolchain.scan",
-		"toolchains": "toolchain.scan",
+	if method, ok := connectPIDShortcuts()[args[0]]; ok {
+		return parseConnectPIDCall(args, method)
 	}
-	if method, ok := shortcuts[args[0]]; ok {
+	if shortcut, ok := connectStringSliceShortcuts()[args[0]]; ok {
+		return parseConnectStringSliceCall(args, shortcut.method, shortcut.paramKey)
+	}
+	if method, ok := connectNoArgShortcuts()[args[0]]; ok {
 		if len(args) != 1 {
 			return "", nil, true, fmt.Errorf("connect %s takes no extra arguments", args[0])
 		}
 		return method, nil, true, nil
 	}
-	if args[0] != "inspect" {
-		return "", nil, false, nil
+	switch args[0] {
+	case "inspect":
+		return parseConnectInspect(args)
+	case "jvm":
+		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
+	case "sample":
+		return parseConnectSample(args)
+	case "storage":
+		if len(args) == 1 {
+			return "storage.system", nil, true, nil
+		}
+		return parseConnectStringSliceCall(args, "storage.byApp", "paths")
+	case "rules":
+		if len(args) == 1 {
+			return "rules.check", nil, true, nil
+		}
+		if len(args) == 2 {
+			return "rules.check", connectParams(map[string]string{"snapshot_id": args[1]}), true, nil
+		}
+		return "", nil, true, fmt.Errorf("connect rules accepts at most one snapshot id")
+	case "snapshot":
+		return parseConnectSnapshot(args)
 	}
+	return "", nil, false, nil
+}
+
+func connectPIDShortcuts() map[string]string {
+	return map[string]string{
+		"jvm-gc":             "jvm.gc_stats",
+		"jvm-heap":           "jvm.heap_histogram",
+		"jvm-heap-histogram": "jvm.heap_histogram",
+		"jvm-thread-dump":    "jvm.thread_dump",
+		"jvm-threads":        "jvm.thread_dump",
+	}
+}
+
+type connectStringSliceShortcut struct {
+	method   string
+	paramKey string
+}
+
+func connectStringSliceShortcuts() map[string]connectStringSliceShortcut {
+	return map[string]connectStringSliceShortcut{
+		"network-apps":   {method: "network.byApp", paramKey: "bundles"},
+		"network-by-app": {method: "network.byApp", paramKey: "bundles"},
+		"process":        {method: "process.list", paramKey: "bundles"},
+		"process-tree":   {method: "process.tree", paramKey: "bundles"},
+		"processes":      {method: "process.list", paramKey: "bundles"},
+		"tree":           {method: "process.tree", paramKey: "bundles"},
+	}
+}
+
+func connectNoArgShortcuts() map[string]string {
+	return map[string]string{
+		"build-tools":         "toolchain.build_tools",
+		"brew":                "toolchain.brew",
+		"cache":               "cache.stats",
+		"cache-stats":         "cache.stats",
+		"connections":         "network.connections",
+		"health":              "health",
+		"host":                "inspect.host",
+		"inspect-host":        "inspect.host",
+		"jdk":                 "jdk.list",
+		"jdk-scan":            "jdk.scan",
+		"jdks":                "jdk.list",
+		"network":             "network.state",
+		"network-connections": "network.connections",
+		"power":               "power.state",
+		"runtimes":            "toolchain.runtimes",
+		"snapshot-create":     "snapshot.create",
+		"snapshot-list":       "snapshot.list",
+		"snapshots":           "snapshot.list",
+		"toolchain":           "toolchain.scan",
+		"toolchains":          "toolchain.scan",
+	}
+}
+
+func parseConnectInspect(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) != 2 {
 		return "", nil, true, fmt.Errorf("connect inspect requires <App.app>")
 	}
-	params, _ := json.Marshal(map[string]string{"path": args[1]})
-	return "inspect.app", json.RawMessage(params), true, nil
+	return "inspect.app", connectParams(map[string]string{"path": args[1]}), true, nil
+}
+
+func parseConnectOptionalPID(args []string, listMethod string, pidMethod string) (string, json.RawMessage, bool, error) {
+	switch len(args) {
+	case 1:
+		return listMethod, nil, true, nil
+	case 2:
+		pid, err := parseConnectPositiveInt(args[1], "pid")
+		if err != nil {
+			return "", nil, true, err
+		}
+		return pidMethod, connectParams(map[string]int{"pid": pid}), true, nil
+	default:
+		return "", nil, true, fmt.Errorf("connect %s accepts at most one pid", args[0])
+	}
+}
+
+func parseConnectPIDCall(args []string, method string) (string, json.RawMessage, bool, error) {
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect %s requires <pid>", args[0])
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	return method, connectParams(map[string]int{"pid": pid}), true, nil
+}
+
+func parseConnectSample(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 || len(args) > 4 {
+		return "", nil, true, fmt.Errorf("connect sample requires <pid> [duration] [interval]")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	params := map[string]int{"pid": pid}
+	if len(args) >= 3 {
+		duration, err := parseConnectPositiveInt(args[2], "duration")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["duration"] = duration
+	}
+	if len(args) == 4 {
+		interval, err := parseConnectPositiveInt(args[3], "interval")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["interval"] = interval
+	}
+	return "process.sample", connectParams(params), true, nil
+}
+
+func parseConnectStringSliceCall(args []string, method string, key string) (string, json.RawMessage, bool, error) {
+	if len(args) == 1 {
+		return method, nil, true, nil
+	}
+	return method, connectParams(map[string][]string{key: args[1:]}), true, nil
+}
+
+func parseConnectSnapshot(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) == 1 {
+		return "snapshot.create", nil, true, nil
+	}
+	switch args[1] {
+	case "create":
+		return connectNoArgSubcommand(args, "snapshot.create")
+	case "list":
+		return connectNoArgSubcommand(args, "snapshot.list")
+	case "get", "show":
+		if len(args) != 3 {
+			return "", nil, true, fmt.Errorf("connect snapshot %s requires <id>", args[1])
+		}
+		return "snapshot.get", connectParams(map[string]string{"ID": args[2]}), true, nil
+	case "diff":
+		if len(args) != 4 {
+			return "", nil, true, fmt.Errorf("connect snapshot diff requires <id-a> <id-b>")
+		}
+		return "snapshot.diff", connectParams(map[string]string{"id_a": args[2], "id_b": args[3]}), true, nil
+	case "processes":
+		return connectSnapshotIDCall(args, "snapshot.processes")
+	case "login-items", "login_items":
+		return connectSnapshotIDCall(args, "snapshot.login_items")
+	case "granted-perms", "granted_perms":
+		return connectSnapshotIDCall(args, "snapshot.granted_perms")
+	case "prune":
+		return parseConnectSnapshotPrune(args)
+	default:
+		return "", nil, true, fmt.Errorf("unknown snapshot subcommand %q", args[1])
+	}
+}
+
+func connectNoArgSubcommand(args []string, method string) (string, json.RawMessage, bool, error) {
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect snapshot %s takes no extra arguments", args[1])
+	}
+	return method, nil, true, nil
+}
+
+func connectSnapshotIDCall(args []string, method string) (string, json.RawMessage, bool, error) {
+	if len(args) != 3 {
+		return "", nil, true, fmt.Errorf("connect snapshot %s requires <id>", args[1])
+	}
+	return method, connectParams(map[string]string{"id": args[2]}), true, nil
+}
+
+func parseConnectSnapshotPrune(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) == 2 {
+		return "snapshot.prune", nil, true, nil
+	}
+	if len(args) != 3 {
+		return "", nil, true, fmt.Errorf("connect snapshot prune accepts at most one keep count")
+	}
+	keep, err := parseConnectPositiveInt(args[2], "keep")
+	if err != nil {
+		return "", nil, true, err
+	}
+	return "snapshot.prune", connectParams(map[string]int{"keep": keep}), true, nil
+}
+
+func parseConnectPositiveInt(raw string, name string) (int, error) {
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid %s %q", name, raw)
+	}
+	return value, nil
+}
+
+func connectParams(value any) json.RawMessage {
+	params, _ := json.Marshal(value)
+	return json.RawMessage(params)
 }
 
 func parseConnectGenericCall(args []string) (string, json.RawMessage, error) {
