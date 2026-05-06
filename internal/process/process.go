@@ -90,7 +90,11 @@ func CollectAll(_ context.Context, opts CollectOptions) []Info {
 	}
 	procs := parsePS(string(out))
 	applyProcessDetails(procs, opts.DetailCollector)
-	applyThreadCounts(procs, opts.ThreadCounter)
+	threadCounter := opts.ThreadCounter
+	if threadCounter == nil && opts.DetailCollector == nil {
+		threadCounter = collectThreadCounts
+	}
+	applyThreadCounts(procs, threadCounter)
 	if len(opts.BundlePaths) > 0 {
 		attributeBundles(procs, opts.BundlePaths)
 	}
@@ -127,7 +131,7 @@ func applyThreadCounts(procs []Info, counter func([]Info) map[int]int) {
 		return
 	}
 	if counter == nil {
-		counter = collectThreadCounts
+		return
 	}
 	counts := counter(procs)
 	for i := range procs {
