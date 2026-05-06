@@ -58,6 +58,7 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
 | `pfctl -s rules` | firewall rules | helper | one-shot | `helper.firewall.rules`, `spectra network firewall` |
 | `tcpdump -i <iface>` | raw packet capture | helper | streaming, high | (planned) targeted capture |
+| `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for planned targeted capture |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
 `nettop`, and `/etc/hosts`. `lsof` is also where current socket owner
