@@ -61,6 +61,7 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for targeted capture |
 | `internal/netcap` pcap reader | classic pcap packet records and link type | user | streaming, low | shared plumbing for future capture summaries |
 | `internal/netcap` packet decoder | IPv4 TCP/UDP flow endpoints and transport payload from Ethernet/raw pcap packets | user | low per packet | shared plumbing for future capture summaries |
+| `internal/netcap` pcap summarizer | bounded DNS, TLS ClientHello, HTTP/1 header, and WebSocket upgrade metadata from pcap streams | user | streaming, low | shared plumbing for capture summaries |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
 `nettop`, and `/etc/hosts`. `lsof` is also where current socket owner
@@ -68,12 +69,13 @@ attribution comes from; its visibility is limited to what the invoking user can
 see unless a future helper-backed collector is used. Raw packet capture is
 reserved for explicit future live workflows.
 
-`internal/netproto` contains protocol parsers that future capture collectors can
-use to summarize packet metadata without storing request or response bodies. The
+`internal/netproto` contains protocol parsers that capture collectors use to
+summarize packet metadata without storing request or response bodies. The
 initial parsers handle plaintext HTTP/1 headers, DNS messages, and TLS
-ClientHello records. HTTP parsing redacts sensitive headers by default. TLS
-parsing exposes SNI and ALPN when the client sends them in cleartext; it cannot
-decrypt HTTPS traffic.
+ClientHello records. `internal/netcap` wires those parsers to bounded pcap
+summaries after link-layer and IPv4 TCP/UDP decoding. HTTP parsing redacts
+sensitive headers by default. TLS parsing exposes SNI and ALPN when the client
+sends them in cleartext; it cannot decrypt HTTPS traffic.
 
 ## Energy and power
 
