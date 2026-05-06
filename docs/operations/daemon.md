@@ -1,8 +1,8 @@
 # Daemon mode
 
 `spectra serve` runs the local long-lived collector and JSON-RPC server.
-It is implemented today for the Unix-socket local workflow and optional
-explicit TCP JSON-RPC. Remote tsnet integration remains future work.
+It supports the Unix-socket local workflow, optional explicit TCP JSON-RPC,
+and an embedded Tailscale `tsnet` listener.
 
 Most CLI commands still run in-process. `spectra status`, `spectra metrics`,
 and direct JSON-RPC clients use the daemon socket today; the same RPC surface
@@ -19,6 +19,7 @@ Tailscale integration that makes remote operation a first-class case.
 spectra serve              # foreground, JSONL log file enabled
 spectra serve --sock /tmp/spectra.sock
 spectra serve --tcp 127.0.0.1:7878
+spectra serve --tsnet --tsnet-hostname work-mac
 spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
 spectra serve --daemon       # start detached and return
@@ -43,12 +44,20 @@ choose another JSONL path or `--no-log-file` for short-lived test runs.
 | Unix socket | `~/.spectra/sock` | local CLI, local TUI/GUI clients |
 | TCP localhost | opt-in via `--tcp 127.0.0.1:7878` | explicit local/forwarded JSON-RPC clients |
 | TCP remote | opt-in via `--tcp <addr>:7878 --allow-remote` | trusted SSH/Tailscale/firewall paths |
-| Tailscale `tsnet` | _not implemented_ | future remote clients via Tailscale |
+| Tailscale `tsnet` | opt-in via `--tsnet` | managed tailnet node, MagicDNS clients |
 
 The Unix socket is created with `0600` permissions and removed on clean
 shutdown. TCP RPC has no Spectra-layer authentication; non-loopback
 binds require `--allow-remote` and should only be used on a trusted
 network path.
+
+`--tsnet` starts an embedded Tailscale node in the daemon process and
+listens on `:7878` by default. State is stored in `~/.spectra/tsnet`
+with `0700` permissions unless `--tsnet-state-dir` is supplied. On first
+run, `tsnet` uses `TS_AUTHKEY` when present; otherwise it writes a
+Tailscale login URL to the daemon log or stderr. `--tsnet-hostname`
+controls the MagicDNS name, and `--tsnet-tags` advertises comma-separated
+tags for ACL-managed tailnets.
 
 ## RPC surface
 
@@ -113,14 +122,17 @@ mediates and applies its own access control.
 
 ## Authentication
 
-Current local mode relies on Unix socket filesystem permissions. Current
-TCP mode relies on the network path that exposes it. Spectra-layer remote
-authentication is future work with the remote portal.
+Current local mode relies on Unix socket filesystem permissions. TCP mode
+relies on the network path that exposes it. `tsnet` mode relies on
+Tailscale identity and ACLs. Spectra-layer remote tokens remain future
+work with the remote portal.
 
 ## Security posture
 
 - Daemon runs as the invoking user, not root.
 - The Unix socket is `0600`-permissioned in `~/.spectra/`.
+- Embedded `tsnet` state lives in `~/.spectra/tsnet` with `0700`
+  permissions by default.
 - All RPC calls are read-only by default. State-changing calls
   (`snapshot.create`, `cache.clear`, `issues.acknowledge`,
   `issues.dismiss`, `issues.fix.record`, `snapshot.prune`, JVM heap/JFR
@@ -166,9 +178,10 @@ Implemented:
    call surface.
 9. `spectra hosts` listing for hosts known from stored snapshots.
 10. Per-user launchd lifecycle through `spectra install-daemon`.
+11. Embedded `tsnet` listener for managed tailnet daemon exposure.
 
 Future:
 
 1. CLI-wide RPC dispatch instead of in-process command execution.
-2. tsnet listener and Tailscale identity integration.
+2. Managed tsnet host discovery.
 3. TUI/GUI clients.

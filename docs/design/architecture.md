@@ -96,8 +96,7 @@ incompatible with this architecture.
 ## RPC protocol
 
 The implemented daemon protocol is newline-delimited JSON-RPC 2.0 over
-Unix sockets or explicit TCP. `tsnet` remains the planned Tailscale
-transport; it should carry the same RPC method surface rather than create
-a separate API.
+Unix sockets, explicit TCP, or embedded `tsnet`. All transports carry the
+same RPC method surface rather than creating separate APIs.
 
 See [storage.md](storage.md) for the data the RPC moves.

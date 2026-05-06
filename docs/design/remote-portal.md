@@ -28,16 +28,16 @@ Three consequences:
    daemon becomes a tailnet node directly — no port forwarding, no
    firewall rules, no `ssh -L`. The spectra binary on the remote Mac
    registers as `work-mac.tailnet-name.ts.net`, and `spectra connect work-mac`
-   Just Works with MagicDNS. The current implementation stops one step
-   earlier: the daemon can opt into an explicit TCP listener and the
-   client can use typed `spectra connect <host> ...` shortcuts or call
-   JSON-RPC methods directly with `spectra connect <host> call ...`.
+   Just Works with MagicDNS. The daemon can now opt into either explicit TCP
+   or embedded tsnet; the client uses the same typed
+   `spectra connect <host> ...` shortcuts and raw JSON-RPC
+   `spectra connect <host> call ...` form for both.
 
 ## Authentication
 
 Three options, ranked by simplicity:
 
-1. **Pure Tailscale identity (planned default).** The daemon trusts any
+1. **Pure Tailscale identity.** The daemon trusts any
    peer the tailnet ACLs let through. Defer access control to Tailscale.
    Right for personal/team tailnets.
 2. **Per-host tokens** layered on top: daemon issues a token at install
@@ -110,8 +110,7 @@ These will get pinned down before the first daemon commit:
    connect surface. **Implemented.**
 5. Add stored `spectra hosts` listing for machines seen through snapshots.
    **Implemented; live daemon discovery is still planned.**
-6. Add `tsnet` integration. Daemon becomes a tailnet node; client uses
-   Tailscale's discovery.
+6. Add `tsnet` integration. Daemon becomes a tailnet node. **Implemented.**
 7. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
 8. Privileged helper as `spectra install-helper` subcommand. Same binary
    ships the helper; SMAppService-registered LaunchDaemon.

@@ -24,6 +24,12 @@ func runServe(args []string) int {
 	sockPath := fs.String("sock", "", "Unix socket path (default: ~/.spectra/sock)")
 	tcpAddr := fs.String("tcp", "", "Optional TCP listen address, such as 127.0.0.1:7878")
 	allowRemote := fs.Bool("allow-remote", false, "Allow --tcp to bind a non-loopback address")
+	tsnetEnabled := fs.Bool("tsnet", false, "Join the tailnet as a managed tsnet node")
+	tsnetAddr := fs.String("tsnet-addr", serve.DefaultTsnetAddr, "Tailnet listen address for tsnet, such as :7878")
+	tsnetHostname := fs.String("tsnet-hostname", "", "Tailnet hostname (default: local hostname)")
+	tsnetStateDir := fs.String("tsnet-state-dir", "", "tsnet state directory (default: ~/.spectra/tsnet)")
+	tsnetEphemeral := fs.Bool("tsnet-ephemeral", false, "Register the tsnet node as ephemeral")
+	tsnetTags := fs.String("tsnet-tags", "", "Comma-separated Tailscale tags to advertise, such as tag:engineer")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
@@ -74,6 +80,10 @@ func runServe(args []string) int {
 		}
 		fmt.Fprintf(os.Stderr, "spectra serve: listening on tcp %s\n", *tcpAddr)
 	}
+	if *tsnetEnabled {
+		fmt.Fprintf(os.Stderr, "spectra serve: joining tailnet via tsnet on %s\n", *tsnetAddr)
+		fmt.Fprintln(os.Stderr, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
+	}
 
 	var detectStore *cache.ShardedStore
 	if cacheStores != nil {
@@ -82,6 +92,12 @@ func runServe(args []string) int {
 	if err := serve.Run(ctx, serve.Options{
 		SockPath:       sock,
 		TCPAddr:        *tcpAddr,
+		TsnetEnabled:   *tsnetEnabled,
+		TsnetAddr:      *tsnetAddr,
+		TsnetHostname:  *tsnetHostname,
+		TsnetStateDir:  *tsnetStateDir,
+		TsnetEphemeral: *tsnetEphemeral,
+		TsnetTags:      splitCommaList(*tsnetTags),
 		SpectraVersion: version,
 		DetectStore:    detectStore,
 		Logger:         daemonLog,

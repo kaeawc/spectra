@@ -320,13 +320,21 @@ user's Unix socket at `~/.spectra/sock`.
 | `--sock` | `~/.spectra/sock` | Unix socket path |
 | `--tcp` | empty | Optional TCP listen address, such as `127.0.0.1:7878` |
 | `--allow-remote` | false | Allow `--tcp` to bind a non-loopback address |
+| `--tsnet` | false | Join the tailnet as a managed tsnet node |
+| `--tsnet-addr` | `:7878` | Tailnet listen address for tsnet |
+| `--tsnet-hostname` | local hostname | Tailnet hostname advertised through MagicDNS |
+| `--tsnet-state-dir` | `~/.spectra/tsnet` | tsnet state directory |
+| `--tsnet-ephemeral` | false | Register the tsnet node as ephemeral |
+| `--tsnet-tags` | empty | Comma-separated Tailscale tags to advertise |
 | `--log-file` | `~/Library/Logs/Spectra/daemon.jsonl` | JSONL daemon log path |
 | `--no-log-file` | false | Disable daemon JSONL logging |
 | `--daemon` | false | Start detached and return |
 
 TCP RPC has no Spectra-layer authentication today. Keep it on loopback
 for local use or expose it only through SSH, Tailscale, or firewall
-controls you trust.
+controls you trust. `--tsnet` uses Tailscale identity and ACLs; first-run
+enrollment uses existing tsnet state, `TS_AUTHKEY`, or a login URL written
+to the daemon log or stderr.
 
 ### Examples
 
@@ -336,6 +344,8 @@ spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
 spectra serve --tcp 127.0.0.1:7878
 spectra serve --tcp 100.64.0.5:7878 --allow-remote
+spectra serve --tsnet --tsnet-hostname work-mac
+spectra serve --tsnet --tsnet-hostname work-mac --tsnet-tags tag:engineer
 ```
 
 ## `spectra install-daemon`
@@ -354,13 +364,16 @@ launchd go to `~/Library/Logs/Spectra/daemon.launchd.*.log`.
 | `spectra install-daemon uninstall` | Boot out and remove the LaunchAgent plist |
 
 The install and `print-plist` forms accept the serve-listener flags
-`--sock`, `--tcp`, `--allow-remote`, `--log-file`, and `--no-log-file`.
+`--sock`, `--tcp`, `--allow-remote`, `--tsnet`, `--tsnet-addr`,
+`--tsnet-hostname`, `--tsnet-state-dir`, `--tsnet-ephemeral`,
+`--tsnet-tags`, `--log-file`, and `--no-log-file`.
 
 ### Examples
 
 ```bash
 spectra install-daemon
 spectra install-daemon --tcp 127.0.0.1:7878
+spectra install-daemon --tsnet --tsnet-hostname work-mac
 spectra install-daemon print-plist --no-log-file
 spectra install-daemon status
 spectra install-daemon uninstall
@@ -369,8 +382,8 @@ spectra install-daemon uninstall
 ## `spectra connect`
 
 Calls a running daemon using the same JSON-RPC protocol as the local
-Unix-socket client. This is the implemented remote transport today;
-automatic tsnet registration and host discovery remain future work.
+Unix-socket client. Targets can be local sockets, explicit TCP listeners,
+or MagicDNS names for daemons started with `--tsnet`.
 
 | Target | Meaning |
 |---|---|

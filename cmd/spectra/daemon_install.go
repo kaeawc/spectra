@@ -12,17 +12,24 @@ import (
 	"strconv"
 
 	"github.com/kaeawc/spectra/internal/fsutil"
+	"github.com/kaeawc/spectra/internal/serve"
 )
 
 const daemonAgentLabel = "dev.spectra.daemon"
 
 type daemonAgentOptions struct {
-	SockPath    string
-	TCPAddr     string
-	AllowRemote bool
-	LogFile     string
-	NoLogFile   bool
-	NoLoad      bool
+	SockPath       string
+	TCPAddr        string
+	AllowRemote    bool
+	TsnetEnabled   bool
+	TsnetAddr      string
+	TsnetHostname  string
+	TsnetStateDir  string
+	TsnetEphemeral bool
+	TsnetTags      string
+	LogFile        string
+	NoLogFile      bool
+	NoLoad         bool
 }
 
 type daemonAgentDeps struct {
@@ -132,6 +139,12 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 	fs.StringVar(&opts.SockPath, "sock", "", "Unix socket path passed to spectra serve")
 	fs.StringVar(&opts.TCPAddr, "tcp", "", "Optional TCP listen address passed to spectra serve")
 	fs.BoolVar(&opts.AllowRemote, "allow-remote", false, "Allow non-loopback TCP listen address")
+	fs.BoolVar(&opts.TsnetEnabled, "tsnet", false, "Join the tailnet as a managed tsnet node")
+	fs.StringVar(&opts.TsnetAddr, "tsnet-addr", serve.DefaultTsnetAddr, "Tailnet listen address for tsnet")
+	fs.StringVar(&opts.TsnetHostname, "tsnet-hostname", "", "Tailnet hostname passed to spectra serve")
+	fs.StringVar(&opts.TsnetStateDir, "tsnet-state-dir", "", "tsnet state directory passed to spectra serve")
+	fs.BoolVar(&opts.TsnetEphemeral, "tsnet-ephemeral", false, "Register the tsnet node as ephemeral")
+	fs.StringVar(&opts.TsnetTags, "tsnet-tags", "", "Comma-separated Tailscale tags to advertise")
 	fs.StringVar(&opts.LogFile, "log-file", "", "JSONL daemon log path")
 	fs.BoolVar(&opts.NoLogFile, "no-log-file", false, "Disable daemon JSONL log file")
 	fs.BoolVar(&opts.NoLoad, "no-load", false, "Write plist but do not bootstrap with launchd")
@@ -139,7 +152,7 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 		return daemonAgentOptions{}, false
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--log-file path|--no-log-file] [--no-load]")
+		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--log-file path|--no-log-file] [--no-load]")
 		return daemonAgentOptions{}, false
 	}
 	if opts.LogFile != "" && opts.NoLogFile {
@@ -163,6 +176,24 @@ func (o daemonAgentOptions) serveArgs() []string {
 	}
 	if o.AllowRemote {
 		args = append(args, "--allow-remote")
+	}
+	if o.TsnetEnabled {
+		args = append(args, "--tsnet")
+	}
+	if o.TsnetAddr != "" && o.TsnetAddr != serve.DefaultTsnetAddr {
+		args = append(args, "--tsnet-addr", o.TsnetAddr)
+	}
+	if o.TsnetHostname != "" {
+		args = append(args, "--tsnet-hostname", o.TsnetHostname)
+	}
+	if o.TsnetStateDir != "" {
+		args = append(args, "--tsnet-state-dir", o.TsnetStateDir)
+	}
+	if o.TsnetEphemeral {
+		args = append(args, "--tsnet-ephemeral")
+	}
+	if o.TsnetTags != "" {
+		args = append(args, "--tsnet-tags", o.TsnetTags)
 	}
 	if o.LogFile != "" {
 		args = append(args, "--log-file", o.LogFile)
