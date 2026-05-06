@@ -119,6 +119,46 @@ func TestJVMHeapVsSystemNoFire(t *testing.T) {
 	}
 }
 
+// --- jvm-gc-pressure ---
+
+func TestJVMGCPressureFiresForOldGenOccupancy(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{
+		{PID: 10, MainClass: "hot.App", GC: &jvm.GCStats{OC: 1000, OU: 925}},
+		{PID: 11, MainClass: "ok.App", GC: &jvm.GCStats{OC: 1000, OU: 500}},
+	}
+	findings := ruleJVMGCPressure().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 GC pressure finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].RuleID != "jvm-gc-pressure" {
+		t.Fatalf("rule ID = %q", findings[0].RuleID)
+	}
+}
+
+func TestJVMGCPressureFiresForFullGCTime(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{PID: 10, MainClass: "fullgc.App", GC: &jvm.GCStats{FGC: 7, FGCT: 1.8}}}
+	findings := ruleJVMGCPressure().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 GC pressure finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Fatalf("severity = %q, want medium", findings[0].Severity)
+	}
+}
+
+func TestJVMGCPressureNoFire(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{
+		{PID: 10, GC: &jvm.GCStats{OC: 1000, OU: 700, FGC: 4, FGCT: 0.9}},
+		{PID: 11},
+	}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("expected no GC pressure findings, got %v", findings)
+	}
+}
+
 // --- jdk-major-version-drift ---
 
 func TestJDKDriftFires(t *testing.T) {

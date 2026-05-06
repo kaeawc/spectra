@@ -21,6 +21,7 @@ type Info struct {
 	VMArgs       string            `json:"vm_args,omitempty"`  // from jcmd VM.command_line
 	VMFlags      string            `json:"vm_flags,omitempty"` // JVM flags (XX: flags)
 	ThreadCount  int               `json:"thread_count,omitempty"`
+	GC           *GCStats          `json:"gc,omitempty"`        // one-shot jstat -gc counters
 	SysProps     map[string]string `json:"sys_props,omitempty"` // selected system properties
 }
 

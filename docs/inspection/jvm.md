@@ -3,10 +3,11 @@
 Spectra implements the JDK shell-tool layer of JVM inspection today:
 running-process discovery, structured per-PID metadata, thread dumps,
 heap histograms, heap dumps, one-shot GC stats, and JFR start/dump/stop.
-It also parses `jfr summary` output into structured event counts and
-attributes running JVMs back to the installed-JDK inventory when
-`java.home` matches a discovered JDK path. The in-process Java agent layer
-remains future work.
+The JVM snapshot includes one-shot `jstat -gc` counters for each running
+JVM when `jstat` is available. It also parses `jfr summary` output into
+structured event counts and attributes running JVMs back to the
+installed-JDK inventory when `java.home` matches a discovered JDK path.
+The in-process Java agent layer remains future work.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -168,12 +169,14 @@ Implemented:
 2. `jps`-based running-JVM discovery.
 3. `jcmd`-based system properties, command-line parsing, VM flags,
    thread count, thread dump, class histogram, heap dump, and JFR control.
-4. `jstat -gc` one-shot GC counter parsing.
+4. `jstat -gc` one-shot GC counter parsing and snapshot attachment.
 5. CLI and daemon RPC surfaces for the implemented collectors.
 6. Path-based attribution from each running JVM's `java.home` to the
    installed-JDK inventory.
 7. `jfr summary` parsing for structured recording metadata and event
    counts.
+8. JVM GC-pressure recommendations from old-generation occupancy and
+   full-GC counters.
 
 Future:
 

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -17,6 +18,7 @@ func V1Catalog() []Rule {
 	return []Rule{
 		ruleJVMEOLVersion(),
 		ruleJVMHeapVsSystemRAM(),
+		ruleJVMGCPressure(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -106,6 +108,51 @@ func ruleJVMHeapVsSystemRAM() Rule {
 			return findings
 		},
 	}
+}
+
+// ruleJVMGCPressure fires when a one-shot jstat snapshot suggests the JVM is
+// under memory pressure: old generation is nearly full or full GC has already
+// consumed meaningful wall time.
+func ruleJVMGCPressure() Rule {
+	return Rule{
+		ID:       "jvm-gc-pressure",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, j := range s.JVMs {
+				if j.GC == nil {
+					continue
+				}
+				if pct := oldGenUsedPct(j.GC); pct >= 90 {
+					findings = append(findings, Finding{
+						RuleID:   "jvm-gc-pressure",
+						Severity: SeverityMedium,
+						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+						Message:  fmt.Sprintf("Old generation is %.0f%% full; allocation pressure may trigger frequent full GC.", pct),
+						Fix:      "Inspect heap histogram/JFR allocation events and reduce live-set size or adjust heap sizing.",
+					})
+					continue
+				}
+				if j.GC.FGC >= 5 && j.GC.FGCT >= 1 {
+					findings = append(findings, Finding{
+						RuleID:   "jvm-gc-pressure",
+						Severity: SeverityMedium,
+						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+						Message:  fmt.Sprintf("%d full GCs have consumed %.1fs; check for old-gen pressure or promotion failures.", j.GC.FGC, j.GC.FGCT),
+						Fix:      "Capture a JFR recording or heap histogram to identify allocation hot spots and retained objects.",
+					})
+				}
+			}
+			return findings
+		},
+	}
+}
+
+func oldGenUsedPct(stats *jvm.GCStats) float64 {
+	if stats == nil || stats.OC <= 0 {
+		return 0
+	}
+	return stats.OU * 100 / stats.OC
 }
 
 // ruleJDKMajorVersionDrift fires when more than one installed JDK shares
