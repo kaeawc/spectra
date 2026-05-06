@@ -36,6 +36,151 @@ func TestResolveSnapshotNotFoundReturnsError(t *testing.T) {
 	}
 }
 
+func TestResolveSnapshotWithHostFallbackUsesLocalSnapshot(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	snap := testSnapshot("snap-local", snapshot.KindLive, time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	saveTestSnapshot(t, db, snap, "")
+
+	got, err := resolveSnapshotWithHostFallback(ctx, db, "snap-local")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.ID != "snap-local" {
+		t.Fatalf("got = %s, want snap-local", got.ID)
+	}
+}
+
+func TestResolveSnapshotWithHostFallbackFallsBackToRemoteSnapshot(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	old := loadRemoteSnapshot
+	t.Cleanup(func() { loadRemoteSnapshot = old })
+	loadRemoteSnapshot = func(context.Context, string, string) (*snapshot.Snapshot, error) {
+		return &snapshot.Snapshot{
+			ID:   "snap-remote",
+			Host: snapshot.HostInfo{Hostname: "remote.lan"},
+		}, nil
+	}
+
+	got, err := resolveSnapshotWithHostFallback(ctx, db, "remote-host")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.ID != "snap-remote" {
+		t.Fatalf("got = %s, want snap-remote", got.ID)
+	}
+}
+
+func TestResolveSnapshotWithHostFallbackFallsBackToLatestRemoteSnapshotForHostOperand(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	gotHost := ""
+	old := loadRemoteSnapshot
+	t.Cleanup(func() { loadRemoteSnapshot = old })
+	loadRemoteSnapshot = func(_ context.Context, host, snapshotID string) (*snapshot.Snapshot, error) {
+		gotHost = host + ":" + snapshotID
+		return &snapshot.Snapshot{
+			ID: "snap-remote-host-latest",
+		}, nil
+	}
+
+	if _, err := resolveSnapshotWithHostFallback(ctx, db, "work-mac"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if gotHost != "work-mac:" {
+		t.Fatalf("host operand forwarded = %q, want %q", gotHost, "work-mac:")
+	}
+}
+
+func TestResolveSnapshotWithHostFallbackUsesExplicitRemoteSnapshotOperand(t *testing.T) {
+	db := tempDB(t)
+	ctx := context.Background()
+	gotHost := ""
+	gotID := ""
+	old := loadRemoteSnapshot
+	t.Cleanup(func() { loadRemoteSnapshot = old })
+	loadRemoteSnapshot = func(_ context.Context, host, snapshotID string) (*snapshot.Snapshot, error) {
+		gotHost = host
+		gotID = snapshotID
+		return &snapshot.Snapshot{ID: snapshotID}, nil
+	}
+
+	got, err := resolveSnapshotWithHostFallback(ctx, db, "work-mac@snap-remote")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if gotHost != "work-mac" {
+		t.Fatalf("host operand = %q, want %q", gotHost, "work-mac")
+	}
+	if gotID != "snap-remote" {
+		t.Fatalf("snapshot operand = %q, want %q", gotID, "snap-remote")
+	}
+	if got.ID != "snap-remote" {
+		t.Fatalf("got = %s, want snap-remote", got.ID)
+	}
+}
+
+func TestParseRemoteDiffOperand(t *testing.T) {
+	tests := []struct {
+		name         string
+		raw          string
+		wantHost     string
+		wantSnapshot string
+		wantOK       bool
+		wantErr      bool
+	}{
+		{
+			name:     "plain id",
+			raw:      "snap-1",
+			wantOK:   false,
+			wantHost: "",
+		},
+		{
+			name:         "remote operand",
+			raw:          "laptop@snap-remote",
+			wantOK:       true,
+			wantHost:     "laptop",
+			wantSnapshot: "snap-remote",
+		},
+		{
+			name:    "invalid empty host",
+			raw:     "@snap-1",
+			wantOK:  false,
+			wantErr: true,
+		},
+		{
+			name:    "invalid empty snapshot",
+			raw:     "laptop@",
+			wantOK:  false,
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotHost, gotSnapshot, gotOK, err := parseRemoteDiffOperand(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.raw)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotHost != tc.wantHost {
+				t.Fatalf("host = %q, want %q", gotHost, tc.wantHost)
+			}
+			if gotSnapshot != tc.wantSnapshot {
+				t.Fatalf("snapshot = %q, want %q", gotSnapshot, tc.wantSnapshot)
+			}
+		})
+	}
+}
+
 func TestSnapshotNameFromArgs(t *testing.T) {
 	tests := []struct {
 		name         string

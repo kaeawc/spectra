@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
@@ -466,8 +467,13 @@ func runSnapshotDiff(args []string) int {
 
 func printDiffUsage() {
 	fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
+	fmt.Fprintln(os.Stderr, "   or: spectra diff <host-a> <host-b|live>")
 	fmt.Fprintln(os.Stderr, "   or: spectra diff baseline [name|id] [live|id]")
 }
+
+type remoteSnapshotLoader func(ctx context.Context, host string, snapshotID string) (*snapshot.Snapshot, error)
+
+var loadRemoteSnapshot remoteSnapshotLoader = resolveRemoteSnapshot
 
 func resolveDiffOperands(ctx context.Context, db *store.DB, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
 	if len(args) > 0 && args[0] == "baseline" {
@@ -478,11 +484,11 @@ func resolveDiffOperands(ctx context.Context, db *store.DB, args []string) (*sna
 		return nil, nil, fmt.Errorf("invalid diff operands")
 	}
 	idA, idB := args[0], args[1]
-	snapA, err := resolveSnapshot(ctx, db, idA)
+	snapA, err := resolveSnapshotWithHostFallback(ctx, db, idA)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot %q: %w", idA, err)
 	}
-	snapB, err := resolveSnapshot(ctx, db, idB)
+	snapB, err := resolveSnapshotWithHostFallback(ctx, db, idB)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot %q: %w", idB, err)
 	}
@@ -523,6 +529,79 @@ func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Sn
 		return &snap, nil
 	}
 	return loadSnapshotFromDB(ctx, db, id)
+}
+
+func resolveSnapshotWithHostFallback(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+	remoteHost, remoteSnapshot, isRemote, err := parseRemoteDiffOperand(id)
+	if err != nil {
+		return nil, err
+	}
+	if isRemote {
+		return loadRemoteSnapshot(ctx, remoteHost, remoteSnapshot)
+	}
+	if strings.HasPrefix(id, "snap-") || id == "live" || strings.HasPrefix(id, "base-") || id == "" {
+		return resolveSnapshot(ctx, db, id)
+	}
+	snap, err := resolveSnapshot(ctx, db, id)
+	if err == nil {
+		return snap, nil
+	}
+	return loadRemoteSnapshot(ctx, id, "")
+}
+
+func parseRemoteDiffOperand(raw string) (host string, snapshotID string, ok bool, err error) {
+	parts := strings.SplitN(raw, "@", 2)
+	if len(parts) != 2 {
+		return "", "", false, nil
+	}
+	if len(parts[0]) == 0 {
+		return "", "", false, fmt.Errorf("invalid remote snapshot operand %q: empty host", raw)
+	}
+	if len(parts[1]) == 0 {
+		return "", "", false, fmt.Errorf("invalid remote snapshot operand %q: empty snapshot id", raw)
+	}
+	return parts[0], parts[1], true, nil
+}
+
+func resolveRemoteSnapshot(ctx context.Context, host string, snapshotID string) (*snapshot.Snapshot, error) {
+	target, err := parseConnectTarget(host)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialConnectTarget(target, 3*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s: %w", host, err)
+	}
+	defer conn.Close()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if snapshotID == "" {
+		raw, err := callRPC(conn, "snapshot.list", nil)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot.list: %w", err)
+		}
+		var rows []store.SnapshotRow
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, fmt.Errorf("snapshot.list: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil, fmt.Errorf("host %s has no snapshots", host)
+		}
+		snapshotID = rows[0].ID
+	}
+
+	raw, err := callRPC(conn, "snapshot.get", connectParams(map[string]string{"ID": snapshotID}))
+	if err != nil {
+		return nil, fmt.Errorf("snapshot.get(%q): %w", snapshotID, err)
+	}
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return nil, fmt.Errorf("snapshot.get(%q): %w", snapshotID, err)
+	}
+	return &snap, nil
 }
 
 func resolveBaselineSnapshot(ctx context.Context, db *store.DB, ref string) (*snapshot.Snapshot, error) {
