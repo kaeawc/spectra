@@ -232,6 +232,22 @@ type SnapshotRow struct {
 	AppCount    int
 }
 
+// HostRow is a summary row from the hosts table.
+type HostRow struct {
+	MachineUUID   string    `json:"machine_uuid"`
+	Hostname      string    `json:"hostname"`
+	OSName        string    `json:"os_name"`
+	OSVersion     string    `json:"os_version"`
+	OSBuild       string    `json:"os_build,omitempty"`
+	CPUBrand      string    `json:"cpu_brand,omitempty"`
+	CPUCores      int       `json:"cpu_cores,omitempty"`
+	RAMBytes      int64     `json:"ram_bytes,omitempty"`
+	Architecture  string    `json:"architecture,omitempty"`
+	FirstSeen     time.Time `json:"first_seen"`
+	LastSeen      time.Time `json:"last_seen"`
+	SnapshotCount int       `json:"snapshot_count"`
+}
+
 // SaveSnapshot persists snap and all its apps. It upserts the host row
 // and inserts the snapshot + apps rows inside a single transaction.
 func (s *DB) SaveSnapshot(ctx context.Context, snap SnapshotInput) error {
@@ -307,6 +323,53 @@ func insertApp(tx *sql.Tx, snapID string, a AppInput) error {
 		a.AppVersion, string(archJSON), string(resultJSON),
 	)
 	return err
+}
+
+// ListHosts returns known hosts ordered by most recent snapshot.
+func (s *DB) ListHosts(ctx context.Context) ([]HostRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT h.machine_uuid, h.hostname, h.os_name, h.os_version,
+		       COALESCE(h.os_build, ''), COALESCE(h.cpu_brand, ''),
+		       COALESCE(h.cpu_cores, 0), COALESCE(h.ram_bytes, 0),
+		       COALESCE(h.architecture, ''), h.first_seen, h.last_seen,
+		       COUNT(sn.id)
+		FROM hosts h
+		LEFT JOIN snapshots sn ON sn.machine_uuid = h.machine_uuid
+		GROUP BY h.machine_uuid, h.hostname, h.os_name, h.os_version,
+		         h.os_build, h.cpu_brand, h.cpu_cores, h.ram_bytes,
+		         h.architecture, h.first_seen, h.last_seen
+		ORDER BY h.last_seen DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []HostRow
+	for rows.Next() {
+		var r HostRow
+		var firstSeen string
+		var lastSeen string
+		if err := rows.Scan(
+			&r.MachineUUID,
+			&r.Hostname,
+			&r.OSName,
+			&r.OSVersion,
+			&r.OSBuild,
+			&r.CPUBrand,
+			&r.CPUCores,
+			&r.RAMBytes,
+			&r.Architecture,
+			&firstSeen,
+			&lastSeen,
+			&r.SnapshotCount,
+		); err != nil {
+			return nil, err
+		}
+		r.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
+		r.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // ListSnapshots returns summary rows ordered newest-first.

@@ -76,6 +76,7 @@ Explicit-host fan-out is implemented with `spectra fan --hosts`. Host
 discovery is still planned, so callers provide the daemon targets today:
 
 ```bash
+spectra hosts
 spectra fan --hosts work-mac,alice-laptop status
 spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
 spectra fan --hosts work-mac,alice-laptop jvm
@@ -86,7 +87,7 @@ The client makes parallel RPC calls to each daemon and aggregates
 results locally into one JSON envelope. The remaining intended shape is:
 
 ```bash
-spectra hosts                                # list discovered Spectra daemons
+spectra hosts                                # include discovered Spectra daemons
 spectra fan inspect /Applications/Slack.app  # inspect Slack on every discovered host
 spectra diff laptop work-mac                 # compare two hosts
 ```
@@ -187,6 +188,6 @@ remote work:
 
 1. Add tsnet integration so the daemon can join a tailnet without an
    externally managed listener.
-2. Add host discovery so `spectra fan` can target every discovered daemon
-   without an explicit `--hosts` list.
+2. Add live host discovery so `spectra hosts` includes reachable daemons
+   and `spectra fan` can run without an explicit `--hosts` list.
 3. Add TUI support against local-or-remote daemon targets.

@@ -32,6 +32,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
 | `fan` | Run one daemon RPC call against multiple explicit targets |
+| `hosts` | List hosts known from stored snapshots |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -344,6 +345,23 @@ spectra connect work-mac toolchains
 spectra connect work-mac snapshot
 spectra connect work-mac snapshot diff snap-before snap-after
 spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":true}'
+```
+
+## `spectra hosts`
+
+Lists hosts already known to the local SQLite store from persisted
+snapshots. This is not live daemon discovery yet; it is the local record
+of machines Spectra has seen.
+
+| Flag | Default | Meaning |
+|---|---:|---|
+| `--json` | false | Emit JSON instead of a table |
+
+### Examples
+
+```bash
+spectra hosts
+spectra hosts --json
 ```
 
 ## `spectra fan`
