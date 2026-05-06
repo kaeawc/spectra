@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/netcap"
 	"github.com/kaeawc/spectra/internal/netstate"
 )
 
@@ -20,6 +21,14 @@ var (
 	}
 	networkCaptureStop = func(handle string) (map[string]any, error) {
 		return helperclient.New().NetCaptureStop(handle)
+	}
+	networkCaptureSummarize = func(path string, limit int) (netcap.PCAPSummary, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return netcap.PCAPSummary{}, fmt.Errorf("open pcap: %w", err)
+		}
+		defer f.Close()
+		return netcap.SummarizePCAP(f, limit)
 	}
 )
 
@@ -56,7 +65,7 @@ func runNetwork(args []string) int {
 
 func runNetworkCapture(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: spectra network capture [start|stop] ...")
+		fmt.Fprintln(os.Stderr, "usage: spectra network capture [start|stop|summarize] ...")
 		return 2
 	}
 	switch args[0] {
@@ -64,6 +73,8 @@ func runNetworkCapture(args []string) int {
 		return runNetworkCaptureStart(args[1:])
 	case "stop":
 		return runNetworkCaptureStop(args[1:])
+	case "summarize", "summary":
+		return runNetworkCaptureSummarize(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown network capture command %q\n", args[0])
 		return 2
@@ -123,6 +134,33 @@ func runNetworkCaptureStop(args []string) int {
 	return printNetworkCaptureResult(result, *asJSON, "capture stopped")
 }
 
+func runNetworkCaptureSummarize(args []string) int {
+	fs := flag.NewFlagSet("spectra network capture summarize", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	limit := fs.Int("limit", netcap.DefaultSummaryEventLimit, "Maximum protocol events to include")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra network capture summarize [--json] [--limit N] <pcap-path>")
+		return 2
+	}
+	summary, err := networkCaptureSummarize(fs.Arg(0), *limit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "network capture summarize: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(summary)
+		return 0
+	}
+	printNetworkCaptureSummary(summary)
+	return 0
+}
+
 func printNetworkCaptureResult(result map[string]any, asJSON bool, label string) int {
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -137,6 +175,52 @@ func printNetworkCaptureResult(result map[string]any, asJSON bool, label string)
 		}
 	}
 	return 0
+}
+
+func printNetworkCaptureSummary(summary netcap.PCAPSummary) {
+	fmt.Println("capture summary")
+	fmt.Printf("  packets: %d\n", summary.Packets)
+	fmt.Printf("  decoded_flows: %d\n", summary.DecodedFlows)
+	if summary.DecodeErrors > 0 {
+		fmt.Printf("  decode_errors: %d\n", summary.DecodeErrors)
+	}
+	fmt.Printf("  dns: %d\n", len(summary.DNS))
+	fmt.Printf("  tls_client_hello: %d\n", len(summary.TLS))
+	fmt.Printf("  http: %d\n", len(summary.HTTP))
+	if summary.EventsDropped > 0 {
+		fmt.Printf("  events_dropped: %d\n", summary.EventsDropped)
+	}
+	for _, event := range summary.DNS {
+		for _, q := range event.Message.Questions {
+			fmt.Printf("  dns_query: %s %s %s -> %s\n", q.Name, q.Type, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+		}
+	}
+	for _, event := range summary.TLS {
+		hello := event.ClientHello
+		target := hello.SNI
+		if target == "" && hello.ECHPresent {
+			target = "ech-present"
+		}
+		if target != "" {
+			fmt.Printf("  tls_client_hello: %s %s -> %s\n", target, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+		}
+	}
+	for _, event := range summary.HTTP {
+		msg := event.Message
+		if msg.IsRequest {
+			fmt.Printf("  http_request: %s %s %s -> %s\n", msg.Method, msg.Target, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+		} else {
+			fmt.Printf("  http_response: %d %s %s -> %s\n", msg.StatusCode, msg.Reason, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+		}
+	}
+}
+
+func formatFlowEndpoint(flow netcap.FlowSummary) string {
+	return fmt.Sprintf("%s:%d", flow.SrcAddr, flow.SrcPort)
+}
+
+func formatFlowDestination(flow netcap.FlowSummary) string {
+	return fmt.Sprintf("%s:%d", flow.DstAddr, flow.DstPort)
 }
 
 func formatCaptureValue(v any) string {

@@ -303,8 +303,9 @@ Shows unprivileged network state by default, including current routes,
 DNS, VPN state, listening ports, and active per-process throughput from
 `nettop`. Listening ports include bind address and process attribution when
 `lsof` exposes it. `spectra network capture` asks the privileged helper for
-bounded tcpdump captures. `spectra network firewall` asks the privileged helper
-for current pf firewall rules.
+bounded tcpdump captures and can summarize completed pcap files without
+retaining request or response bodies. `spectra network firewall` asks the
+privileged helper for current pf firewall rules.
 
 ### Examples
 
@@ -314,6 +315,7 @@ spectra network --json
 spectra network connections --proto tcp --state established
 spectra network capture start --interface en0 --duration 30s --proto tcp --host api.example.com --port 443
 spectra network capture stop netcap-1
+spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
 spectra network firewall
 spectra network firewall --json
 ```
