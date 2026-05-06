@@ -76,6 +76,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network-by-app [App.app ...]")
@@ -141,6 +142,8 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectInspect(args)
 	case "jvm":
 		return parseConnectOptionalPID(args, "jvm.list", "jvm.inspect")
+	case "metrics":
+		return parseConnectMetrics(args)
 	case "sample":
 		return parseConnectSample(args)
 	case "storage":
@@ -160,6 +163,31 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return parseConnectSnapshot(args)
 	}
 	return "", nil, false, nil
+}
+
+func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
+	switch len(args) {
+	case 1:
+		return "process.live", nil, true, nil
+	case 2:
+		pid, err := parseConnectPositiveInt(args[1], "pid")
+		if err != nil {
+			return "", nil, true, err
+		}
+		return "process.history", connectParams(map[string]int{"pid": pid}), true, nil
+	case 3:
+		pid, err := parseConnectPositiveInt(args[1], "pid")
+		if err != nil {
+			return "", nil, true, err
+		}
+		limit, err := parseConnectPositiveInt(args[2], "limit")
+		if err != nil {
+			return "", nil, true, err
+		}
+		return "process.history", connectParams(map[string]int{"pid": pid, "limit": limit}), true, nil
+	default:
+		return "", nil, true, fmt.Errorf("connect metrics accepts optional pid and limit only")
+	}
 }
 
 func connectPIDShortcuts() map[string]string {
