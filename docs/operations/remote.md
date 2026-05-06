@@ -89,7 +89,8 @@ The client makes parallel RPC calls to each daemon and aggregates
 results locally into one JSON envelope. The remaining intended shape is:
 
 ```bash
-spectra hosts                                # include discovered Spectra daemons
+spectra hosts                                # include discovered Spectra hosts
+spectra hosts --probe                         # report reachable hosts
 spectra fan inspect /Applications/Slack.app  # inspect Slack on every discovered host
 spectra diff laptop work-mac                 # compare two hosts
 ```

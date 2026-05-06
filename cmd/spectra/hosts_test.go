@@ -26,7 +26,7 @@ func TestRunHostsWithTable(t *testing.T) {
 				SnapshotCount: 3,
 			},
 		}, nil
-	})
+	}, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -41,7 +41,7 @@ func TestRunHostsWithJSON(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runHostsWith([]string{"--json"}, &stdout, &stderr, func(context.Context) ([]store.HostRow, error) {
 		return []store.HostRow{{MachineUUID: "UUID-A", Hostname: "a.local"}}, nil
-	})
+	}, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -59,7 +59,7 @@ func TestRunHostsWithEmptyList(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runHostsWith(nil, &stdout, &stderr, func(context.Context) ([]store.HostRow, error) {
 		return nil, nil
-	})
+	}, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}
@@ -73,11 +73,67 @@ func TestRunHostsWithListError(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runHostsWith(nil, &stdout, &stderr, func(context.Context) ([]store.HostRow, error) {
 		return nil, errors.New("db unavailable")
-	})
+	}, nil)
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "db unavailable") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunHostsWithProbe(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runHostsWith([]string{"--probe"}, &stdout, &stderr, func(context.Context) ([]store.HostRow, error) {
+		return []store.HostRow{
+			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
+			{MachineUUID: "UUID-B", Hostname: "deadbox.local", OSName: "macOS", OSVersion: "15.6.1"},
+		}, nil
+	}, func(_ context.Context, host string) error {
+		if host == "work-mac.local" {
+			return nil
+		}
+		return errors.New("timeout")
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "UUID-A") || !strings.Contains(out, "UUID-B") {
+		t.Fatalf("stdout = %q", out)
+	}
+	if !strings.Contains(out, "yes") || !strings.Contains(out, "no") {
+		t.Fatalf("stdout = %q", out)
+	}
+}
+
+func TestRunHostsWithProbeJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runHostsWith([]string{"--probe", "--json"}, &stdout, &stderr, func(context.Context) ([]store.HostRow, error) {
+		return []store.HostRow{
+			{MachineUUID: "UUID-A", Hostname: "work-mac.local", OSName: "macOS", OSVersion: "15.6.1"},
+		}, nil
+	}, func(_ context.Context, host string) error {
+		if host == "work-mac.local" {
+			return nil
+		}
+		return errors.New("timeout")
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+
+	var rows []struct {
+		store.HostRow
+		Reachable bool   `json:"reachable"`
+		Error     string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || !rows[0].Reachable {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
