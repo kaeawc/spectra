@@ -163,8 +163,8 @@ NetworkState {
   hosts_overrides []      # only non-default /etc/hosts lines
   vpn_active             # tailscale, cisco anyconnect, openvpn
   vpn_interfaces []
-  listening_ports []{ port, proto, pid, app_path }
-  established_connections_count
+  listening_ports []{ port, proto, local_addr, pid, command, user, app_path }
+  established_connections_count  # TCP ESTABLISHED rows only
   process_throughput []{ pid, command, bytes_in_per_sec, bytes_out_per_sec }
 }
 ```

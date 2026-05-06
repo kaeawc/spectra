@@ -45,7 +45,7 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
 | `nettop -P -L 2 -x -d -J bytes_in,bytes_out -t external` | per-process network bytes/sec | user (limited) | ~1s sample | `network.process_throughput` |
-| `lsof -i -P -n -sTCP:LISTEN` | current listening TCP sockets | user | one-shot | `network.listening_ports` |
+| `lsof -i -P -n -sTCP:LISTEN` | current listening TCP sockets with bind address, PID, command, and user | user | one-shot | `network.listening_ports` |
 | `lsof -i -P -n` | current TCP/UDP sockets | user | one-shot | `network.connections`, `network.byApp`, established count |
 | `netstat -an` | system-wide TCP/UDP socket state without PID/app attribution | user | low | fallback when `lsof` unavailable |
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
@@ -55,8 +55,10 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `tcpdump -i <iface>` | raw packet capture | helper | streaming, high | (planned) targeted capture |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
-`nettop`, and `/etc/hosts`. Raw packet capture is reserved for explicit
-future live workflows.
+`nettop`, and `/etc/hosts`. `lsof` is also where current socket owner
+attribution comes from; its visibility is limited to what the invoking user can
+see unless a future helper-backed collector is used. Raw packet capture is
+reserved for explicit future live workflows.
 
 ## Energy and power
 
