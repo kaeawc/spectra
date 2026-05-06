@@ -214,4 +214,5 @@ window in the daemon RPC schema once that lands.
   fields are computed
 - [../inspection/node-based-apps.md](../inspection/node-based-apps.md) —
   Node/Electron package, native add-on, and URL-host inspection
-- [../inspection/](../inspection/) — per-field deep-dives
+- [../inspection/metadata.md](../inspection/metadata.md) —
+  per-field deep-dives start with bundle metadata

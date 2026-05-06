@@ -1,10 +1,9 @@
 # Recommendations engine
 
 Spectra has an implemented recommendations engine backed by a built-in Go
-rule catalog, project-local override files, persisted issues, and
-applied-fix history. The long-term architecture still points toward
-CEL/YAML rules, but today's executable rules are compiled Go code so the
-catalog can ship without adding a dependency.
+rule catalog, CEL/YAML rule files, project-local override files, persisted
+issues, and applied-fix history. The built-in catalog is still compiled Go
+code; CEL/YAML is the external catalog format for local team rules.
 
 The recommendations engine is what turns Spectra from "DataDog Agent for
 Macs" into something genuinely new: **a persistent issue catalog where
@@ -17,9 +16,14 @@ Entry points:
 spectra rules
 spectra rules --json
 spectra rules --snapshot <snapshot-id>
+spectra rules --rules rules/*.yml
 spectra rules --rules-config spectra.yml
+spectra rules validate --rules rules/*.yml
+spectra rules list --rules rules/*.yml
+spectra rules explain --rules rules/*.yml <rule-id>
 spectra issues check
 spectra issues check --rules-config spectra.yml
+spectra issues check --rules rules/*.yml
 spectra issues list [--status open]
 spectra issues acknowledge <issue-id>
 spectra issues dismiss <issue-id>
@@ -50,37 +54,52 @@ type Rule struct {
 ```
 
 `rules.Evaluate(snapshot, rules.V1Catalog())` runs the catalog and returns
-sorted findings. `spectra rules` prints findings without persisting them;
-`spectra issues check` evaluates rules, persists the snapshot when needed,
-and upserts findings into the issue catalog. Both commands load
-project-local rule overrides from `./spectra.yml` when present, or from
-an explicit `--rules-config` path.
+sorted findings. CEL/YAML files compile into the same `Rule` shape, so the
+engine has one evaluation path regardless of rule source. `spectra rules`
+prints findings without persisting them; `spectra issues check` evaluates
+rules, persists the snapshot when needed, and upserts findings into the
+issue catalog. Both commands load project-local rule overrides from
+`./spectra.yml` when present, or from an explicit `--rules-config` path.
+Catalog loading goes through a source abstraction: built-in Go rules and
+filesystem YAML files are implemented sources, with remote catalogs planned
+behind the same interface.
 
-## Future shape
-
-Rules are declarative, written in YAML with [CEL](https://github.com/google/cel-spec)
-expressions for the matching predicate:
+Rules can also be declarative YAML with
+[CEL](https://github.com/google/cel-spec) expressions for the matching
+predicate:
 
 ```yaml
 # rules/jvm.yml
 - id: jvm-eol-version
-  match: jvm.version.major <= 11
+  for_each: jvms
+  match: item.version_major <= 11
   severity: medium
-  message: "JDK {{.jvm.version}} is past public support."
+  subject: "jvm:{{ .item.pid }}"
+  message: "JDK {{ .item.jdk_version }} is past public support."
   fix: |
     Recommend upgrading to JDK 21 LTS. Spectra can list installed candidates:
         spectra jdk list
 
 - id: jvm-heap-vs-system
-  match: jvm.max_heap_mb / system.ram_mb > 0.6
+  for_each: jvms
+  match: item.max_heap_mb / host.ram_mb > 0.6
   severity: high
-  message: "Max heap {{.jvm.max_heap_mb}}MB is {{percent jvm.max_heap_mb system.ram_mb}}% of system RAM."
+  message: "Max heap is more than 60% of system RAM."
   fix: "Reduce -Xmx, or expect OS-level swap thrashing under memory pressure."
 ```
 
+Supported YAML fields are `id`, `severity`, `for_each`, `match`,
+`subject`, `message`, `fix`, and `tags`. `for_each` is optional; host-level
+rules omit it. Supported collections today are `apps`, `processes`, `jvms`,
+and `toolchains.jdks`. Message, fix, and subject use Go `text/template`
+against the CEL activation (`host`, `apps`, `processes`, `jvms`,
+`toolchains`, and `item` for per-row rules). The CEL environment includes
+helper functions for common rule math: `percent(value, total)`,
+`bytesGB(bytes)`, and `semverCompare(a, b)`.
+
 ## Why CEL
 
-CEL remains the target for a later external rule catalog because:
+CEL is the external rule expression language because:
 
 - Declarative — rules can be added without touching Go code.
 - Sandboxed — evaluation has no side effects.
@@ -92,8 +111,9 @@ CEL remains the target for a later external rule catalog because:
 
 Alternatives considered:
 
-- **Rules as Go code** — fastest path, but every new rule is a code
-  change + binary release. Wrong incentives for the catalog's growth.
+- **Rules as Go code** — still the built-in catalog path, but every new
+  external rule would otherwise be a code change + binary release. Wrong
+  incentives for the catalog's growth.
 - **A custom DSL** — too much yak-shaving for v1. CEL is good enough.
 
 ## Issue lifecycle
@@ -122,8 +142,9 @@ matching finding.
 
 ## Rule sources
 
-The V1 catalog ships with the binary. Project-local `spectra.yml`
-overrides are implemented for the built-in catalog:
+The V1 catalog ships with the binary. Local CEL/YAML files are loaded with
+`--rules`. Project-local `spectra.yml` overrides are implemented for the
+merged catalog:
 
 ```yaml
 rules:
@@ -142,8 +163,6 @@ Future:
 
 - **Remote catalogs** — pull from a URL or git repo (e.g.
   `kaeawc/spectra-rules-jvm`).
-- **CEL/YAML rules** — evaluate new declarative rules, not just overrides
-  for built-ins.
 - **AI-generated rules** — at the edge: feed the LLM a structured
   snapshot and let it propose new rules to add to the catalog.
 
@@ -195,5 +214,5 @@ Implemented rules:
   independently; we'll deal with conflicts when we see them.
 - **Multi-host rules** that fire on tailnet-wide patterns (e.g. "this
   team has version drift across machines"). V2.
-- **External CEL/YAML catalogs.** Project-local overrides are implemented,
-  but new externally defined CEL rules remain future work.
+- **Remote CEL/YAML catalogs.** Filesystem CEL/YAML catalogs are implemented;
+  URL/git-backed catalogs remain future work.

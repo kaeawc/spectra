@@ -17,14 +17,14 @@ running JVM via the Attach API for layer-2 JVM inspection — see
 to live-snapshot retention. See
 [../operations/snapshots-and-hosts.md#baselines](../operations/snapshots-and-hosts.md#baselines).
 
-**Blob store.** The on-disk store for large artifacts (heap dumps,
+<a id="blob-store"></a>**Blob store.** The on-disk store for large artifacts (heap dumps,
 JFR recordings, thread dumps) that don't belong in
 [*SQLite*](#sqlite). Two-level hash-sharded layout under
 `~/.cache/spectra/v1/{kind}/{hash[:2]}/{hash[2:]}.bin`. See
 [../design/storage.md](../design/storage.md) and
 [../operations/artifacts.md](../operations/artifacts.md).
 
-**Catalog.** The set of [*rules*](#rule) the
+<a id="catalog"></a>**Catalog.** The set of [*rules*](#rule) the
 [*recommendations engine*](#recommendations-engine) evaluates. Ships
 with the binary, can be extended by project-local
 `spectra.yml` overrides or remote rule sources.
@@ -41,17 +41,17 @@ signal was non-specific (e.g. AppKit linked but no framework
 markers). *Low* means we couldn't classify and reported what we
 found.
 
-**Daemon.** The long-lived [*unprivileged*](#unprivileged-daemon) Go
+<a id="daemon"></a>**Daemon.** The long-lived [*unprivileged*](#unprivileged-daemon) Go
 process invoked via `spectra serve`. Owns [*SQLite*](#sqlite),
 [*blob store*](#blob-store), [*tsnet*](#tsnet) state, and lives in
 the user's home. Distinguished from the
 [*privileged helper*](#privileged-helper).
 
-**Detect / Detection.** The static-inspection layer that classifies
+<a id="detect--detection"></a>**Detect / Detection.** The static-inspection layer that classifies
 a `.app` bundle's framework. Returns `detect.Result`. See
 [../detection/overview.md](../detection/overview.md).
 
-**Diff.** A structural comparison between two snapshots — typically
+<a id="diff"></a>**Diff.** A structural comparison between two snapshots — typically
 "my Mac vs your Mac" or "this Mac now vs this Mac last Tuesday." See
 [../operations/snapshots-and-hosts.md#diff-operands](../operations/snapshots-and-hosts.md#diff-operands)
 and
@@ -63,7 +63,7 @@ versions), formula drift (different brew versions), config drift
 (different sysctls). The recommendations engine often fires on
 drift.
 
-**Granted permissions.** The privacy services TCC has actually
+<a id="granted-permissions"></a>**Granted permissions.** The privacy services TCC has actually
 authorized for a bundle. Distinct from
 [*declared*](#declared-privacy) — a permission can be granted only
 if it's been declared. See
@@ -80,14 +80,14 @@ entitlement). Required for any Spectra-distributed binary.
 distinguished from the static [*detection*](#detect--detection)
 half. Process state, network state, granted permissions, etc.
 
-**Issue.** An open finding emitted by the
+<a id="issue"></a>**Issue.** An open finding emitted by the
 [*recommendations engine*](#recommendations-engine). Persists across
 snapshots; same finding seen on Monday and Tuesday is one issue with
 two observations. Status moves through
 `open → acknowledged → fixed → closed` (or `dismissed`). See
 [../design/recommendations-engine.md](../design/recommendations-engine.md).
 
-**JDK install.** A discovered Java Development Kit on the host.
+<a id="jdk-install"></a>**JDK install.** A discovered Java Development Kit on the host.
 Spectra enumerates from system, brew, SDKMAN, asdf, mise, JBR
 toolbox, and manual install paths. See
 [../inspection/toolchains.md](../inspection/toolchains.md).
@@ -112,18 +112,18 @@ filename prefix (matching the bundle ID's reverse-DNS prefix) or
 by ProgramArguments path matching. See
 [../inspection/login-items.md](../inspection/login-items.md).
 
-**Native module.** An `.node` file under
+<a id="native-module"></a>**Native module.** An `.node` file under
 `Contents/Resources/app.asar.unpacked/` in an Electron app — a
 custom-compiled bridge between Node.js and the OS. Spectra
 classifies each by language (Rust / Swift / C++). See
 [../detection/native-modules.md](../detection/native-modules.md).
 
-**Privileged helper.** The optional root-running LaunchDaemon
+<a id="privileged-helper"></a>**Privileged helper.** The optional root-running LaunchDaemon
 installed via `sudo spectra install-helper`. Exposes a narrow RPC
 surface to the unprivileged daemon over a local Unix socket. See
 [../design/privileged-helper.md](../design/privileged-helper.md).
 
-**Recommendations engine.** The CEL-rules-driven evaluation layer
+<a id="recommendations-engine"></a>**Recommendations engine.** The CEL-rules-driven evaluation layer
 that fires against [*snapshot*](#snapshot) data and produces
 [*issues*](#issue). See
 [../design/recommendations-engine.md](../design/recommendations-engine.md).
@@ -132,7 +132,7 @@ that fires against [*snapshot*](#snapshot) data and produces
 [result-schema.md](result-schema.md). Synonym in casual usage:
 "detection record."
 
-**Rule.** A single declarative match expression in CEL with
+<a id="rule"></a>**Rule.** A single declarative match expression in CEL with
 metadata (id, severity, message, fix). Lives in the
 [*catalog*](#catalog).
 
@@ -152,13 +152,13 @@ encountered, Spectra follows the framework binary for layer-2/3
 classification. See
 [../detection/overview.md#shim-launcher-handling](../detection/overview.md#shim-launcher-handling).
 
-**Snapshot.** A timestamped capture of one host's state. Lives in
+<a id="snapshot"></a>**Snapshot.** A timestamped capture of one host's state. Lives in
 [*SQLite*](#sqlite); refers to artifacts in the
 [*blob store*](#blob-store). See
 [../operations/snapshots-and-hosts.md](../operations/snapshots-and-hosts.md)
 and [../design/system-inventory.md](../design/system-inventory.md).
 
-**SQLite.** Spectra's relational store for structured snapshot
+<a id="sqlite"></a>**SQLite.** Spectra's relational store for structured snapshot
 data. One database per host. WAL mode. Cross-host diff is a client-
 side correlation across each daemon's local database. See
 [../design/storage.md](../design/storage.md).
@@ -184,13 +184,13 @@ LaunchAgent in `~/Library` runs as the user; one in `/Library/LaunchAgents`
 runs as the user (any user); a LaunchDaemon in `/Library/LaunchDaemons`
 runs as root.
 
-**tsnet.** Tailscale's Go library that lets a process join the
+<a id="tsnet"></a>**tsnet.** Tailscale's Go library that lets a process join the
 tailnet directly as a node, without requiring `tailscaled`.
 Spectra's daemon embeds it so remote-portal connections work without
 port forwarding. See
 [../design/remote-portal.md](../design/remote-portal.md).
 
-**Unprivileged daemon.** The user-running [*daemon*](#daemon)
+<a id="unprivileged-daemon"></a>**Unprivileged daemon.** The user-running [*daemon*](#daemon)
 process. Distinguished from the
 [*privileged helper*](#privileged-helper).
 
@@ -222,7 +222,7 @@ is chosen for the same reason. See
 **Codesign.** macOS's code-signing tool. Spectra parses
 `codesign -dv` output for team identifier and hardened-runtime flag.
 
-**Declared privacy.** The set of `NS*UsageDescription` keys an app
+<a id="declared-privacy"></a>**Declared privacy.** The set of `NS*UsageDescription` keys an app
 declares in `Info.plist`. macOS shows these strings during permission
 prompts. Apps cannot ask for permissions they haven't declared.
 
@@ -241,7 +241,7 @@ Agents run as the user; Daemons run as root. See
 **Mach-O.** macOS executable file format. Multi-arch ("universal")
 binaries pack one Mach-O per architecture into a fat header.
 
-**MASReceipt.** `_MASReceipt` directory inside `Contents/`,
+<a id="packaging"></a>**MASReceipt.** `_MASReceipt` directory inside `Contents/`,
 indicating Mac App Store distribution.
 
 **plutil.** macOS plist utility. Spectra uses it to extract

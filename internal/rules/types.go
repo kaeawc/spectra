@@ -1,9 +1,8 @@
 // Package rules implements the Spectra recommendations engine.
 //
-// Rules are defined as Go functions today; the long-term architecture
-// (docs/design/recommendations-engine.md) targets CEL expressions loaded
-// from YAML so new rules don't require a binary release. The MatchFn
-// signature is the seam where CEL evaluators will plug in.
+// Rules are defined as built-in Go functions and optional CEL/YAML catalog
+// files. Both sources compile to Rule values so the engine has one evaluation
+// path.
 package rules
 
 import "github.com/kaeawc/spectra/internal/snapshot"
@@ -36,4 +35,9 @@ type Rule struct {
 	ID       string
 	Severity Severity
 	MatchFn  func(s snapshot.Snapshot) []Finding
+	Source   string
+
+	// Optional metadata used by catalog inspection commands.
+	Message string
+	Fix     string
 }

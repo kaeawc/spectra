@@ -16,11 +16,22 @@ import (
 )
 
 func runRules(args []string) int {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "validate":
+			return runRulesValidate(args[1:])
+		case "list":
+			return runRulesList(args[1:])
+		case "explain":
+			return runRulesExplain(args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("spectra rules", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: take a live snapshot)")
 	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
+	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -40,7 +51,10 @@ func runRules(args []string) int {
 		})
 	}
 
-	catalog, err := loadRuleCatalog(*rulesConfig, os.Stderr)
+	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
+		ConfigPath: *rulesConfig,
+		RulePaths:  rules.SplitRulePaths(*rulePaths),
+	}, os.Stderr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rules: %v\n", err)
 		return 1
@@ -64,8 +78,23 @@ func runRules(args []string) int {
 }
 
 func loadRuleCatalog(configPath string, stderr io.Writer) ([]rules.Rule, error) {
-	catalog := rules.V1Catalog()
-	path, explicit := resolveRulesConfigPath(configPath)
+	return loadRuleCatalogWithOptions(ruleCatalogOptions{ConfigPath: configPath}, stderr)
+}
+
+type ruleCatalogOptions struct {
+	ConfigPath string
+	RulePaths  []string
+}
+
+func loadRuleCatalogWithOptions(opts ruleCatalogOptions, stderr io.Writer) ([]rules.Rule, error) {
+	catalog, err := rules.LoadCatalog(
+		rules.BuiltinCatalogSource{},
+		rules.YAMLFileCatalogSource{Paths: opts.RulePaths},
+	)
+	if err != nil {
+		return nil, err
+	}
+	path, explicit := resolveRulesConfigPath(opts.ConfigPath)
 	if path == "" {
 		return catalog, nil
 	}
@@ -83,6 +112,109 @@ func loadRuleCatalog(configPath string, stderr io.Writer) ([]rules.Rule, error) 
 		fmt.Fprintf(stderr, "warning: %s\n", warning)
 	}
 	return rules.ApplyOverrides(catalog, overrides), nil
+}
+
+func runRulesValidate(args []string) int {
+	fs := flag.NewFlagSet("spectra rules validate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to validate")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	paths := rules.SplitRulePaths(*rulePaths)
+	if len(paths) == 0 {
+		paths = rules.SplitRulePaths(strings.Join(fs.Args(), ","))
+	}
+	if len(paths) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: spectra rules validate --rules <rules.yml[,more.yml]>")
+		return 2
+	}
+	if _, err := rules.LoadCatalog(rules.BuiltinCatalogSource{}, rules.YAMLFileCatalogSource{Paths: paths}); err != nil {
+		fmt.Fprintf(os.Stderr, "rules validate: %v\n", err)
+		return 1
+	}
+	fmt.Printf("validated %d rule file(s)\n", len(paths))
+	return 0
+}
+
+func runRulesList(args []string) int {
+	fs := flag.NewFlagSet("spectra rules list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
+	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
+		ConfigPath: *rulesConfig,
+		RulePaths:  rules.SplitRulePaths(*rulePaths),
+	}, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rules list: %v\n", err)
+		return 1
+	}
+	summary := rules.SummarizeCatalog(catalog)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(summary)
+		return 0
+	}
+	fmt.Printf("%-8s  %-30s  %s\n", "SEVERITY", "RULE", "SOURCE")
+	fmt.Println(strings.Repeat("-", 80))
+	for _, row := range summary {
+		fmt.Printf("%-8s  %-30s  %s\n", row.Severity, truncate(row.ID, 30), row.Source)
+	}
+	fmt.Printf("\n%d rule(s)\n", len(summary))
+	return 0
+}
+
+func runRulesExplain(args []string) int {
+	fs := flag.NewFlagSet("spectra rules explain", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
+	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra rules explain [--rules rules.yml] <rule-id>")
+		return 2
+	}
+	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
+		ConfigPath: *rulesConfig,
+		RulePaths:  rules.SplitRulePaths(*rulePaths),
+	}, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rules explain: %v\n", err)
+		return 1
+	}
+	id := fs.Arg(0)
+	for _, row := range rules.SummarizeCatalog(catalog) {
+		if row.ID != id {
+			continue
+		}
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(row)
+			return 0
+		}
+		fmt.Printf("Rule:     %s\n", row.ID)
+		fmt.Printf("Severity: %s\n", row.Severity)
+		fmt.Printf("Source:   %s\n", row.Source)
+		if row.Message != "" {
+			fmt.Printf("Message:  %s\n", row.Message)
+		}
+		if row.Fix != "" {
+			fmt.Printf("Fix:      %s\n", row.Fix)
+		}
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "rules explain: unknown rule %q\n", id)
+	return 1
 }
 
 func resolveRulesConfigPath(configPath string) (path string, explicit bool) {

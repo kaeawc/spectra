@@ -204,4 +204,5 @@ dominated by `ps` parsing. Acceptable.
   what these sources roll up into
 - [../design/privileged-helper.md](../design/privileged-helper.md) —
   which sources require root and how the helper exposes them
-- [../inspection/](../inspection/) — per-collector deep dives
+- [metadata.md](metadata.md) — per-collector deep dives start with
+  bundle metadata
