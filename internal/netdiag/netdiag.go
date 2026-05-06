@@ -279,14 +279,29 @@ type target struct {
 	ports []int
 }
 
-func endpointTargets(explicit []string, conns []netstate.Connection, defaultPorts []int) []target {
-	if len(defaultPorts) == 0 {
-		defaultPorts = []int{443}
+func endpointTargets(explicit []string, conns []netstate.Connection, portFilters []int) []target {
+	if len(conns) > 0 {
+		return connectionTargets(explicit, conns, portFilters)
 	}
 	seen := map[string]map[int]bool{}
 	for _, raw := range explicit {
-		host, ports := splitTarget(raw, defaultPorts)
+		host, ports := splitTarget(raw, portFilters)
 		addTarget(seen, host, ports)
+	}
+	return targetsFromSeen(seen)
+}
+
+func connectionTargets(filters []string, conns []netstate.Connection, portFilters []int) []target {
+	hostFilters := map[string]bool{}
+	seen := map[string]map[int]bool{}
+	for _, raw := range filters {
+		host, port := splitFilterTarget(raw)
+		if host != "" {
+			hostFilters[strings.ToLower(host)] = true
+		}
+		if port > 0 {
+			portFilters = append(portFilters, port)
+		}
 	}
 	for _, c := range conns {
 		if c.RemoteAddr == "" {
@@ -296,29 +311,44 @@ func endpointTargets(explicit []string, conns []netstate.Connection, defaultPort
 		if host == "" {
 			continue
 		}
-		ports := defaultPorts
-		if port > 0 {
-			ports = []int{port}
+		if len(hostFilters) > 0 && !hostFilters[strings.ToLower(host)] {
+			continue
 		}
-		addTarget(seen, host, ports)
+		if len(portFilters) > 0 && !containsPort(portFilters, port) {
+			continue
+		}
+		addTarget(seen, host, []int{port})
 	}
+	return targetsFromSeen(seen)
+}
+
+func splitFilterTarget(raw string) (string, int) {
+	return splitHostPortLoose(raw)
+}
+
+func targetsFromSeen(seen map[string]map[int]bool) []target {
 	var out []target
 	for host, ports := range seen {
 		var ps []int
 		for port := range ports {
 			ps = append(ps, port)
 		}
+		sort.Ints(ps)
 		out = append(out, target{host: host, ports: ps})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].host < out[j].host })
 	return out
 }
 
-func splitTarget(raw string, defaultPorts []int) (string, []int) {
+func splitTarget(raw string, portFilters []int) (string, []int) {
 	host, port := splitHostPortLoose(raw)
 	if port > 0 {
 		return host, []int{port}
 	}
-	return host, defaultPorts
+	if len(portFilters) > 0 {
+		return host, portFilters
+	}
+	return host, []int{443}
 }
 
 func addTarget(seen map[string]map[int]bool, host string, ports []int) {
@@ -334,6 +364,15 @@ func addTarget(seen map[string]map[int]bool, host string, ports []int) {
 			seen[host][port] = true
 		}
 	}
+}
+
+func containsPort(ports []int, want int) bool {
+	for _, port := range ports {
+		if port == want {
+			return true
+		}
+	}
+	return false
 }
 
 func splitHostPortLoose(addr string) (string, int) {

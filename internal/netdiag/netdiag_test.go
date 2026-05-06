@@ -106,6 +106,33 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 	}
 }
 
+func TestEndpointTargetsInferAndFilterAppConnections(t *testing.T) {
+	conns := []netstate.Connection{
+		{RemoteAddr: "api.example.com:443"},
+		{RemoteAddr: "uploads.example.com:8443"},
+		{RemoteAddr: "api.example.com:5228"},
+	}
+	all := endpointTargets(nil, conns, nil)
+	if len(all) != 2 || all[0].host != "api.example.com" || len(all[0].ports) != 2 {
+		t.Fatalf("all targets = %+v", all)
+	}
+	hostFiltered := endpointTargets([]string{"uploads.example.com"}, conns, nil)
+	if len(hostFiltered) != 1 || hostFiltered[0].host != "uploads.example.com" || hostFiltered[0].ports[0] != 8443 {
+		t.Fatalf("host filtered targets = %+v", hostFiltered)
+	}
+	portFiltered := endpointTargets(nil, conns, []int{443})
+	if len(portFiltered) != 1 || portFiltered[0].host != "api.example.com" || portFiltered[0].ports[0] != 443 {
+		t.Fatalf("port filtered targets = %+v", portFiltered)
+	}
+}
+
+func TestEndpointTargetsUseExplicitHostWhenNoConnections(t *testing.T) {
+	targets := endpointTargets([]string{"api.example.com"}, nil, nil)
+	if len(targets) != 1 || targets[0].host != "api.example.com" || targets[0].ports[0] != 443 {
+		t.Fatalf("targets = %+v", targets)
+	}
+}
+
 func TestParseDigStatuses(t *testing.T) {
 	ok := parseDig(digNOERRORFixture)
 	if ok.Status != "NOERROR" || ok.QueryMS != 7 || ok.Server != "1.1.1.1#53(1.1.1.1)" || len(ok.Addresses) != 1 {

@@ -209,10 +209,10 @@ func TestRunNetworkCaptureUnavailableHelper(t *testing.T) {
 
 func TestRunNetworkDiagnose(t *testing.T) {
 	restore := stubNetworkDiagnose(t, func(_ context.Context, opts netdiag.Options) (netdiag.Report, error) {
-		if opts.AppPath != "/Applications/Slack.app" || opts.PID != 412 || len(opts.Targets) != 1 || opts.Targets[0] != "api.example.com" {
+		if opts.AppPath != "/Applications/Slack.app" || opts.PID != 412 || len(opts.Targets) != 0 {
 			t.Fatalf("opts = %+v", opts)
 		}
-		if len(opts.Ports) != 2 || opts.Ports[0] != 443 || opts.Ports[1] != 8443 {
+		if len(opts.Ports) != 0 {
 			t.Fatalf("ports = %+v", opts.Ports)
 		}
 		return netdiag.Report{
@@ -243,7 +243,7 @@ func TestRunNetworkDiagnose(t *testing.T) {
 	defer restore()
 
 	out := captureStdout(t, func() {
-		code := runNetwork([]string{"diagnose", "--app", "/Applications/Slack.app", "--pid", "412", "--ports", "443,8443", "api.example.com"})
+		code := runNetwork([]string{"diagnose", "--app", "/Applications/Slack.app", "--pid", "412"})
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
