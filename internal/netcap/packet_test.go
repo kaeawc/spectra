@@ -8,7 +8,7 @@ import (
 
 func TestDecodeEthernetIPv4TCP(t *testing.T) {
 	payload := []byte("GET / HTTP/1.1\r\n\r\n")
-	frame := ethernetFrame(ipv4Packet(6, tcpSegment(53124, 80, payload)))
+	frame := ethernetFrame(ipv4Packet(6, tcpSegmentWithMeta(53124, 80, 1000, 2000, 0x18, payload)))
 
 	pkt, err := DecodeFlowPacket(LinkTypeEthernet, frame)
 	if err != nil {
@@ -22,6 +22,9 @@ func TestDecodeEthernetIPv4TCP(t *testing.T) {
 	}
 	if pkt.SrcPort != 53124 || pkt.DstPort != 80 || !bytes.Equal(pkt.Payload, payload) {
 		t.Fatalf("transport = %+v", pkt)
+	}
+	if pkt.TCPSeq != 1000 || pkt.TCPAck != 2000 || pkt.TCPFlags != 0x18 {
+		t.Fatalf("tcp metadata = %+v", pkt)
 	}
 }
 
@@ -144,10 +147,17 @@ func ipv4Packet(proto byte, body []byte) []byte {
 }
 
 func tcpSegment(src, dst uint16, payload []byte) []byte {
+	return tcpSegmentWithMeta(src, dst, 0, 0, 0, payload)
+}
+
+func tcpSegmentWithMeta(src, dst uint16, seq, ack uint32, flags uint8, payload []byte) []byte {
 	seg := make([]byte, 20+len(payload))
 	binary.BigEndian.PutUint16(seg[:2], src)
 	binary.BigEndian.PutUint16(seg[2:4], dst)
+	binary.BigEndian.PutUint32(seg[4:8], seq)
+	binary.BigEndian.PutUint32(seg[8:12], ack)
 	seg[12] = 0x50
+	seg[13] = flags
 	copy(seg[20:], payload)
 	return seg
 }
