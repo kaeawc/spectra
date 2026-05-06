@@ -60,6 +60,7 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `tcpdump -i <iface>` | raw packet capture to helper-generated pcap path | helper | streaming, high | `helper.net_capture.start` / `helper.net_capture.stop` |
 | `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for targeted capture |
 | `internal/netcap` pcap reader | classic pcap packet records and link type | user | streaming, low | shared plumbing for future capture summaries |
+| `internal/netcap` packet decoder | IPv4 TCP/UDP flow endpoints and transport payload from Ethernet/raw pcap packets | user | low per packet | shared plumbing for future capture summaries |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
 `nettop`, and `/etc/hosts`. `lsof` is also where current socket owner
