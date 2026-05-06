@@ -404,6 +404,7 @@ automatic tsnet registration and host discovery remain future work.
 | `spectra connect <target> storage <App.app> [more.apps]` | Call `storage.byApp` |
 | `spectra connect <target> power` | Call `power.state` |
 | `spectra connect <target> rules [snapshot-id]` | Call `rules.check` |
+| `spectra connect <target> issues check [snapshot-id]` | Call `issues.check` |
 | `spectra connect <target> issues <machine-id> [status]` | Call `issues.list` |
 | `spectra connect <target> issues list <machine-id> [status]` | Call `issues.list` |
 | `spectra connect <target> issues update <issue-id> <status>` | Call `issues.update` |
@@ -458,6 +459,8 @@ spectra connect work-mac jvm-heap-dump 4012 /tmp/heap.hprof
 spectra connect work-mac processes
 spectra connect work-mac network
 spectra connect work-mac storage /Applications/Slack.app
+spectra connect work-mac issues check
+spectra connect work-mac issues check snap-1
 spectra connect work-mac toolchains
 spectra connect work-mac snapshot
 spectra connect work-mac snapshot diff snap-before snap-after
@@ -494,6 +497,8 @@ is optional; when omitted, fan-out uses hosts from the local store.
 | Flag | Default | Meaning |
 |---|---:|---|
 | `--hosts` | optional | Comma-separated daemon targets (`local`, `host`, `host:port`, `unix:/path`). Omit to use hosts from local `spectra hosts` data. |
+| `--probe` | false | Probe each target with `health` RPC and skip unreachable hosts when true. |
+| `--discover` | false | Include tailscale peers from `tailscale status --json` and merge with local-known hosts. |
 | `--timeout` | `3s` | Dial/read timeout per target |
 
 The command accepts the same typed shortcuts and raw `call` form as
@@ -509,6 +514,8 @@ spectra fan --hosts work-mac,alice-laptop jdk
 spectra fan --hosts work-mac,alice-laptop snapshot
 spectra fan --hosts work-mac,alice-laptop call network.connections
 spectra fan inspect /Applications/Slack.app
+spectra fan --discover status
+spectra fan --discover --probe inspect /Applications/Slack.app
 ```
 
 ## `spectra version`

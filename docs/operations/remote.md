@@ -62,6 +62,7 @@ spectra connect work-mac storage
 spectra connect work-mac storage /Applications/Slack.app
 spectra connect work-mac power
 spectra connect work-mac rules
+spectra connect work-mac issues check
 spectra connect work-mac cache
 spectra connect work-mac cache clear detect
 spectra connect work-mac issues local-machine
@@ -82,9 +83,13 @@ Use `call` for less common methods such as direct JDK calls.
 
 ## Cross-host operations
 
-Explicit-host fan-out is implemented with `spectra fan --hosts`.
-When `--hosts` is omitted, `spectra fan` uses discovered/recorded hosts
-from `spectra hosts` (currently local-store-based discovery):
+Cross-host fan-out is implemented with `spectra fan --hosts`.
+When `--hosts` is omitted, `spectra fan` can merge:
+- hosts from local `spectra hosts` data (`~/.spectra/spectra.db`), and
+- optional tailscale peers (`spectra fan --discover`) from `tailscale status --json`.
+
+This currently supports a manual discovery opt-in path while we migrate toward
+fully managed tsnet fan-out:
 
 ```bash
 spectra hosts
@@ -93,6 +98,7 @@ spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
 spectra fan inspect /Applications/Slack.app
 spectra fan --hosts work-mac,alice-laptop jvm
 spectra fan --hosts work-mac,alice-laptop network-by-app /Applications/Slack.app
+spectra fan --discover status
 ```
 
 The client makes parallel RPC calls to each daemon and aggregates
@@ -201,6 +207,6 @@ remote work:
 
 1. Add tsnet integration so the daemon can join a tailnet without an
    externally managed listener.
-2. Add live host discovery so `spectra hosts` includes reachable daemons
+2. Add managed tsnet host discovery so `spectra hosts` includes reachable daemons
    and `spectra fan` can run without an explicit `--hosts` list.
 3. Add TUI support against local-or-remote daemon targets.

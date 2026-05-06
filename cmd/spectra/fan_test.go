@@ -56,7 +56,7 @@ func TestRunFanWithTypedShortcut(t *testing.T) {
 			result, _ := json.Marshal(map[string]string{"address": target.Address})
 			return result, nil
 		},
-		func(context.Context, bool) ([]fanTarget, error) {
+		func(context.Context, bool, bool) ([]fanTarget, error) {
 			t.Fatal("discover should not be used when --hosts provided")
 			return nil, nil
 		},
@@ -96,7 +96,7 @@ func TestRunFanWithPartialFailure(t *testing.T) {
 			}
 			return json.RawMessage(`{"ok":true}`), nil
 		},
-		func(context.Context, bool) ([]fanTarget, error) {
+		func(context.Context, bool, bool) ([]fanTarget, error) {
 			t.Fatal("discover should not be used when --hosts provided")
 			return nil, nil
 		},
@@ -131,7 +131,7 @@ func TestRunFanWithBadShortcut(t *testing.T) {
 			t.Fatal("caller should not run")
 			return nil, nil
 		},
-		func(context.Context, bool) ([]fanTarget, error) {
+		func(context.Context, bool, bool) ([]fanTarget, error) {
 			t.Fatal("discover should not be used when --hosts provided")
 			return nil, nil
 		},
@@ -162,7 +162,7 @@ func TestRunFanWithDiscoveredHosts(t *testing.T) {
 		func(target connectTarget, _ time.Duration, _ string, _ json.RawMessage) (json.RawMessage, error) {
 			return json.Marshal(map[string]string{"address": target.Address})
 		},
-		func(_ context.Context, probe bool) ([]fanTarget, error) {
+		func(_ context.Context, probe bool, discover bool) ([]fanTarget, error) {
 			if probe {
 				t.Fatal("discover should not probe unless --probe is set")
 			}
@@ -217,7 +217,10 @@ func TestRunFanWithDiscoveredHostsProbe(t *testing.T) {
 		func(target connectTarget, _ time.Duration, _ string, _ json.RawMessage) (json.RawMessage, error) {
 			return json.Marshal(map[string]string{"address": target.Address})
 		},
-		func(_ context.Context, probe bool) ([]fanTarget, error) {
+		func(_ context.Context, probe bool, discover bool) ([]fanTarget, error) {
+			if discover {
+				t.Fatal("discover should not receive --discover")
+			}
 			if !probe {
 				t.Fatal("discover should receive --probe")
 			}
@@ -294,7 +297,7 @@ func TestDiscoverFanTargetsWithProbeFiltersUnreachable(t *testing.T) {
 	}
 	t.Cleanup(func() { fanProbeTarget = origProbeTarget })
 
-	targets, err := discoverFanTargets(ctx, true)
+	targets, err := discoverFanTargets(ctx, true, false)
 	if err != nil {
 		t.Fatalf("discoverFanTargets = %v", err)
 	}
@@ -309,6 +312,212 @@ func TestDiscoverFanTargetsWithProbeFiltersUnreachable(t *testing.T) {
 	}
 }
 
+func TestRunFanWithDiscoverFanout(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var gotDiscover bool
+	code := runFanWith(
+		[]string{"--discover", "host"},
+		&stdout,
+		&stderr,
+		func(target connectTarget, _ time.Duration, _ string, _ json.RawMessage) (json.RawMessage, error) {
+			return json.Marshal(map[string]string{"address": target.Address})
+		},
+		func(_ context.Context, probe bool, discover bool) ([]fanTarget, error) {
+			gotDiscover = discover
+			if probe {
+				t.Fatal("discover should not receive --probe")
+			}
+			if !discover {
+				t.Fatal("discover should receive --discover")
+			}
+			return []fanTarget{
+				{Name: "work-mac", Target: connectTarget{Network: "tcp", Address: "work-mac:7878"}},
+				{Name: "alice-laptop", Target: connectTarget{Network: "tcp", Address: "alice-laptop:7878"}},
+			}, nil
+		},
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !gotDiscover {
+		t.Fatalf("discover flag was not passed")
+	}
+
+	var out fanOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(out.Targets))
+	}
+}
+
+func TestDiscoverFanTargetsWithDiscoveredPeers(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dbPath := filepath.Join(home, ".spectra", "spectra.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	takenAt := time.Date(2026, time.May, 5, 12, 0, 0, 0, time.UTC)
+	if err := db.SaveSnapshot(ctx, store.SnapshotInput{
+		ID:          "snap-work-mac",
+		MachineUUID: "uuid-work-mac",
+		TakenAt:     takenAt,
+		Kind:        "live",
+		Hostname:    "work-mac",
+		OSName:      "macOS",
+		OSVersion:   "15.0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	origDiscoverPeers := fanDiscoverPeers
+	fanDiscoverPeers = func() ([]string, error) {
+		return []string{"work-mac", "alice-laptop"}, nil
+	}
+	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
+
+	targets, err := discoverFanTargets(ctx, false, true)
+	if err != nil {
+		t.Fatalf("discoverFanTargets = %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(targets))
+	}
+	if targets[0].Name != "alice-laptop" || targets[0].Target.Address != "alice-laptop:7878" {
+		t.Fatalf("targets[0] = %+v", targets[0])
+	}
+	if targets[1].Name != "work-mac" || targets[1].Target.Address != "work-mac:7878" {
+		t.Fatalf("targets[1] = %+v", targets[1])
+	}
+}
+
+func TestDiscoverFanTargetsWithDiscoveryFallbackToPeers(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origDiscoverPeers := fanDiscoverPeers
+	fanDiscoverPeers = func() ([]string, error) {
+		return []string{"remote-laptop", "remote-laptop"}, nil
+	}
+	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
+
+	targets, err := discoverFanTargets(ctx, false, true)
+	if err != nil {
+		t.Fatalf("discoverFanTargets = %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	if targets[0].Name != "remote-laptop" || targets[0].Target.Address != "remote-laptop:7878" {
+		t.Fatalf("targets[0] = %+v", targets[0])
+	}
+}
+
+func TestDiscoverFanTargetsDiscoveryErrorWithDbFallback(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dbPath := filepath.Join(home, ".spectra", "spectra.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	takenAt := time.Date(2026, time.May, 5, 12, 0, 0, 0, time.UTC)
+	if err := db.SaveSnapshot(ctx, store.SnapshotInput{
+		ID:          "snap-work-mac",
+		MachineUUID: "uuid-work-mac",
+		TakenAt:     takenAt,
+		Kind:        "live",
+		Hostname:    "work-mac",
+		OSName:      "macOS",
+		OSVersion:   "15.0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	origDiscoverPeers := fanDiscoverPeers
+	fanDiscoverPeers = func() ([]string, error) {
+		return nil, errors.New("tailscale unavailable")
+	}
+	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
+
+	targets, err := discoverFanTargets(ctx, false, true)
+	if err != nil {
+		t.Fatalf("discoverFanTargets = %v", err)
+	}
+	if len(targets) != 1 || targets[0].Name != "work-mac" {
+		t.Fatalf("targets = %+v", targets)
+	}
+}
+
+func TestDiscoverFanTargetsDiscoveryErrorWithoutDb(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origDiscoverPeers := fanDiscoverPeers
+	fanDiscoverPeers = func() ([]string, error) {
+		return nil, errors.New("tailscale unavailable")
+	}
+	t.Cleanup(func() { fanDiscoverPeers = origDiscoverPeers })
+
+	_, err := discoverFanTargets(ctx, false, true)
+	if err == nil {
+		t.Fatal("discoverFanTargets succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "discover remote hosts") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDiscoverTailscalePeersFromStatusJSON(t *testing.T) {
+	origRunTailscaleStatus := runTailscaleStatus
+	runTailscaleStatus = func() ([]byte, error) {
+		body := map[string]any{
+			"Peers": map[string]map[string]string{
+				"foo": {"DNSName": "foo.tailnet.example"},
+				"bar": {"HostName": "bar-laptop"},
+				"dup": {"DNSName": "foo.tailnet.example"},
+			},
+			"Peer": map[string]map[string]string{
+				"legacy": {"DNSName": "legacy.tailnet.example"},
+			},
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw, nil
+	}
+	t.Cleanup(func() { runTailscaleStatus = origRunTailscaleStatus })
+
+	peers, err := discoverTailscalePeers()
+	if err != nil {
+		t.Fatalf("discoverTailscalePeers = %v", err)
+	}
+	if len(peers) != 3 {
+		t.Fatalf("len(peers) = %d, want 3", len(peers))
+	}
+	expected := []string{"bar-laptop", "foo.tailnet.example", "legacy.tailnet.example"}
+	for i, peer := range peers {
+		if peer != expected[i] {
+			t.Fatalf("peers[%d] = %q, want %q", i, peer, expected[i])
+		}
+	}
+}
+
 func TestRunFanWithDiscoveredHostsError(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -320,7 +529,7 @@ func TestRunFanWithDiscoveredHostsError(t *testing.T) {
 			t.Fatal("caller should not run")
 			return nil, nil
 		},
-		func(context.Context, bool) ([]fanTarget, error) {
+		func(context.Context, bool, bool) ([]fanTarget, error) {
 			return nil, nil
 		},
 	)
