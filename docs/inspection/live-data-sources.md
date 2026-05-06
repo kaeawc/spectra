@@ -50,6 +50,7 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `lsof -i -P -n -sTCP:LISTEN` | current listening TCP sockets with bind address, PID, command, and user | user | one-shot | `network.listening_ports` |
 | `lsof -i -P -n` | current TCP/UDP sockets | user | one-shot | `network.connections`, `network.byApp`, established count |
 | `netstat -an` | system-wide TCP/UDP socket state without PID/app attribution | user | low | fallback when `lsof` unavailable |
+| passive DNS parser | query names/types, response flag, response code, truncation, answer count from DNS payloads | user/helper depending on capture source | low per packet | `internal/netproto` parser for future UDP summaries |
 | passive TLS ClientHello parser | SNI, ALPN, TLS versions, ECH-present flag from captured bytes | user/helper depending on capture source | low per record | `internal/netproto` parser for future capture summaries |
 | `scutil --proxy` | system proxy config | user | <10ms | `network.proxy_config` |
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
@@ -65,8 +66,9 @@ reserved for explicit future live workflows.
 
 `internal/netproto` contains protocol parsers that future capture collectors can
 use to summarize packet metadata without storing request or response bodies. The
-first parser handles TLS ClientHello records, which exposes SNI and ALPN when
-the client sends them in cleartext; it cannot decrypt HTTPS traffic.
+initial parsers handle DNS messages and TLS ClientHello records. TLS parsing
+exposes SNI and ALPN when the client sends them in cleartext; it cannot decrypt
+HTTPS traffic.
 
 ## Energy and power
 
