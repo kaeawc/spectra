@@ -72,13 +72,15 @@ artifact writes.
 
 ## Cross-host operations
 
-Explicit-host fan-out is implemented with `spectra fan --hosts`. Host
-discovery is still planned, so callers provide the daemon targets today:
+Explicit-host fan-out is implemented with `spectra fan --hosts`.
+When `--hosts` is omitted, `spectra fan` uses discovered/recorded hosts
+from `spectra hosts` (currently local-store-based discovery):
 
 ```bash
 spectra hosts
 spectra fan --hosts work-mac,alice-laptop status
 spectra fan --hosts work-mac,alice-laptop inspect /Applications/Slack.app
+spectra fan inspect /Applications/Slack.app
 spectra fan --hosts work-mac,alice-laptop jvm
 spectra fan --hosts work-mac,alice-laptop network-by-app /Applications/Slack.app
 ```

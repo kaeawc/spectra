@@ -1,17 +1,23 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/store"
 )
 
 type fanRPCCaller func(target connectTarget, timeout time.Duration, method string, params json.RawMessage) (json.RawMessage, error)
+type fanHostLister func(ctx context.Context) ([]fanTarget, error)
 
 type fanOutput struct {
 	Method  string            `json:"method"`
@@ -28,19 +34,25 @@ type fanTargetOutput struct {
 }
 
 func runFan(args []string) int {
-	return runFanWith(args, os.Stdout, os.Stderr, callFanRPC)
+	return runFanWith(args, os.Stdout, os.Stderr, callFanRPC, discoverFanTargets)
 }
 
-func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPCCaller) int {
+func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPCCaller, discover fanHostLister) int {
 	fs := flag.NewFlagSet("spectra fan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	timeout := fs.Duration("timeout", 3*time.Second, "Dial/read timeout per target")
-	hosts := fs.String("hosts", "", "Comma-separated daemon targets")
+	hosts := fs.String("hosts", "", "Comma-separated daemon targets; defaults to discovered hosts")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	targets, err := parseFanTargets(*hosts)
+	var targets []fanTarget
+	var err error
+	if strings.TrimSpace(*hosts) == "" {
+		targets, err = discover(context.Background())
+	} else {
+		targets, err = parseFanTargets(*hosts)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		printFanUsage(stderr)
@@ -49,6 +61,11 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	method, params, err := parseConnectCall(fs.Args())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		printFanUsage(stderr)
+		return 2
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(stderr, "fan requires --hosts target[,target...]")
 		printFanUsage(stderr)
 		return 2
 	}
@@ -70,9 +87,9 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 }
 
 func printFanUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra fan --hosts host-a,host-b [status|host|jvm|processes|network|storage|power|rules]")
-	fmt.Fprintln(w, "   or: spectra fan --hosts host-a,host-b inspect <App.app>")
-	fmt.Fprintln(w, "   or: spectra fan --hosts host-a,host-b call <method> [json-params]")
+	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [status|host|jvm|processes|network|storage|power|rules]")
+	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] inspect <App.app>")
+	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] call <method> [json-params]")
 }
 
 func parseFanTargets(raw string) ([]fanTarget, error) {
@@ -92,6 +109,48 @@ func parseFanTargets(raw string) ([]fanTarget, error) {
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("fan requires --hosts target[,target...]")
 	}
+	return targets, nil
+}
+
+func discoverFanTargets(ctx context.Context) ([]fanTarget, error) {
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.ListHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(rows))
+	targets := make([]fanTarget, 0, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Hostname)
+		if name == "" {
+			continue
+		}
+		target, err := parseConnectTarget(net.JoinHostPort(name, defaultRemotePort))
+		if err != nil {
+			continue
+		}
+		key := target.Address
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, fanTarget{Name: name, Target: target})
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("fan requires --hosts target[,target...]")
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].Name < targets[j].Name
+	})
 	return targets, nil
 }
 
