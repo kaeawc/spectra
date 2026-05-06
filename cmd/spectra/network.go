@@ -210,6 +210,9 @@ func printNetworkCaptureSummary(summary netcap.PCAPSummary) {
 	fmt.Printf("  dns: %d\n", len(summary.DNS))
 	fmt.Printf("  tls_client_hello: %d\n", len(summary.TLS))
 	fmt.Printf("  http: %d\n", len(summary.HTTP))
+	if upgrades := countWebSocketUpgrades(summary); upgrades > 0 {
+		fmt.Printf("  websocket_upgrades: %d\n", upgrades)
+	}
 	if summary.EventsDropped > 0 {
 		fmt.Printf("  events_dropped: %d\n", summary.EventsDropped)
 	}
@@ -231,11 +234,29 @@ func printNetworkCaptureSummary(summary netcap.PCAPSummary) {
 	for _, event := range summary.HTTP {
 		msg := event.Message
 		if msg.IsRequest {
-			fmt.Printf("  http_request: %s %s %s -> %s\n", msg.Method, msg.Target, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+			label := "http_request"
+			if msg.WebSocket {
+				label = "websocket_upgrade"
+			}
+			fmt.Printf("  %s: %s %s %s -> %s\n", label, msg.Method, msg.Target, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
 		} else {
-			fmt.Printf("  http_response: %d %s %s -> %s\n", msg.StatusCode, msg.Reason, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
+			label := "http_response"
+			if msg.WebSocket {
+				label = "websocket_upgrade_response"
+			}
+			fmt.Printf("  %s: %d %s %s -> %s\n", label, msg.StatusCode, msg.Reason, formatFlowEndpoint(event.Flow), formatFlowDestination(event.Flow))
 		}
 	}
+}
+
+func countWebSocketUpgrades(summary netcap.PCAPSummary) int {
+	var count int
+	for _, event := range summary.HTTP {
+		if event.Message.WebSocket {
+			count++
+		}
+	}
+	return count
 }
 
 func formatFlowEndpoint(flow netcap.FlowSummary) string {
