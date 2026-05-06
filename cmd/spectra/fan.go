@@ -17,7 +17,8 @@ import (
 )
 
 type fanRPCCaller func(target connectTarget, timeout time.Duration, method string, params json.RawMessage) (json.RawMessage, error)
-type fanHostLister func(ctx context.Context) ([]fanTarget, error)
+type fanHostLister func(ctx context.Context, probeUnreachable bool) ([]fanTarget, error)
+type fanTargetProber func(ctx context.Context, target connectTarget, timeout time.Duration) error
 
 type fanOutput struct {
 	Method  string            `json:"method"`
@@ -42,6 +43,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	fs.SetOutput(stderr)
 	timeout := fs.Duration("timeout", 3*time.Second, "Dial/read timeout per target")
 	hosts := fs.String("hosts", "", "Comma-separated daemon targets; defaults to discovered hosts")
+	probe := fs.Bool("probe", false, "When discovering hosts, skip entries that fail a health check")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -49,7 +51,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	var targets []fanTarget
 	var err error
 	if strings.TrimSpace(*hosts) == "" {
-		targets, err = discover(context.Background())
+		targets, err = discover(context.Background(), *probe)
 	} else {
 		targets, err = parseFanTargets(*hosts)
 	}
@@ -87,7 +89,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 }
 
 func printFanUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [status|host|jvm|processes|network|storage|power|rules]")
+	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] call <method> [json-params]")
 }
@@ -112,7 +114,9 @@ func parseFanTargets(raw string) ([]fanTarget, error) {
 	return targets, nil
 }
 
-func discoverFanTargets(ctx context.Context) ([]fanTarget, error) {
+var fanProbeTarget fanTargetProber = probeFanTarget
+
+func discoverFanTargets(ctx context.Context, probeUnreachable bool) ([]fanTarget, error) {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
 		return nil, err
@@ -145,6 +149,16 @@ func discoverFanTargets(ctx context.Context) ([]fanTarget, error) {
 		seen[key] = struct{}{}
 		targets = append(targets, fanTarget{Name: name, Target: target})
 	}
+	if probeUnreachable {
+		filtered := make([]fanTarget, 0, len(targets))
+		for _, target := range targets {
+			if err := fanProbeTarget(ctx, target.Target, 3*time.Second); err != nil {
+				continue
+			}
+			filtered = append(filtered, target)
+		}
+		targets = filtered
+	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("fan requires --hosts target[,target...]")
 	}
@@ -152,6 +166,23 @@ func discoverFanTargets(ctx context.Context) ([]fanTarget, error) {
 		return targets[i].Name < targets[j].Name
 	})
 	return targets, nil
+}
+
+func probeFanTarget(ctx context.Context, target connectTarget, timeout time.Duration) error {
+	conn, err := dialConnectTarget(target, timeout)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d, ok := conn.(interface{ SetDeadline(time.Time) error }); ok {
+		_ = d.SetDeadline(time.Now().Add(timeout))
+	}
+	_, err = callRPC(conn, "health", nil)
+	return err
 }
 
 type fanTarget struct {
