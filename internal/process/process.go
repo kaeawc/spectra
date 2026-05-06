@@ -127,7 +127,7 @@ func applyThreadCounts(procs []Info, counter func([]Info) map[int]int) {
 		return
 	}
 	if counter == nil {
-		return
+		counter = collectThreadCounts
 	}
 	counts := counter(procs)
 	for i := range procs {
