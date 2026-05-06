@@ -142,7 +142,7 @@ func printTable(rs []detect.Result, verbose bool) {
 		if len(r.NativeModules) > 0 {
 			fmt.Printf("    native modules:\n")
 			for _, m := range r.NativeModules {
-				fmt.Printf("      [%s] %s\n", m.Language, m.Name)
+				fmt.Printf("      [%s] %s\n", m.Language, nativeModuleLabel(m))
 				if verbose {
 					for _, h := range m.Hints {
 						fmt.Printf("           %s\n", h)
@@ -151,6 +151,16 @@ func printTable(rs []detect.Result, verbose bool) {
 			}
 		}
 	}
+}
+
+func nativeModuleLabel(m detect.NativeModule) string {
+	if m.PackageName == "" {
+		return m.Name
+	}
+	if m.PackageVersion == "" {
+		return fmt.Sprintf("%s (%s)", m.Name, m.PackageName)
+	}
+	return fmt.Sprintf("%s (%s@%s)", m.Name, m.PackageName, m.PackageVersion)
 }
 
 func printMeta(r detect.Result) {
