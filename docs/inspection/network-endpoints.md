@@ -117,7 +117,7 @@ Related live-network collectors:
 - `internal/netstate/connections.go` — `lsof -i -P -n` socket list with
   `netstat -an` fallback.
 - `internal/netstate/netstate.go` — routes, DNS, proxy config, VPN state,
-  listening ports, and connection counts.
+  listening ports with process attribution, and connection counts.
 
 ## CLI usage
 

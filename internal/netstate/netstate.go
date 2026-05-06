@@ -48,10 +48,13 @@ type HostsEntry struct {
 
 // ListeningPort is one TCP/UDP socket currently bound on the machine.
 type ListeningPort struct {
-	Port    int    `json:"port"`
-	Proto   string `json:"proto"` // "tcp", "udp"
-	PID     int    `json:"pid,omitempty"`
-	AppPath string `json:"app_path,omitempty"`
+	Port      int    `json:"port"`
+	Proto     string `json:"proto"` // "tcp", "udp"
+	LocalAddr string `json:"local_addr,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	Command   string `json:"command,omitempty"`
+	User      string `json:"user,omitempty"`
+	AppPath   string `json:"app_path,omitempty"`
 }
 
 // Throughput is a per-process network throughput sample from nettop.
@@ -91,7 +94,7 @@ func Collect(run CmdRunner) State {
 		s.VPNInterfaces = parseVPNInterfaces(string(out))
 		s.VPNActive = len(s.VPNInterfaces) > 0
 	}
-	s.EstablishedConnectionsCount = len(collectConnectionRows(run))
+	s.EstablishedConnectionsCount = countEstablishedConnections(collectConnectionRows(run))
 	s.ProcessThroughput = CollectThroughput(run)
 	return s
 }
@@ -104,6 +107,16 @@ func collectConnectionRows(run CmdRunner) []Connection {
 		return parseNetstatConnections(string(out))
 	}
 	return nil
+}
+
+func countEstablishedConnections(conns []Connection) int {
+	count := 0
+	for _, conn := range conns {
+		if conn.Proto == "tcp" && conn.State == "established" {
+			count++
+		}
+	}
+	return count
 }
 
 // CollectThroughput samples per-process external-interface network throughput.
@@ -331,36 +344,70 @@ func parseLSOFListen(out string) []ListeningPort {
 		if len(fields) < 9 {
 			continue
 		}
-		addrField := fields[8]
-		if !strings.HasSuffix(addrField, "(LISTEN)") {
-			// Some lsof versions put (LISTEN) in a separate column.
-			found := false
-			for _, f := range fields {
-				if f == "(LISTEN)" {
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
+		nodeIdx := lsofNodeIndex(fields)
+		if nodeIdx < 0 || nodeIdx+1 >= len(fields) {
+			continue
 		}
-		// Address is the field before (LISTEN): "TCP *:8080" or "*:8080"
-		addr := strings.TrimSuffix(addrField, "(LISTEN)")
-		addr = strings.TrimSpace(addr)
-		if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-			portStr := addr[idx+1:]
-			if seen[portStr] {
-				continue
-			}
-			seen[portStr] = true
-			port := parsePort(portStr)
-			if port > 0 {
-				ports = append(ports, ListeningPort{Port: port, Proto: "tcp"})
-			}
+		state := ""
+		if nodeIdx+2 < len(fields) {
+			state = fields[nodeIdx+2]
 		}
+		name := fields[nodeIdx+1]
+		if !isListenState(name, state) {
+			continue
+		}
+		local, port, ok := parseListenAddr(name)
+		if !ok {
+			continue
+		}
+		pid, _ := strconv.Atoi(fields[1])
+		proto := strings.ToLower(fields[nodeIdx])
+		key := proto + "/" + strconv.Itoa(pid) + "/" + local + "/" + strconv.Itoa(port)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		ports = append(ports, ListeningPort{
+			Port:      port,
+			Proto:     proto,
+			LocalAddr: local,
+			PID:       pid,
+			Command:   fields[0],
+			User:      fields[2],
+		})
 	}
 	return ports
+}
+
+func lsofNodeIndex(fields []string) int {
+	for i, f := range fields {
+		upper := strings.ToUpper(f)
+		if upper == "TCP" || upper == "UDP" {
+			return i
+		}
+	}
+	return -1
+}
+
+func isListenState(name, state string) bool {
+	return strings.Contains(name, "(LISTEN)") || state == "(LISTEN)"
+}
+
+func parseListenAddr(name string) (string, int, bool) {
+	addr := strings.TrimSpace(strings.TrimSuffix(name, "(LISTEN)"))
+	idx := strings.LastIndex(addr, ":")
+	if idx < 0 || idx == len(addr)-1 {
+		return "", 0, false
+	}
+	port := parsePort(addr[idx+1:])
+	if port <= 0 {
+		return "", 0, false
+	}
+	local := strings.TrimSpace(addr[:idx])
+	if local == "" {
+		local = "*"
+	}
+	return local, port, true
 }
 
 func parsePort(s string) int {

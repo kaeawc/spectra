@@ -121,12 +121,35 @@ func TestParseLSOFListen(t *testing.T) {
 	if len(ports) != 2 {
 		t.Fatalf("got %d ports, want 2 (8080 and 9090, deduped): %+v", len(ports), ports)
 	}
-	found := map[int]bool{}
+	found := map[int]ListeningPort{}
 	for _, p := range ports {
-		found[p.Port] = true
+		found[p.Port] = p
 	}
-	if !found[8080] || !found[9090] {
+	if _, ok := found[8080]; !ok {
 		t.Errorf("ports = %+v, want 8080 and 9090", ports)
+	}
+	if _, ok := found[9090]; !ok {
+		t.Errorf("ports = %+v, want 8080 and 9090", ports)
+	}
+	slack := found[8080]
+	if slack.PID != 412 || slack.Command != "Slack" || slack.User != "alice" {
+		t.Errorf("8080 attribution = %+v, want Slack pid=412 user=alice", slack)
+	}
+	if slack.LocalAddr != "*" || slack.Proto != "tcp" {
+		t.Errorf("8080 endpoint = %+v, want tcp *:8080", slack)
+	}
+}
+
+func TestParseLSOFListenInlineState(t *testing.T) {
+	out := `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+node    512 alice 12u IPv6 0x123 0t0 TCP [::1]:9229(LISTEN)
+`
+	ports := parseLSOFListen(out)
+	if len(ports) != 1 {
+		t.Fatalf("ports = %+v, want one inline LISTEN row", ports)
+	}
+	if ports[0].LocalAddr != "[::1]" || ports[0].Port != 9229 || ports[0].PID != 512 {
+		t.Fatalf("inline listen parse = %+v", ports[0])
 	}
 }
 
@@ -274,8 +297,8 @@ func TestCollect(t *testing.T) {
 	if len(s.VPNInterfaces) != 1 || s.VPNInterfaces[0] != "utun3" {
 		t.Errorf("VPNInterfaces = %v, want [utun3]", s.VPNInterfaces)
 	}
-	if s.EstablishedConnectionsCount != 3 {
-		t.Errorf("EstablishedConnectionsCount = %d, want 3", s.EstablishedConnectionsCount)
+	if s.EstablishedConnectionsCount != 1 {
+		t.Errorf("EstablishedConnectionsCount = %d, want 1", s.EstablishedConnectionsCount)
 	}
 	if len(s.ProcessThroughput) != 1 || s.ProcessThroughput[0].PID != 412 {
 		t.Errorf("ProcessThroughput = %+v, want active Slack row", s.ProcessThroughput)
@@ -324,7 +347,7 @@ func TestCollectConnectionsCountFallsBackToNetstat(t *testing.T) {
 		return nil, errors.New("unexpected command")
 	}
 	s := Collect(stub)
-	if s.EstablishedConnectionsCount != 3 {
-		t.Errorf("EstablishedConnectionsCount = %d, want 3", s.EstablishedConnectionsCount)
+	if s.EstablishedConnectionsCount != 1 {
+		t.Errorf("EstablishedConnectionsCount = %d, want 1", s.EstablishedConnectionsCount)
 	}
 }

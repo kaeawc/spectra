@@ -191,12 +191,20 @@ func printListeningPorts(listening []netstate.ListeningPort) {
 	// Sort by port for stable output.
 	ports := make([]netstate.ListeningPort, len(listening))
 	copy(ports, listening)
-	sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
+	sort.Slice(ports, func(i, j int) bool {
+		if ports[i].Port != ports[j].Port {
+			return ports[i].Port < ports[j].Port
+		}
+		if ports[i].LocalAddr != ports[j].LocalAddr {
+			return ports[i].LocalAddr < ports[j].LocalAddr
+		}
+		return ports[i].PID < ports[j].PID
+	})
 
 	fmt.Println()
 	fmt.Printf("listening ports (%d):\n", len(ports))
 	for _, p := range ports {
-		fmt.Printf("  %s/%d%s%s\n", p.Proto, p.Port, listeningPID(p), listeningApp(p))
+		fmt.Printf("  %s/%d%s%s%s%s\n", p.Proto, p.Port, listeningAddr(p), listeningPID(p), listeningCommand(p), listeningApp(p))
 	}
 }
 
@@ -227,6 +235,20 @@ func listeningPID(p netstate.ListeningPort) string {
 		return ""
 	}
 	return fmt.Sprintf(" pid=%d", p.PID)
+}
+
+func listeningAddr(p netstate.ListeningPort) string {
+	if p.LocalAddr == "" {
+		return ""
+	}
+	return fmt.Sprintf(" addr=%s", p.LocalAddr)
+}
+
+func listeningCommand(p netstate.ListeningPort) string {
+	if p.Command == "" {
+		return ""
+	}
+	return fmt.Sprintf(" cmd=%s", truncate(p.Command, 24))
 }
 
 func listeningApp(p netstate.ListeningPort) string {
