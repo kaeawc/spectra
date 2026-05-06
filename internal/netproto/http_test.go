@@ -28,7 +28,7 @@ func TestParseHTTP1RequestHeadersRedactsSensitiveValues(t *testing.T) {
 }
 
 func TestParseHTTP1ResponseHeaders(t *testing.T) {
-	raw := []byte("HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nSet-Cookie: sid=secret\n\nwebsocket bytes")
+	raw := []byte("HTTP/1.1 101 Switching Protocols\nConnection: Upgrade\nUpgrade: websocket\nSet-Cookie: sid=secret\n\nwebsocket bytes")
 
 	msg, err := ParseHTTP1Headers(raw)
 	if err != nil {
@@ -41,8 +41,35 @@ func TestParseHTTP1ResponseHeaders(t *testing.T) {
 	if headers["Upgrade"].Value != "websocket" {
 		t.Fatalf("Upgrade header = %+v", headers["Upgrade"])
 	}
+	if !msg.WebSocket {
+		t.Fatal("WebSocket = false, want true")
+	}
 	if headers["Set-Cookie"].Value != redactedHeaderValue || !headers["Set-Cookie"].Redacted {
 		t.Fatalf("Set-Cookie header = %+v, want redacted", headers["Set-Cookie"])
+	}
+}
+
+func TestParseHTTP1RequestDetectsWebSocketUpgrade(t *testing.T) {
+	raw := []byte("GET /socket HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n\r\n")
+
+	msg, err := ParseHTTP1Headers(raw)
+	if err != nil {
+		t.Fatalf("ParseHTTP1Headers: %v", err)
+	}
+	if !msg.WebSocket {
+		t.Fatal("WebSocket = false, want true")
+	}
+}
+
+func TestParseHTTP1WebSocketRequiresConnectionUpgrade(t *testing.T) {
+	raw := []byte("HTTP/1.1 200 OK\r\nUpgrade: websocket\r\n\r\n")
+
+	msg, err := ParseHTTP1Headers(raw)
+	if err != nil {
+		t.Fatalf("ParseHTTP1Headers: %v", err)
+	}
+	if msg.WebSocket {
+		t.Fatal("WebSocket = true, want false")
 	}
 }
 
