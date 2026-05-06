@@ -79,6 +79,8 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-explain <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jmx-status <pid> | jvm-jmx-start-local <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-flamegraph <pid> [dest]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot diff <id-a> <id-b>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> diff <id-a> <id-b>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-heap-dump <pid> [dest] | jvm-jfr-start <pid> [name] | jvm-jfr-dump <pid> <dest> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp|udp] [host=HOST] [port=N]")
@@ -153,6 +155,11 @@ func parseConnectShortcut(args []string) (string, json.RawMessage, bool, error) 
 		return method, nil, true, nil
 	}
 	switch args[0] {
+	case "diff":
+		if len(args) != 3 {
+			return "", nil, true, fmt.Errorf("connect diff requires <id-a> <id-b>")
+		}
+		return "snapshot.diff", connectParams(map[string]string{"id_a": args[1], "id_b": args[2]}), true, nil
 	case "inspect":
 		return parseConnectInspect(args)
 	case "network":

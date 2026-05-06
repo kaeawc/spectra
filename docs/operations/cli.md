@@ -430,6 +430,7 @@ or MagicDNS names for daemons started with `--tsnet`.
 | `spectra connect <target> jvm-threads <pid>` | Call `jvm.thread_dump` |
 | `spectra connect <target> jvm-heap <pid>` | Call `jvm.heap_histogram` |
 | `spectra connect <target> jvm-heap-dump <pid> [dest]` | Call `jvm.heap_dump` |
+| `spectra connect <target> diff <id-a> <id-b>` | Call `snapshot.diff` |
 | `spectra connect <target> metrics` | Call `process.live` |
 | `spectra connect <target> metrics <pid> [limit]` | Call `process.history` |
 | `spectra connect <target> processes` | Call `process.list` |
@@ -507,6 +508,7 @@ spectra connect work-mac issues check snap-1
 spectra connect work-mac toolchains
 spectra connect work-mac snapshot
 spectra connect work-mac snapshot diff snap-before snap-after
+spectra connect work-mac diff snap-a snap-b
 spectra connect work-mac call jvm.heap_dump '{"pid":4012,"confirm_sensitive":true}'
 ```
 

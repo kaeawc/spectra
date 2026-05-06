@@ -72,6 +72,7 @@ spectra connect work-mac processes
 spectra connect work-mac process-tree /Applications/Slack.app
 spectra connect work-mac network
 spectra connect work-mac connections
+spectra connect work-mac diff snap-before snap-after
 spectra connect work-mac network-by-app /Applications/Slack.app
 spectra connect work-mac metrics
 spectra connect work-mac metrics 4012 60
