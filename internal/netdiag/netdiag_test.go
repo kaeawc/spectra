@@ -106,6 +106,28 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 	}
 }
 
+func TestDiagnoseEndpointFilterNoMatches(t *testing.T) {
+	run := appBehaviorRunner(t)
+	report, err := Diagnose(context.Background(), Options{
+		AppPath:   "/Applications/Slack.app",
+		Targets:   []string{"other.example"},
+		Ports:     []int{443, 9443},
+		NetRunner: run,
+		ProcRunner: func(context.Context, process.CollectOptions) []process.Info {
+			return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if len(report.Endpoints) != 0 {
+		t.Fatalf("expected no endpoint probes, got %+v", report.Endpoints)
+	}
+	if !hasFinding(report.Findings, "app endpoint filters matched no active connections") {
+		t.Fatalf("missing no-match finding: %+v", report.Findings)
+	}
+}
+
 func TestEndpointTargetsInferAndFilterAppConnections(t *testing.T) {
 	conns := []netstate.Connection{
 		{RemoteAddr: "api.example.com:443"},

@@ -172,6 +172,9 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 	report.TopThroughput = topThroughput(state.ProcessThroughput, 5)
 
 	targets := endpointTargets(opts.Targets, report.Connections, opts.Ports)
+	diagnosticNoEndpoints := len(report.Connections) > 0 &&
+		len(targets) == 0 &&
+		(len(opts.Targets) > 0 || len(opts.Ports) > 0)
 	for _, target := range targets {
 		diag := EndpointDiagnosis{
 			Host:       target.host,
@@ -192,6 +195,13 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 		report.Endpoints = append(report.Endpoints, diag)
 	}
 	report.Findings = findings(report)
+	if diagnosticNoEndpoints {
+		report.Findings = append(report.Findings, Finding{
+			Severity: "warning",
+			Title:    "app endpoint filters matched no active connections",
+			Detail:   "use broader --ports or positional hosts to include additional remote endpoints",
+		})
+	}
 	return report, nil
 }
 
