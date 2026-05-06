@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/netcap"
+	"github.com/kaeawc/spectra/internal/netproto"
 )
 
 func TestRunNetworkCaptureStartCallsHelper(t *testing.T) {
@@ -73,6 +75,60 @@ func TestRunNetworkCaptureStopCallsHelper(t *testing.T) {
 	}
 }
 
+func TestRunNetworkCaptureSummarize(t *testing.T) {
+	restore := stubNetworkCaptureSummarize(t, func(path string, limit int) (netcap.PCAPSummary, error) {
+		if path != "/tmp/capture.pcap" || limit != 2 {
+			t.Fatalf("params = %q %d", path, limit)
+		}
+		return netcap.PCAPSummary{
+			Packets:      3,
+			DecodedFlows: 3,
+			DNS: []netcap.DNSFlowSummary{{
+				Flow:    netcap.FlowSummary{SrcAddr: "192.0.2.10", SrcPort: 53123, DstAddr: "198.51.100.20", DstPort: 53},
+				Message: netproto.DNSMessage{Questions: []netproto.DNSQuestion{{Name: "example.com", Type: "A", Class: "IN"}}},
+			}},
+			TLS: []netcap.TLSFlowSummary{{
+				Flow:        netcap.FlowSummary{SrcAddr: "192.0.2.10", SrcPort: 53124, DstAddr: "198.51.100.20", DstPort: 443},
+				ClientHello: netproto.TLSClientHello{SNI: "example.com"},
+			}},
+			HTTP: []netcap.HTTPFlowSummary{{
+				Flow:    netcap.FlowSummary{SrcAddr: "192.0.2.10", SrcPort: 53125, DstAddr: "198.51.100.20", DstPort: 80},
+				Message: netproto.HTTPMessage{IsRequest: true, Method: "GET", Target: "/chat", WebSocket: true},
+			}},
+		}, nil
+	})
+	defer restore()
+
+	out := captureStdout(t, func() {
+		code := runNetwork([]string{"capture", "summarize", "--limit", "2", "/tmp/capture.pcap"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	for _, want := range []string{"capture summary", "packets: 3", "dns_query: example.com A", "tls_client_hello: example.com", "http_request: GET /chat"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestRunNetworkCaptureSummarizeJSON(t *testing.T) {
+	restore := stubNetworkCaptureSummarize(t, func(string, int) (netcap.PCAPSummary, error) {
+		return netcap.PCAPSummary{Packets: 1, DecodedFlows: 1}, nil
+	})
+	defer restore()
+
+	out := captureStdout(t, func() {
+		code := runNetwork([]string{"capture", "summary", "--json", "/tmp/capture.pcap"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	if !strings.Contains(out, `"packets": 1`) {
+		t.Fatalf("stdout = %q", out)
+	}
+}
+
 func TestRunNetworkCaptureRequiresInterface(t *testing.T) {
 	restore := stubNetworkCaptureStart(t, func(string, int, int, string, string, int) (map[string]any, error) {
 		t.Fatal("helper should not be called")
@@ -108,6 +164,13 @@ func stubNetworkCaptureStop(t *testing.T, fn func(string) (map[string]any, error
 	old := networkCaptureStop
 	networkCaptureStop = fn
 	return func() { networkCaptureStop = old }
+}
+
+func stubNetworkCaptureSummarize(t *testing.T, fn func(string, int) (netcap.PCAPSummary, error)) func() {
+	t.Helper()
+	old := networkCaptureSummarize
+	networkCaptureSummarize = fn
+	return func() { networkCaptureSummarize = old }
 }
 
 func captureStdout(t *testing.T, fn func()) string {
