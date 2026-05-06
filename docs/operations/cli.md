@@ -390,6 +390,7 @@ automatic tsnet registration and host discovery remain future work.
 | `spectra connect <target> jvm-gc <pid>` | Call `jvm.gc_stats` |
 | `spectra connect <target> jvm-threads <pid>` | Call `jvm.thread_dump` |
 | `spectra connect <target> jvm-heap <pid>` | Call `jvm.heap_histogram` |
+| `spectra connect <target> jvm-heap-dump <pid> [dest]` | Call `jvm.heap_dump` |
 | `spectra connect <target> metrics` | Call `process.live` |
 | `spectra connect <target> metrics <pid> [limit]` | Call `process.history` |
 | `spectra connect <target> processes` | Call `process.list` |
@@ -452,6 +453,8 @@ spectra connect work-mac jvm-jfr-start 4012 spectra
 spectra connect work-mac jvm-jfr-dump 4012 /tmp/recording.jfr spectra
 spectra connect work-mac jvm-jfr-stop 4012 /tmp/recording.jfr
 spectra connect work-mac jvm-jfr-summary /tmp/recording.jfr
+spectra connect work-mac jvm-heap-dump 4012
+spectra connect work-mac jvm-heap-dump 4012 /tmp/heap.hprof
 spectra connect work-mac processes
 spectra connect work-mac network
 spectra connect work-mac storage /Applications/Slack.app
