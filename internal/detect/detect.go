@@ -153,10 +153,12 @@ type StorageFootprint struct {
 // app.asar.unpacked tree. The Language field is the best-guess source
 // language inferred from link map and binary content.
 type NativeModule struct {
-	Name     string // basename, e.g. "computer_use.node"
-	Path     string // bundle-relative path
-	Language string // Rust, Swift, C++, unknown
-	Hints    []string
+	Name           string // basename, e.g. "computer_use.node"
+	Path           string // bundle-relative path
+	PackageName    string // npm package name when package.json is present
+	PackageVersion string // npm package version when package.json is present
+	Language       string // Rust, Swift, C++, unknown
+	Hints          []string
 }
 
 // Options controls optional, more expensive sub-detections.
@@ -962,6 +964,7 @@ func nativeModuleRoots(appPath string) []string {
 // rust-strings scanning, then C++.
 func classifyNativeModule(absPath, relPath string) NativeModule {
 	m := NativeModule{Name: filepath.Base(absPath), Path: relPath, Language: "C++"}
+	readNativeModulePackage(absPath, &m)
 	libs := otoolL(absPath)
 	joined := strings.Join(libs, "\n")
 
@@ -1011,6 +1014,48 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 		m.Hints = append(m.Hints, "links libc++")
 	}
 	return m
+}
+
+func readNativeModulePackage(absPath string, m *NativeModule) {
+	root := nativeModulePackageRoot(absPath)
+	if root == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return
+	}
+	var pkg struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return
+	}
+	m.PackageName = pkg.Name
+	m.PackageVersion = pkg.Version
+}
+
+func nativeModulePackageRoot(absPath string) string {
+	parts := strings.Split(filepath.Clean(absPath), string(os.PathSeparator))
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "node_modules" || i+1 >= len(parts) {
+			continue
+		}
+		end := i + 2
+		if strings.HasPrefix(parts[i+1], "@") {
+			if i+2 >= len(parts) {
+				return ""
+			}
+			end = i + 3
+		}
+		root := filepath.Join(parts[:end]...)
+		if filepath.IsAbs(absPath) && !filepath.IsAbs(root) {
+			root = string(os.PathSeparator) + root
+		}
+		return root
+	}
+	return ""
 }
 
 func nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {

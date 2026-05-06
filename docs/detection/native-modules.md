@@ -9,7 +9,13 @@ Rust/Swift code.
 
 ## Classification rules
 
-Per `.node` file, in order:
+For each `.node` file, Spectra first walks up to the owning
+`node_modules` package, including scoped packages, and reads
+`package.json` when present. `PackageName` and `PackageVersion` are
+surfaced alongside the module filename so output can distinguish
+`pty.node` from `node-pty@x.y.z`.
+
+Then language classification runs in order:
 
 1. **Rust signal #1 — Cargo target path.** If the link map contains
    `/target/.../-apple-darwin/release/` or `.../debug/`, classify as
@@ -93,8 +99,6 @@ useful classification than "Electron."
 
 ## Future ideas
 
-- Surface module versions by reading the package's `package.json` if
-  present in the unpacked tree.
 - Detect specific high-signal modules by name (e.g. `node-keytar` →
   "uses macOS Keychain"; `node-mac-notifier` → "uses Notification Center")
   and surface that as a capability hint.

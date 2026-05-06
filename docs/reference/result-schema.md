@@ -61,10 +61,12 @@ Source of truth: `internal/detect/detect.go`.
 
 ```go
 type NativeModule struct {
-    Name     string   // e.g. "computer_use.node"
-    Path     string   // bundle-relative
-    Language string   // Rust, Swift, C++, unknown
-    Hints    []string // additional context (linked frameworks, etc.)
+    Name           string   // e.g. "computer_use.node"
+    Path           string   // bundle-relative
+    PackageName    string   // npm package name when package.json is present
+    PackageVersion string   // npm package version when package.json is present
+    Language       string   // Rust, Swift, C++, unknown
+    Hints          []string // additional context (linked frameworks, etc.)
 }
 ```
 

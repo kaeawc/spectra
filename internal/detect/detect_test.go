@@ -321,6 +321,9 @@ func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(rustModule), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/package.json"), []byte(`{"name":"custom-native","version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	body := strings.Repeat("rustc/library/core/src/panicking.rs core::panicking\n", 60)
 	if err := os.WriteFile(rustModule, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -348,11 +351,36 @@ func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
 	if r.NativeModules[0].Language != "Rust" {
 		t.Errorf("custom module language = %q, want Rust; hints=%v", r.NativeModules[0].Language, r.NativeModules[0].Hints)
 	}
+	if r.NativeModules[0].PackageName != "custom-native" || r.NativeModules[0].PackageVersion != "1.2.3" {
+		t.Errorf("custom module package = %q@%q, want custom-native@1.2.3", r.NativeModules[0].PackageName, r.NativeModules[0].PackageVersion)
+	}
 	if r.NativeModules[1].Path != "Contents/Resources/app/node_modules/plain/build/Release/plain.node" {
 		t.Errorf("second module path = %q", r.NativeModules[1].Path)
 	}
 	if r.NativeModules[1].Language != "C++" {
 		t.Errorf("plain module language = %q, want C++", r.NativeModules[1].Language)
+	}
+}
+
+func TestNativeModulePackageRootHandlesScopedPackages(t *testing.T) {
+	app := makeBundle(t, "FakeScopedNativeModule")
+	root := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg")
+	mod := filepath.Join(root, "prebuilds/darwin-arm64/addon.node")
+	if err := os.MkdirAll(filepath.Dir(mod), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mod, []byte("native addon"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"@scope/pkg","version":"4.5.6"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := nativeModulePackageRoot(mod); got != root {
+		t.Fatalf("nativeModulePackageRoot = %q, want %q", got, root)
+	}
+	m := classifyNativeModule(mod, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg/prebuilds/darwin-arm64/addon.node")
+	if m.PackageName != "@scope/pkg" || m.PackageVersion != "4.5.6" {
+		t.Fatalf("module package = %q@%q, want @scope/pkg@4.5.6", m.PackageName, m.PackageVersion)
 	}
 }
 

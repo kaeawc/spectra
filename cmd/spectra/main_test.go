@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kaeawc/spectra/internal/detect"
+)
 
 func TestSubcommandListIncludesList(t *testing.T) {
 	for _, sc := range subcommandList() {
@@ -39,5 +43,16 @@ func TestListInspectArgsPrependsAll(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("arg %d = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestNativeModuleLabelIncludesPackageVersion(t *testing.T) {
+	got := nativeModuleLabel(detect.NativeModule{
+		Name:           "addon.node",
+		PackageName:    "@scope/pkg",
+		PackageVersion: "1.2.3",
+	})
+	if got != "addon.node (@scope/pkg@1.2.3)" {
+		t.Fatalf("nativeModuleLabel = %q", got)
 	}
 }
