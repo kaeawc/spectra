@@ -57,8 +57,8 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 | `scutil --dns` | DNS resolver config | user | <10ms | `network.dns_servers` |
 | `route -n get default` | default route + interface | user | <10ms | `network.default_route_*` |
 | `pfctl -s rules` | firewall rules | helper | one-shot | `helper.firewall.rules`, `spectra network firewall` |
-| `tcpdump -i <iface>` | raw packet capture | helper | streaming, high | (planned) targeted capture |
-| `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for planned targeted capture |
+| `tcpdump -i <iface>` | raw packet capture to helper-generated pcap path | helper | streaming, high | `helper.net_capture.start` / `helper.net_capture.stop` |
+| `internal/netcap` tcpdump builder | validated interface/output/filter argv for bounded captures | helper | no capture cost itself | shared plumbing for targeted capture |
 
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
 `nettop`, and `/etc/hosts`. `lsof` is also where current socket owner

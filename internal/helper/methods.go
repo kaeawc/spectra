@@ -27,6 +27,7 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 		run = defaultRunner
 	}
 	fsUsage := newFSUsageManager(fsUsageStarter)
+	netCapture := newNetCaptureManager(nil, "")
 
 	d.Register("helper.health", func(_ uint32, _ json.RawMessage) (any, error) {
 		return map[string]any{"ok": true, "helper": true}, nil
@@ -84,6 +85,22 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 			return nil, fmt.Errorf("helper.fs_usage.stop invalid params: %w", err)
 		}
 		return fsUsage.stop(p)
+	})
+
+	d.Register("helper.net_capture.start", func(uid uint32, params json.RawMessage) (any, error) {
+		var p netCaptureStartParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("helper.net_capture.start invalid params: %w", err)
+		}
+		return netCapture.start(uid, p)
+	})
+
+	d.Register("helper.net_capture.stop", func(_ uint32, params json.RawMessage) (any, error) {
+		var p netCaptureStopParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("helper.net_capture.stop invalid params: %w", err)
+		}
+		return netCapture.stop(p)
 	})
 
 	d.Register("helper.tcc.system.query", func(_ uint32, params json.RawMessage) (any, error) {

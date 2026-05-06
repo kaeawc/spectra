@@ -168,3 +168,30 @@ func (c *Client) FSUsageStop(handle string) (map[string]any, error) {
 	var m map[string]any
 	return m, json.Unmarshal(raw, &m)
 }
+
+// NetCaptureStart starts a bounded helper tcpdump capture.
+func (c *Client) NetCaptureStart(iface string, durationMS, snapLen int, proto, host string, port int) (map[string]any, error) {
+	raw, err := c.call("helper.net_capture.start", map[string]any{
+		"interface":   iface,
+		"duration_ms": durationMS,
+		"snap_len":    snapLen,
+		"proto":       proto,
+		"host":        host,
+		"port":        port,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(raw, &m)
+}
+
+// NetCaptureStop stops a running helper tcpdump capture.
+func (c *Client) NetCaptureStop(handle string) (map[string]any, error) {
+	raw, err := c.call("helper.net_capture.stop", map[string]any{"handle": handle})
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(raw, &m)
+}
