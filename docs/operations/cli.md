@@ -178,10 +178,16 @@ by-ui:
 Diffs two stored snapshots. `live` can be used as either side to
 capture an ephemeral current snapshot without storing it.
 
+`snapshot diff` also supports comparing snapshots across hosts when a
+local match is not found: a bare host token resolves to that host's most
+recent stored snapshot.
+
 ### Examples
 
 ```bash
 spectra diff snap-20260504T095749Z-4829 live
+spectra diff workstation work-mac                # latest snapshot on each host
+spectra diff workstation@snap-20260504T095749Z-4829 work-mac@snap-20260503T170201Z-9932
 spectra diff baseline                  # newest baseline against live
 spectra diff baseline pre-incident live
 ```
