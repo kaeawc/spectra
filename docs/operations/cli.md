@@ -38,6 +38,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `sample` | Collect a user-space CPU sample of a process |
 | `cache` | Manage the local blob cache |
 | `install-helper` | Install the privileged helper daemon |
+| `install-daemon` | Install the user LaunchAgent for `spectra serve` |
 | `version` | Print Spectra version and exit |
 | `help` | Show top-level help |
 
@@ -264,6 +265,9 @@ user's Unix socket at `~/.spectra/sock`.
 | `--sock` | `~/.spectra/sock` | Unix socket path |
 | `--tcp` | empty | Optional TCP listen address, such as `127.0.0.1:7878` |
 | `--allow-remote` | false | Allow `--tcp` to bind a non-loopback address |
+| `--log-file` | `~/Library/Logs/Spectra/daemon.jsonl` | JSONL daemon log path |
+| `--no-log-file` | false | Disable daemon JSONL logging |
+| `--daemon` | false | Start detached and return |
 
 TCP RPC has no Spectra-layer authentication today. Keep it on loopback
 for local use or expose it only through SSH, Tailscale, or firewall
@@ -277,6 +281,34 @@ spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
 spectra serve --tcp 127.0.0.1:7878
 spectra serve --tcp 100.64.0.5:7878 --allow-remote
+```
+
+## `spectra install-daemon`
+
+Installs a per-user LaunchAgent that runs `spectra serve` through
+launchd. The plist is written to
+`~/Library/LaunchAgents/dev.spectra.daemon.plist`; stdout/stderr from
+launchd go to `~/Library/Logs/Spectra/daemon.launchd.*.log`.
+
+| Form | Description |
+|---|---|
+| `spectra install-daemon [serve flags]` | Write, bootstrap, enable, and kickstart the LaunchAgent |
+| `spectra install-daemon --no-load [serve flags]` | Write the plist without loading it |
+| `spectra install-daemon print-plist [serve flags]` | Print the plist that would be installed |
+| `spectra install-daemon status` | Run `launchctl print` for the agent |
+| `spectra install-daemon uninstall` | Boot out and remove the LaunchAgent plist |
+
+The install and `print-plist` forms accept the serve-listener flags
+`--sock`, `--tcp`, `--allow-remote`, `--log-file`, and `--no-log-file`.
+
+### Examples
+
+```bash
+spectra install-daemon
+spectra install-daemon --tcp 127.0.0.1:7878
+spectra install-daemon print-plist --no-log-file
+spectra install-daemon status
+spectra install-daemon uninstall
 ```
 
 ## `spectra connect`
