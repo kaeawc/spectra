@@ -44,19 +44,21 @@ Three options, ranked by simplicity:
    time, client stores it. More work, but works off-tailnet too.
 3. **mTLS via Tailscale-issued certs.** Cleanest but more code.
 
-V1 will be Tailscale-ACL-only.
+The implemented `tsnet` mode uses Tailscale identity and ACLs, with
+optional Spectra-side allowlists for login names and node names. Per-host
+tokens remain future work for non-Tailscale remote exposure.
 
 ## The killer feature: cross-host correlation
 
 Once each Mac is running the daemon, queries can fan out. Explicit-host
-fan-out is implemented today; tailnet discovery is the planned next step:
+fan-out and Tailscale daemon probing are implemented:
 
 ```bash
 spectra fan --hosts laptop,work-mac inspect /Applications/Slack.app
 # both daemons inspect Slack and return one JSON envelope
 ```
 
-The intended discovered-host workflow remains:
+The broader grouped-inventory workflow remains planned:
 
 ```bash
 spectra list --all-hosts
@@ -74,23 +76,18 @@ spectra diff laptop work-mac
 Activity Monitor cannot tell either of those stories because it's
 per-machine by construction.
 
-## Open architecture questions
+## Architecture decisions
 
-These will get pinned down before the first daemon commit:
-
-1. **Authentication model.** Pure Tailscale ACL is leaning, but per-host
-   tokens may be needed for non-Tailscale SSH usage.
-2. **On-demand vs always-on collection.** If `spectra connect host` only
-   spins up data collection when a client connects, idle cost is ~zero.
-   If the daemon keeps a ring buffer of the last hour, scrollback and
-   replay become possible. The latter requires real persistence —
-   already covered by [storage.md](storage.md).
-3. **What runs where.** Does the daemon do all analysis (binary
-   scanning, rules engine evaluation), or does it stream raw observations
-   and the client computes? Daemon-side keeps clients dumb and lets
-   results cache across multiple connecting clients. Almost certainly
-   daemon-side, lazy, with a small in-memory LRU of recent `Detect()`
-   results.
+1. **Authentication model.** Tailscale ACLs are the primary remote access
+   control in `tsnet` mode, with optional `WhoIs`-based allowlists. Explicit
+   TCP still relies on the trusted network path.
+2. **On-demand plus ring-buffer collection.** Most collectors run on demand
+   for RPC calls. The daemon also keeps a short process metrics ring buffer
+   and writes aggregate history to SQLite, as covered by
+   [storage.md](storage.md).
+3. **Daemon-side analysis.** Binary scanning, snapshot creation, rules
+   evaluation, issue persistence, and helper mediation happen daemon-side.
+   Clients render typed responses or call raw JSON-RPC methods.
 4. **Privileged helper coupling.** The unprivileged daemon talks to the
    privileged helper over a local Unix socket when it needs root-only
    data. The remote client never talks to the helper directly — the
@@ -108,12 +105,16 @@ These will get pinned down before the first daemon commit:
    network path.**
 4. Add explicit-host `spectra fan --hosts ...` fan-out over the typed
    connect surface. **Implemented.**
-5. Add stored `spectra hosts` listing for machines seen through snapshots.
-   **Implemented; live daemon discovery is still planned.**
+5. Add stored `spectra hosts` listing for machines seen through snapshots
+   plus Tailscale daemon probing through `--discover-daemons`.
+   **Implemented.**
 6. Add `tsnet` integration. Daemon becomes a tailnet node. **Implemented.**
 7. TUI client. Bubble Tea, talks to local-or-remote daemon identically.
+   **Planned.**
 8. Privileged helper as `spectra install-helper` subcommand. Same binary
    ships the helper; SMAppService-registered LaunchDaemon.
+   **Implemented.**
 9. Ring buffer + history for replay (requires SQLite from
    [storage.md](storage.md)).
-10. Native GUI after the TUI proves the data model.
+   **Implemented for process metrics.**
+10. Native GUI after the TUI proves the data model. **Planned.**

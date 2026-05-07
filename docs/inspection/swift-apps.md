@@ -134,15 +134,15 @@ little obvious third-party structure. The strongest operational signal may
 be a long-running helper, a large group container, or a granted TCC
 permission that is not obvious from the visible UI.
 
-## Planned result fields
+## Result fields
 
-The current result schema already exposes most Swift-adjacent data through
-generic fields: `UI`, `Runtime`, `Architectures`, `Entitlements`,
-`PrivacyDescriptions`, `GrantedPermissions`, `Helpers`, `Dependencies`,
-and process/network/storage rows.
+Swift inspection is exposed as a dedicated `Swift` result section. It is
+derived from the same generic collectors used by the rest of app inspection:
+linked libraries, entitlements, metadata, storage, TCC, helper, and process
+collectors remain shared.
 
-If Swift inspection becomes a dedicated result section, keep it derived
-from existing collectors first:
+The dedicated section records the Swift-specific signals that would otherwise
+be scattered across generic fields:
 
 ```go
 type SwiftInspection struct {
@@ -154,6 +154,11 @@ type SwiftInspection struct {
     AppGroups        []string
 }
 ```
+
+The surrounding generic fields still provide the operational context:
+`UI`, `Runtime`, `Architectures`, `Entitlements`, `PrivacyDescriptions`,
+`GrantedPermissions`, `Helpers`, `Dependencies`, and
+process/network/storage rows.
 
 Do not add a Swift-only subprocess path unless a generic collector cannot
 represent the signal. `otool`, `codesign`, `plutil`, `file`, and TCC reads

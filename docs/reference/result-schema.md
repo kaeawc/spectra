@@ -205,8 +205,8 @@ type PythonApp struct {
 ## Stability
 
 Field names and JSON tag shape are intended to be stable. Adding new
-fields is non-breaking; renaming fields will go through a deprecation
-window in the daemon RPC schema once that lands.
+fields is non-breaking; renaming fields should go through a deprecation
+window in the implemented daemon RPC schema.
 
 ## See also
 

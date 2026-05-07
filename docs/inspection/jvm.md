@@ -240,7 +240,7 @@ beyond JMX-over-RMI port forwarding. Spectra's JVM subsystem is
 purpose-built for the workflow that exists today:
 
 - **Remote-by-default.** Same `spectra connect work-mac` portal as the
-  rest of Spectra once the remote portal lands
+  rest of Spectra over explicit TCP or managed `tsnet`
   ([../design/remote-portal.md](../design/remote-portal.md)).
 - **Persistent.** Thread dumps and JFR recordings can be stored in the blob
   cache; heap dumps are written as explicit `.hprof` artifacts.
