@@ -101,12 +101,6 @@ func snapshotNameFromArgs(baseline bool, explicitName string, args []string) (st
 	return args[0], true
 }
 
-// saveSnapshot opens the default DB, persists snap, and prunes old live
-// snapshots beyond the default retention limit (100 per machine).
-func saveSnapshot(snap snapshot.Snapshot) error {
-	return saveSnapshotNamed(snap, "")
-}
-
 // saveSnapshotNamed persists snap with an optional human name label and prunes
 // old live snapshots. Baselines are never pruned.
 func saveSnapshotNamed(snap snapshot.Snapshot, name string) error {

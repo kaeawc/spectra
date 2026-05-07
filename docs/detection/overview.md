@@ -111,6 +111,14 @@ architecture vs Codex's plain off-the-shelf `node-pty` and
 
 See [native-modules.md](native-modules.md).
 
+## Enrichment: Python-based apps
+
+Some macOS apps hide a Python runtime behind an AppKit, Qt, or custom launcher.
+Those markers should enrich the result rather than replace a stronger
+framework verdict: Spectra can report `UI=Qt` while also recording that the
+bundle was packaged by py2app, PyInstaller, Briefcase, Nuitka, or a custom
+launcher. See [../inspection/python-apps.md](../inspection/python-apps.md).
+
 ## Confidence levels
 
 - **high** — Layer 1 marker matched, OR Layer 2 had a definitive Swift /

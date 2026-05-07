@@ -180,83 +180,12 @@ func enumProp(values []string, def string) map[string]interface{} {
 }
 
 func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
-	var p struct {
-		AppPath    string `json:"app_path"`
-		PID        int    `json:"pid"`
-		BundleID   string `json:"bundle_id"`
-		Symptom    string `json:"symptom"`
-		Network    bool   `json:"network"`
-		IncludeRaw bool   `json:"include_raw"`
-	}
+	var p triageParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
 
-	evidence := []string{}
-	next := []string{}
-	rawOut := map[string]interface{}{}
-	if p.Symptom != "" {
-		evidence = append(evidence, "symptom: "+p.Symptom)
-	}
-
-	if p.AppPath != "" {
-		app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(p.Network))
-		if err != nil {
-			evidence = append(evidence, fmt.Sprintf("app inspection failed: %v", err))
-		} else {
-			evidence = append(evidence, summarizeApp(app)...)
-			rawOut["app"] = app
-			if app.Runtime == "JVM" || app.Language == "Java" || app.Language == "Kotlin" {
-				next = append(next, "Use jvm operation=list or inspect to inspect running JVMs for this app.")
-			}
-			if len(app.NetworkEndpoints) > 0 {
-				next = append(next, "Use network operation=diagnose with host/port when a specific endpoint is failing.")
-			}
-		}
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
-		appProcs := filterAppProcesses(procs, p.AppPath)
-		if len(appProcs) > 0 {
-			evidence = append(evidence, summarizeProcesses(appProcs, 5)...)
-			rawOut["processes"] = appProcs
-		}
-	}
-
-	if p.PID > 0 {
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{Deep: true})
-		if proc, ok := findProcess(procs, p.PID); ok {
-			evidence = append(evidence, summarizeProcesses([]process.Info{proc}, 1)...)
-			rawOut["process"] = proc
-		} else {
-			evidence = append(evidence, fmt.Sprintf("pid %d not found in process list", p.PID))
-		}
-		if info := s.inspectJVM(p.PID); info != nil {
-			evidence = append(evidence, summarizeJVM(*info)...)
-			rawOut["jvm"] = info
-			next = append(next, "Use jvm operation=explain for GC/thread/memory interpretation.")
-		}
-	}
-
-	if p.BundleID != "" {
-		snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
-		for _, app := range snap.Apps {
-			if app.BundleID == p.BundleID {
-				evidence = append(evidence, summarizeApp(app)...)
-				rawOut["matched_app"] = app
-				break
-			}
-		}
-	}
-
-	findings, err := s.evaluateLiveRules("")
-	if err == nil && len(findings) > 0 {
-		evidence = append(evidence, summarizeFindings(findings, 5)...)
-		rawOut["findings"] = findings
-		next = append(next, "Use diagnose include_raw=true for the full rules output.")
-	}
-	if len(next) == 0 {
-		next = append(next, "Use snapshot operation=create store=true to preserve current state for later diffing.")
-	}
-
+	evidence, next, rawOut := s.collectTriage(p)
 	env := toolEnvelope{
 		Summary:     triageSummary(evidence),
 		Evidence:    evidence,
@@ -267,6 +196,94 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 		env.Raw = rawOut
 	}
 	return toolText(env)
+}
+
+type triageParams struct {
+	AppPath    string `json:"app_path"`
+	PID        int    `json:"pid"`
+	BundleID   string `json:"bundle_id"`
+	Symptom    string `json:"symptom"`
+	Network    bool   `json:"network"`
+	IncludeRaw bool   `json:"include_raw"`
+}
+
+func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]interface{}) {
+	var evidence []string
+	var next []string
+	rawOut := map[string]interface{}{}
+	if p.Symptom != "" {
+		evidence = append(evidence, "symptom: "+p.Symptom)
+	}
+	if p.AppPath != "" {
+		evidence, next = s.collectTriageApp(p, evidence, next, rawOut)
+	}
+	if p.PID > 0 {
+		evidence, next = s.collectTriagePID(p.PID, evidence, next, rawOut)
+	}
+	if p.BundleID != "" {
+		evidence = s.collectTriageBundle(p, evidence, rawOut)
+	}
+	findings, err := s.evaluateLiveRules("")
+	if err == nil && len(findings) > 0 {
+		evidence = append(evidence, summarizeFindings(findings, 5)...)
+		rawOut["findings"] = findings
+		next = append(next, "Use diagnose include_raw=true for the full rules output.")
+	}
+	if len(next) == 0 {
+		next = append(next, "Use snapshot operation=create store=true to preserve current state for later diffing.")
+	}
+	return evidence, next, rawOut
+}
+
+func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+	app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(p.Network))
+	if err != nil {
+		evidence = append(evidence, fmt.Sprintf("app inspection failed: %v", err))
+	} else {
+		evidence = append(evidence, summarizeApp(app)...)
+		rawOut["app"] = app
+		if app.Runtime == "JVM" || app.Language == "Java" || app.Language == "Kotlin" {
+			next = append(next, "Use jvm operation=list or inspect to inspect running JVMs for this app.")
+		}
+		if len(app.NetworkEndpoints) > 0 {
+			next = append(next, "Use network operation=diagnose with host/port when a specific endpoint is failing.")
+		}
+	}
+	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
+	appProcs := filterAppProcesses(procs, p.AppPath)
+	if len(appProcs) > 0 {
+		evidence = append(evidence, summarizeProcesses(appProcs, 5)...)
+		rawOut["processes"] = appProcs
+	}
+	return evidence, next
+}
+
+func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{Deep: true})
+	if proc, ok := findProcess(procs, pid); ok {
+		evidence = append(evidence, summarizeProcesses([]process.Info{proc}, 1)...)
+		rawOut["process"] = proc
+	} else {
+		evidence = append(evidence, fmt.Sprintf("pid %d not found in process list", pid))
+	}
+	if info := s.inspectJVM(pid); info != nil {
+		evidence = append(evidence, summarizeJVM(*info)...)
+		rawOut["jvm"] = info
+		next = append(next, "Use jvm operation=explain for GC/thread/memory interpretation.")
+	}
+	return evidence, next
+}
+
+func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut map[string]interface{}) []string {
+	snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
+	for _, app := range snap.Apps {
+		if app.BundleID == p.BundleID {
+			evidence = append(evidence, summarizeApp(app)...)
+			rawOut["matched_app"] = app
+			break
+		}
+	}
+	return evidence
 }
 
 func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
@@ -315,19 +332,7 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 }
 
 func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
-	var p struct {
-		Operation    string `json:"operation"`
-		ID           string `json:"id"`
-		IDA          string `json:"id_a"`
-		IDB          string `json:"id_b"`
-		Name         string `json:"name"`
-		Network      bool   `json:"network"`
-		SkipApps     bool   `json:"skip_apps"`
-		Store        bool   `json:"store"`
-		Kind         string `json:"kind"`
-		IncludeRaw   bool   `json:"include_raw"`
-		LimitSummary int    `json:"limit_summary"`
-	}
+	var p snapshotParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
@@ -336,74 +341,104 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "create", "baseline":
-		snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
-			SpectraVersion: s.Version,
-			DetectOpts:     s.detectOptions(p.Network),
-			SkipApps:       p.SkipApps,
-		})
-		if p.Operation == "baseline" {
-			snap.Kind = snapshot.KindBaseline
-		}
-		if p.Store {
-			if err := saveSnapshot(snap); err != nil {
-				return toolError(err.Error())
-			}
-		}
-		evidence := summarizeSnapshot(snap, p.LimitSummary)
-		if p.Store {
-			evidence = append(evidence, "snapshot persisted")
-		}
-		env := toolEnvelope{
-			Summary:     fmt.Sprintf("created %s snapshot %s", snap.Kind, snap.ID),
-			Evidence:    evidence,
-			NextActions: []string{"Use snapshot operation=diff against a baseline to inspect changes."},
-			Timestamp:   s.now(),
-		}
-		if p.IncludeRaw {
-			env.Raw = snap
-		}
-		return toolText(env)
+		return s.toolSnapshotCreate(p)
 	case "list":
-		db, err := openStore()
-		if err != nil {
-			return toolError(err.Error())
-		}
-		defer db.Close()
-		rows, err := db.ListSnapshots(context.Background(), p.Kind)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d stored snapshot(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+		return s.toolSnapshotList(p)
 	case "get":
-		if p.ID == "" {
-			return toolError("snapshot get requires id")
-		}
-		snap, err := loadStoredSnapshot(p.ID)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		env := toolEnvelope{Summary: "loaded snapshot " + p.ID, Evidence: summarizeSnapshot(snap, p.LimitSummary), Timestamp: s.now()}
-		if p.IncludeRaw {
-			env.Raw = snap
-		}
-		return toolText(env)
+		return s.toolSnapshotGet(p)
 	case "diff":
-		if p.IDA == "" || p.IDB == "" {
-			return toolError("snapshot diff requires id_a and id_b")
-		}
-		a, err := loadStoredSnapshot(p.IDA)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		b, err := loadStoredSnapshot(p.IDB)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		result := diff.Compare(a, b)
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: s.now()})
+		return s.toolSnapshotDiff(p)
 	default:
 		return toolError("unknown snapshot operation: " + p.Operation)
 	}
+}
+
+type snapshotParams struct {
+	Operation    string `json:"operation"`
+	ID           string `json:"id"`
+	IDA          string `json:"id_a"`
+	IDB          string `json:"id_b"`
+	Name         string `json:"name"`
+	Network      bool   `json:"network"`
+	SkipApps     bool   `json:"skip_apps"`
+	Store        bool   `json:"store"`
+	Kind         string `json:"kind"`
+	IncludeRaw   bool   `json:"include_raw"`
+	LimitSummary int    `json:"limit_summary"`
+}
+
+func (s *Server) toolSnapshotCreate(p snapshotParams) ToolResult {
+	snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
+		SpectraVersion: s.Version,
+		DetectOpts:     s.detectOptions(p.Network),
+		SkipApps:       p.SkipApps,
+	})
+	if p.Operation == "baseline" {
+		snap.Kind = snapshot.KindBaseline
+	}
+	if p.Store {
+		if err := saveSnapshot(snap); err != nil {
+			return toolError(err.Error())
+		}
+	}
+	evidence := summarizeSnapshot(snap, p.LimitSummary)
+	if p.Store {
+		evidence = append(evidence, "snapshot persisted")
+	}
+	env := toolEnvelope{
+		Summary:     fmt.Sprintf("created %s snapshot %s", snap.Kind, snap.ID),
+		Evidence:    evidence,
+		NextActions: []string{"Use snapshot operation=diff against a baseline to inspect changes."},
+		Timestamp:   s.now(),
+	}
+	if p.IncludeRaw {
+		env.Raw = snap
+	}
+	return toolText(env)
+}
+
+func (s *Server) toolSnapshotList(p snapshotParams) ToolResult {
+	db, err := openStore()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	defer db.Close()
+	rows, err := db.ListSnapshots(context.Background(), p.Kind)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d stored snapshot(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+}
+
+func (s *Server) toolSnapshotGet(p snapshotParams) ToolResult {
+	if p.ID == "" {
+		return toolError("snapshot get requires id")
+	}
+	snap, err := loadStoredSnapshot(p.ID)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	env := toolEnvelope{Summary: "loaded snapshot " + p.ID, Evidence: summarizeSnapshot(snap, p.LimitSummary), Timestamp: s.now()}
+	if p.IncludeRaw {
+		env.Raw = snap
+	}
+	return toolText(env)
+}
+
+func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
+	if p.IDA == "" || p.IDB == "" {
+		return toolError("snapshot diff requires id_a and id_b")
+	}
+	a, err := loadStoredSnapshot(p.IDA)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	b, err := loadStoredSnapshot(p.IDB)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	result := diff.Compare(a, b)
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: s.now()})
 }
 
 func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
@@ -497,142 +532,185 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 }
 
 func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
-	var p struct {
-		Operation        string `json:"operation"`
-		PID              int    `json:"pid"`
-		Samples          int    `json:"samples"`
-		IntervalMillis   int    `json:"interval_millis"`
-		Dest             string `json:"dest"`
-		Event            string `json:"event"`
-		DurationSeconds  int    `json:"duration_seconds"`
-		ConfirmSensitive bool   `json:"confirm_sensitive"`
-		AsprofPath       string `json:"asprof_path"`
-		Agent            string `json:"agent"`
-		MBeanName        string `json:"mbean_name"`
-		Attribute        string `json:"attribute"`
-		MBeanOperation   string `json:"mbean_operation"`
-		IncludeRaw       bool   `json:"include_raw"`
-	}
+	var p jvmParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	switch p.Operation {
-	case "list", "":
-		jvms := s.collect.JVMs.CollectJVMs(context.Background(), s.jvmOptions())
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JVM process(es)", len(jvms)), Evidence: summarizeJVMs(jvms), Raw: optionalRaw(p.IncludeRaw, jvms), Timestamp: s.now()})
-	case "inspect":
-		if p.PID == 0 {
-			return toolError("jvm inspect requires pid")
-		}
-		info := s.inspectJVM(p.PID)
-		if info == nil {
-			return toolError(fmt.Sprintf("JVM pid %d not found", p.PID))
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("inspected JVM pid %d", p.PID), Evidence: summarizeJVM(*info), Raw: optionalRaw(p.IncludeRaw, info), Timestamp: s.now()})
-	case "explain":
-		if p.PID == 0 {
-			return toolError("jvm explain requires pid")
-		}
-		explanation, err := s.collect.JVMs.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
-	case "thread_dump":
-		return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump)
-	case "gc_stats":
-		if p.PID == 0 {
-			return toolError("jvm gc_stats requires pid")
-		}
-		stats, err := s.collect.JVMs.CollectGCStats(p.PID)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
-	case "vm_memory":
-		if p.PID == 0 {
-			return toolError("jvm vm_memory requires pid")
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(p.PID), Timestamp: s.now()})
-	case "heap_histogram":
-		return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram)
-	case "attach":
-		if p.PID == 0 {
-			return toolError("jvm attach requires pid")
-		}
-		status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
-	case "mbeans":
-		if p.PID == 0 {
-			return toolError("jvm mbeans requires pid")
-		}
-		mbeans, err := jvm.FetchMBeans(p.PID, nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
-	case "mbean_read":
-		if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
-			return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
-		}
-		value, err := jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
-	case "mbean_invoke":
-		if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
-			return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
-		}
-		value, err := jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
-	case "probe":
-		if p.PID == 0 {
-			return toolError("jvm probe requires pid")
-		}
-		probes, err := jvm.FetchAgentProbes(p.PID, nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
-	case "heap_dump":
-		if !p.ConfirmSensitive {
-			return toolError("jvm heap_dump requires confirm_sensitive=true")
-		}
-		if p.PID == 0 {
-			return toolError("jvm heap_dump requires pid")
-		}
-		if p.Dest == "" {
-			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
-		}
-		if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
-	case "flamegraph":
-		if !p.ConfirmSensitive {
-			return toolError("jvm flamegraph requires confirm_sensitive=true")
-		}
-		if p.PID == 0 {
-			return toolError("jvm flamegraph requires pid")
-		}
-		if p.Dest == "" {
-			p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
-		}
-		err := s.collect.JVMs.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
-	default:
+	op := p.Operation
+	if op == "" {
+		op = "list"
+	}
+	handlers := map[string]func(jvmParams) ToolResult{
+		"list":           s.toolJVMList,
+		"inspect":        s.toolJVMInspect,
+		"explain":        s.toolJVMExplain,
+		"thread_dump":    func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
+		"gc_stats":       s.toolJVMGCStats,
+		"vm_memory":      s.toolJVMVMMemory,
+		"heap_histogram": func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
+		"attach":         s.toolJVMAttach,
+		"mbeans":         s.toolJVMMBeans,
+		"mbean_read":     s.toolJVMMBeanRead,
+		"mbean_invoke":   s.toolJVMMBeanInvoke,
+		"probe":          s.toolJVMProbe,
+		"heap_dump":      s.toolJVMHeapDump,
+		"flamegraph":     s.toolJVMFlamegraph,
+	}
+	handler, ok := handlers[op]
+	if !ok {
 		return toolError("unknown jvm operation: " + p.Operation)
 	}
+	return handler(p)
+}
+
+type jvmParams struct {
+	Operation        string `json:"operation"`
+	PID              int    `json:"pid"`
+	Samples          int    `json:"samples"`
+	IntervalMillis   int    `json:"interval_millis"`
+	Dest             string `json:"dest"`
+	Event            string `json:"event"`
+	DurationSeconds  int    `json:"duration_seconds"`
+	ConfirmSensitive bool   `json:"confirm_sensitive"`
+	AsprofPath       string `json:"asprof_path"`
+	Agent            string `json:"agent"`
+	MBeanName        string `json:"mbean_name"`
+	Attribute        string `json:"attribute"`
+	MBeanOperation   string `json:"mbean_operation"`
+	IncludeRaw       bool   `json:"include_raw"`
+}
+
+func (s *Server) toolJVMList(p jvmParams) ToolResult {
+	jvms := s.collect.JVMs.CollectJVMs(context.Background(), s.jvmOptions())
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JVM process(es)", len(jvms)), Evidence: summarizeJVMs(jvms), Raw: optionalRaw(p.IncludeRaw, jvms), Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMInspect(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm inspect requires pid")
+	}
+	info := s.inspectJVM(p.PID)
+	if info == nil {
+		return toolError(fmt.Sprintf("JVM pid %d not found", p.PID))
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("inspected JVM pid %d", p.PID), Evidence: summarizeJVM(*info), Raw: optionalRaw(p.IncludeRaw, info), Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMExplain(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm explain requires pid")
+	}
+	explanation, err := s.collect.JVMs.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMGCStats(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm gc_stats requires pid")
+	}
+	stats, err := s.collect.JVMs.CollectGCStats(p.PID)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMVMMemory(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm vm_memory requires pid")
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(p.PID), Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMAttach(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm attach requires pid")
+	}
+	status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMMBeans(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm mbeans requires pid")
+	}
+	mbeans, err := jvm.FetchMBeans(p.PID, nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMMBeanRead(p jvmParams) ToolResult {
+	if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
+		return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
+	}
+	value, err := jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMMBeanInvoke(p jvmParams) ToolResult {
+	if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
+		return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
+	}
+	value, err := jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMProbe(p jvmParams) ToolResult {
+	if p.PID == 0 {
+		return toolError("jvm probe requires pid")
+	}
+	probes, err := jvm.FetchAgentProbes(p.PID, nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
+	if !p.ConfirmSensitive {
+		return toolError("jvm heap_dump requires confirm_sensitive=true")
+	}
+	if p.PID == 0 {
+		return toolError("jvm heap_dump requires pid")
+	}
+	if p.Dest == "" {
+		p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
+	}
+	if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+}
+
+func (s *Server) toolJVMFlamegraph(p jvmParams) ToolResult {
+	if !p.ConfirmSensitive {
+		return toolError("jvm flamegraph requires confirm_sensitive=true")
+	}
+	if p.PID == 0 {
+		return toolError("jvm flamegraph requires pid")
+	}
+	if p.Dest == "" {
+		p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
+	}
+	err := s.collect.JVMs.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
 }
 
 func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
@@ -708,18 +786,7 @@ func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {
 }
 
 func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
-	var p struct {
-		Operation   string `json:"operation"`
-		SnapshotID  string `json:"snapshot_id"`
-		MachineUUID string `json:"machine_uuid"`
-		Status      string `json:"status"`
-		ID          string `json:"id"`
-		IssueID     string `json:"issue_id"`
-		AppliedBy   string `json:"applied_by"`
-		Command     string `json:"command"`
-		Output      string `json:"output"`
-		ExitCode    int    `json:"exit_code"`
-	}
+	var p issuesParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
@@ -730,68 +797,94 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 	defer db.Close()
 	switch p.Operation {
 	case "check", "":
-		snap, findings, err := s.evaluateRules(p.SnapshotID, "")
-		if err != nil {
-			return toolError(err.Error())
-		}
-		ids, err := persistFindingsWithDB(db, snap, findings)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("persisted %d issue(s)", len(ids)), Evidence: summarizeFindings(findings, 10), Raw: map[string]interface{}{"snapshot_id": snap.ID, "ids": ids}, Timestamp: s.now()})
+		return s.toolIssuesCheck(db, p)
 	case "list":
-		if p.MachineUUID == "" {
-			return toolError("issues list requires machine_uuid")
-		}
-		rows, err := db.ListIssues(context.Background(), p.MachineUUID, store.IssueStatus(p.Status))
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d issue(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+		return s.toolIssuesList(db, p)
 	case "acknowledge", "dismiss":
-		if p.ID == "" {
-			return toolError("issues " + p.Operation + " requires id")
-		}
-		status := store.IssueAcknowledged
-		if p.Operation == "dismiss" {
-			status = store.IssueDismissed
-		}
-		if err := db.UpdateIssueStatus(context.Background(), p.ID, status); err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: s.now()})
+		return s.toolIssuesUpdateStatus(db, p)
 	case "record_fix":
-		if p.IssueID == "" {
-			return toolError("issues record_fix requires issue_id")
-		}
-		id, err := db.RecordAppliedFix(context.Background(), store.AppliedFixInput{IssueID: p.IssueID, AppliedBy: p.AppliedBy, Command: p.Command, Output: p.Output, ExitCode: p.ExitCode})
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: "recorded applied fix", Raw: map[string]interface{}{"id": id}, Timestamp: s.now()})
+		return s.toolIssuesRecordFix(db, p)
 	case "fix_history":
-		if p.IssueID == "" {
-			return toolError("issues fix_history requires issue_id")
-		}
-		rows, err := db.ListAppliedFixes(context.Background(), p.IssueID)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+		return s.toolIssuesFixHistory(db, p)
 	default:
 		return toolError("unknown issues operation: " + p.Operation)
 	}
 }
 
-func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
-	var p struct {
-		Operation string                 `json:"operation"`
-		Network   string                 `json:"network"`
-		Address   string                 `json:"address"`
-		Method    string                 `json:"method"`
-		Params    map[string]interface{} `json:"params"`
-		Hosts     []string               `json:"hosts"`
+type issuesParams struct {
+	Operation   string `json:"operation"`
+	SnapshotID  string `json:"snapshot_id"`
+	MachineUUID string `json:"machine_uuid"`
+	Status      string `json:"status"`
+	ID          string `json:"id"`
+	IssueID     string `json:"issue_id"`
+	AppliedBy   string `json:"applied_by"`
+	Command     string `json:"command"`
+	Output      string `json:"output"`
+	ExitCode    int    `json:"exit_code"`
+}
+
+func (s *Server) toolIssuesCheck(db *store.DB, p issuesParams) ToolResult {
+	snap, findings, err := s.evaluateRules(p.SnapshotID, "")
+	if err != nil {
+		return toolError(err.Error())
 	}
+	ids, err := persistFindingsWithDB(db, snap, findings)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("persisted %d issue(s)", len(ids)), Evidence: summarizeFindings(findings, 10), Raw: map[string]interface{}{"snapshot_id": snap.ID, "ids": ids}, Timestamp: s.now()})
+}
+
+func (s *Server) toolIssuesList(db *store.DB, p issuesParams) ToolResult {
+	if p.MachineUUID == "" {
+		return toolError("issues list requires machine_uuid")
+	}
+	rows, err := db.ListIssues(context.Background(), p.MachineUUID, store.IssueStatus(p.Status))
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d issue(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+}
+
+func (s *Server) toolIssuesUpdateStatus(db *store.DB, p issuesParams) ToolResult {
+	if p.ID == "" {
+		return toolError("issues " + p.Operation + " requires id")
+	}
+	status := store.IssueAcknowledged
+	if p.Operation == "dismiss" {
+		status = store.IssueDismissed
+	}
+	if err := db.UpdateIssueStatus(context.Background(), p.ID, status); err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: s.now()})
+}
+
+func (s *Server) toolIssuesRecordFix(db *store.DB, p issuesParams) ToolResult {
+	if p.IssueID == "" {
+		return toolError("issues record_fix requires issue_id")
+	}
+	id, err := db.RecordAppliedFix(context.Background(), store.AppliedFixInput{IssueID: p.IssueID, AppliedBy: p.AppliedBy, Command: p.Command, Output: p.Output, ExitCode: p.ExitCode})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: "recorded applied fix", Raw: map[string]interface{}{"id": id}, Timestamp: s.now()})
+}
+
+func (s *Server) toolIssuesFixHistory(db *store.DB, p issuesParams) ToolResult {
+	if p.IssueID == "" {
+		return toolError("issues fix_history requires issue_id")
+	}
+	rows, err := db.ListAppliedFixes(context.Background(), p.IssueID)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: s.now()})
+}
+
+func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
+	var p remoteParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
@@ -800,43 +893,64 @@ func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "health", "":
-		address := p.Address
-		if address == "" {
-			address = "127.0.0.1:7878"
-		}
-		resp, err := callDaemon(p.Network, address, "health", nil)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: "remote health check completed", Raw: resp, Timestamp: s.now()})
+		return s.toolRemoteHealth(p)
 	case "rpc":
-		if p.Address == "" || p.Method == "" {
-			return toolError("remote rpc requires address and method")
-		}
-		resp, err := callDaemon(p.Network, p.Address, p.Method, p.Params)
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: "remote rpc completed: " + p.Method, Raw: resp, Timestamp: s.now()})
+		return s.toolRemoteRPC(p)
 	case "triage":
 		return toolError("remote triage is not a daemon RPC yet; use remote operation=rpc with method names such as snapshot.create, rules.check, jvm.list")
 	case "fanout":
-		if len(p.Hosts) == 0 || p.Method == "" {
-			return toolError("remote fanout requires hosts and method")
-		}
-		out := make(map[string]interface{}, len(p.Hosts))
-		for _, host := range p.Hosts {
-			resp, err := callDaemon(p.Network, host, p.Method, p.Params)
-			if err != nil {
-				out[host] = map[string]string{"error": err.Error()}
-			} else {
-				out[host] = resp
-			}
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("fanout completed for %d host(s)", len(p.Hosts)), Raw: out, Timestamp: s.now()})
+		return s.toolRemoteFanout(p)
 	default:
 		return toolError("unknown remote operation: " + p.Operation)
 	}
+}
+
+type remoteParams struct {
+	Operation string                 `json:"operation"`
+	Network   string                 `json:"network"`
+	Address   string                 `json:"address"`
+	Method    string                 `json:"method"`
+	Params    map[string]interface{} `json:"params"`
+	Hosts     []string               `json:"hosts"`
+}
+
+func (s *Server) toolRemoteHealth(p remoteParams) ToolResult {
+	address := p.Address
+	if address == "" {
+		address = "127.0.0.1:7878"
+	}
+	resp, err := callDaemon(p.Network, address, "health", nil)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: "remote health check completed", Raw: resp, Timestamp: s.now()})
+}
+
+func (s *Server) toolRemoteRPC(p remoteParams) ToolResult {
+	if p.Address == "" || p.Method == "" {
+		return toolError("remote rpc requires address and method")
+	}
+	resp, err := callDaemon(p.Network, p.Address, p.Method, p.Params)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{Summary: "remote rpc completed: " + p.Method, Raw: resp, Timestamp: s.now()})
+}
+
+func (s *Server) toolRemoteFanout(p remoteParams) ToolResult {
+	if len(p.Hosts) == 0 || p.Method == "" {
+		return toolError("remote fanout requires hosts and method")
+	}
+	out := make(map[string]interface{}, len(p.Hosts))
+	for _, host := range p.Hosts {
+		resp, err := callDaemon(p.Network, host, p.Method, p.Params)
+		if err != nil {
+			out[host] = map[string]string{"error": err.Error()}
+		} else {
+			out[host] = resp
+		}
+	}
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("fanout completed for %d host(s)", len(p.Hosts)), Raw: out, Timestamp: s.now()})
 }
 
 type inspectResult struct {
