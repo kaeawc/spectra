@@ -94,8 +94,8 @@ nav:
       - Power and thermal: inspection/power-thermal.md
       - Python-based apps: inspection/python-apps.md
       - Rust-based apps: inspection/rust-based-apps.md
-      - Toolchains (planned): inspection/toolchains.md
-      - JVM (planned): inspection/jvm.md
+      - Toolchains: inspection/toolchains.md
+      - JVM: inspection/jvm.md
       - Live data sources: inspection/live-data-sources.md
   - Playbooks:
       - Overview: playbooks/index.md
@@ -108,10 +108,10 @@ nav:
       - CLI: operations/cli.md
       - Issues: operations/issues.md
       - Install services: operations/install-services.md
-      - Daemon (planned): operations/daemon.md
-      - Remote (planned): operations/remote.md
+      - Daemon: operations/daemon.md
+      - Remote: operations/remote.md
       - Snapshots and hosts: operations/snapshots-and-hosts.md
-      - Caching (planned): operations/caching.md
+      - Caching: operations/caching.md
       - Artifact lifecycle: operations/artifacts.md
   - Reference:
       - Result schema: reference/result-schema.md

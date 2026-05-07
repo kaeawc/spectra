@@ -46,7 +46,7 @@ The cache layout follows the patterns proven out in
 | `jfr` | content hash of recording | Java Flight Recorder file |
 | `threads` | hash of `(pid, timestamp)` | Thread dump text |
 | `samples` | hash of `(pid, timestamp)` | `sample <pid>` output |
-| `netcap` | hash of capture metadata | Future: pcap recordings |
+| `netcap` | hash of capture metadata | pcap recordings and summaries |
 
 ## Eviction
 
@@ -65,10 +65,12 @@ these commands automatically without touching CLI code.
 
 ## Async writer
 
-Cache writes don't block the collector. A bounded queue (workers +
-queueSize) flushes blobs in the background; if the queue is full, the
-caller falls back to a synchronous write rather than dropping data.
-Counters track queued / completed / failed / bytes.
+Cache writes normally don't block the collector. A bounded queue
+(workers + queueSize) flushes blobs in the background; if the queue is
+full, the caller falls back to a synchronous write rather than dropping
+data. Callers can also choose synchronous writes when the artifact must
+exist before the operation returns. Counters track queued / completed /
+failed / bytes.
 
 The async writer is implemented in `internal/cache/async_writer.go`.
 Callers can still write synchronously when they need the artifact to be

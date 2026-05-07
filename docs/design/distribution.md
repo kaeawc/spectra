@@ -3,8 +3,8 @@
 Each macOS distribution channel imposes a different ceiling on what
 Spectra can do. This page captures the analysis behind the current
 **source build + optional LaunchDaemon helper** distribution path, the
-planned Homebrew/prebuilt release channels, and why the Mac App Store is
-out of scope for the full product.
+release packaging now present in-tree, and why the Mac App Store is out
+of scope for the full product.
 
 Today the supported path is:
 
@@ -26,7 +26,7 @@ sudo ./spectra install-helper
 
 ## Capability vs channel matrix
 
-| Capability | MAS | Source build | Homebrew CLI (planned) | Prebuilt archive/cask (planned) |
+| Capability | MAS | Source build | Homebrew CLI | Prebuilt archive/cask |
 |---|---|---|---|---|
 | Static inspection of `/Applications` | partial | ✓ | ✓ | ✓ |
 | Read other users' app data | ✗ (sandbox) | ✓ | ✓ | ✓ |
@@ -101,7 +101,7 @@ the current shell installer with `SMAppService.daemon` yet, but it gives the
 release process the signed helper identity that `SMAppService` or
 `SMJobBless` registration will require.
 
-## Why Homebrew is still the planned primary channel
+## Homebrew channel
 
 - Developer-shaped tools live there. Krit, Tailscale CLI, Datadog Agent,
   1Password CLI all use it.
@@ -109,17 +109,17 @@ release process the signed helper identity that `SMAppService` or
   Users who want root-grade visibility opt in separately.
 - The same formula installs to every Mac in a tailnet — important for the
   cross-host remote portal.
-- Notarization is required only for the cask (.app) variant; the CLI
-  formula can build from source and dodge Gatekeeper.
+- Notarization is required only for prebuilt/cask artifacts; the CLI
+  formula builds from source.
 
 ```bash
-# Planned
 brew install kaeawc/tap/spectra
 ```
 
-The first Homebrew formula should build the unprivileged CLI and helper
-binary, but should not install or start the helper automatically.
-User-daemon lifecycle is available after install through:
+The formula template lives at `packaging/homebrew/spectra.rb`. It builds
+the unprivileged CLI, MCP server, and helper binary, but does not install
+or start the helper automatically. User-daemon lifecycle is available
+after install through:
 
 ```bash
 spectra install-daemon
@@ -130,6 +130,44 @@ Root visibility stays behind the same explicit command:
 ```bash
 sudo spectra install-helper
 ```
+
+Publishing the formula still requires a release tag, source archive
+checksum, and tap repository update.
+
+## Prebuilt archives
+
+Release archives are built by:
+
+```bash
+make dist
+```
+
+This produces arm64 and amd64 macOS tarballs plus SHA-256 checksums under
+`dist/`. The archives contain:
+
+- `bin/spectra`
+- `bin/spectra-mcp`
+- `bin/spectra-helper`
+- the JVM attach agent jar when present
+- the install and distribution docs needed by offline users
+
+Set `CODESIGN_ID` to sign binaries before they are archived:
+
+```bash
+CODESIGN_ID="Developer ID Application: Example Corp (TEAMID)" make dist
+```
+
+Signed archives can be submitted with:
+
+```bash
+NOTARY_PROFILE=spectra-notary make notarize
+```
+
+The repo cannot provide Developer ID credentials or a notary keychain
+profile. Those remain release-owner inputs. A future cask can either
+point at these signed archives or wrap the same binaries in a pkg/app
+container if helper identity verification moves to
+`SMAppService.daemon` or `SMJobBless`.
 
 ## Why an optional sudo helper
 
