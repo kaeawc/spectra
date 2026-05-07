@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-helper build-all test vet fmt lint complexity security licenses tidy ci clean all \
+.PHONY: build build-mcp build-helper build-agent agent build-all test vet fmt lint complexity security licenses tidy ci clean all \
 	release-check validate-workflows \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
@@ -7,6 +7,7 @@ LDFLAGS = -s -w -X main.version=$(VERSION)
 BIN ?= spectra
 MCP_BIN ?= spectra-mcp
 HELPER_BIN ?= spectra-helper
+AGENT_JAR ?= agent/spectra-agent.jar
 
 # --- Build -------------------------------------------------------------------
 
@@ -18,6 +19,14 @@ build-mcp:
 
 build-helper:
 	go build -ldflags "$(LDFLAGS)" -o $(HELPER_BIN) ./cmd/spectra-helper/
+
+build-agent:
+	rm -rf agent/build
+	mkdir -p agent/build/classes
+	javac --add-modules jdk.attach -d agent/build/classes $$(find agent/src/main/java -name '*.java')
+	jar cfm $(AGENT_JAR) agent/MANIFEST.MF -C agent/build/classes .
+
+agent: build-agent
 
 build-all: build build-mcp build-helper
 

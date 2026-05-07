@@ -39,7 +39,7 @@ func toolDefinitions() []ToolDefinition {
 		snapshotToolDef(),
 		diagnoseToolDef(),
 		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph"}),
+		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
 		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
@@ -500,6 +500,10 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		DurationSeconds  int    `json:"duration_seconds"`
 		ConfirmSensitive bool   `json:"confirm_sensitive"`
 		AsprofPath       string `json:"asprof_path"`
+		Agent            string `json:"agent"`
+		MBeanName        string `json:"mbean_name"`
+		Attribute        string `json:"attribute"`
+		MBeanOperation   string `json:"mbean_operation"`
 		IncludeRaw       bool   `json:"include_raw"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
@@ -545,6 +549,51 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: jvm.CollectVMMemoryDiagnostics(p.PID, nil), Timestamp: time.Now().UTC()})
 	case "heap_histogram":
 		return jcmdText(p.PID, "heap histogram", jvm.HeapHistogram)
+	case "attach":
+		if p.PID == 0 {
+			return toolError("jvm attach requires pid")
+		}
+		status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: time.Now().UTC()})
+	case "mbeans":
+		if p.PID == 0 {
+			return toolError("jvm mbeans requires pid")
+		}
+		mbeans, err := jvm.FetchMBeans(p.PID, nil)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: time.Now().UTC()})
+	case "mbean_read":
+		if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
+			return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
+		}
+		value, err := jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: time.Now().UTC()})
+	case "mbean_invoke":
+		if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
+			return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
+		}
+		value, err := jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: time.Now().UTC()})
+	case "probe":
+		if p.PID == 0 {
+			return toolError("jvm probe requires pid")
+		}
+		probes, err := jvm.FetchAgentProbes(p.PID, nil)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: time.Now().UTC()})
 	case "heap_dump":
 		if !p.ConfirmSensitive {
 			return toolError("jvm heap_dump requires confirm_sensitive=true")

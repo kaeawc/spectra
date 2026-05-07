@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Premain-Class: com.spectra.agent.SpectraAgent
+Agent-Class: com.spectra.agent.SpectraAgent
+Main-Class: com.spectra.agent.AttachMain
+Can-Redefine-Classes: false
+Can-Retransform-Classes: false
+

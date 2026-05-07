@@ -78,6 +78,8 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid> | jvm-vm-memory <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-explain <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jmx-status <pid> | jvm-jmx-start-local <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-attach <pid> | jvm-mbeans <pid> | jvm-probe <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-mbean-read <pid> <name> <attribute> | jvm-mbean-invoke <pid> <name> <operation>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-flamegraph <pid> [dest]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot diff <id-a> <id-b>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> diff <id-a> <id-b>")
@@ -210,6 +212,8 @@ func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage
 		"jvm-jfr-summary":       parseConnectJFRSummary,
 		"jvm-flamegraph":        parseConnectJVMFlamegraph,
 		"jvm-heap-dump":         parseConnectJVMHeapDump,
+		"jvm-mbean-read":        parseConnectJVMMBeanRead,
+		"jvm-mbean-invoke":      parseConnectJVMMBeanInvoke,
 		"metrics":               parseConnectMetrics,
 		"network-capture-start": parseConnectNetworkCaptureStart,
 		"netcap-start":          parseConnectNetworkCaptureStart,
@@ -221,6 +225,36 @@ func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage
 		"issues":                parseConnectIssues,
 		"snapshot":              parseConnectSnapshot,
 	}
+}
+
+func parseConnectJVMMBeanRead(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 4 {
+		return "", nil, true, fmt.Errorf("connect jvm-mbean-read requires <pid> <name> <attribute>")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	return "jvm.mbean.read", connectParams(map[string]any{
+		"pid":       pid,
+		"name":      args[2],
+		"attribute": args[3],
+	}), true, nil
+}
+
+func parseConnectJVMMBeanInvoke(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 4 {
+		return "", nil, true, fmt.Errorf("connect jvm-mbean-invoke requires <pid> <name> <operation>")
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, true, err
+	}
+	return "jvm.mbean.invoke", connectParams(map[string]any{
+		"pid":       pid,
+		"name":      args[2],
+		"operation": args[3],
+	}), true, nil
 }
 
 func parseConnectJFRStart(args []string) (string, json.RawMessage, bool, error) {
@@ -494,11 +528,14 @@ func parseConnectNetworkCaptureStop(args []string) (string, json.RawMessage, boo
 func connectPIDShortcuts() map[string]string {
 	return map[string]string{
 		"jvm-gc":              "jvm.gc_stats",
+		"jvm-attach":          "jvm.attach",
 		"jvm-explain":         "jvm.explain",
 		"jvm-heap":            "jvm.heap_histogram",
 		"jvm-heap-histogram":  "jvm.heap_histogram",
 		"jvm-jmx-start-local": "jvm.jmx.start_local",
 		"jvm-jmx-status":      "jvm.jmx.status",
+		"jvm-mbeans":          "jvm.mbeans",
+		"jvm-probe":           "jvm.probe",
 		"jvm-thread-dump":     "jvm.thread_dump",
 		"jvm-threads":         "jvm.thread_dump",
 		"jvm-vm-memory":       "jvm.vm_memory",

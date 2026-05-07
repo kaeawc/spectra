@@ -1,6 +1,5 @@
-// Package jvm discovers and inspects running JVM processes using the JDK
-// shell tools jps and jcmd. No Java code is embedded; all inspection is
-// done by forking bundled JDK commands already present on the machine.
+// Package jvm discovers and inspects running JVM processes using JDK shell
+// tools and the optional spectra-agent.jar in-process agent.
 //
 // See docs/inspection/jvm.md for the full design.
 package jvm
