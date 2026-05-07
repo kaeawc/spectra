@@ -229,50 +229,74 @@ func parseConnectJVM(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) == 1 {
 		return "jvm.list", nil, true, nil
 	}
-	if len(args) == 2 {
-		if pid, err := parseConnectPositiveInt(args[1], "pid"); err == nil {
-			return "jvm.inspect", connectParams(map[string]int{"pid": pid}), true, nil
-		}
+	if method, params, ok := parseConnectJVMPIDInspect(args); ok {
+		return method, params, true, nil
 	}
-	switch args[1] {
-	case "list":
-		if len(args) != 2 {
-			return "", nil, true, fmt.Errorf("connect jvm list takes no extra arguments")
-		}
-		return "jvm.list", nil, true, nil
-	case "inspect":
-		return parseConnectNestedPIDCall(args, "jvm.inspect")
-	case "gc-stats":
-		return parseConnectNestedPIDCall(args, "jvm.gc_stats")
-	case "thread-dump", "threads":
-		return parseConnectNestedPIDCall(args, "jvm.thread_dump")
-	case "heap-histogram", "heap":
-		return parseConnectNestedPIDCall(args, "jvm.heap_histogram")
-	case "heap-dump":
+	if parser, ok := connectJVMSubcommands()[args[1]]; ok {
+		return parser(args)
+	}
+	return "", nil, true, fmt.Errorf("unknown jvm subcommand %q", args[1])
+}
+
+func parseConnectJVMPIDInspect(args []string) (string, json.RawMessage, bool) {
+	if len(args) != 2 {
+		return "", nil, false
+	}
+	pid, err := parseConnectPositiveInt(args[1], "pid")
+	if err != nil {
+		return "", nil, false
+	}
+	return "jvm.inspect", connectParams(map[string]int{"pid": pid}), true
+}
+
+func connectJVMSubcommands() map[string]func([]string) (string, json.RawMessage, bool, error) {
+	nestedPID := map[string]string{
+		"inspect":        "jvm.inspect",
+		"gc-stats":       "jvm.gc_stats",
+		"thread-dump":    "jvm.thread_dump",
+		"threads":        "jvm.thread_dump",
+		"heap-histogram": "jvm.heap_histogram",
+		"heap":           "jvm.heap_histogram",
+		"vm-memory":      "jvm.vm_memory",
+		"attach":         "jvm.attach",
+		"mbeans":         "jvm.mbeans",
+		"probe":          "jvm.probe",
+		"explain":        "jvm.explain",
+	}
+	out := make(map[string]func([]string) (string, json.RawMessage, bool, error), len(nestedPID)+7)
+	out["list"] = parseConnectJVMList
+	out["heap-dump"] = func(args []string) (string, json.RawMessage, bool, error) {
 		return parseConnectJVMHeapDump(append([]string{"jvm-heap-dump"}, args[2:]...))
-	case "vm-memory":
-		return parseConnectNestedPIDCall(args, "jvm.vm_memory")
-	case "jmx":
-		return parseConnectJVMJMX(args)
-	case "attach":
-		return parseConnectNestedPIDCall(args, "jvm.attach")
-	case "mbeans":
-		return parseConnectNestedPIDCall(args, "jvm.mbeans")
-	case "mbean-read":
-		return parseConnectJVMMBeanRead(append([]string{"jvm-mbean-read"}, args[2:]...))
-	case "mbean-invoke":
-		return parseConnectJVMMBeanInvoke(append([]string{"jvm-mbean-invoke"}, args[2:]...))
-	case "probe":
-		return parseConnectNestedPIDCall(args, "jvm.probe")
-	case "flamegraph":
-		return parseConnectJVMFlamegraph(append([]string{"jvm-flamegraph"}, args[2:]...))
-	case "explain":
-		return parseConnectNestedPIDCall(args, "jvm.explain")
-	case "jfr":
-		return parseConnectJVMJFR(args)
-	default:
-		return "", nil, true, fmt.Errorf("unknown jvm subcommand %q", args[1])
 	}
+	out["jmx"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMJMX(args)
+	}
+	out["mbean-read"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMMBeanRead(append([]string{"jvm-mbean-read"}, args[2:]...))
+	}
+	out["mbean-invoke"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMMBeanInvoke(append([]string{"jvm-mbean-invoke"}, args[2:]...))
+	}
+	out["flamegraph"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMFlamegraph(append([]string{"jvm-flamegraph"}, args[2:]...))
+	}
+	out["jfr"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMJFR(args)
+	}
+	for sub, method := range nestedPID {
+		method := method
+		out[sub] = func(args []string) (string, json.RawMessage, bool, error) {
+			return parseConnectNestedPIDCall(args, method)
+		}
+	}
+	return out
+}
+
+func parseConnectJVMList(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) != 2 {
+		return "", nil, true, fmt.Errorf("connect jvm list takes no extra arguments")
+	}
+	return "jvm.list", nil, true, nil
 }
 
 func parseConnectNestedPIDCall(args []string, method string) (string, json.RawMessage, bool, error) {
@@ -689,21 +713,6 @@ func parseConnectInspect(args []string) (string, json.RawMessage, bool, error) {
 		return "", nil, true, fmt.Errorf("connect inspect requires <App.app>")
 	}
 	return "inspect.app", connectParams(map[string]string{"path": args[1]}), true, nil
-}
-
-func parseConnectOptionalPID(args []string, listMethod string, pidMethod string) (string, json.RawMessage, bool, error) {
-	switch len(args) {
-	case 1:
-		return listMethod, nil, true, nil
-	case 2:
-		pid, err := parseConnectPositiveInt(args[1], "pid")
-		if err != nil {
-			return "", nil, true, err
-		}
-		return pidMethod, connectParams(map[string]int{"pid": pid}), true, nil
-	default:
-		return "", nil, true, fmt.Errorf("connect %s accepts at most one pid", args[0])
-	}
 }
 
 func parseConnectPIDCall(args []string, method string) (string, json.RawMessage, bool, error) {

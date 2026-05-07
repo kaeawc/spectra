@@ -107,46 +107,15 @@ func parseGlobalRemoteArgs(args []string) (globalRemoteArgs, bool, error) {
 	out := globalRemoteArgs{timeout: 3 * time.Second}
 	restStart := 0
 	for restStart < len(args) {
-		arg := args[restStart]
-		switch {
-		case arg == "--":
-			restStart++
-			goto done
-		case arg == "--remote" || arg == "--target" || arg == "--rpc-target":
-			if restStart+1 >= len(args) {
-				return out, true, fmt.Errorf("%s requires a target", arg)
-			}
-			out.target = args[restStart+1]
-			restStart += 2
-		case strings.HasPrefix(arg, "--remote="):
-			out.target = strings.TrimPrefix(arg, "--remote=")
-			restStart++
-		case strings.HasPrefix(arg, "--target="):
-			out.target = strings.TrimPrefix(arg, "--target=")
-			restStart++
-		case strings.HasPrefix(arg, "--rpc-target="):
-			out.target = strings.TrimPrefix(arg, "--rpc-target=")
-			restStart++
-		case arg == "--timeout":
-			if restStart+1 >= len(args) {
-				return out, true, fmt.Errorf("%s requires a duration", arg)
-			}
-			timeout, err := time.ParseDuration(args[restStart+1])
-			if err != nil {
-				return out, true, fmt.Errorf("invalid --timeout: %w", err)
-			}
-			out.timeout = timeout
-			restStart += 2
-		case strings.HasPrefix(arg, "--timeout="):
-			timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
-			if err != nil {
-				return out, true, fmt.Errorf("invalid --timeout: %w", err)
-			}
-			out.timeout = timeout
-			restStart++
-		default:
+		next, stop, err := parseGlobalRemoteArg(args, restStart, &out)
+		if err != nil {
+			return out, true, err
+		}
+		if stop {
+			restStart = next
 			goto done
 		}
+		restStart = next
 	}
 done:
 	if out.target == "" {
@@ -154,6 +123,60 @@ done:
 	}
 	out.args = normalizeRemoteCommandArgs(args[restStart:])
 	return out, true, nil
+}
+
+func parseGlobalRemoteArg(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	arg := args[idx]
+	switch {
+	case arg == "--":
+		return idx + 1, true, nil
+	case isRemoteTargetFlag(arg):
+		if idx+1 >= len(args) {
+			return idx, true, fmt.Errorf("%s requires a target", arg)
+		}
+		out.target = args[idx+1]
+		return idx + 2, false, nil
+	case strings.HasPrefix(arg, "--remote="):
+		out.target = strings.TrimPrefix(arg, "--remote=")
+		return idx + 1, false, nil
+	case strings.HasPrefix(arg, "--target="):
+		out.target = strings.TrimPrefix(arg, "--target=")
+		return idx + 1, false, nil
+	case strings.HasPrefix(arg, "--rpc-target="):
+		out.target = strings.TrimPrefix(arg, "--rpc-target=")
+		return idx + 1, false, nil
+	case arg == "--timeout":
+		return parseGlobalRemoteTimeoutValue(args, idx, out)
+	case strings.HasPrefix(arg, "--timeout="):
+		return parseGlobalRemoteTimeoutInline(arg, idx, out)
+	default:
+		return idx, true, nil
+	}
+}
+
+func isRemoteTargetFlag(arg string) bool {
+	return arg == "--remote" || arg == "--target" || arg == "--rpc-target"
+}
+
+func parseGlobalRemoteTimeoutValue(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	if idx+1 >= len(args) {
+		return idx, true, fmt.Errorf("%s requires a duration", args[idx])
+	}
+	timeout, err := time.ParseDuration(args[idx+1])
+	if err != nil {
+		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
+	}
+	out.timeout = timeout
+	return idx + 2, false, nil
+}
+
+func parseGlobalRemoteTimeoutInline(arg string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
+	if err != nil {
+		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
+	}
+	out.timeout = timeout
+	return idx + 1, false, nil
 }
 
 func normalizeRemoteCommandArgs(args []string) []string {
