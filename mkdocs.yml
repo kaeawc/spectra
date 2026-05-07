@@ -94,6 +94,7 @@ nav:
       - Power and thermal: inspection/power-thermal.md
       - Python-based apps: inspection/python-apps.md
       - Rust-based apps: inspection/rust-based-apps.md
+      - Process profiling: inspection/process-profiling.md
       - Toolchains: inspection/toolchains.md
       - JVM: inspection/jvm.md
       - Live data sources: inspection/live-data-sources.md

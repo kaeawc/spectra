@@ -11,9 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1468,15 +1466,16 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	d.Register("process.tree", func(params json.RawMessage) (any, error) {
 		var p struct {
 			Bundles []string `json:"bundles"`
+			Deep    bool     `json:"deep"`
 		}
 		_ = json.Unmarshal(params, &p)
-		procs := process.CollectAll(context.Background(), process.CollectOptions{
-			BundlePaths: p.Bundles,
-		})
-		return process.BuildTree(procs), nil
+		return process.NewTreeService(nil).Build(context.Background(), process.TreeOptions{
+			Bundles: p.Bundles,
+			Deep:    p.Deep,
+		}), nil
 	})
 
-	// process.sample — run `sample <pid> <duration>` and return the text output.
+	// process.sample — run `sample <pid> <duration> <interval>` and return the text output.
 	// Required: {"pid": <pid>}. Optional: {"duration": 1, "interval": 10}.
 	d.Register("process.sample", func(params json.RawMessage) (any, error) {
 		var p struct {
@@ -1508,12 +1507,16 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
 			return nil, err
 		}
-		out, err := runSampleCmd(p.PID, p.Duration, p.Interval)
+		result, err := process.NewSampler(nil, nil).Capture(context.Background(), process.SampleOptions{
+			PID:        p.PID,
+			Duration:   time.Duration(p.Duration) * time.Second,
+			IntervalMS: p.Interval,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
+			return nil, err
 		}
-		rec.SizeBytes = int64(len(out))
-		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "output": string(out)}), nil
+		rec.SizeBytes = int64(len(result.Output))
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": result.PID, "output": result.Output, "taken_at": result.TakenAt, "duration_ms": result.DurationMS, "interval_ms": result.IntervalMS}), nil
 	})
 
 	// power.state — battery level, thermal pressure, assertions, and top energy users.
@@ -1783,17 +1786,4 @@ func recordArtifact(ctx context.Context, log logger.Logger, recorder artifact.Re
 
 func daemonJVMOptions() jvm.CollectOptions {
 	return jvm.CollectOptions{JDKs: collectJDKs(context.Background(), toolchain.CollectOptions{})}
-}
-
-// runSampleCmd runs `sample <pid> <duration> <interval>` and returns stdout.
-func runSampleCmd(pid, durationSec, intervalMS int) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(),
-		time.Duration(durationSec+5)*time.Second)
-	defer cancel()
-	// #nosec G204 -- PID, duration, and interval are integer arguments.
-	return exec.CommandContext(ctx, "sample",
-		strconv.Itoa(pid),
-		strconv.Itoa(durationSec),
-		strconv.Itoa(intervalMS),
-	).Output()
 }
