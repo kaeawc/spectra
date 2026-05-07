@@ -104,6 +104,35 @@ func TestBuildSkipAppsProducesNoApps(t *testing.T) {
 	}
 }
 
+func TestBuildUsesInjectedHostCollector(t *testing.T) {
+	snap := Build(context.Background(), Options{
+		HostCollector: fakeHostCollector{host: HostInfo{
+			Hostname:    "fake-host",
+			MachineUUID: "FAKE-UUID",
+			OSName:      "macOS",
+		}},
+		SkipApps:      true,
+		SkipProcesses: true,
+		SkipStorage:   true,
+		SkipJVMs:      true,
+	})
+
+	if snap.Host.Hostname != "fake-host" {
+		t.Fatalf("Hostname = %q, want fake-host", snap.Host.Hostname)
+	}
+	if snap.Host.MachineUUID != "FAKE-UUID" {
+		t.Fatalf("MachineUUID = %q, want FAKE-UUID", snap.Host.MachineUUID)
+	}
+}
+
+type fakeHostCollector struct {
+	host HostInfo
+}
+
+func (f fakeHostCollector) CollectHost(string) HostInfo {
+	return f.host
+}
+
 func TestBuildAttributesProcessesToConfiguredAppPaths(t *testing.T) {
 	psOut := "412 1 0.5 184320 204800 501 alice Sat May 2 22:40:05 2026 /Applications/Foo.app/Contents/MacOS/Foo --type=renderer\n" +
 		"1 0 0.0 4096 8192 0 root Sat May 2 22:00:00 2026 /sbin/launchd\n"

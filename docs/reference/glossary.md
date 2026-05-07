@@ -14,7 +14,8 @@ running JVM via the Attach API for layer-2 JVM inspection — see
 **Baseline.** A frozen reference [*snapshot*](#snapshot) used as the
 "known good" comparison point for [*diff*](#diff). Created via
 `spectra snapshot create --baseline <name>`. Immutable; not subject
-to live-snapshot retention.
+to live-snapshot retention. See
+[../operations/snapshots-and-hosts.md#baselines](../operations/snapshots-and-hosts.md#baselines).
 
 **Blob store.** The on-disk store for large artifacts (heap dumps,
 JFR recordings, thread dumps) that don't belong in
@@ -51,6 +52,8 @@ a `.app` bundle's framework. Returns `detect.Result`. See
 
 **Diff.** A structural comparison between two snapshots — typically
 "my Mac vs your Mac" or "this Mac now vs this Mac last Tuesday." See
+[../operations/snapshots-and-hosts.md#diff-operands](../operations/snapshots-and-hosts.md#diff-operands)
+and
 [../design/system-inventory.md#diff-semantics](../design/system-inventory.md#diff-semantics).
 
 **Drift.** A diff result indicating two hosts have meaningfully
@@ -151,7 +154,8 @@ classification. See
 **Snapshot.** A timestamped capture of one host's state. Lives in
 [*SQLite*](#sqlite); refers to artifacts in the
 [*blob store*](#blob-store). See
-[../design/system-inventory.md](../design/system-inventory.md).
+[../operations/snapshots-and-hosts.md](../operations/snapshots-and-hosts.md)
+and [../design/system-inventory.md](../design/system-inventory.md).
 
 **SQLite.** Spectra's relational store for structured snapshot
 data. One database per host. WAL mode. Cross-host diff is a client-

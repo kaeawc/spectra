@@ -44,6 +44,10 @@ hosts and time:
   engine.
 - **applied_fixes** — audit log of remediation actions.
 
+See [Snapshots and hosts](../operations/snapshots-and-hosts.md) for
+the operational lifecycle around host identity, baselines, stored
+snapshots, retention, and diff operands.
+
 ### Driver
 
 Use `modernc.org/sqlite` (pure Go, no CGo). ~30% slower than `mattn/go-sqlite3`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -249,6 +250,75 @@ func TestResolveBaselineSnapshotRejectsLiveID(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotToRegistryPersistsChildrenAndPrunesLive(t *testing.T) {
+	reg := newFakeSnapshotRegistry()
+	snap := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
+	snap.Processes = []process.Info{{PID: 42, Command: "Foo"}}
+	snap.Apps = []detect.Result{{
+		Path:               "/Applications/Foo.app",
+		BundleID:           "com.example.foo",
+		LoginItems:         []detect.LoginItem{{Path: "/Library/LaunchAgents/com.example.foo.plist"}},
+		GrantedPermissions: []string{"kTCCServiceCamera"},
+	}}
+
+	if err := saveSnapshotToRegistry(context.Background(), reg, snap, ""); err != nil {
+		t.Fatalf("saveSnapshotToRegistry: %v", err)
+	}
+	if len(reg.saved) != 1 {
+		t.Fatalf("saved snapshots = %d, want 1", len(reg.saved))
+	}
+	if reg.saved[0].MachineUUID != "TEST-MACHINE" {
+		t.Fatalf("MachineUUID = %q", reg.saved[0].MachineUUID)
+	}
+	if len(reg.processes[snap.ID]) != 1 {
+		t.Fatalf("process rows = %d, want 1", len(reg.processes[snap.ID]))
+	}
+	if len(reg.loginItems[snap.ID]) != 1 {
+		t.Fatalf("login item rows = %d, want 1", len(reg.loginItems[snap.ID]))
+	}
+	if len(reg.grantedPerms[snap.ID]) != 1 {
+		t.Fatalf("granted perm rows = %d, want 1", len(reg.grantedPerms[snap.ID]))
+	}
+	if reg.pruneKeep != 100 {
+		t.Fatalf("prune keep = %d, want 100", reg.pruneKeep)
+	}
+}
+
+func TestSaveSnapshotToRegistryDoesNotPruneBaseline(t *testing.T) {
+	reg := newFakeSnapshotRegistry()
+	snap := testSnapshot("snap-base", snapshot.KindBaseline, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
+
+	if err := saveSnapshotToRegistry(context.Background(), reg, snap, "pre-incident"); err != nil {
+		t.Fatalf("saveSnapshotToRegistry: %v", err)
+	}
+	if len(reg.saved) != 1 {
+		t.Fatalf("saved snapshots = %d, want 1", len(reg.saved))
+	}
+	if reg.saved[0].Name != "pre-incident" {
+		t.Fatalf("Name = %q, want pre-incident", reg.saved[0].Name)
+	}
+	if reg.pruneKeep != 0 {
+		t.Fatalf("baseline triggered prune keep=%d", reg.pruneKeep)
+	}
+}
+
+func TestResolveBaselineSnapshotWithFakeRegistry(t *testing.T) {
+	ctx := context.Background()
+	reg := newFakeSnapshotRegistry()
+	old := testSnapshot("snap-old", snapshot.KindBaseline, time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC))
+	newer := testSnapshot("snap-new", snapshot.KindBaseline, time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC))
+	reg.putSnapshot(old, "pre-incident")
+	reg.putSnapshot(newer, "release")
+
+	got, err := resolveBaselineSnapshot(ctx, reg, "release")
+	if err != nil {
+		t.Fatalf("resolve by fake registry: %v", err)
+	}
+	if got.ID != "snap-new" {
+		t.Fatalf("ID = %q, want snap-new", got.ID)
+	}
+}
+
 func testSnapshot(id string, kind snapshot.Kind, takenAt time.Time) snapshot.Snapshot {
 	return snapshot.Snapshot{
 		ID:      id,
@@ -260,6 +330,113 @@ func testSnapshot(id string, kind snapshot.Kind, takenAt time.Time) snapshot.Sna
 			OSName:      "macOS",
 		},
 	}
+}
+
+type fakeSnapshotRegistry struct {
+	saved        []store.SnapshotInput
+	rows         []store.SnapshotRow
+	jsonByID     map[string][]byte
+	apps         map[string][]store.AppRow
+	processes    map[string][]store.ProcessSnapshotRow
+	loginItems   map[string][]store.LoginItemRow
+	grantedPerms map[string][]store.GrantedPermRow
+	deleted      []string
+	pruneKeep    int
+}
+
+func newFakeSnapshotRegistry() *fakeSnapshotRegistry {
+	return &fakeSnapshotRegistry{
+		jsonByID:     map[string][]byte{},
+		apps:         map[string][]store.AppRow{},
+		processes:    map[string][]store.ProcessSnapshotRow{},
+		loginItems:   map[string][]store.LoginItemRow{},
+		grantedPerms: map[string][]store.GrantedPermRow{},
+	}
+}
+
+func (f *fakeSnapshotRegistry) putSnapshot(s snapshot.Snapshot, name string) {
+	input := store.FromSnapshot(s)
+	input.Name = name
+	f.saved = append(f.saved, input)
+	f.rows = append([]store.SnapshotRow{{
+		ID:          s.ID,
+		MachineUUID: input.MachineUUID,
+		TakenAt:     s.TakenAt,
+		Kind:        string(s.Kind),
+		Name:        name,
+		SpectraVer:  input.SpectraVer,
+		AppCount:    len(s.Apps),
+	}}, f.rows...)
+	f.jsonByID[s.ID] = input.SnapshotJSON
+}
+
+func (f *fakeSnapshotRegistry) SaveSnapshot(_ context.Context, input store.SnapshotInput) error {
+	f.saved = append(f.saved, input)
+	f.rows = append([]store.SnapshotRow{{
+		ID:          input.ID,
+		MachineUUID: input.MachineUUID,
+		TakenAt:     input.TakenAt,
+		Kind:        input.Kind,
+		Name:        input.Name,
+		SpectraVer:  input.SpectraVer,
+		AppCount:    len(input.Apps),
+	}}, f.rows...)
+	f.jsonByID[input.ID] = input.SnapshotJSON
+	return nil
+}
+
+func (f *fakeSnapshotRegistry) SaveSnapshotProcesses(_ context.Context, snapID string, rows []store.ProcessSnapshotRow) error {
+	f.processes[snapID] = append([]store.ProcessSnapshotRow(nil), rows...)
+	return nil
+}
+
+func (f *fakeSnapshotRegistry) SaveLoginItems(_ context.Context, snapID string, rows []store.LoginItemRow) error {
+	f.loginItems[snapID] = append([]store.LoginItemRow(nil), rows...)
+	return nil
+}
+
+func (f *fakeSnapshotRegistry) SaveGrantedPerms(_ context.Context, snapID string, rows []store.GrantedPermRow) error {
+	f.grantedPerms[snapID] = append([]store.GrantedPermRow(nil), rows...)
+	return nil
+}
+
+func (f *fakeSnapshotRegistry) ListSnapshots(context.Context, string) ([]store.SnapshotRow, error) {
+	return append([]store.SnapshotRow(nil), f.rows...), nil
+}
+
+func (f *fakeSnapshotRegistry) GetSnapshot(_ context.Context, id string) (store.SnapshotRow, error) {
+	for _, row := range f.rows {
+		if row.ID == id {
+			return row, nil
+		}
+	}
+	return store.SnapshotRow{}, store.ErrNotFound
+}
+
+func (f *fakeSnapshotRegistry) GetSnapshotJSON(_ context.Context, id string) ([]byte, error) {
+	raw, ok := f.jsonByID[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return raw, nil
+}
+
+func (f *fakeSnapshotRegistry) GetSnapshotApps(_ context.Context, id string) ([]store.AppRow, error) {
+	rows, ok := f.apps[id]
+	if !ok {
+		return nil, errors.New("apps not found")
+	}
+	return rows, nil
+}
+
+func (f *fakeSnapshotRegistry) DeleteSnapshot(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func (f *fakeSnapshotRegistry) PruneSnapshots(_ context.Context, keepN int) (int64, error) {
+	f.pruneKeep = keepN
+	return 0, nil
 }
 
 func saveTestSnapshot(t *testing.T, db *store.DB, snap snapshot.Snapshot, name string) {
