@@ -155,4 +155,6 @@ window in the daemon RPC schema once that lands.
 
 - [../detection/overview.md](../detection/overview.md) — how the verdict
   fields are computed
+- [../inspection/node-based-apps.md](../inspection/node-based-apps.md) —
+  Node/Electron package, native add-on, and URL-host inspection
 - [../inspection/](../inspection/) — per-field deep-dives

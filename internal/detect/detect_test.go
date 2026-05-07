@@ -1,12 +1,151 @@
 package detect
 
 import (
+	"bytes"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 )
+
+type fakeNodeFS struct {
+	files map[string][]byte
+	dirs  map[string]bool
+}
+
+func newFakeNodeFS() *fakeNodeFS {
+	return &fakeNodeFS{files: map[string][]byte{}, dirs: map[string]bool{}}
+}
+
+func (f *fakeNodeFS) addDir(path string) {
+	path = filepath.Clean(path)
+	for {
+		f.dirs[path] = true
+		parent := filepath.Dir(path)
+		if parent == path || parent == "." {
+			return
+		}
+		path = parent
+	}
+}
+
+func (f *fakeNodeFS) addFile(path string, data string) {
+	path = filepath.Clean(path)
+	f.addDir(filepath.Dir(path))
+	f.files[path] = []byte(data)
+}
+
+func (f *fakeNodeFS) Exists(path string) bool {
+	path = filepath.Clean(path)
+	_, file := f.files[path]
+	return file || f.dirs[path]
+}
+
+func (f *fakeNodeFS) IsDir(path string) bool {
+	return f.dirs[filepath.Clean(path)]
+}
+
+func (f *fakeNodeFS) Open(path string) (io.ReadCloser, error) {
+	data, ok := f.files[filepath.Clean(path)]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (f *fakeNodeFS) ReadDir(path string) ([]os.DirEntry, error) {
+	path = filepath.Clean(path)
+	if !f.dirs[path] {
+		return nil, os.ErrNotExist
+	}
+	children := map[string]fakeDirEntry{}
+	prefix := path + string(os.PathSeparator)
+	for p := range f.dirs {
+		if !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(p, prefix)
+		if rest == "" || strings.Contains(rest, string(os.PathSeparator)) {
+			continue
+		}
+		children[rest] = fakeDirEntry{name: rest, dir: true}
+	}
+	for p := range f.files {
+		if !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(p, prefix)
+		if rest == "" || strings.Contains(rest, string(os.PathSeparator)) {
+			continue
+		}
+		children[rest] = fakeDirEntry{name: rest}
+	}
+	names := make([]string, 0, len(children))
+	for name := range children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	entries := make([]os.DirEntry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, children[name])
+	}
+	return entries, nil
+}
+
+func (f *fakeNodeFS) ReadFile(path string) ([]byte, error) {
+	data, ok := f.files[filepath.Clean(path)]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return data, nil
+}
+
+func (f *fakeNodeFS) WalkDir(root string, fn fs.WalkDirFunc) error {
+	root = filepath.Clean(root)
+	if !f.Exists(root) {
+		return os.ErrNotExist
+	}
+	var paths []string
+	for p := range f.dirs {
+		if p == root || strings.HasPrefix(p, root+string(os.PathSeparator)) {
+			paths = append(paths, p)
+		}
+	}
+	for p := range f.files {
+		if p == root || strings.HasPrefix(p, root+string(os.PathSeparator)) {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		if err := fn(p, fakeDirEntry{name: filepath.Base(p), dir: f.dirs[p]}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type fakeDirEntry struct {
+	name string
+	dir  bool
+}
+
+func (e fakeDirEntry) Name() string               { return e.name }
+func (e fakeDirEntry) IsDir() bool                { return e.dir }
+func (e fakeDirEntry) Type() os.FileMode          { return 0 }
+func (e fakeDirEntry) Info() (os.FileInfo, error) { return nil, nil }
+
+type fakeNodeCommands struct {
+	libs map[string][]string
+}
+
+func (c fakeNodeCommands) OtoolL(path string) []string {
+	return c.libs[filepath.Clean(path)]
+}
 
 // makeBundle creates a synthetic .app skeleton at t.TempDir()/Name.app
 // and returns its path. Subsequent helpers add markers.
@@ -299,6 +438,79 @@ func TestDependenciesNPMPackages(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("missing packages: %v", want)
+	}
+}
+
+func TestNodeAppInspectorDependenciesWithFakeFS(t *testing.T) {
+	app := "/Apps/Fake.app"
+	fsys := newFakeNodeFS()
+	fsys.addDir(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"))
+	fsys.addDir(filepath.Join(app, "Contents/Frameworks/Squirrel.framework"))
+	fsys.addDir(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/node-pty"))
+	fsys.addDir(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg"))
+	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/a.jar"), "")
+	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/readme.txt"), "")
+
+	deps := (nodeAppInspector{fs: fsys, cmd: fakeNodeCommands{}}).scanDependencies(app)
+	if deps == nil {
+		t.Fatal("Dependencies nil")
+	}
+	if got := strings.Join(deps.ThirdPartyFrameworks, ","); got != "Squirrel" {
+		t.Fatalf("ThirdPartyFrameworks = %q, want Squirrel", got)
+	}
+	if got := strings.Join(deps.NPMPackages, ","); got != "@scope/pkg,node-pty" {
+		t.Fatalf("NPMPackages = %q, want @scope/pkg,node-pty", got)
+	}
+	if deps.JavaJars != 1 {
+		t.Fatalf("JavaJars = %d, want 1", deps.JavaJars)
+	}
+}
+
+func TestNodeAppInspectorNativeModuleWithFakes(t *testing.T) {
+	app := "/Apps/Fake.app"
+	mod := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node")
+	sidecar := filepath.Join(filepath.Dir(mod), "libKeytarSwift.dylib")
+	fsys := newFakeNodeFS()
+	fsys.addFile(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/keytar/package.json"), `{"name":"keytar","version":"7.9.0"}`)
+	fsys.addFile(mod, "native addon")
+	fsys.addFile(sidecar, "sidecar")
+	fsys.addFile(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/keytar/keytar.node.dSYM/Contents/Resources/DWARF/keytar.node"), "debug")
+	cmds := fakeNodeCommands{libs: map[string][]string{
+		filepath.Clean(mod): {
+			"@rpath/libKeytarSwift.dylib",
+			"/System/Library/Frameworks/AppKit.framework/AppKit",
+		},
+	}}
+
+	mods := (nodeAppInspector{fs: fsys, cmd: cmds}).scanNativeModules(app)
+	if len(mods) != 1 {
+		t.Fatalf("NativeModules len = %d, want 1: %#v", len(mods), mods)
+	}
+	m := mods[0]
+	if m.Language != "Swift" {
+		t.Fatalf("Language = %q, want Swift; hints=%v", m.Language, m.Hints)
+	}
+	if m.PackageName != "keytar" || m.PackageVersion != "7.9.0" {
+		t.Fatalf("Package = %q@%q, want keytar@7.9.0", m.PackageName, m.PackageVersion)
+	}
+	if !hasHint(m.Hints, "uses macOS Keychain") || !hasHint(m.RiskHints, "credential store access") {
+		t.Fatalf("hints = %v risk hints = %v, want keytar capability and risk hints", m.Hints, m.RiskHints)
+	}
+	if !hasHint(m.Hints, "rpath sibling: libKeytarSwift.dylib") {
+		t.Fatalf("hints = %v, want sidecar hint", m.Hints)
+	}
+}
+
+func TestNodeAppInspectorNetworkEndpointsWithFakeFS(t *testing.T) {
+	app := "/Apps/Fake.app"
+	exe := filepath.Join(app, "Contents/MacOS/main")
+	fsys := newFakeNodeFS()
+	fsys.addFile(exe, "https://api.example.com https://www.w3.org")
+	fsys.addFile(filepath.Join(app, "Contents/Resources/app.asar"), strings.Repeat("x", 300)+"https://Telemetry.Example.com/path")
+
+	hosts := (nodeAppInspector{fs: fsys, cmd: fakeNodeCommands{}}).scanNetworkEndpoints(app, exe)
+	if got := strings.Join(hosts, ","); got != "api.example.com,telemetry.example.com" {
+		t.Fatalf("hosts = %q, want api.example.com,telemetry.example.com", got)
 	}
 }
 

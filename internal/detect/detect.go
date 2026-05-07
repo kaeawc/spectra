@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -183,6 +184,62 @@ type NativeModule struct {
 type Options struct {
 	ScanNetwork bool // scan binary + app.asar for embedded URL hosts
 	Now         func() time.Time
+}
+
+type nodeAppFS interface {
+	Exists(path string) bool
+	IsDir(path string) bool
+	Open(path string) (io.ReadCloser, error)
+	ReadDir(path string) ([]os.DirEntry, error)
+	ReadFile(path string) ([]byte, error)
+	WalkDir(root string, fn fs.WalkDirFunc) error
+}
+
+type nodeAppCommands interface {
+	OtoolL(path string) []string
+}
+
+type osNodeAppFS struct{}
+
+func (osNodeAppFS) Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (osNodeAppFS) IsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func (osNodeAppFS) Open(path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
+
+func (osNodeAppFS) ReadDir(path string) ([]os.DirEntry, error) {
+	return os.ReadDir(path)
+}
+
+func (osNodeAppFS) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+func (osNodeAppFS) WalkDir(root string, fn fs.WalkDirFunc) error {
+	return filepath.WalkDir(root, fn)
+}
+
+type execNodeAppCommands struct{}
+
+func (execNodeAppCommands) OtoolL(path string) []string {
+	return otoolL(path)
+}
+
+type nodeAppInspector struct {
+	fs  nodeAppFS
+	cmd nodeAppCommands
+}
+
+func defaultNodeAppInspector() nodeAppInspector {
+	return nodeAppInspector{fs: osNodeAppFS{}, cmd: execNodeAppCommands{}}
 }
 
 // Detect inspects the bundle at appPath and returns a Result.
@@ -847,7 +904,11 @@ func otoolL(exe string) []string {
 // plus framework-specific tells (Wails). We avoid `strings(1)` to skip a fork
 // and to handle multi-arch binaries uniformly.
 func scanBinaryMarkers(exe string) (m binaryMarkers) {
-	f, err := os.Open(exe)
+	return defaultNodeAppInspector().scanBinaryMarkers(exe)
+}
+
+func (ins nodeAppInspector) scanBinaryMarkers(exe string) (m binaryMarkers) {
+	f, err := ins.fs.Open(exe)
 	if err != nil {
 		return m
 	}
@@ -939,10 +1000,14 @@ func findJVMRoot(contents string) string {
 // add-ons and classifies each by language using its link map and binary
 // fingerprint.
 func scanNativeModules(appPath string) []NativeModule {
+	return defaultNodeAppInspector().scanNativeModules(appPath)
+}
+
+func (ins nodeAppInspector) scanNativeModules(appPath string) []NativeModule {
 	var mods []NativeModule
 	seen := map[string]struct{}{}
-	for _, root := range nativeModuleRoots(appPath) {
-		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, _ error) error {
+	for _, root := range ins.nativeModuleRoots(appPath) {
+		_ = ins.fs.WalkDir(root, func(path string, d os.DirEntry, _ error) error {
 			if d == nil || d.IsDir() {
 				return nil
 			}
@@ -958,7 +1023,7 @@ func scanNativeModules(appPath string) []NativeModule {
 				return nil
 			}
 			seen[rel] = struct{}{}
-			mods = append(mods, classifyNativeModule(path, rel))
+			mods = append(mods, ins.classifyNativeModule(path, rel))
 			return nil
 		})
 	}
@@ -969,6 +1034,10 @@ func scanNativeModules(appPath string) []NativeModule {
 }
 
 func nativeModuleRoots(appPath string) []string {
+	return defaultNodeAppInspector().nativeModuleRoots(appPath)
+}
+
+func (ins nodeAppInspector) nativeModuleRoots(appPath string) []string {
 	resources := filepath.Join(appPath, "Contents", "Resources")
 	candidates := []string{
 		filepath.Join(resources, "app.asar.unpacked"),
@@ -976,7 +1045,7 @@ func nativeModuleRoots(appPath string) []string {
 	}
 	var roots []string
 	for _, root := range candidates {
-		if isDir(root) {
+		if ins.fs.IsDir(root) {
 			roots = append(roots, root)
 		}
 	}
@@ -988,16 +1057,20 @@ func nativeModuleRoots(appPath string) []string {
 // libswift* references reveal Swift. Everything else falls through to
 // rust-strings scanning, then C++.
 func classifyNativeModule(absPath, relPath string) NativeModule {
+	return defaultNodeAppInspector().classifyNativeModule(absPath, relPath)
+}
+
+func (ins nodeAppInspector) classifyNativeModule(absPath, relPath string) NativeModule {
 	m := NativeModule{Name: filepath.Base(absPath), Path: relPath, Language: "C++"}
-	readNativeModulePackage(absPath, &m)
+	ins.readNativeModulePackage(absPath, &m)
 	appendNativeModuleCapabilityHints(&m)
 	appendNativeModuleRiskHints(&m)
-	libs := otoolL(absPath)
+	libs := ins.cmd.OtoolL(absPath)
 	joined := strings.Join(libs, "\n")
 
 	// Resolve @rpath references to actual sibling dylibs so we can also
 	// inspect the real implementation library (e.g. libClaudeSwift.dylib).
-	sidecars := nativeModuleSidecars(absPath, libs, &m)
+	sidecars := ins.nativeModuleSidecars(absPath, libs, &m)
 
 	// Rust signal #1: Cargo target path leaks into the load command.
 	if strings.Contains(joined, "/target/") && (strings.Contains(joined, "-apple-darwin/release/") || strings.Contains(joined, "-apple-darwin/debug/")) {
@@ -1026,9 +1099,9 @@ func classifyNativeModule(absPath, relPath string) NativeModule {
 	}
 
 	// Rust signal #2: panic strings in the .node file or any sidecar.
-	rust := scanBinaryMarkers(absPath).rustHits
+	rust := ins.scanBinaryMarkers(absPath).rustHits
 	for _, s := range sidecars {
-		rust += scanBinaryMarkers(s).rustHits
+		rust += ins.scanBinaryMarkers(s).rustHits
 	}
 	if rust >= 50 {
 		m.Language = "Rust"
@@ -1088,11 +1161,15 @@ func appendNativeModuleRiskHints(m *NativeModule) {
 }
 
 func readNativeModulePackage(absPath string, m *NativeModule) {
+	defaultNodeAppInspector().readNativeModulePackage(absPath, m)
+}
+
+func (ins nodeAppInspector) readNativeModulePackage(absPath string, m *NativeModule) {
 	root := nativeModulePackageRoot(absPath)
 	if root == "" {
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	data, err := ins.fs.ReadFile(filepath.Join(root, "package.json"))
 	if err != nil {
 		return
 	}
@@ -1130,13 +1207,17 @@ func nativeModulePackageRoot(absPath string) string {
 }
 
 func nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {
+	return defaultNodeAppInspector().nativeModuleSidecars(absPath, libs, m)
+}
+
+func (ins nodeAppInspector) nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {
 	var sidecars []string
 	for _, lib := range libs {
 		if !strings.HasPrefix(lib, "@rpath/") {
 			continue
 		}
 		sib := filepath.Join(filepath.Dir(absPath), strings.TrimPrefix(lib, "@rpath/"))
-		if exists(sib) {
+		if ins.fs.Exists(sib) {
 			sidecars = append(sidecars, sib)
 			m.Hints = append(m.Hints, "rpath sibling: "+filepath.Base(sib))
 		}
@@ -1227,8 +1308,12 @@ func followWrapper(exe string) string {
 // countJars returns the number of .jar files anywhere under root.
 // Bounded by walk; bundles aren't deep.
 func countJars(root string) int {
+	return defaultNodeAppInspector().countJars(root)
+}
+
+func (ins nodeAppInspector) countJars(root string) int {
 	var n int
-	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, _ error) error {
+	_ = ins.fs.WalkDir(root, func(_ string, d os.DirEntry, _ error) error {
 		if d == nil || d.IsDir() {
 			return nil
 		}
@@ -1566,9 +1651,13 @@ func readPrivacyDescriptions(appPath string) map[string]string {
 // scanDependencies summarises third-party libraries embedded in the bundle.
 // Apple frameworks and Helper sub-apps are filtered out.
 func scanDependencies(appPath string) *Dependencies {
+	return defaultNodeAppInspector().scanDependencies(appPath)
+}
+
+func (ins nodeAppInspector) scanDependencies(appPath string) *Dependencies {
 	d := &Dependencies{}
 	frameworks := filepath.Join(appPath, "Contents", "Frameworks")
-	if entries, err := os.ReadDir(frameworks); err == nil {
+	if entries, err := ins.fs.ReadDir(frameworks); err == nil {
 		for _, e := range entries {
 			name := e.Name()
 			if !strings.HasSuffix(name, ".framework") {
@@ -1587,7 +1676,7 @@ func scanDependencies(appPath string) *Dependencies {
 
 	// npm packages: top-level dirs under app.asar.unpacked/node_modules.
 	nm := filepath.Join(appPath, "Contents", "Resources", "app.asar.unpacked", "node_modules")
-	if entries, err := os.ReadDir(nm); err == nil {
+	if entries, err := ins.fs.ReadDir(nm); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
@@ -1595,7 +1684,7 @@ func scanDependencies(appPath string) *Dependencies {
 			n := e.Name()
 			if strings.HasPrefix(n, "@") {
 				// Scoped: list each scoped package as @scope/pkg.
-				if subs, err := os.ReadDir(filepath.Join(nm, n)); err == nil {
+				if subs, err := ins.fs.ReadDir(filepath.Join(nm, n)); err == nil {
 					for _, s := range subs {
 						if s.IsDir() {
 							d.NPMPackages = append(d.NPMPackages, n+"/"+s.Name())
@@ -1609,7 +1698,7 @@ func scanDependencies(appPath string) *Dependencies {
 		sort.Strings(d.NPMPackages)
 	}
 
-	d.JavaJars = countJars(filepath.Join(appPath, "Contents"))
+	d.JavaJars = ins.countJars(filepath.Join(appPath, "Contents"))
 
 	if len(d.ThirdPartyFrameworks) == 0 && len(d.NPMPackages) == 0 && d.JavaJars == 0 {
 		return nil
@@ -1621,6 +1710,10 @@ func scanDependencies(appPath string) *Dependencies {
 // in the main executable and app.asar (when present). Cheap-but-effective:
 // most apps don't bother to obfuscate URL literals.
 func scanNetworkEndpoints(appPath, exe string) []string {
+	return defaultNodeAppInspector().scanNetworkEndpoints(appPath, exe)
+}
+
+func (ins nodeAppInspector) scanNetworkEndpoints(appPath, exe string) []string {
 	hosts := map[string]struct{}{}
 	urlRe := regexp.MustCompile(`(?i)https?://([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})`)
 
@@ -1629,7 +1722,7 @@ func scanNetworkEndpoints(appPath, exe string) []string {
 			return
 		}
 		// Stream in chunks; we only care about ASCII URL substrings.
-		f, err := os.Open(path)
+		f, err := ins.fs.Open(path)
 		if err != nil {
 			return
 		}
@@ -1659,7 +1752,7 @@ func scanNetworkEndpoints(appPath, exe string) []string {
 
 	addFrom(exe)
 	asar := filepath.Join(appPath, "Contents", "Resources", "app.asar")
-	if exists(asar) {
+	if ins.fs.Exists(asar) {
 		addFrom(asar)
 	}
 

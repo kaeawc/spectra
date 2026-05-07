@@ -83,6 +83,7 @@ nav:
       - Security: inspection/security.md
       - Swift apps: inspection/swift-apps.md
       - Storage footprint: inspection/storage-footprint.md
+      - Node-based apps: inspection/node-based-apps.md
       - Network endpoints: inspection/network-endpoints.md
       - Helpers and XPC: inspection/helpers-and-xpc.md
       - Login items: inspection/login-items.md

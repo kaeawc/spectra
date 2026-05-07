@@ -126,3 +126,8 @@ useful classification than "Electron."
 
 - Expand `RiskHints` as more Electron native modules show repeatable
   security-sensitive patterns in real apps.
+
+## See also
+
+- [../inspection/node-based-apps.md](../inspection/node-based-apps.md) —
+  broader Node/Electron bundle inspection.
