@@ -250,11 +250,15 @@ func runIssuesCheck(args []string) int {
 	asJSON := fs.Bool("json", false, "Emit findings JSON")
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: live)")
 	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
+	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	catalog, err := loadRuleCatalog(*rulesConfig, os.Stderr)
+	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
+		ConfigPath: *rulesConfig,
+		RulePaths:  rules.SplitRulePaths(*rulePaths),
+	}, os.Stderr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issues check: %v\n", err)
 		return 1

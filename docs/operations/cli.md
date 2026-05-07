@@ -235,6 +235,7 @@ snapshot. `./spectra.yml` is loaded automatically when present; use
 |---|---|---|
 | `--json` | false | Emit JSON findings |
 | `--snapshot` | empty | Evaluate a stored snapshot by ID |
+| `--rules` | empty | Comma-separated YAML rule files or globs to add to the catalog |
 | `--rules-config` | `./spectra.yml` if present | Rule override file |
 
 Supported `spectra.yml` rule overrides:
@@ -253,19 +254,24 @@ rules:
 spectra rules
 spectra rules --json
 spectra rules --snapshot snap-20260504T095749Z-4829
+spectra rules --rules rules/*.yml
 spectra rules --rules-config team-spectra.yml
+spectra rules validate --rules rules/*.yml
+spectra rules list --rules rules/*.yml
+spectra rules explain --rules rules/*.yml jvm-eol-version
 ```
 
 ## `spectra issues`
 
 Persists recommendation findings as issues and lets users manage their
-lifecycle. `spectra issues check` accepts the same `--snapshot` and
-`--rules-config` flags as `spectra rules`.
+lifecycle. `spectra issues check` accepts the same `--snapshot`, `--rules`,
+and `--rules-config` flags as `spectra rules`.
 
 ### Examples
 
 ```bash
 spectra issues check
+spectra issues check --rules rules/*.yml
 spectra issues check --rules-config team-spectra.yml
 spectra issues list --status open
 spectra issues acknowledge issue-123

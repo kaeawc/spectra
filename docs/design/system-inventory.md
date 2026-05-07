@@ -296,6 +296,7 @@ exposes config. Until then, retention is hardcoded.
   host identity, registry lifecycle, baselines, retention, and diff
   workflows
 - [storage.md](storage.md) — where snapshots are persisted
-- [../inspection/](../inspection/) — per-collector deep dives
+- [../inspection/metadata.md](../inspection/metadata.md) —
+  per-collector deep dives start with bundle metadata
 - [recommendations-engine.md](recommendations-engine.md) — what fires
   against this data

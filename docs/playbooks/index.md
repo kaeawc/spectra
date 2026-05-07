@@ -15,7 +15,7 @@ Use them when the question is operational:
 | Another Mac is behaving differently | [Remote triage](remote-triage.md) |
 | Builds or tools differ across machines | [Toolchain drift](toolchain-drift.md) |
 
-The collector reference remains under [Inspection](../inspection/). The
+The collector reference starts at [Inspection metadata](../inspection/metadata.md). The
 playbooks link back to those pages when the next step is to understand a
 specific data source or JSON field.
 

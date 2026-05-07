@@ -26,7 +26,8 @@ bundles, live process/network/storage/toolchain inventory, snapshots,
 baseline diffs, recommendations, and JSON-RPC calls to a local or explicit
 TCP daemon. See
 [detection/overview.md](detection/overview.md) for the framework detection
-model, [inspection/](inspection/) for what we extract from each bundle, and
+model, [inspection/metadata.md](inspection/metadata.md) for what we
+extract from each bundle, and
 [design/architecture.md](design/architecture.md) for where this is heading.
 
 ```

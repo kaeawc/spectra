@@ -79,6 +79,47 @@ rules:
 	}
 }
 
+func TestLoadRuleCatalogLoadsYAMLRules(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(path, []byte(`
+- id: yaml-host
+  severity: info
+  match: "true"
+  message: "host finding"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{RulePaths: []string{path}}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := findRule(catalog, "yaml-host")
+	if rule == nil {
+		t.Fatal("yaml-host missing")
+	}
+	if rule.Source != path {
+		t.Fatalf("source = %q, want %q", rule.Source, path)
+	}
+}
+
+func TestLoadRuleCatalogRejectsYAMLDuplicateBuiltIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(path, []byte(`
+- id: app-unsigned
+  severity: info
+  match: "true"
+  message: "duplicate"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadRuleCatalogWithOptions(ruleCatalogOptions{RulePaths: []string{path}}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("loadRuleCatalogWithOptions succeeded, want duplicate ID error")
+	}
+}
+
 func findRule(catalog []rules.Rule, id string) *rules.Rule {
 	for i := range catalog {
 		if catalog[i].ID == id {
