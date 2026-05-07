@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -68,6 +70,24 @@ func TestNewIDFormat(t *testing.T) {
 	}
 	if len(parts[2]) != 4 {
 		t.Errorf("part 2 = %q, want 4-digit suffix", parts[2])
+	}
+}
+
+func TestBuildUsesInjectedClockAndIDGenerator(t *testing.T) {
+	at := time.Date(2026, 5, 7, 12, 34, 56, 0, time.UTC)
+	snap := Build(context.Background(), Options{
+		Clock:         clock.NewFake(at),
+		IDGenerator:   idgen.NewSequence("snap-test"),
+		SkipApps:      true,
+		SkipProcesses: true,
+		SkipStorage:   true,
+		SkipJVMs:      true,
+	})
+	if snap.ID != "snap-test-1" {
+		t.Fatalf("ID = %q, want snap-test-1", snap.ID)
+	}
+	if !snap.TakenAt.Equal(at) {
+		t.Fatalf("TakenAt = %v, want %v", snap.TakenAt, at)
 	}
 }
 

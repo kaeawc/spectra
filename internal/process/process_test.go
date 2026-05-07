@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // fakePS returns a CmdRunner that feeds canned ps output.
@@ -98,6 +100,22 @@ func TestCollectAll(t *testing.T) {
 	procs := CollectAll(context.Background(), opts)
 	if len(procs) != 4 {
 		t.Errorf("CollectAll: got %d procs, want 4", len(procs))
+	}
+}
+
+func TestCollectAllWithProcRunner(t *testing.T) {
+	runner := proc.NewFake().OnExact("ps", []string{"-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="}, proc.Response{
+		Result: proc.Result{Stdout: []byte(psFixture)},
+	})
+	procs := CollectAll(context.Background(), CollectOptions{
+		Runner:          runner,
+		DetailCollector: func([]Info) map[int]Details { return nil },
+	})
+	if len(procs) != 4 {
+		t.Fatalf("CollectAll: got %d procs, want 4", len(procs))
+	}
+	if got := runner.CallCount(); got != 1 {
+		t.Fatalf("CallCount = %d, want 1", got)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/helperclient"
+	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/livehistory"
 	"github.com/kaeawc/spectra/internal/logger"
@@ -73,6 +74,7 @@ type Options struct {
 	DBPath           string              // empty = store.DefaultPath()
 	CacheRegistry    *cache.Registry     // nil = cache.Default
 	DetectStore      *cache.ShardedStore // nil = no detect caching
+	DetectWriter     *cache.AsyncWriter  // nil = sync writes or daemon-created writer
 	ArtifactRecorder artifact.Recorder   // nil = default per-user manifest
 	Logger           logger.Logger       // nil = discard
 }
@@ -190,6 +192,11 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	if cacheReg == nil {
 		cacheReg = cache.Default
 	}
+	detectWriter := opts.DetectWriter
+	if detectWriter == nil && opts.DetectStore != nil {
+		detectWriter = cache.NewAsyncWriter(opts.DetectStore, 128, 2)
+		defer detectWriter.Close()
+	}
 	artifactRecorder := opts.ArtifactRecorder
 	if artifactRecorder == nil {
 		path, err := artifact.DefaultManifestPath()
@@ -200,7 +207,7 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, artifactRecorder, tsnetStatus, tsNode)
+	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
 	go func() {
@@ -424,10 +431,11 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	if history == nil {
 		history = livehistory.NewRing(livehistory.DefaultCapacity)
 	}
+	issueSvc := issueflow.Service{Store: db}
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		result := map[string]any{"ok": true, "version": version}
 		if tsnetStatus != nil {
@@ -474,6 +482,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
 			DetectStore:    detectStore,
+			DetectWriter:   detectWriter,
 		})
 		if err := db.SaveSnapshot(context.Background(), store.FromSnapshot(snap)); err != nil {
 			return nil, err
@@ -670,6 +679,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 				SpectraVersion: version,
 				DetectOpts:     detect.Options{},
 				DetectStore:    detectStore,
+				DetectWriter:   detectWriter,
 			})
 		}
 		return rules.Evaluate(snap, rules.V1Catalog()), nil
@@ -698,6 +708,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 				SpectraVersion: version,
 				DetectOpts:     detect.Options{},
 				DetectStore:    detectStore,
+				DetectWriter:   detectWriter,
 			})
 			snapInput := store.FromSnapshot(snap)
 			if err := db.SaveSnapshot(context.Background(), snapInput); err != nil {
@@ -777,7 +788,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Status == "" {
 			return nil, fmt.Errorf("issues.update requires {\"id\": \"...\", \"status\": \"...\"}")
 		}
-		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueStatus(p.Status)); err != nil {
+		if err := issueSvc.Update(context.Background(), p.ID, store.IssueStatus(p.Status)); err != nil {
 			return nil, err
 		}
 		return map[string]any{"id": p.ID, "status": p.Status}, nil
@@ -792,7 +803,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 			return nil, fmt.Errorf("issues.acknowledge requires {\"id\": \"...\"}")
 		}
-		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueAcknowledged); err != nil {
+		if err := issueSvc.Acknowledge(context.Background(), p.ID); err != nil {
 			return nil, err
 		}
 		return map[string]any{"id": p.ID, "status": "acknowledged"}, nil
@@ -807,7 +818,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
 			return nil, fmt.Errorf("issues.dismiss requires {\"id\": \"...\"}")
 		}
-		if err := db.UpdateIssueStatus(context.Background(), p.ID, store.IssueDismissed); err != nil {
+		if err := issueSvc.Dismiss(context.Background(), p.ID); err != nil {
 			return nil, err
 		}
 		return map[string]any{"id": p.ID, "status": "dismissed"}, nil
@@ -820,7 +831,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
 			return nil, fmt.Errorf("issues.fix.record requires {\"issue_id\": \"...\"}")
 		}
-		id, err := db.RecordAppliedFix(context.Background(), p)
+		id, err := issueSvc.RecordFix(context.Background(), p)
 		if err != nil {
 			return nil, err
 		}
@@ -836,7 +847,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
 			return nil, fmt.Errorf("issues.fix.list requires {\"issue_id\": \"...\"}")
 		}
-		return db.ListAppliedFixes(context.Background(), p.IssueID)
+		return issueSvc.FixHistory(context.Background(), p.IssueID)
 	})
 
 	// jvm.list — list all running JVM processes.

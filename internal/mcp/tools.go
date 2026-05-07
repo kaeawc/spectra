@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -855,7 +856,8 @@ func (s *Server) toolIssuesUpdateStatus(db *store.DB, p issuesParams) ToolResult
 	if p.Operation == "dismiss" {
 		status = store.IssueDismissed
 	}
-	if err := db.UpdateIssueStatus(context.Background(), p.ID, status); err != nil {
+	svc := issueflow.Service{Store: db}
+	if err := svc.Update(context.Background(), p.ID, status); err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: s.now()})
@@ -865,7 +867,8 @@ func (s *Server) toolIssuesRecordFix(db *store.DB, p issuesParams) ToolResult {
 	if p.IssueID == "" {
 		return toolError("issues record_fix requires issue_id")
 	}
-	id, err := db.RecordAppliedFix(context.Background(), store.AppliedFixInput{IssueID: p.IssueID, AppliedBy: p.AppliedBy, Command: p.Command, Output: p.Output, ExitCode: p.ExitCode})
+	svc := issueflow.Service{Store: db}
+	id, err := svc.RecordFix(context.Background(), store.AppliedFixInput{IssueID: p.IssueID, AppliedBy: p.AppliedBy, Command: p.Command, Output: p.Output, ExitCode: p.ExitCode})
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -876,7 +879,8 @@ func (s *Server) toolIssuesFixHistory(db *store.DB, p issuesParams) ToolResult {
 	if p.IssueID == "" {
 		return toolError("issues fix_history requires issue_id")
 	}
-	rows, err := db.ListAppliedFixes(context.Background(), p.IssueID)
+	svc := issueflow.Service{Store: db}
+	rows, err := svc.FixHistory(context.Background(), p.IssueID)
 	if err != nil {
 		return toolError(err.Error())
 	}

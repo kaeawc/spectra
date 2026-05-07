@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -48,6 +50,14 @@ type Snapshot struct {
 type Options struct {
 	// SpectraVersion is recorded on HostInfo.
 	SpectraVersion string
+
+	// Clock controls snapshot timestamps and default snapshot IDs.
+	// Zero value uses the system clock.
+	Clock clock.Clock
+
+	// IDGenerator overrides snapshot ID generation. When nil, IDs retain the
+	// historical snap-YYYYMMDDTHHMMSSZ-NNNN format derived from Clock.
+	IDGenerator idgen.Generator
 
 	// HostCollector gathers host identity and capacity facts.
 	// Zero value uses the live machine collector.
@@ -104,15 +114,24 @@ type Options struct {
 	// collectApps serves cached results keyed by Info.plist + main-exe hash and
 	// stores new results on miss.
 	DetectStore *cache.ShardedStore
+
+	// DetectWriter optionally writes detect-cache misses asynchronously.
+	// DetectStore must also be set; nil writes synchronously.
+	DetectWriter *cache.AsyncWriter
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
 // composing their results. Any collector failure is silently absorbed
 // per the system-inventory contract — partial snapshots are valid.
 func Build(ctx context.Context, opts Options) Snapshot {
+	clk := opts.Clock
+	if clk == nil {
+		clk = clock.System{}
+	}
+	takenAt := clk.Now().UTC()
 	s := Snapshot{
-		ID:      newID(),
-		TakenAt: time.Now().UTC(),
+		ID:      newIDWith(takenAt, opts.IDGenerator),
+		TakenAt: takenAt,
 		Kind:    KindLive,
 	}
 	appPaths := snapshotAppPaths(opts)
@@ -250,7 +269,7 @@ func collectApps(_ context.Context, opts Options) []detect.Result {
 		go func() {
 			defer wg.Done()
 			for i := range in {
-				r, err := detectWithCache(paths[i], opts.DetectOpts, opts.DetectStore)
+				r, err := detectWithCache(paths[i], opts.DetectOpts, opts.DetectStore, opts.DetectWriter)
 				out <- job{i: i, res: r, err: err}
 			}
 		}()
@@ -298,7 +317,13 @@ func scanApps(dir string) []string {
 // "snap-YYYYMMDDTHHMMSSZ-<short>". Stable across machines (UTC); short
 // suffix avoids collision when multiple snapshots run in the same second.
 func newID() string {
-	now := time.Now().UTC()
+	return newIDWith(time.Now().UTC(), nil)
+}
+
+func newIDWith(now time.Time, ids idgen.Generator) string {
+	if ids != nil {
+		return ids.Next()
+	}
 	short := now.Format("150405.000000")
 	short = strings.ReplaceAll(short, ".", "")
 	return "snap-" + now.Format("20060102T150405Z") + "-" + short[len(short)-4:]

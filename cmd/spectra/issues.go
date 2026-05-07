@@ -116,7 +116,8 @@ func runIssuesUpdate(args []string) int {
 	defer db.Close()
 
 	id := fs.Arg(0)
-	if err := db.UpdateIssueStatus(context.Background(), id, store.IssueStatus(*status)); err != nil {
+	svc := issueflow.Service{Store: db}
+	if err := svc.Update(context.Background(), id, store.IssueStatus(*status)); err != nil {
 		fmt.Fprintf(os.Stderr, "update %q: %v\n", id, err)
 		return 1
 	}
@@ -151,7 +152,8 @@ func runIssuesSetStatus(args []string, verb string, status store.IssueStatus) in
 	defer db.Close()
 
 	id := fs.Arg(0)
-	if err := db.UpdateIssueStatus(context.Background(), id, status); err != nil {
+	svc := issueflow.Service{Store: db}
+	if err := svc.Update(context.Background(), id, status); err != nil {
 		fmt.Fprintf(os.Stderr, "%s %q: %v\n", verb, id, err)
 		return 1
 	}
@@ -181,7 +183,8 @@ func runIssuesRecordFix(args []string) int {
 	}
 	defer db.Close()
 
-	id, err := db.RecordAppliedFix(context.Background(), store.AppliedFixInput{
+	svc := issueflow.Service{Store: db}
+	id, err := svc.RecordFix(context.Background(), store.AppliedFixInput{
 		IssueID:   fs.Arg(0),
 		AppliedBy: *appliedBy,
 		Command:   *command,
@@ -215,7 +218,8 @@ func runIssuesFixHistory(args []string) int {
 	}
 	defer db.Close()
 
-	rows, err := db.ListAppliedFixes(context.Background(), fs.Arg(0))
+	svc := issueflow.Service{Store: db}
+	rows, err := svc.FixHistory(context.Background(), fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fix history for %q: %v\n", fs.Arg(0), err)
 		return 1

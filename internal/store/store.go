@@ -5,7 +5,6 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/idgen"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
@@ -29,13 +31,26 @@ func DefaultPath() (string, error) {
 // DB is a thin wrapper around *sql.DB that owns schema setup and the
 // canonical read/write operations for Spectra's relational tier.
 type DB struct {
-	db *sql.DB
+	db    *sql.DB
+	clock clock.Clock
+	ids   idgen.Generator
+}
+
+// Options configures DB dependencies that need deterministic tests.
+type Options struct {
+	Clock       clock.Clock
+	IDGenerator idgen.Generator
 }
 
 // Open opens (or creates) the SQLite database at path. It applies all
 // pragmas and runs the schema migration on first use. Caller is
 // responsible for Close().
 func Open(path string) (*DB, error) {
+	return OpenWithOptions(path, Options{})
+}
+
+// OpenWithOptions opens a database with injectable time and ID generation.
+func OpenWithOptions(path string, opts Options) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store: mkdir %s: %w", filepath.Dir(path), err)
 	}
@@ -46,7 +61,14 @@ func Open(path string) (*DB, error) {
 	// One writer at a time is fine; WAL allows concurrent readers.
 	db.SetMaxOpenConns(1)
 
-	s := &DB{db: db}
+	if opts.Clock == nil {
+		opts.Clock = clock.System{}
+	}
+	if opts.IDGenerator == nil {
+		opts.IDGenerator = idgen.UUID{}
+	}
+
+	s := &DB{db: db, clock: opts.Clock, ids: opts.IDGenerator}
 	if err := s.applyPragmas(); err != nil {
 		db.Close()
 		return nil, err
@@ -916,7 +938,7 @@ func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, f
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowString()
 	var ids []string
 	for _, f := range findings {
 		var existingID string
@@ -957,7 +979,7 @@ func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, f
 		}
 
 		// New issue.
-		id := newID()
+		id := s.newID()
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO issues
 			    (id, rule_id, machine_uuid, subject, severity, message, fix,
@@ -1007,7 +1029,7 @@ func (s *DB) ListIssues(ctx context.Context, machineUUID string, status IssueSta
 
 // UpdateIssueStatus transitions an issue to a new status.
 func (s *DB) UpdateIssueStatus(ctx context.Context, id string, status IssueStatus) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowString()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE issues SET status=?, updated_at=? WHERE id=?`,
 		string(status), now, id)
@@ -1023,8 +1045,8 @@ func (s *DB) UpdateIssueStatus(ctx context.Context, id string, status IssueStatu
 
 // RecordAppliedFix inserts a new applied_fixes row.
 func (s *DB) RecordAppliedFix(ctx context.Context, fix AppliedFixInput) (string, error) {
-	id := newID()
-	now := time.Now().UTC().Format(time.RFC3339)
+	id := s.newID()
+	now := s.nowString()
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO applied_fixes (id, issue_id, applied_at, applied_by, command, output, exit_code)
 		VALUES (?,?,?,?,?,?,?)`,
@@ -1086,13 +1108,18 @@ func scanIssueRows(rows *sql.Rows) ([]IssueRow, error) {
 	return out, rows.Err()
 }
 
-// newID generates a unique ID for a new record. Uses random to avoid
-// importing the idgen package and creating a cycle.
-func newID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback: use timestamp nano as hex.
-		return fmt.Sprintf("%016x", time.Now().UnixNano())
+func (s *DB) nowString() string {
+	clk := s.clock
+	if clk == nil {
+		clk = clock.System{}
 	}
-	return fmt.Sprintf("%016x", b)
+	return clk.Now().UTC().Format(time.RFC3339)
+}
+
+func (s *DB) newID() string {
+	ids := s.ids
+	if ids == nil {
+		ids = idgen.UUID{}
+	}
+	return ids.Next()
 }

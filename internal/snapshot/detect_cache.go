@@ -17,7 +17,7 @@ import (
 // file changes.
 //
 // store may be nil, in which case the function falls through to a live Detect.
-func detectWithCache(appPath string, opts detect.Options, store *cache.ShardedStore) (detect.Result, error) {
+func detectWithCache(appPath string, opts detect.Options, store *cache.ShardedStore, writer *cache.AsyncWriter) (detect.Result, error) {
 	if store == nil {
 		return detect.DetectWith(appPath, opts)
 	}
@@ -35,7 +35,11 @@ func detectWithCache(appPath string, opts detect.Options, store *cache.ShardedSt
 	r, err := detect.DetectWith(appPath, opts)
 	if err == nil && key != nil {
 		if blob, jerr := json.Marshal(r); jerr == nil {
-			_ = store.Put(key, blob)
+			if writer != nil {
+				writer.Write(key, blob)
+			} else {
+				_ = store.Put(key, blob)
+			}
 		}
 	}
 	return r, err

@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
@@ -19,6 +21,17 @@ func openTestDB(t *testing.T) *DB {
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func openTestDBWithOptions(t *testing.T, opts Options) *DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenWithOptions(path, opts)
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
@@ -439,6 +452,42 @@ func TestRecordAndListAppliedFixes(t *testing.T) {
 	}
 	if fixes[0].Command != "docker system prune" {
 		t.Errorf("command = %q", fixes[0].Command)
+	}
+}
+
+func TestStoreOptionsControlIssueIDsAndTimestamps(t *testing.T) {
+	at := time.Date(2026, 5, 7, 12, 34, 56, 0, time.UTC)
+	db := openTestDBWithOptions(t, Options{
+		Clock:       clock.NewFake(at),
+		IDGenerator: idgen.NewSequence("issue"),
+	})
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+
+	ids, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, []FindingInput{
+		{RuleID: "rule-Z", Subject: "App", Severity: "low", Message: "minor"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertIssues: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "issue-1" {
+		t.Fatalf("ids = %v, want [issue-1]", ids)
+	}
+
+	rows, err := db.ListIssues(ctx, "TEST-UUID-1234", "")
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if got := rows[0].CreatedAt; !got.Equal(at) {
+		t.Fatalf("CreatedAt = %v, want %v", got, at)
+	}
+
+	fixID, err := db.RecordAppliedFix(ctx, AppliedFixInput{IssueID: ids[0], Command: "fix"})
+	if err != nil {
+		t.Fatalf("RecordAppliedFix: %v", err)
+	}
+	if fixID != "issue-2" {
+		t.Fatalf("fixID = %q, want issue-2", fixID)
 	}
 }
 
