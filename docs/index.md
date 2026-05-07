@@ -28,7 +28,8 @@ TCP daemon. See
 [detection/overview.md](detection/overview.md) for the framework detection
 model, [inspection/metadata.md](inspection/metadata.md) for what we
 extract from each bundle, and
-[design/architecture.md](design/architecture.md) for where this is heading.
+[design/architecture.md](design/architecture.md) for the daemon, helper,
+and client model.
 
 ```
 ./spectra /Applications/Slack.app           # one app, terse table
@@ -41,21 +42,23 @@ extract from each bundle, and
 ./spectra connect 127.0.0.1:7878            # health check over RPC
 ```
 
-## What's Planned
+## Implemented And Planned
 
-- **tsnet remote portal** — `spectra connect work-mac` from your laptop to
-  inspect a teammate's machine over the tailnet without manually exposing a
-  TCP listener. See
+- **tsnet remote portal** — `spectra serve --tsnet` exposes a managed
+  tailnet daemon, and `spectra connect work-mac` can inspect it through
+  MagicDNS without manually exposing a TCP listener. See
   [design/remote-portal.md](design/remote-portal.md).
 - **Remote fan-out** — `spectra fan --hosts ...` runs one typed remote
   call across multiple explicit daemon targets; `spectra hosts` lists
-  locally known hosts from snapshots while automatic discovery is still
-  planned.
+  locally known hosts from snapshots and `--discover-daemons` probes
+  reachable Spectra daemons discovered through Tailscale.
 - **TUI client** — Bubble Tea UI against the same local-or-remote daemon
   RPC surface.
 - **Release packaging** — the user LaunchAgent installer exists;
   Homebrew formula, prebuilt binaries, signing, and notarization are
-  still planned.
+  still planned. See [operations/daemon.md](operations/daemon.md) and
+  [operations/remote.md](operations/remote.md) for implemented service
+  and remote operation details.
 
 ## Distribution
 

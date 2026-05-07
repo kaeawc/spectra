@@ -69,8 +69,9 @@ mode (see [../design/privileged-helper.md](../design/privileged-helper.md)).
 The current unprivileged path uses `lsof`, `scutil`, `route`, `ifconfig`,
 `nettop`, and `/etc/hosts`. `lsof` is also where current socket owner
 attribution comes from; its visibility is limited to what the invoking user can
-see unless a future helper-backed collector is used. Raw packet capture is
-reserved for explicit future live workflows.
+see unless the privileged helper is installed and the caller uses a
+helper-backed collector. Raw packet capture is reserved for explicit live
+capture workflows.
 
 `internal/netproto` contains protocol parsers that capture collectors use to
 summarize packet metadata without storing request or response bodies. The

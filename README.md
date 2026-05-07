@@ -39,20 +39,22 @@ also extracts every URL host referenced in the binary and `app.asar`.
 
 ## Status
 
-Today: a single-binary CLI that does deep, single-host static inspection
-of `.app` bundles. 17 tests, ~10s to scan all 100 apps in `/Applications`.
+Today: a Go CLI plus optional daemon and privileged helper. Spectra does
+deep `.app` inspection, live process/network/storage/power inventory,
+JVM and toolchain diagnostics, SQLite-backed snapshots and diffs,
+recommendation rules, issue tracking, JSON-RPC over Unix socket or
+explicit TCP, and optional Tailscale `tsnet` daemon exposure.
 
-Heading toward: a daemon-with-clients architecture that exposes the same
-inspection over JSON-RPC, talks to peers over Tailscale via `tsnet`,
-adds VisualVM-class JVM introspection, and runs a CEL-based
-recommendations engine over snapshots stored in SQLite.
+Implemented code with passing tests is treated as complete in the docs.
+Code whose tests are failing or absent is documented as partial until the
+test suite catches up.
 
 ## Documentation
 
 Full living docs at [`docs/`](docs/index.md):
 
 - [Quickstart](docs/quickstart.md) — common commands and outputs
-- [Architecture](docs/design/architecture.md) — where this is heading
+- [Architecture](docs/design/architecture.md) — daemon, helper, and clients
 - [Distribution](docs/design/distribution.md) — why MAS is out, why Homebrew
 - [Storage stack](docs/design/storage.md) — SQLite + sharded blob store
 - [Detection model](docs/detection/overview.md) — the three-layer classifier
