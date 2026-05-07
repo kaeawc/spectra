@@ -1,7 +1,8 @@
 # Install
 
-Spectra is currently distributed only via source build. Homebrew formula and
-prebuilt binaries are planned (see
+Spectra is currently distributed via source build. The repo also contains
+release packaging for Homebrew and macOS tarball archives, but published
+formulae and signed/notarized binaries are release-owner tasks (see
 [design/distribution.md](design/distribution.md)).
 
 ## From source
@@ -36,8 +37,36 @@ brew install kaeawc/tap/spectra
 spectra /Applications/Slack.app
 ```
 
-The formula is not published yet; source build is the supported path for
-now.
+The formula template lives at `packaging/homebrew/spectra.rb`. It builds
+`spectra`, `spectra-mcp`, and `spectra-helper` from source and does not
+install the privileged helper automatically. Publishing requires replacing
+the placeholder tag and checksum in the template and copying it into the
+tap repository.
+
+## Prebuilt archives
+
+Release owners can build unsigned local archives with:
+
+```bash
+make dist
+```
+
+This writes `dist/spectra_<version>_darwin_arm64.tar.gz`,
+`dist/spectra_<version>_darwin_amd64.tar.gz`, and `dist/checksums.txt`.
+To sign binaries inside the archives:
+
+```bash
+CODESIGN_ID="Developer ID Application: Example Corp (TEAMID)" make dist
+```
+
+To submit built archives to Apple's notary service:
+
+```bash
+NOTARY_PROFILE=spectra-notary make notarize
+```
+
+The notary profile must already exist in the local keychain via
+`xcrun notarytool store-credentials`.
 
 ## Privileged helper
 
