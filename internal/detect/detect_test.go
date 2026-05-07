@@ -505,6 +505,8 @@ func TestNodeAppInspectorDependenciesWithFakeFS(t *testing.T) {
 	fsys.addDir(filepath.Join(app, "Contents/Frameworks/Squirrel.framework"))
 	fsys.addDir(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/node-pty"))
 	fsys.addDir(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg"))
+	fsys.addDir(filepath.Join(app, "Contents/Resources/app/node_modules/better-sqlite3"))
+	fsys.addDir(filepath.Join(app, "Contents/Resources/app/node_modules/node-pty"))
 	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/a.jar"), "")
 	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/readme.txt"), "")
 
@@ -515,8 +517,8 @@ func TestNodeAppInspectorDependenciesWithFakeFS(t *testing.T) {
 	if got := strings.Join(deps.ThirdPartyFrameworks, ","); got != "Squirrel" {
 		t.Fatalf("ThirdPartyFrameworks = %q, want Squirrel", got)
 	}
-	if got := strings.Join(deps.NPMPackages, ","); got != "@scope/pkg,node-pty" {
-		t.Fatalf("NPMPackages = %q, want @scope/pkg,node-pty", got)
+	if got := strings.Join(deps.NPMPackages, ","); got != "@scope/pkg,better-sqlite3,node-pty" {
+		t.Fatalf("NPMPackages = %q, want @scope/pkg,better-sqlite3,node-pty", got)
 	}
 	if deps.JavaJars != 1 {
 		t.Fatalf("JavaJars = %d, want 1", deps.JavaJars)
