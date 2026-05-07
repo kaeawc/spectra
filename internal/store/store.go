@@ -905,7 +905,9 @@ type AppliedFixRow struct {
 // UpsertIssues reconciles a slice of findings against the issues table.
 // For each finding, it looks up an existing open/acknowledged issue by
 // (rule_id, machine_uuid, subject). If found, last_seen_snapshot_id and
-// updated_at are refreshed. If not found, a new open issue is inserted.
+// updated_at are refreshed. Dismissed issues suppress later matching
+// findings. If no active or dismissed issue exists, a new open issue is
+// inserted.
 // Returns the IDs of all touched (inserted or updated) issues.
 func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, findings []FindingInput) ([]string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -939,6 +941,19 @@ func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, f
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("store: lookup issue: %w", err)
+		}
+		var dismissedID string
+		err = tx.QueryRowContext(ctx, `
+			SELECT id FROM issues
+			WHERE rule_id=? AND machine_uuid=? AND subject=? AND status='dismissed'
+			LIMIT 1`,
+			f.RuleID, machineUUID, f.Subject,
+		).Scan(&dismissedID)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: lookup dismissed issue: %w", err)
 		}
 
 		// New issue.

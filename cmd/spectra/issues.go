@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/kaeawc/spectra/internal/detect"
+	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
@@ -19,6 +22,8 @@ func issuesSubcommands() []subcommand {
 		{"update", "Update an issue status", runIssuesUpdate},
 		{"acknowledge", "Mark an issue acknowledged", runIssuesAcknowledge},
 		{"dismiss", "Mark an issue dismissed", runIssuesDismiss},
+		{"record-fix", "Record a fix attempt for an issue", runIssuesRecordFix},
+		{"fix-history", "List recorded fix attempts for an issue", runIssuesFixHistory},
 		{"check", "Run rules, record findings as issues, and print a summary", runIssuesCheck},
 	}
 }
@@ -154,6 +159,89 @@ func runIssuesSetStatus(args []string, verb string, status store.IssueStatus) in
 	return 0
 }
 
+func runIssuesRecordFix(args []string) int {
+	fs := flag.NewFlagSet("spectra issues record-fix", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	appliedBy := fs.String("applied-by", "", "Actor that applied the fix")
+	command := fs.String("command", "", "Command or action taken")
+	output := fs.String("output", "", "Command output or result note")
+	exitCode := fs.Int("exit-code", 0, "Command exit code")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: spectra issues record-fix [--applied-by user] [--command cmd] [--output text] [--exit-code code] <issue-id>")
+		return 2
+	}
+
+	db, _, err := openIssuesDB()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	id, err := db.RecordAppliedFix(context.Background(), store.AppliedFixInput{
+		IssueID:   fs.Arg(0),
+		AppliedBy: *appliedBy,
+		Command:   *command,
+		Output:    *output,
+		ExitCode:  *exitCode,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "record fix for %q: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	fmt.Printf("recorded fix %s for issue %s\n", id, fs.Arg(0))
+	return 0
+}
+
+func runIssuesFixHistory(args []string) int {
+	fs := flag.NewFlagSet("spectra issues fix-history", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: spectra issues fix-history [--json] <issue-id>")
+		return 2
+	}
+
+	db, _, err := openIssuesDB()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer db.Close()
+
+	rows, err := db.ListAppliedFixes(context.Background(), fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fix history for %q: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(rows)
+		return 0
+	}
+	if len(rows) == 0 {
+		fmt.Printf("no fix history for issue %s\n", fs.Arg(0))
+		return 0
+	}
+	fmt.Printf("%-20s  %-20s  %-12s  %-8s  %s\n", "ID", "APPLIED_AT", "APPLIED_BY", "EXIT", "COMMAND")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, r := range rows {
+		fmt.Printf("%-20s  %-20s  %-12s  %-8d  %s\n",
+			truncate(r.ID, 20), r.AppliedAt.Format(time.RFC3339),
+			truncate(r.AppliedBy, 12), r.ExitCode, truncate(r.Command, 60),
+		)
+	}
+	fmt.Printf("\n%d fix attempt(s)\n", len(rows))
+	return 0
+}
+
 // runIssuesCheck evaluates V1 rules against a live or stored snapshot,
 // persists the findings as issues, and prints a human-readable summary.
 func runIssuesCheck(args []string) int {
@@ -166,49 +254,32 @@ func runIssuesCheck(args []string) int {
 		return 2
 	}
 
-	var snap snapshot.Snapshot
-	if *snapID != "" {
-		s, err := loadStoredSnapshot(*snapID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "issues check: %v\n", err)
-			return 1
-		}
-		snap = *s
-	} else {
-		snap = snapshot.Build(context.Background(), snapshot.Options{
-			SpectraVersion: version,
-		})
-		// Persist the snapshot so issues can reference it.
-		if err := saveSnapshot(snap); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not persist snapshot: %v\n", err)
-		}
-	}
-
 	catalog, err := loadRuleCatalog(*rulesConfig, os.Stderr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issues check: %v\n", err)
 		return 1
 	}
-	findings := rules.Evaluate(snap, catalog)
-
-	// Record findings as issues.
-	db, machineUUID, err := openIssuesDB()
-	if err == nil {
-		defer db.Close()
-		var inputs []store.FindingInput
-		for _, f := range findings {
-			inputs = append(inputs, store.FindingInput{
-				RuleID:   f.RuleID,
-				Subject:  f.Subject,
-				Severity: string(f.Severity),
-				Message:  f.Message,
-				Fix:      f.Fix,
-			})
-		}
-		if _, err := db.UpsertIssues(context.Background(), machineUUID, snap.ID, inputs); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not record issues: %v\n", err)
-		}
+	db, _, err := openIssuesDB()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
+	defer db.Close()
+
+	svc := issueflow.Service{
+		Store:         db,
+		SnapshotStore: cliSnapshotStore{db: db},
+		Snapshots:     cliSnapshotSource{version: version},
+		Engine: issueflow.EngineFunc(func(s snapshot.Snapshot) []rules.Finding {
+			return rules.Evaluate(s, catalog)
+		}),
+	}
+	result, err := svc.Check(context.Background(), issueflow.CheckOptions{SnapshotID: *snapID})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issues check: %v\n", err)
+		return 1
+	}
+	findings := result.Findings
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -223,6 +294,45 @@ func runIssuesCheck(args []string) int {
 	}
 	printFindings(findings)
 	return 0
+}
+
+type cliSnapshotSource struct {
+	version string
+}
+
+func (s cliSnapshotSource) Live(ctx context.Context) (snapshot.Snapshot, error) {
+	return snapshot.Build(ctx, snapshot.Options{
+		SpectraVersion: s.version,
+		DetectOpts:     detect.Options{},
+	}), nil
+}
+
+func (cliSnapshotSource) Stored(_ context.Context, id string) (snapshot.Snapshot, error) {
+	s, err := loadStoredSnapshot(id)
+	if err != nil {
+		return snapshot.Snapshot{}, err
+	}
+	return *s, nil
+}
+
+type cliSnapshotStore struct {
+	db *store.DB
+}
+
+func (s cliSnapshotStore) SaveSnapshot(ctx context.Context, snap store.SnapshotInput) error {
+	return s.db.SaveSnapshot(ctx, snap)
+}
+
+func (s cliSnapshotStore) SaveSnapshotProcesses(ctx context.Context, snapshotID string, processes []store.ProcessSnapshotRow) error {
+	return s.db.SaveSnapshotProcesses(ctx, snapshotID, processes)
+}
+
+func (s cliSnapshotStore) SaveLoginItems(ctx context.Context, snapshotID string, items []store.LoginItemRow) error {
+	return s.db.SaveLoginItems(ctx, snapshotID, items)
+}
+
+func (s cliSnapshotStore) SaveGrantedPerms(ctx context.Context, snapshotID string, perms []store.GrantedPermRow) error {
+	return s.db.SaveGrantedPerms(ctx, snapshotID, perms)
 }
 
 // openIssuesDB opens the default DB and returns the machine UUID from the
