@@ -261,6 +261,63 @@ func TestReadTauriVersion(t *testing.T) {
 	}
 }
 
+func TestReadTauriVersionFallsBackToJSON5WithFakeReader(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "FakeTauri.app")
+	fsys := newFakeNodeFS()
+	fsys.addFile(filepath.Join(app, "Contents", "Resources", "tauri.conf.json5"), `{"version":"2.2.0"}`)
+	if got := readTauriVersionWith(app, fsys); got != "2.2.0" {
+		t.Errorf("readTauriVersionWith = %q, want 2.2.0", got)
+	}
+}
+
+func TestTauriInspectionPromotesAppKitWebKitWithRustMarkers(t *testing.T) {
+	r := Result{UI: "Unknown", Runtime: "unknown", Confidence: "low"}
+	exe := "/Fake.app/Contents/MacOS/main"
+	classifyByLinkedLibsWith(exe, &r, fakeNodeCommands{
+		libs: map[string][]string{filepath.Clean(exe): {
+			"/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+			"/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit",
+		}},
+	})
+	classifyByStringsWith(exe, &r, fakeMarkerScanner{
+		markers: binaryMarkers{rustHits: 204},
+	})
+
+	if r.UI != "Tauri" {
+		t.Fatalf("UI = %q, want Tauri; signals=%v", r.UI, r.Signals)
+	}
+	if r.Runtime != "Rust" || r.Language != "Rust" || r.Confidence != "high" {
+		t.Fatalf("got runtime=%q language=%q confidence=%q", r.Runtime, r.Language, r.Confidence)
+	}
+	if !hasHint(r.Signals, "links AppKit + WebKit (Tauri suspect)") {
+		t.Fatalf("signals = %v, want AppKit+WebKit signal", r.Signals)
+	}
+	if !hasHint(r.Signals, "204 Rust panic-site strings") {
+		t.Fatalf("signals = %v, want Rust marker count", r.Signals)
+	}
+}
+
+func TestTauriInspectionDoesNotPromoteWeakRustMarkers(t *testing.T) {
+	r := Result{UI: "Unknown", Runtime: "unknown", Confidence: "low"}
+	exe := "/Fake.app/Contents/MacOS/main"
+	classifyByLinkedLibsWith(exe, &r, fakeNodeCommands{
+		libs: map[string][]string{filepath.Clean(exe): {
+			"/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+			"/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit",
+		}},
+	})
+	classifyByStringsWith(exe, &r, fakeMarkerScanner{
+		markers: binaryMarkers{rustHits: 30},
+	})
+
+	if r.UI != "AppKit+WebKit" {
+		t.Fatalf("UI = %q, want AppKit+WebKit", r.UI)
+	}
+	if r.Confidence != "medium" {
+		t.Fatalf("confidence = %q, want medium", r.Confidence)
+	}
+}
+
 func TestDetectComposeDesktop(t *testing.T) {
 	app := makeBundle(t, "FakeKMP")
 	// Bundled JVM
@@ -688,6 +745,14 @@ func hasHint(hints []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type fakeMarkerScanner struct {
+	markers binaryMarkers
+}
+
+func (f fakeMarkerScanner) ScanMarkers(string) binaryMarkers {
+	return f.markers
 }
 
 func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {

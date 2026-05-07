@@ -11,6 +11,7 @@ versions, architectures, on-disk size, packaging, MAS receipt.
 | `AppVersion` | `Info.plist` `CFBundleShortVersionString` |
 | `BuildNumber` | `Info.plist` `CFBundleVersion` |
 | `ElectronVersion` | Electron Framework's own `Info.plist` `CFBundleVersion` |
+| `FrameworkVersions["Tauri"]` | `Contents/Resources/tauri.conf.json` or JSON-compatible `tauri.conf.json5` |
 | `Architectures` | `file <executable>` parsed for `arm64` / `x86_64` |
 | `BundleSizeBytes` | walk over bundle, sparse-aware (see [storage-footprint.md](storage-footprint.md)) |
 | `TeamID` | `codesign -dv` |

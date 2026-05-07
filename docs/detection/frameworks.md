@@ -22,6 +22,7 @@ confirmed examples from real apps. Layer numbers refer to
 - **Layer 2:** AppKit + WebKit linked.
 - **Layer 3:** Rust panic strings ≥ 100.
 - **Confirmed:** Conductor (204 Rust strings), Polyscope.
+- **Inspection details:** [../inspection/tauri.md](../inspection/tauri.md).
 
 ### Wails (Go + WebKit)
 - **Layer 2:** AppKit + WebKit linked.

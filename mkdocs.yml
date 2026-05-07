@@ -86,6 +86,7 @@ nav:
       - Storage footprint: inspection/storage-footprint.md
       - Node-based apps: inspection/node-based-apps.md
       - Network endpoints: inspection/network-endpoints.md
+      - Tauri apps: inspection/tauri.md
       - Helpers and XPC: inspection/helpers-and-xpc.md
       - Login items: inspection/login-items.md
       - Running processes: inspection/running-processes.md
