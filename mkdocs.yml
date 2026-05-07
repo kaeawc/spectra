@@ -81,6 +81,7 @@ nav:
   - Inspection:
       - Metadata: inspection/metadata.md
       - Security: inspection/security.md
+      - Swift apps: inspection/swift-apps.md
       - Storage footprint: inspection/storage-footprint.md
       - Network endpoints: inspection/network-endpoints.md
       - Helpers and XPC: inspection/helpers-and-xpc.md

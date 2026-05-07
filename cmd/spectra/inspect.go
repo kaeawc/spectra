@@ -170,6 +170,7 @@ func printMeta(r detect.Result) {
 	printIdentityMeta(r)
 	printSecurityMeta(r)
 	printPrivacyMeta(r)
+	printSwiftMeta(r)
 	printDependencyMeta(r)
 	printStructureMeta(r)
 	printRuntimeMeta(r)
@@ -233,6 +234,35 @@ func printPrivacyMeta(r detect.Result) {
 		}
 		sort.Strings(keys)
 		fmt.Printf("    privacy declared: %s\n", strings.Join(keys, ", "))
+	}
+}
+
+func printSwiftMeta(r detect.Result) {
+	if r.Swift == nil {
+		return
+	}
+	if len(r.Swift.RuntimeLibraries) > 0 {
+		fmt.Printf("    swift runtime: %s\n", truncateList(r.Swift.RuntimeLibraries, 5))
+	}
+	capabilities := []string{}
+	if r.Swift.UsesSwiftUI {
+		capabilities = append(capabilities, "SwiftUI")
+	}
+	if r.Swift.UsesAppIntents {
+		capabilities = append(capabilities, "AppIntents")
+	}
+	if r.Swift.UsesScreenCapture {
+		capabilities = append(capabilities, "ScreenCaptureKit")
+	}
+	if len(capabilities) > 0 {
+		fmt.Printf("    swift capabilities: %s\n", strings.Join(capabilities, ", "))
+	}
+	if len(r.Swift.AppGroups) > 0 {
+		fmt.Printf("    app groups: %s\n", truncateList(r.Swift.AppGroups, 4))
+	}
+	if len(r.Swift.AppleFrameworks) > 0 {
+		fmt.Printf("    apple frameworks (%d): %s\n", len(r.Swift.AppleFrameworks),
+			truncateList(r.Swift.AppleFrameworks, 6))
 	}
 }
 

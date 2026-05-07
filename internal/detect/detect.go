@@ -70,6 +70,10 @@ type Result struct {
 	// embedded npm packages.
 	Dependencies *Dependencies
 
+	// Swift summarises Swift runtime, Apple framework, and app-group
+	// signals for native Swift or Swift-hybrid apps.
+	Swift *SwiftInspection
+
 	// Helpers enumerates the bundle's sub-bundles: helper apps (Electron's
 	// GPU/Renderer/Plugin), XPC services, and plugins/extensions.
 	Helpers *Helpers
@@ -130,6 +134,17 @@ type Dependencies struct {
 	ThirdPartyFrameworks []string // names under Contents/Frameworks/, sans Apple
 	NPMPackages          []string // top-level dirs under app.asar.unpacked/node_modules
 	JavaJars             int      // count of .jar files (JVM apps)
+}
+
+// SwiftInspection describes Swift-specific app signals derived from shared
+// bundle inspection sources.
+type SwiftInspection struct {
+	RuntimeLibraries  []string // libswift*.dylib basenames
+	AppleFrameworks   []string // normalized linked Apple framework basenames
+	UsesSwiftUI       bool
+	UsesAppIntents    bool
+	UsesScreenCapture bool
+	AppGroups         []string
 }
 
 // StorageFootprint is the on-disk size, in bytes, of each well-known
@@ -262,9 +277,11 @@ func populateMetadata(appPath, exe string, r *Result) {
 	}
 	r.BundleSizeBytes, r.ApparentSizeBytes = bundleSizes(appPath)
 	r.TeamID, r.HardenedRuntime = readSigning(appPath)
-	r.Sandboxed, r.Entitlements = readEntitlements(appPath)
+	var appGroups []string
+	r.Sandboxed, r.Entitlements, appGroups = readEntitlementsDetail(appPath)
 	r.MASReceipt = exists(filepath.Join(appPath, "Contents", "_MASReceipt"))
 	r.Storage = scanStorage(appPath, r.BundleID)
+	r.Swift = inspectSwiftApp(appPath, exe, realSwiftInspectionSource{appGroups: appGroups})
 }
 
 func frameworkVersions(appPath string, r *Result) map[string]string {
@@ -490,13 +507,19 @@ func parseGatekeeperOutput(out string) string {
 }
 
 func readEntitlements(appPath string) (sandboxed bool, notable []string) {
+	sandboxed, notable, _ = readEntitlementsDetail(appPath)
+	return sandboxed, notable
+}
+
+func readEntitlementsDetail(appPath string) (sandboxed bool, notable, appGroups []string) {
 	out, err := exec.Command("codesign", "-d", "--entitlements", ":-", appPath).Output()
 	if err != nil || len(out) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 
 	// Pairs look like <key>NAME</key><true/> in the single-line XML output.
 	xml := string(out)
+	appGroups = applicationGroups(xml)
 	notableKeys := map[string]bool{
 		"com.apple.security.app-sandbox":                         true,
 		"com.apple.security.network.client":                      true,
@@ -523,7 +546,7 @@ func readEntitlements(appPath string) (sandboxed bool, notable []string) {
 		}
 	}
 	sort.Strings(notable)
-	return sandboxed, notable
+	return sandboxed, notable, appGroups
 }
 
 // --- Layer 1 ----------------------------------------------------------------
@@ -817,17 +840,7 @@ func otoolL(exe string) []string {
 	if err != nil {
 		return nil
 	}
-	var libs []string
-	for i, line := range strings.Split(string(out), "\n") {
-		if i == 0 {
-			continue // first line echoes the path
-		}
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
-			libs = append(libs, fields[0])
-		}
-	}
-	return libs
+	return parseOtoolLibraries(out)
 }
 
 // scanBinaryMarkers streams the binary looking for Rust and Go fingerprints,

@@ -49,10 +49,12 @@ confirmed examples from real apps. Layer numbers refer to
 - **Confirmed:** Keynote, Numbers, Ghostty, Tuple, iTerm (hybrid),
   Muse Hub, ChatGPT (no — see AppKit+Swift), Canary Mail, Airtime,
   InYourFace, MindNode, GarageBand.
+- **Inspection:** see [../inspection/swift-apps.md](../inspection/swift-apps.md).
 
 ### AppKit + Swift
 - **Layer 2:** `libswift*.dylib` linked but no SwiftUI.
 - **Confirmed:** ChatGPT, Pages, RemotePlay.
+- **Inspection:** see [../inspection/swift-apps.md](../inspection/swift-apps.md).
 
 ### AppKit (Obj-C)
 - **Layer 2:** AppKit/Cocoa linked, no Swift dylibs.
