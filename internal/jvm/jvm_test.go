@@ -465,6 +465,12 @@ java_command: com.example.Server
 	if info.JDKVersion != "21.0.6" {
 		t.Errorf("JDKVersion = %q", info.JDKVersion)
 	}
+	if info.Posture != "virtual-thread-production-baseline" {
+		t.Errorf("Posture = %q", info.Posture)
+	}
+	if len(info.Diagnostics.Capabilities) == 0 {
+		t.Fatal("Diagnostics capabilities are missing")
+	}
 	if info.VMArgs != "-Xmx2g" {
 		t.Errorf("VMArgs = %q", info.VMArgs)
 	}

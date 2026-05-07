@@ -14,6 +14,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/diag"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -939,12 +940,14 @@ func printJVMDetail(info jvm.Info) {
 	fmt.Printf("Main class    %s\n", strOrDash(info.MainClass))
 	fmt.Printf("JDK vendor    %s\n", strOrDash(info.JDKVendor))
 	fmt.Printf("JDK version   %s\n", strOrDash(info.JDKVersion))
+	fmt.Printf("Posture       %s\n", strOrDash(info.Posture))
 	fmt.Printf("Java home     %s\n", strOrDash(info.JavaHome))
 	fmt.Printf("JDK install   %s\n", strOrDash(info.JDKInstallID))
 	fmt.Printf("JDK source    %s\n", strOrDash(info.JDKSource))
 	fmt.Printf("VM args       %s\n", strOrDash(info.VMArgs))
 	fmt.Printf("VM flags      %s\n", strOrDash(info.VMFlags))
 	fmt.Printf("Threads       %s\n", intOrDash(info.ThreadCount))
+	printJVMDiagnosticCapabilities(info.Diagnostics)
 
 	if len(info.SysProps) > 0 {
 		fmt.Println("\nSystem properties:")
@@ -956,6 +959,20 @@ func printJVMDetail(info jvm.Info) {
 		for _, k := range keys {
 			fmt.Printf("  %-30s  %s\n", k, info.SysProps[k])
 		}
+	}
+}
+
+func printJVMDiagnosticCapabilities(matrix diag.Matrix) {
+	if len(matrix.Capabilities) == 0 {
+		return
+	}
+	fmt.Println("\nDiagnostics:")
+	for _, capability := range matrix.Capabilities {
+		fmt.Printf("  %-28s %-11s", capability.ID, capability.Status)
+		if len(capability.Command) > 0 {
+			fmt.Printf(" %s", strings.Join(capability.Command, " "))
+		}
+		fmt.Println()
 	}
 }
 

@@ -85,6 +85,8 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []t
 		info.JDKVendor = props["java.vendor"]
 		info.JDKVersion = props["java.version"]
 	}
+	info.Posture = virtualThreadEra(info.JDKVersion)
+	info.Diagnostics = DiagnosticsMatrix(info.JDKVersion)
 
 	info.VMFlags, info.VMArgs = collectCommandLine(pid, run)
 	info.ThreadCount = collectThreadCount(pid, run)

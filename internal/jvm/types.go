@@ -4,6 +4,8 @@
 // See docs/inspection/jvm.md for the full design.
 package jvm
 
+import "github.com/kaeawc/spectra/internal/diag"
+
 // CmdRunner abstracts shell-out for testability.
 type CmdRunner func(name string, args ...string) ([]byte, error)
 
@@ -17,11 +19,13 @@ type Info struct {
 	JDKInstallID string            `json:"jdk_install_id,omitempty"`
 	JDKSource    string            `json:"jdk_source,omitempty"`
 	JDKPath      string            `json:"jdk_path,omitempty"`
+	Posture      string            `json:"posture,omitempty"`
 	VMArgs       string            `json:"vm_args,omitempty"`  // from jcmd VM.command_line
 	VMFlags      string            `json:"vm_flags,omitempty"` // JVM flags (XX: flags)
 	ThreadCount  int               `json:"thread_count,omitempty"`
 	GC           *GCStats          `json:"gc,omitempty"`        // one-shot jstat -gc counters
 	SysProps     map[string]string `json:"sys_props,omitempty"` // selected system properties
+	Diagnostics  diag.Matrix       `json:"diagnostics"`
 }
 
 // selectedProps is the allowlist of java system properties captured in SysProps.
