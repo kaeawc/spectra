@@ -59,6 +59,9 @@ Inferred from the frameworks present in `Contents/Frameworks/`:
 Note: Squirrel.framework alone doesn't imply Electron — Ollama ships it
 without Electron Framework. Spectra tracks them as independent signals.
 
+See [electron.md](electron.md) for the full Electron bundle inspection
+model.
+
 ## Sample output (verbose)
 
 ```

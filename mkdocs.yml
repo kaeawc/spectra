@@ -80,6 +80,7 @@ nav:
       - Native modules: detection/native-modules.md
   - Inspection:
       - Metadata: inspection/metadata.md
+      - Electron apps: inspection/electron.md
       - Objective-C based apps: inspection/objc-based-app.md
       - Security: inspection/security.md
       - Swift apps: inspection/swift-apps.md

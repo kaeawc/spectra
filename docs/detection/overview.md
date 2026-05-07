@@ -111,6 +111,9 @@ architecture vs Codex's plain off-the-shelf `node-pty` and
 
 See [native-modules.md](native-modules.md).
 
+For the broader static and live inspection model around Electron bundles,
+see [../inspection/electron.md](../inspection/electron.md).
+
 ## Enrichment: Python-based apps
 
 Some macOS apps hide a Python runtime behind an AppKit, Qt, or custom launcher.

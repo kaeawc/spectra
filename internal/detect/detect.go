@@ -1755,9 +1755,25 @@ func (ins nodeAppInspector) scanDependencies(appPath string) *Dependencies {
 		sort.Strings(d.ThirdPartyFrameworks)
 	}
 
-	// npm packages: top-level dirs under app.asar.unpacked/node_modules.
-	nm := filepath.Join(appPath, "Contents", "Resources", "app.asar.unpacked", "node_modules")
-	if entries, err := ins.fs.ReadDir(nm); err == nil {
+	d.NPMPackages = ins.npmPackages(appPath)
+
+	d.JavaJars = ins.countJars(filepath.Join(appPath, "Contents"))
+
+	if len(d.ThirdPartyFrameworks) == 0 && len(d.NPMPackages) == 0 && d.JavaJars == 0 {
+		return nil
+	}
+	return d
+}
+
+func (ins nodeAppInspector) npmPackages(appPath string) []string {
+	seen := map[string]struct{}{}
+	var packages []string
+	for _, root := range ins.nativeModuleRoots(appPath) {
+		nm := filepath.Join(root, "node_modules")
+		entries, err := ins.fs.ReadDir(nm)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
@@ -1768,23 +1784,25 @@ func (ins nodeAppInspector) scanDependencies(appPath string) *Dependencies {
 				if subs, err := ins.fs.ReadDir(filepath.Join(nm, n)); err == nil {
 					for _, s := range subs {
 						if s.IsDir() {
-							d.NPMPackages = append(d.NPMPackages, n+"/"+s.Name())
+							packages = appendUniqueString(packages, seen, n+"/"+s.Name())
 						}
 					}
 				}
 				continue
 			}
-			d.NPMPackages = append(d.NPMPackages, n)
+			packages = appendUniqueString(packages, seen, n)
 		}
-		sort.Strings(d.NPMPackages)
 	}
+	sort.Strings(packages)
+	return packages
+}
 
-	d.JavaJars = ins.countJars(filepath.Join(appPath, "Contents"))
-
-	if len(d.ThirdPartyFrameworks) == 0 && len(d.NPMPackages) == 0 && d.JavaJars == 0 {
-		return nil
+func appendUniqueString(values []string, seen map[string]struct{}, value string) []string {
+	if _, ok := seen[value]; ok {
+		return values
 	}
-	return d
+	seen[value] = struct{}{}
+	return append(values, value)
 }
 
 // scanNetworkEndpoints harvests distinct hostnames from URL strings found
