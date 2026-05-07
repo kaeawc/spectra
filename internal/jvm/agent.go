@@ -49,9 +49,15 @@ type MBeanAttribute struct {
 }
 
 type MBeanOperation struct {
-	Name       string `json:"name"`
-	ReturnType string `json:"return_type,omitempty"`
-	Impact     int    `json:"impact,omitempty"`
+	Name       string           `json:"name"`
+	ReturnType string           `json:"return_type,omitempty"`
+	Impact     int              `json:"impact,omitempty"`
+	Parameters []MBeanParameter `json:"parameters,omitempty"`
+}
+
+type MBeanParameter struct {
+	Name string `json:"name,omitempty"`
+	Type string `json:"type,omitempty"`
 }
 
 type AgentProbes struct {
