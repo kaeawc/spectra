@@ -264,6 +264,16 @@ func defaultNodeAppInspector() nodeAppInspector {
 	return nodeAppInspector{fs: osNodeAppFS{}, cmd: execNodeAppCommands{}}
 }
 
+type markerScanner interface {
+	ScanMarkers(exe string) binaryMarkers
+}
+
+type fileMarkerScanner struct{}
+
+func (fileMarkerScanner) ScanMarkers(exe string) binaryMarkers {
+	return scanBinaryMarkers(exe)
+}
+
 // Detect inspects the bundle at appPath and returns a Result.
 // It never returns an error for "unknown" — instead it fills the result
 // with what it found and Confidence="low".
@@ -396,11 +406,15 @@ func firstPlistString(plist string, keys ...string) string {
 }
 
 func readTauriVersion(appPath string) string {
+	return readTauriVersionWith(appPath, osNodeAppFS{})
+}
+
+func readTauriVersionWith(appPath string, files nodeAppFS) string {
 	for _, rel := range []string{
 		filepath.Join("Contents", "Resources", "tauri.conf.json"),
 		filepath.Join("Contents", "Resources", "tauri.conf.json5"),
 	} {
-		data, err := os.ReadFile(filepath.Join(appPath, rel))
+		data, err := files.ReadFile(filepath.Join(appPath, rel))
 		if err != nil {
 			continue
 		}
@@ -722,10 +736,14 @@ func classifyJVMMarkers(appPath, contents, jvmRoot string, jarCount int, r *Resu
 // --- Layer 2: linked dylibs --------------------------------------------------
 
 func classifyByLinkedLibs(exe string, r *Result) {
+	classifyByLinkedLibsWith(exe, r, execNodeAppCommands{})
+}
+
+func classifyByLinkedLibsWith(exe string, r *Result, cmds nodeAppCommands) {
 	if exe == "" {
 		return
 	}
-	libs := otoolL(exe)
+	libs := cmds.OtoolL(exe)
 	if len(libs) == 0 {
 		return
 	}
@@ -791,10 +809,14 @@ func classifyByLinkedLibs(exe string, r *Result) {
 // --- Layer 3: binary strings -------------------------------------------------
 
 func classifyByStrings(exe string, r *Result) {
+	classifyByStringsWith(exe, r, fileMarkerScanner{})
+}
+
+func classifyByStringsWith(exe string, r *Result, scanner markerScanner) {
 	if exe == "" {
 		return
 	}
-	m := scanBinaryMarkers(exe)
+	m := scanner.ScanMarkers(exe)
 
 	// Go wins outright — the buildinfo magic only appears in Go binaries.
 	if m.hasGoBuildID {

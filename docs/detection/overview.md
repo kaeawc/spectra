@@ -65,6 +65,11 @@ The Rust threshold (100) was chosen empirically: a single bundled Rust
 dylib in a non-Rust app produces under 30 hits; native Rust apps
 produce hundreds.
 
+For Tauri specifically, Layer 2 first records the app as an
+`AppKit+WebKit` suspect; Layer 3 promotes that verdict to `Tauri` only
+when the main binary has strong Rust evidence. See
+[../inspection/tauri.md](../inspection/tauri.md).
+
 ## Shim launcher handling
 
 Some apps use a tiny launcher binary (Chrome, Edge, Brave) that loads
