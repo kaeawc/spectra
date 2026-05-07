@@ -10,6 +10,7 @@ import (
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/telemetry"
 )
 
 func TestBuildHostOnly(t *testing.T) {
@@ -151,6 +152,37 @@ type fakeHostCollector struct {
 
 func (f fakeHostCollector) CollectHost(string) HostInfo {
 	return f.host
+}
+
+func TestBuildIncludesRuntimeTelemetryCollectors(t *testing.T) {
+	snap := Build(context.Background(), Options{
+		SkipApps:      true,
+		SkipProcesses: true,
+		SkipStorage:   true,
+		SkipJVMs:      true,
+		RuntimeTelemetryCollectors: []telemetry.Collector{
+			fakeRuntimeTelemetryCollector{processes: []telemetry.Process{{
+				Runtime: telemetry.Runtime("python"),
+				PID:     812,
+				Heap:    &telemetry.Heap{UsedBytes: 1024, Source: "test"},
+			}}},
+		},
+	})
+
+	if len(snap.RuntimeTelemetry) != 1 {
+		t.Fatalf("RuntimeTelemetry len = %d, want 1", len(snap.RuntimeTelemetry))
+	}
+	if snap.RuntimeTelemetry[0].Runtime != "python" || snap.RuntimeTelemetry[0].PID != 812 {
+		t.Fatalf("RuntimeTelemetry[0] = %#v", snap.RuntimeTelemetry[0])
+	}
+}
+
+type fakeRuntimeTelemetryCollector struct {
+	processes []telemetry.Process
+}
+
+func (f fakeRuntimeTelemetryCollector) CollectRuntimeTelemetry(context.Context) []telemetry.Process {
+	return f.processes
 }
 
 func TestBuildAttributesProcessesToConfiguredAppPaths(t *testing.T) {

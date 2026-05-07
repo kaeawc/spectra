@@ -98,13 +98,53 @@ JVMInfo {
   vm_args
   vm_flags
   thread_count
+  gc                                  # legacy one-shot jstat -gc counters
   sys_props                            # selected java.* / os.* / user.* keys
 }
 ```
 
-Source: `jps` and `jcmd`. GC snapshots are available through JVM commands
-but are not embedded in the snapshot shape today. See
-[../inspection/jvm.md](../inspection/jvm.md).
+Source: `jps`, `jcmd`, and `jstat`.
+
+## RuntimeTelemetry
+
+Runtime-neutral telemetry for managed and native application architectures:
+
+```
+RuntimeTelemetry {
+  runtime                 # jvm, python, node, go, native, ...
+  pid
+  identity                # runtime-specific identity fields
+  config                  # runtime-specific config and selected properties
+  heap {
+    used_bytes
+    committed_bytes
+    max_bytes
+    native_bytes
+    source
+  }
+  gc {
+    collections
+    collection_time_ms
+    pools[]
+    source
+  }
+  threads {
+    live
+    peak
+    daemon
+    states
+    source
+  }
+  profiles[]              # references to profiling artifacts, not payloads
+  sections[]              # runtime-specific diagnostic sections/errors
+}
+```
+
+JVM telemetry is the first adapter. It maps `jstat -gc`, `jcmd` thread
+counts, optional VM-memory diagnostics, and optional spectra-agent probes into
+this common shape. Other runtimes plug in through the same collector
+interface, so snapshots can grow beyond JVMs without adding one-off top-level
+fields for every architecture. See [../inspection/jvm.md](../inspection/jvm.md).
 
 ## JDKInstall
 
