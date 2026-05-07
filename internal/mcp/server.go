@@ -23,6 +23,7 @@ type Server struct {
 	Version string
 	Verbose bool
 	log     logger.Logger
+	collect Collectors
 }
 
 // NewServer returns a configured MCP server from stdin/stdout handles.
@@ -32,11 +33,40 @@ func NewServer(reader io.Reader, writer io.Writer) *Server {
 		writer:  writer,
 		Version: "dev",
 		log:     logger.New(logger.Config{Format: logger.FormatText, Level: slog.LevelInfo}),
+		collect: defaultCollectors(),
 	}
 }
 
 // SetLogger overrides log output (mainly for tests).
 func (s *Server) SetLogger(l logger.Logger) { s.log = l }
+
+// SetCollectors overrides host-inspection dependencies (mainly for tests).
+// Zero fields keep their default implementation.
+func (s *Server) SetCollectors(c Collectors) {
+	defaults := defaultCollectors()
+	if c.Apps == nil {
+		c.Apps = defaults.Apps
+	}
+	if c.Processes == nil {
+		c.Processes = defaults.Processes
+	}
+	if c.Network == nil {
+		c.Network = defaults.Network
+	}
+	if c.Snapshots == nil {
+		c.Snapshots = defaults.Snapshots
+	}
+	if c.JVMs == nil {
+		c.JVMs = defaults.JVMs
+	}
+	if c.Toolchain == nil {
+		c.Toolchain = defaults.Toolchain
+	}
+	if c.Clock == nil {
+		c.Clock = defaults.Clock
+	}
+	s.collect = c
+}
 
 // Run reads framed messages and processes them until EOF.
 func (s *Server) Run() {
