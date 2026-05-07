@@ -10,7 +10,13 @@ shape.
 ```
 spectra <subcommand> [flags] [args]
 spectra [flags] <App.app>...     # routes to `inspect` (default)
+spectra --remote <target> <subcommand> [args]
 ```
+
+`--remote`, `--target`, and `--rpc-target` are global client flags. When one
+is present before the subcommand, Spectra translates the command to a daemon
+JSON-RPC call and prints indented JSON. Without one of those flags, commands
+run in-process on the local machine.
 
 ## Subcommands
 
@@ -64,6 +70,7 @@ spectra --all                                  # scan /Applications + Utilities
 spectra list -v                                # same scan with an explicit subcommand
 spectra --network -v /Applications/Cursor.app  # add embedded URL hosts
 spectra --json /Applications/*.app | jq '.[] | select(.UI == "Tauri")'
+spectra --remote work-mac inspect /Applications/Slack.app
 ```
 
 ### Output (table)

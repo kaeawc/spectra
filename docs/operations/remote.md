@@ -100,6 +100,18 @@ spectra connect work-mac brew
 
 Use `call` for less common methods such as direct JDK calls.
 
+The same typed surface is also available as a top-level client flag when you
+want the normal command shape:
+
+```bash
+spectra --remote work-mac jvm
+spectra --remote work-mac jvm thread-dump 4012
+spectra --remote work-mac inspect /Applications/Slack.app
+spectra --target local network connections
+```
+
+Top-level remote dispatch returns JSON, just like `connect` and `fan`.
+
 ## Cross-host operations
 
 Cross-host fan-out is implemented with `spectra fan --hosts`.

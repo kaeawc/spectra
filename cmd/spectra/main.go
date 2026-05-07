@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 var version = "dev"
@@ -73,6 +74,13 @@ func main() {
 // args fall through to `inspect` for backward compatibility with the
 // flag-only CLI shape.
 func dispatch(args []string) int {
+	if remote, ok, err := parseGlobalRemoteArgs(args); ok {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		return runRemoteCommand(remote)
+	}
 	if len(args) == 0 {
 		runHelp(os.Stderr)
 		return 2
@@ -87,6 +95,78 @@ func dispatch(args []string) int {
 	}
 	// No subcommand matched — default to inspect with the full arg list.
 	return runInspect(args)
+}
+
+type globalRemoteArgs struct {
+	target  string
+	timeout time.Duration
+	args    []string
+}
+
+func parseGlobalRemoteArgs(args []string) (globalRemoteArgs, bool, error) {
+	out := globalRemoteArgs{timeout: 3 * time.Second}
+	restStart := 0
+	for restStart < len(args) {
+		arg := args[restStart]
+		switch {
+		case arg == "--":
+			restStart++
+			goto done
+		case arg == "--remote" || arg == "--target" || arg == "--rpc-target":
+			if restStart+1 >= len(args) {
+				return out, true, fmt.Errorf("%s requires a target", arg)
+			}
+			out.target = args[restStart+1]
+			restStart += 2
+		case strings.HasPrefix(arg, "--remote="):
+			out.target = strings.TrimPrefix(arg, "--remote=")
+			restStart++
+		case strings.HasPrefix(arg, "--target="):
+			out.target = strings.TrimPrefix(arg, "--target=")
+			restStart++
+		case strings.HasPrefix(arg, "--rpc-target="):
+			out.target = strings.TrimPrefix(arg, "--rpc-target=")
+			restStart++
+		case arg == "--timeout":
+			if restStart+1 >= len(args) {
+				return out, true, fmt.Errorf("%s requires a duration", arg)
+			}
+			timeout, err := time.ParseDuration(args[restStart+1])
+			if err != nil {
+				return out, true, fmt.Errorf("invalid --timeout: %w", err)
+			}
+			out.timeout = timeout
+			restStart += 2
+		case strings.HasPrefix(arg, "--timeout="):
+			timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
+			if err != nil {
+				return out, true, fmt.Errorf("invalid --timeout: %w", err)
+			}
+			out.timeout = timeout
+			restStart++
+		default:
+			goto done
+		}
+	}
+done:
+	if out.target == "" {
+		return out, false, nil
+	}
+	out.args = normalizeRemoteCommandArgs(args[restStart:])
+	return out, true, nil
+}
+
+func normalizeRemoteCommandArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	if strings.HasSuffix(args[0], ".app") || strings.HasPrefix(args[0], "/") {
+		next := make([]string, 0, len(args)+1)
+		next = append(next, "inspect")
+		next = append(next, args...)
+		return next
+	}
+	return args
 }
 
 func runVersion(_ []string) int {
@@ -114,6 +194,7 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "Spectra — macOS app diagnostics, JVM-aware remote debugging portal.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage: spectra <subcommand> [flags] [args]")
+	fmt.Fprintln(w, "       spectra --remote <target> <subcommand> [args]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {
@@ -125,4 +206,6 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "  spectra --all -v")
 	fmt.Fprintln(w, "  spectra list -v")
 	fmt.Fprintln(w, "  spectra --json /Applications/Cursor.app")
+	fmt.Fprintln(w, "  spectra --remote work-mac jvm")
+	fmt.Fprintln(w, "  spectra --remote local inspect /Applications/Slack.app")
 }
