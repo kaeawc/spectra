@@ -17,6 +17,7 @@ import (
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/livehistory"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/rpc"
@@ -77,7 +78,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, &artifact.FakeRecorder{}, nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, &artifact.FakeRecorder{}, nil, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -1237,7 +1238,7 @@ func TestDaemonJVMHeapDumpRecordsArtifact(t *testing.T) {
 	defer db.Close()
 	fake := &artifact.FakeRecorder{}
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, fake, nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, fake, nil, nil)
 	client, server := net.Pipe()
 	defer client.Close()
 	go d.Serve(server)

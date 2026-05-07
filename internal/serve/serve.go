@@ -24,6 +24,7 @@ import (
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/livehistory"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -179,10 +180,11 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	log.Info("daemon storage ready", "db", dbPath)
 
 	collector := metrics.NewCollector()
+	history := livehistory.NewRing(livehistory.DefaultCapacity)
 	sampler := metrics.NewSampler(collector, time.Second, nil)
 	go sampler.Run(ctx)
 	go flushMetricsLoop(ctx, collector, db)
-	go snapshotLoop(ctx, opts.SpectraVersion, db)
+	go snapshotLoop(ctx, opts.SpectraVersion, db, history)
 
 	cacheReg := opts.CacheRegistry
 	if cacheReg == nil {
@@ -198,7 +200,7 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, artifactRecorder, tsnetStatus, tsNode)
+	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, artifactRecorder, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
 	go func() {
@@ -395,7 +397,7 @@ func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
 // snapshotLoop captures a live host-only snapshot every minute and prunes the
 // live snapshot history to the last 100 entries. Apps, storage, and JVMs are
 // skipped to keep the per-tick cost low (~50ms vs seconds for a full snapshot).
-func snapshotLoop(ctx context.Context, version string, db *store.DB) {
+func snapshotLoop(ctx context.Context, version string, db *store.DB, history *livehistory.Ring) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -409,6 +411,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 				SkipStorage:    true,
 				SkipJVMs:       true,
 			})
+			history.Add(snap)
 			_ = db.SaveSnapshot(ctx, store.FromSnapshot(snap))
 			_ = db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap))
 			_ = db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap))
@@ -421,7 +424,10 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+	if history == nil {
+		history = livehistory.NewRing(livehistory.DefaultCapacity)
+	}
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		result := map[string]any{"ok": true, "version": version}
 		if tsnetStatus != nil {
@@ -507,6 +513,25 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("process.history requires {\"pid\": <pid>}")
 		}
 		return db.GetProcessMetrics(context.Background(), p.PID, p.Limit)
+	})
+
+	d.Register("live.current", func(_ json.RawMessage) (any, error) {
+		snap, ok := history.Latest()
+		if !ok {
+			return nil, fmt.Errorf("live.current has no samples yet")
+		}
+		return snap, nil
+	})
+
+	d.Register("live.history", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.Limit <= 0 {
+			p.Limit = livehistory.DefaultCapacity
+		}
+		return history.Recent(p.Limit), nil
 	})
 
 	d.Register("inspect.app", func(params json.RawMessage) (any, error) {

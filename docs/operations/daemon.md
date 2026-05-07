@@ -73,8 +73,8 @@ JSON-RPC 2.0 methods, organized by concern:
 - **Snapshots** — `snapshot.create`, `snapshot.list`, `snapshot.get`,
   `snapshot.diff`, `snapshot.processes`, `snapshot.login_items`,
   `snapshot.granted_perms`, `snapshot.prune`
-- **Live state** — `process.live`, `process.history`, `process.list`,
-  `process.tree`, `process.sample`
+- **Live state** — `live.current`, `live.history`, `process.live`,
+  `process.history`, `process.list`, `process.tree`, `process.sample`
 - **Helper** — `helper.health`, `helper.powermetrics.sample`,
   `helper.tcc.system.query`, `helper.firewall.rules`,
   `helper.fs_usage.start`, `helper.fs_usage.stop`,
@@ -113,6 +113,12 @@ Process-level metrics (CPU%, RSS, virtual size) are sampled at ~1Hz into
 an in-memory ring buffer. The last 30 minutes per process are kept in RAM
 and flushed as 1-minute aggregates to SQLite. `spectra metrics` reads the
 stored rows; the `process.live` RPC returns recent in-memory samples.
+
+Broader live collector replay is kept as a second in-memory ring of daemon
+snapshot captures. `live.current` returns the newest broad live snapshot and
+`live.history` returns recent captures across the host, process, toolchain,
+power, sysctl, and network collectors. At the default 1-minute daemon cadence,
+the in-memory replay window keeps the last 30 captures.
 
 The daemon also captures a host-focused live snapshot every minute and prunes
 live snapshots to the last 100 rows. Apps, storage, and JVMs are skipped in
