@@ -80,7 +80,7 @@ summaries after link-layer and IPv4 TCP/UDP decoding. HTTP parsing redacts
 sensitive headers by default. TLS parsing exposes SNI and ALPN when the client
 sends them in cleartext; it cannot decrypt HTTPS traffic.
 
-## Energy and power
+## Power and thermal
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
@@ -92,7 +92,8 @@ sends them in cleartext; it cannot decrypt HTTPS traffic.
 
 `pmset` plus `top` covers the unprivileged power story. `powermetrics`
 provides deeper CPU/GPU/network/disk energy breakdown when the privileged
-helper is installed and reachable.
+helper is installed and reachable. See
+[power-thermal.md](power-thermal.md) for the command, RPC, and JSON shape.
 
 ## JVM observation
 
