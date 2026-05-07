@@ -95,6 +95,7 @@ JDK commands:
 | Flamegraph capture | `asprof -d <seconds> -e <event> -f <path> <pid>` |
 | JFR start / stop / dump | `jcmd <pid> JFR.start`, `JFR.dump` |
 | JFR summary | `jfr summary <recording.jfr>` |
+| JFR event views | `jfr view <view> <recording.jfr>` |
 
 `spectra jvm` and `spectra jvm <pid>` parse output into structured JSON
 when `--json` is passed. `spectra jvm jfr summary --json <file>` returns
@@ -103,6 +104,16 @@ and JFR dump files are copied into the
 [sharded blob store](../design/storage.md) when the cache stores are
 initialized. Heap dumps are written to the requested path or to
 `~/.spectra/<pid>-<timestamp>.hprof`.
+
+Recording analysis is split behind reusable internals before it is exposed as
+new user-facing commands. `internal/recording` defines runtime-neutral artifact,
+view, table, finding, analyzer, and analyzer-registry interfaces so Spectra can
+adapt the same architecture to JVM, native, Electron, Python, network, or other
+application recordings. `internal/jvm` implements that interface for JFR: it can
+run and parse `jfr view` tables for GC pauses, allocation sites, hot methods,
+monitor blocking, file I/O, and socket I/O, then combine those event views with
+`jfr summary` counts into first-pass incident findings. The same structures are
+intended to back future CLI, daemon RPC, MCP, and remote-debugging views.
 
 `spectra jvm vm-memory --json <pid>` returns every memory section with
 its underlying command, output, and per-section error. Native memory
