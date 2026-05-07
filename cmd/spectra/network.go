@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/netcap"
 	"github.com/kaeawc/spectra/internal/netdiag"
@@ -294,6 +296,12 @@ func runNetworkCaptureStart(args []string) int {
 		fmt.Fprintf(os.Stderr, "network capture start: %v\n", err)
 		return 1
 	}
+	recordNetworkCaptureArtifact("spectra network capture start", result, map[string]string{
+		"interface": *iface,
+		"proto":     *proto,
+		"host":      *host,
+		"port":      strconv.Itoa(*port),
+	})
 	return printNetworkCaptureResult(result, *asJSON, "capture started")
 }
 
@@ -319,6 +327,9 @@ func runNetworkCaptureStop(args []string) int {
 		fmt.Fprintf(os.Stderr, "network capture stop: %v\n", err)
 		return 1
 	}
+	recordNetworkCaptureArtifact("spectra network capture stop", result, map[string]string{
+		"handle": fs.Arg(0),
+	})
 	if *summarize {
 		path, _ := result["output_path"].(string)
 		if path == "" {
@@ -341,6 +352,23 @@ func runNetworkCaptureStop(args []string) int {
 		return 0
 	}
 	return printNetworkCaptureResult(result, *asJSON, "capture stopped")
+}
+
+func recordNetworkCaptureArtifact(command string, result map[string]any, metadata map[string]string) {
+	path, _ := result["output_path"].(string)
+	handle, _ := result["handle"].(string)
+	if handle != "" {
+		metadata["handle"] = handle
+	}
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindPacketCapture,
+		Sensitivity: artifact.SensitivityHigh,
+		Source:      "cli",
+		Command:     command,
+		Path:        path,
+		CacheKind:   cache.KindNetcap,
+		Metadata:    metadata,
+	})
 }
 
 func runNetworkCaptureSummarize(args []string) int {

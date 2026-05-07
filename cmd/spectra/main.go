@@ -64,6 +64,7 @@ func subcommandList() []subcommand {
 
 func main() {
 	initCacheStores()
+	initArtifactRecorder()
 	os.Exit(dispatch(os.Args[1:]))
 }
 
