@@ -442,7 +442,7 @@ func TestRecordAndListAppliedFixes(t *testing.T) {
 	}
 }
 
-func TestUpsertIssuesDoesNotReopenDismissed(t *testing.T) {
+func TestUpsertIssuesDoesNotReopenOrDuplicateDismissed(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	snapID := seedSnapshot(t, db)
@@ -455,13 +455,20 @@ func TestUpsertIssuesDoesNotReopenDismissed(t *testing.T) {
 	// Dismiss the issue.
 	_ = db.UpdateIssueStatus(ctx, ids[0], IssueDismissed)
 
-	// Same finding again — should create a NEW issue because dismissed != open|acknowledged.
+	// Same finding again should stay suppressed after dismissal.
 	ids2, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, findings)
 	if err != nil {
 		t.Fatalf("UpsertIssues after dismiss: %v", err)
 	}
-	if len(ids2) != 1 || ids2[0] == ids[0] {
-		t.Errorf("expected new issue ID after dismiss, got same: %v", ids2)
+	if len(ids2) != 0 {
+		t.Errorf("expected dismissed issue to be suppressed, got touched IDs: %v", ids2)
+	}
+	rows, err := db.ListIssues(ctx, "TEST-UUID-1234", "")
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != ids[0] || rows[0].Status != IssueDismissed {
+		t.Errorf("dismissed issue was duplicated or reopened: %+v", rows)
 	}
 }
 

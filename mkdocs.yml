@@ -91,6 +91,7 @@ nav:
       - Live data sources: inspection/live-data-sources.md
   - Operations:
       - CLI: operations/cli.md
+      - Issues: operations/issues.md
       - Daemon (planned): operations/daemon.md
       - Remote (planned): operations/remote.md
       - Caching (planned): operations/caching.md
