@@ -86,7 +86,7 @@ sends them in cleartext; it cannot decrypt HTTPS traffic.
 |---|---|---|---|---|
 | `pmset -g assertions` | active wake/sleep assertions | user | <10ms | `power.active_assertions` |
 | `pmset -g batt` | battery state | user | <10ms | `power.on_battery` |
-| `pmset -g therm` | thermal state | user | <10ms | `power.thermal_pressure` |
+| `pmset -g therm` | thermal state and CPU speed-limit percentage | user | <10ms | `power.thermal_pressure`, `power.thermal_throttled`, `power.cpu_speed_limit_pct` |
 | `powermetrics --samplers cpu_power,gpu_power,network,disk -n 1` | deeper energy attribution | helper-only | ~1s | `helper.powermetrics.sample` |
 | `top -l 1 -n 10 -o power -stats pid,power,command` | flat per-process power column | user | ~200ms | `power.energy_top_users` |
 

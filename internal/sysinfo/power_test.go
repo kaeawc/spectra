@@ -21,6 +21,32 @@ const thermSerious = `System thermal state: serious
 CPU_Speed_Limit	= 60
 `
 
+const thermLogThrottled = `2021-07-07 12:32:50 -0400 CPU Power notify
+	CPU_Scheduler_Limit 	= 100
+	CPU_Available_CPUs 	= 8
+	CPU_Speed_Limit 	= 90
+2021-07-07 12:32:51 -0400 CPU Power notify
+	CPU_Scheduler_Limit 	= 100
+	CPU_Available_CPUs 	= 8
+	CPU_Speed_Limit 	= 92
+
+2021-07-07 12:32:52 -0400 CPU Power notify
+	CPU_Scheduler_Limit 	= 100
+	CPU_Available_CPUs 	= 8
+	CPU_Speed_Limit 	= 100
+`
+
+const thermLogWithGarbage = `2021-07-07 12:32:50 -0400 CPU Power notify
+	CPU_Scheduler_Limit 	= 100
+	CPU_Available_CPUs 	= 8
+	CPU_Speed_Limit 	= 90
+2021-07-07 12:32:51 -0400 not a complete record
+	CPU_Speed_Limit 	= nope
+2021-07-07 12:32:52 -0400 CPU Power notify
+	CPU_Available_CPUs 	= 8
+	CPU_Speed_Limit 	= 100
+`
+
 const assertionsOutput = `Assertion status system-wide:
    BackgroundTask                 0
    PreventUserIdleSleep           1
@@ -140,6 +166,15 @@ func TestCollectPowerThermal(t *testing.T) {
 	if ps.ThermalPressure != "serious" {
 		t.Errorf("ThermalPressure = %q, want serious", ps.ThermalPressure)
 	}
+	if !ps.ThermalThrottled {
+		t.Error("ThermalThrottled = false, want true")
+	}
+	if ps.CPUSpeedLimitPct != 60 {
+		t.Errorf("CPUSpeedLimitPct = %d, want 60", ps.CPUSpeedLimitPct)
+	}
+	if ps.PercentThermalThrottled != 100 {
+		t.Errorf("PercentThermalThrottled = %d, want 100", ps.PercentThermalThrottled)
+	}
 }
 
 func TestCollectPowerAssertions(t *testing.T) {
@@ -196,6 +231,46 @@ func TestParseEnergyTopPreservesCommandWithSpaces(t *testing.T) {
 	}
 	if users[0].Command != "Google Chrome Helper" {
 		t.Errorf("Command = %q, want Google Chrome Helper", users[0].Command)
+	}
+}
+
+func TestParseThermAggregatesSpeedLimits(t *testing.T) {
+	var ps PowerState
+	parseTherm(thermLogThrottled, &ps)
+	if !ps.ThermalThrottled {
+		t.Error("ThermalThrottled = false, want true")
+	}
+	if ps.CPUSpeedLimitPct != 100 {
+		t.Errorf("CPUSpeedLimitPct = %d, want latest 100", ps.CPUSpeedLimitPct)
+	}
+	if ps.LowestCPUSpeedLimitPct != 90 {
+		t.Errorf("LowestCPUSpeedLimitPct = %d, want 90", ps.LowestCPUSpeedLimitPct)
+	}
+	if ps.AverageCPUSpeedLimitPct != 94 {
+		t.Errorf("AverageCPUSpeedLimitPct = %d, want 94", ps.AverageCPUSpeedLimitPct)
+	}
+	if ps.PercentThermalThrottled != 66 {
+		t.Errorf("PercentThermalThrottled = %d, want 66", ps.PercentThermalThrottled)
+	}
+	wantSamples := []int{90, 92, 100}
+	if len(ps.CPUSpeedLimitSamples) != len(wantSamples) {
+		t.Fatalf("samples = %v, want %v", ps.CPUSpeedLimitSamples, wantSamples)
+	}
+	for i := range wantSamples {
+		if ps.CPUSpeedLimitSamples[i] != wantSamples[i] {
+			t.Fatalf("samples = %v, want %v", ps.CPUSpeedLimitSamples, wantSamples)
+		}
+	}
+}
+
+func TestParseThermSkipsInvalidSpeedLimits(t *testing.T) {
+	var ps PowerState
+	parseTherm(thermLogWithGarbage, &ps)
+	if len(ps.CPUSpeedLimitSamples) != 2 {
+		t.Fatalf("samples = %v, want two valid samples", ps.CPUSpeedLimitSamples)
+	}
+	if ps.LowestCPUSpeedLimitPct != 90 {
+		t.Errorf("LowestCPUSpeedLimitPct = %d, want 90", ps.LowestCPUSpeedLimitPct)
 	}
 }
 
