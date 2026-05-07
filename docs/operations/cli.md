@@ -297,6 +297,25 @@ spectra jvm jfr summary --json /tmp/app.jfr
 spectra jvm jfr stop 4012 --name spectra
 ```
 
+## `spectra power`
+
+Shows current host power and thermal state: AC/battery source, battery
+percentage, thermal pressure, active sleep/display assertions, and a short
+per-process energy-impact sample. This command is about power state, not
+hardware fan control. For remote multi-host execution, use `spectra fan ... power`;
+`fan` means fan-out to multiple daemons.
+
+### Examples
+
+```bash
+spectra power
+spectra power --json
+spectra connect work-mac power
+spectra fan --hosts work-mac,alice-laptop power
+```
+
+See [../inspection/power-thermal.md](../inspection/power-thermal.md).
+
 ## `spectra network`
 
 Shows unprivileged network state by default, including current routes,

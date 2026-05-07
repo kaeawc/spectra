@@ -206,6 +206,7 @@ PowerState {
 
 Source: `pmset -g assertions`, `pmset -g batt`, `pmset -g therm`,
 `top -l 1 -o power`. See
+[../inspection/power-thermal.md](../inspection/power-thermal.md) and
 [../inspection/live-data-sources.md](../inspection/live-data-sources.md).
 
 ## EnvSnapshot

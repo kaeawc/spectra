@@ -37,6 +37,10 @@ const topEnergyOutput = `PID    POWER  COMMAND
 1      0.0    launchd
 `
 
+const topEnergyOutputWithSpaces = `PID    POWER  COMMAND
+501    4.2    Google Chrome Helper
+`
+
 func stubPower(batt, therm, assertions, topEnergy string) CmdRunner {
 	return func(name string, args ...string) ([]byte, error) {
 		if name == "top" {
@@ -71,6 +75,41 @@ func stubPower(batt, therm, assertions, topEnergy string) CmdRunner {
 
 func stubPmset(batt, therm, assertions string) CmdRunner {
 	return stubPower(batt, therm, assertions, "")
+}
+
+type fakePowerSource struct {
+	batt       string
+	therm      string
+	assertions string
+	topEnergy  string
+}
+
+func (f fakePowerSource) Battery() ([]byte, error) {
+	if f.batt == "" {
+		return nil, errors.New("no batt")
+	}
+	return []byte(f.batt), nil
+}
+
+func (f fakePowerSource) Thermal() ([]byte, error) {
+	if f.therm == "" {
+		return nil, errors.New("no therm")
+	}
+	return []byte(f.therm), nil
+}
+
+func (f fakePowerSource) Assertions() ([]byte, error) {
+	if f.assertions == "" {
+		return nil, errors.New("no assertions")
+	}
+	return []byte(f.assertions), nil
+}
+
+func (f fakePowerSource) EnergyTop() ([]byte, error) {
+	if f.topEnergy == "" {
+		return nil, errors.New("no top")
+	}
+	return []byte(f.topEnergy), nil
 }
 
 func TestCollectPowerOnBattery(t *testing.T) {
@@ -150,6 +189,16 @@ func TestParseEnergyTop(t *testing.T) {
 	}
 }
 
+func TestParseEnergyTopPreservesCommandWithSpaces(t *testing.T) {
+	users := parseEnergyTop(topEnergyOutputWithSpaces)
+	if len(users) != 1 {
+		t.Fatalf("len = %d, want 1", len(users))
+	}
+	if users[0].Command != "Google Chrome Helper" {
+		t.Errorf("Command = %q, want Google Chrome Helper", users[0].Command)
+	}
+}
+
 func TestCollectPowerEnergyTopUsers(t *testing.T) {
 	ps := CollectPower(stubPower("", "", "", topEnergyOutput))
 	if len(ps.EnergyTopUsers) != 3 {
@@ -157,5 +206,26 @@ func TestCollectPowerEnergyTopUsers(t *testing.T) {
 	}
 	if ps.EnergyTopUsers[1].PID != 412 {
 		t.Errorf("second PID = %d, want 412", ps.EnergyTopUsers[1].PID)
+	}
+}
+
+func TestPowerCollectorWithFakeSource(t *testing.T) {
+	ps := PowerCollector{Source: fakePowerSource{
+		batt:       battOnBattery,
+		therm:      thermSerious,
+		assertions: assertionsOutput,
+		topEnergy:  topEnergyOutputWithSpaces,
+	}}.Collect()
+	if !ps.OnBattery {
+		t.Error("OnBattery = false, want true")
+	}
+	if ps.ThermalPressure != "serious" {
+		t.Errorf("ThermalPressure = %q, want serious", ps.ThermalPressure)
+	}
+	if len(ps.Assertions) != 1 {
+		t.Fatalf("Assertions = %d, want 1", len(ps.Assertions))
+	}
+	if len(ps.EnergyTopUsers) != 1 || ps.EnergyTopUsers[0].Command != "Google Chrome Helper" {
+		t.Fatalf("EnergyTopUsers = %+v, want Google Chrome Helper entry", ps.EnergyTopUsers)
 	}
 }

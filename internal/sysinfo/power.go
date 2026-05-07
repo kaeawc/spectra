@@ -30,21 +30,72 @@ type PowerAssertion struct {
 	Name string `json:"name,omitempty"`
 }
 
+// PowerSource provides the raw macOS command output for power collection.
+type PowerSource interface {
+	Battery() ([]byte, error)
+	Thermal() ([]byte, error)
+	Assertions() ([]byte, error)
+	EnergyTop() ([]byte, error)
+}
+
+// CommandPowerSource shells out to the built-in macOS power tools.
+type CommandPowerSource struct {
+	Run CmdRunner
+}
+
+func (s CommandPowerSource) runner() CmdRunner {
+	if s.Run == nil {
+		return DefaultRunner
+	}
+	return s.Run
+}
+
+func (s CommandPowerSource) Battery() ([]byte, error) {
+	return s.runner()("pmset", "-g", "batt")
+}
+
+func (s CommandPowerSource) Thermal() ([]byte, error) {
+	return s.runner()("pmset", "-g", "therm")
+}
+
+func (s CommandPowerSource) Assertions() ([]byte, error) {
+	return s.runner()("pmset", "-g", "assertions")
+}
+
+func (s CommandPowerSource) EnergyTop() ([]byte, error) {
+	return s.runner()("top", "-l", "1", "-n", "10", "-o", "power", "-stats", "pid,power,command")
+}
+
+// PowerCollector turns raw source output into structured power state.
+type PowerCollector struct {
+	Source PowerSource
+}
+
 // CollectPower gathers PowerState from pmset. Any sub-command failure is
 // silently absorbed; partial results are still valid.
 func CollectPower(run CmdRunner) PowerState {
-	var ps PowerState
+	return PowerCollector{Source: CommandPowerSource{Run: run}}.Collect()
+}
 
-	if out, err := run("pmset", "-g", "batt"); err == nil {
+// Collect gathers PowerState. Any source failure is silently absorbed; partial
+// results are still valid.
+func (c PowerCollector) Collect() PowerState {
+	var ps PowerState
+	src := c.Source
+	if src == nil {
+		src = CommandPowerSource{}
+	}
+
+	if out, err := src.Battery(); err == nil {
 		parseBatt(string(out), &ps)
 	}
-	if out, err := run("pmset", "-g", "therm"); err == nil {
-		parsTherm(string(out), &ps)
+	if out, err := src.Thermal(); err == nil {
+		parseTherm(string(out), &ps)
 	}
-	if out, err := run("pmset", "-g", "assertions"); err == nil {
+	if out, err := src.Assertions(); err == nil {
 		ps.Assertions = parseAssertions(string(out))
 	}
-	if out, err := run("top", "-l", "1", "-n", "10", "-o", "power", "-stats", "pid,power,command"); err == nil {
+	if out, err := src.EnergyTop(); err == nil {
 		ps.EnergyTopUsers = parseEnergyTop(string(out))
 	}
 
@@ -70,7 +121,7 @@ func parseEnergyTop(out string) []EnergyUser {
 		if err != nil {
 			continue
 		}
-		result = append(result, EnergyUser{PID: pid, EnergyImpact: impact, Command: fields[2]})
+		result = append(result, EnergyUser{PID: pid, EnergyImpact: impact, Command: strings.Join(fields[2:], " ")})
 	}
 	return result
 }
@@ -101,10 +152,10 @@ func extractPct(line string) int {
 	return n
 }
 
-// parsTherm extracts thermal pressure from `pmset -g therm`.
+// parseTherm extracts thermal pressure from `pmset -g therm`.
 //
 // Example: "CPU_Speed_Limit	= 100" and "System thermal state: nominal"
-func parsTherm(out string, ps *PowerState) {
+func parseTherm(out string, ps *PowerState) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "System thermal state:") {
