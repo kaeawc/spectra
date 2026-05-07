@@ -172,6 +172,7 @@ func printMeta(r detect.Result) {
 	printPrivacyMeta(r)
 	printSwiftMeta(r)
 	printDependencyMeta(r)
+	printObjCMeta(r)
 	printStructureMeta(r)
 	printRuntimeMeta(r)
 	printStorageMeta(r)
@@ -283,6 +284,43 @@ func printDependencyMeta(r detect.Result) {
 	if len(r.NetworkEndpoints) > 0 {
 		fmt.Printf("    hosts (%d): %s\n", len(r.NetworkEndpoints),
 			truncateList(r.NetworkEndpoints, 8))
+	}
+}
+
+func printObjCMeta(r detect.Result) {
+	if r.ObjC == nil {
+		return
+	}
+	if r.ObjC.PrincipalClass != "" || r.ObjC.MainNibFile != "" || r.ObjC.MainStoryboardFile != "" {
+		parts := []string{}
+		if r.ObjC.PrincipalClass != "" {
+			parts = append(parts, "principal "+r.ObjC.PrincipalClass)
+		}
+		if r.ObjC.MainNibFile != "" {
+			parts = append(parts, "nib "+r.ObjC.MainNibFile)
+		}
+		if r.ObjC.MainStoryboardFile != "" {
+			parts = append(parts, "storyboard "+r.ObjC.MainStoryboardFile)
+		}
+		fmt.Printf("    objc: %s\n", strings.Join(parts, ", "))
+	}
+	if len(r.ObjC.LinkedFrameworks) > 0 {
+		fmt.Printf("    objc frameworks (%d): %s\n", len(r.ObjC.LinkedFrameworks),
+			truncateList(r.ObjC.LinkedFrameworks, 8))
+	}
+	if len(r.ObjC.URLSchemes) > 0 {
+		fmt.Printf("    url schemes: %s\n", truncateList(r.ObjC.URLSchemes, 6))
+	}
+	if len(r.ObjC.DocumentTypes) > 0 {
+		names := make([]string, 0, len(r.ObjC.DocumentTypes))
+		for _, doc := range r.ObjC.DocumentTypes {
+			if doc.Name != "" {
+				names = append(names, doc.Name)
+			}
+		}
+		if len(names) > 0 {
+			fmt.Printf("    document types: %s\n", truncateList(names, 6))
+		}
 	}
 }
 

@@ -30,13 +30,14 @@ import (
 // Result is the diagnosis for one .app bundle.
 type Result struct {
 	Path          string
-	UI            string         // Electron, SwiftUI, AppKit, Tauri, Flutter, Qt, ComposeDesktop, Swing, SWT, NetBeansPlatform, EclipseRCP, Wxwidgets, Unknown
-	Runtime       string         // Node+Chromium, Swift, ObjC, Rust, Dart, JVM, Go, C++, mixed, unknown
-	Language      string         // best guess: TypeScript/JS, Swift, Kotlin, Java, Rust, Go, Dart, C++, ObjC
-	Packaging     string         // Squirrel, Sparkle, jpackage, install4j, none
-	Confidence    string         // high | medium | low
-	Signals       []string       // human-readable reasons we picked this
-	NativeModules []NativeModule // sub-detection: custom native code embedded in the bundle
+	UI            string          // Electron, SwiftUI, AppKit, Tauri, Flutter, Qt, ComposeDesktop, Swing, SWT, NetBeansPlatform, EclipseRCP, Wxwidgets, Unknown
+	Runtime       string          // Node+Chromium, Swift, ObjC, Rust, Dart, JVM, Go, C++, mixed, unknown
+	Language      string          // best guess: TypeScript/JS, Swift, Kotlin, Java, Rust, Go, Dart, C++, ObjC
+	Packaging     string          // Squirrel, Sparkle, jpackage, install4j, none
+	Confidence    string          // high | medium | low
+	Signals       []string        // human-readable reasons we picked this
+	NativeModules []NativeModule  // sub-detection: custom native code embedded in the bundle
+	ObjC          *ObjCInspection // Objective-C/AppKit bundle profile, when applicable
 
 	// Metadata pulled from Info.plist and frameworks. Best-effort; any
 	// field may be empty if the bundle doesn't expose it.
@@ -146,6 +147,27 @@ type SwiftInspection struct {
 	UsesAppIntents    bool
 	UsesScreenCapture bool
 	AppGroups         []string
+}
+
+// ObjCInspection summarizes AppKit/Objective-C bundle structure that is
+// useful once the framework classifier lands on plain AppKit.
+type ObjCInspection struct {
+	LinkedFrameworks       []string
+	PrincipalClass         string
+	MainNibFile            string
+	MainStoryboardFile     string
+	DocumentTypes          []ObjCDocumentType
+	URLSchemes             []string
+	Services               []string
+	AutomationEntitlements []string
+	UpdateMechanism        string
+}
+
+// ObjCDocumentType is one CFBundleDocumentTypes entry from Info.plist.
+type ObjCDocumentType struct {
+	Name       string
+	Role       string
+	Extensions []string
 }
 
 // StorageFootprint is the on-disk size, in bytes, of each well-known
@@ -295,6 +317,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.PrivacyDescriptions = readPrivacyDescriptions(appPath)
 	r.Dependencies = scanDependencies(appPath)
 	r.Helpers = scanHelpers(appPath)
+	r.ObjC = scanObjCInspection(appPath, exe, r)
 	r.LoginItems = scanLoginItems(appPath, r.BundleID)
 	r.RunningProcesses = scanRunningProcesses(appPath)
 	r.AppStartedAt, r.AppUptimeSeconds = appUptime(r.RunningProcesses, detectNow(opts))

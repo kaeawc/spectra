@@ -46,6 +46,8 @@ Mac Catalyst:
 See [catalyst.md](catalyst.md) for the Catalyst path.
 See [../inspection/swift-apps.md](../inspection/swift-apps.md) for the
 deeper app-level Swift inspection surface.
+See [../inspection/objc-based-app.md](../inspection/objc-based-app.md)
+for the AppKit/Objective-C inspection profile.
 
 ### Layer 3 — Binary content scanning
 
