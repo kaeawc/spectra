@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 var version = "dev"
@@ -73,6 +74,13 @@ func main() {
 // args fall through to `inspect` for backward compatibility with the
 // flag-only CLI shape.
 func dispatch(args []string) int {
+	if remote, ok, err := parseGlobalRemoteArgs(args); ok {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		return runRemoteCommand(remote)
+	}
 	if len(args) == 0 {
 		runHelp(os.Stderr)
 		return 2
@@ -87,6 +95,101 @@ func dispatch(args []string) int {
 	}
 	// No subcommand matched — default to inspect with the full arg list.
 	return runInspect(args)
+}
+
+type globalRemoteArgs struct {
+	target  string
+	timeout time.Duration
+	args    []string
+}
+
+func parseGlobalRemoteArgs(args []string) (globalRemoteArgs, bool, error) {
+	out := globalRemoteArgs{timeout: 3 * time.Second}
+	restStart := 0
+	for restStart < len(args) {
+		next, stop, err := parseGlobalRemoteArg(args, restStart, &out)
+		if err != nil {
+			return out, true, err
+		}
+		if stop {
+			restStart = next
+			goto done
+		}
+		restStart = next
+	}
+done:
+	if out.target == "" {
+		return out, false, nil
+	}
+	out.args = normalizeRemoteCommandArgs(args[restStart:])
+	return out, true, nil
+}
+
+func parseGlobalRemoteArg(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	arg := args[idx]
+	switch {
+	case arg == "--":
+		return idx + 1, true, nil
+	case isRemoteTargetFlag(arg):
+		if idx+1 >= len(args) {
+			return idx, true, fmt.Errorf("%s requires a target", arg)
+		}
+		out.target = args[idx+1]
+		return idx + 2, false, nil
+	case strings.HasPrefix(arg, "--remote="):
+		out.target = strings.TrimPrefix(arg, "--remote=")
+		return idx + 1, false, nil
+	case strings.HasPrefix(arg, "--target="):
+		out.target = strings.TrimPrefix(arg, "--target=")
+		return idx + 1, false, nil
+	case strings.HasPrefix(arg, "--rpc-target="):
+		out.target = strings.TrimPrefix(arg, "--rpc-target=")
+		return idx + 1, false, nil
+	case arg == "--timeout":
+		return parseGlobalRemoteTimeoutValue(args, idx, out)
+	case strings.HasPrefix(arg, "--timeout="):
+		return parseGlobalRemoteTimeoutInline(arg, idx, out)
+	default:
+		return idx, true, nil
+	}
+}
+
+func isRemoteTargetFlag(arg string) bool {
+	return arg == "--remote" || arg == "--target" || arg == "--rpc-target"
+}
+
+func parseGlobalRemoteTimeoutValue(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	if idx+1 >= len(args) {
+		return idx, true, fmt.Errorf("%s requires a duration", args[idx])
+	}
+	timeout, err := time.ParseDuration(args[idx+1])
+	if err != nil {
+		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
+	}
+	out.timeout = timeout
+	return idx + 2, false, nil
+}
+
+func parseGlobalRemoteTimeoutInline(arg string, idx int, out *globalRemoteArgs) (int, bool, error) {
+	timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
+	if err != nil {
+		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
+	}
+	out.timeout = timeout
+	return idx + 1, false, nil
+}
+
+func normalizeRemoteCommandArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	if strings.HasSuffix(args[0], ".app") || strings.HasPrefix(args[0], "/") {
+		next := make([]string, 0, len(args)+1)
+		next = append(next, "inspect")
+		next = append(next, args...)
+		return next
+	}
+	return args
 }
 
 func runVersion(_ []string) int {
@@ -114,6 +217,7 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "Spectra — macOS app diagnostics, JVM-aware remote debugging portal.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage: spectra <subcommand> [flags] [args]")
+	fmt.Fprintln(w, "       spectra --remote <target> <subcommand> [args]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {
@@ -125,4 +229,6 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "  spectra --all -v")
 	fmt.Fprintln(w, "  spectra list -v")
 	fmt.Fprintln(w, "  spectra --json /Applications/Cursor.app")
+	fmt.Fprintln(w, "  spectra --remote work-mac jvm")
+	fmt.Fprintln(w, "  spectra --remote local inspect /Applications/Slack.app")
 }

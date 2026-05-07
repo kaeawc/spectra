@@ -4,9 +4,19 @@
 It supports the Unix-socket local workflow, optional explicit TCP JSON-RPC,
 and an embedded Tailscale `tsnet` listener.
 
-Most CLI commands still run in-process. `spectra status`, `spectra metrics`,
-and direct JSON-RPC clients use the daemon socket today; the same RPC surface
-is intended to back future thin clients and UI clients.
+By default, CLI commands still run in-process. Add `--remote <target>` (or
+`--target <target>`) before a command to dispatch supported commands through
+the daemon RPC surface instead:
+
+```bash
+spectra --remote local jvm
+spectra --remote work-mac inspect /Applications/Slack.app
+spectra --remote work-mac jvm thread-dump 4012
+```
+
+Remote top-level dispatch returns indented JSON, matching `spectra connect`
+and `spectra fan`. Plain commands such as `spectra jvm` and
+`spectra inspect /Applications/Slack.app` continue to run locally.
 
 See [../design/architecture.md](../design/architecture.md) for the
 overall daemon-with-clients model and
@@ -195,11 +205,11 @@ Implemented:
    shortcuts, and the raw `spectra connect <target> call` escape hatch.
 8. Explicit-host `spectra fan --hosts ...` fan-out over the same remote
    call surface.
-9. `spectra hosts` listing for hosts known from stored snapshots.
-10. Per-user launchd lifecycle through `spectra install-daemon`.
-11. Embedded `tsnet` listener for managed tailnet daemon exposure.
+9. Explicit CLI-wide RPC dispatch with `spectra --remote <target> ...`.
+10. `spectra hosts` listing for hosts known from stored snapshots.
+11. Per-user launchd lifecycle through `spectra install-daemon`.
+12. Embedded `tsnet` listener for managed tailnet daemon exposure.
 
 Future:
 
-1. CLI-wide RPC dispatch instead of in-process command execution.
-2. TUI/GUI clients.
+1. TUI/GUI clients.
