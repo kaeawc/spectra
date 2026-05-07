@@ -876,12 +876,16 @@ func printMBeanInvocation(result jvm.MBeanInvocation) {
 }
 
 func printMBeans(result jvm.MBeansResult) {
+	catalog := jvm.CatalogMBeans(result)
 	fmt.Printf("MBeans: %d\n", len(result.MBeans))
-	for _, bean := range result.MBeans {
-		fmt.Printf("%s\n", bean.Name)
-		fmt.Printf("  class       %s\n", strOrDash(bean.Class))
-		fmt.Printf("  attributes  %d\n", len(bean.Attributes))
-		fmt.Printf("  operations  %d\n", len(bean.Operations))
+	for _, group := range catalog.Groups {
+		fmt.Printf("\n%s\n", group.Name)
+		for _, component := range group.Components {
+			fmt.Printf("  %s\n", component.ID)
+			fmt.Printf("    kind        %s\n", strOrDash(component.Kind))
+			fmt.Printf("    attributes  %d\n", len(component.Attributes))
+			fmt.Printf("    operations  %d\n", len(component.Operations))
+		}
 	}
 }
 

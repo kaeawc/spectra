@@ -30,6 +30,7 @@ import java.util.concurrent.Executors;
 import javax.management.MBeanAttributeInfo;
 import javax.management.MBeanInfo;
 import javax.management.MBeanOperationInfo;
+import javax.management.MBeanParameterInfo;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -176,7 +177,18 @@ public final class SpectraAgent {
                 firstOp = false;
                 out.append("{\"name\":\"").append(json(op.getName())).append('"');
                 out.append(",\"return_type\":\"").append(json(op.getReturnType())).append('"');
-                out.append(",\"impact\":").append(op.getImpact()).append('}');
+                out.append(",\"impact\":").append(op.getImpact());
+                out.append(",\"parameters\":[");
+                boolean firstParam = true;
+                for (MBeanParameterInfo param : op.getSignature()) {
+                    if (!firstParam) {
+                        out.append(',');
+                    }
+                    firstParam = false;
+                    out.append("{\"name\":\"").append(json(param.getName())).append('"');
+                    out.append(",\"type\":\"").append(json(param.getType())).append("\"}");
+                }
+                out.append("]}");
             }
             out.append("]}");
         }
