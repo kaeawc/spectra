@@ -104,6 +104,7 @@ nav:
   - Operations:
       - CLI: operations/cli.md
       - Issues: operations/issues.md
+      - Install services: operations/install-services.md
       - Daemon (planned): operations/daemon.md
       - Remote (planned): operations/remote.md
       - Snapshots and hosts: operations/snapshots-and-hosts.md
