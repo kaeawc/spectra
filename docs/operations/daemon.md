@@ -164,7 +164,15 @@ with the remote portal.
   `issues.dismiss`, `issues.fix.record`, `snapshot.prune`, JVM heap/JFR
   capture) are explicit methods. Sensitive artifact writes
   (`jvm.heap_dump`, `jvm.jfr.dump`, `jvm.flamegraph`) also require
-  `confirm_sensitive: true` in the request.
+  `confirm_sensitive: true` in the request under the default
+  `--artifact-policy=confirm` mode. Use `--artifact-policy=deny` to
+  reject daemon artifact writes on shared remote daemons, or
+  `--artifact-policy=allow` for trusted automation that still wants
+  daemon audit records.
+- The `health` and `artifact.policy` RPC methods report the active
+  artifact policy so clients can show the current remote write posture.
+- Successful and denied daemon artifact writes are logged to the JSONL
+  daemon audit log when logging is enabled.
 - The daemon is intended to be a low-privilege observer, not a remote
   shell. Method surface is intentionally narrow; arbitrary
   `exec.Command` is not exposed over RPC.

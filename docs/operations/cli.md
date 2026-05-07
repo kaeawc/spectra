@@ -393,6 +393,7 @@ user's Unix socket at `~/.spectra/sock`.
 | `--tsnet-tags` | empty | Comma-separated Tailscale tags to advertise |
 | `--tsnet-allow-logins` | empty | Comma-separated Tailscale login names allowed to connect |
 | `--tsnet-allow-nodes` | empty | Comma-separated Tailscale node names allowed to connect |
+| `--artifact-policy` | `confirm` | Artifact write policy: `confirm`, `deny`, or `allow` |
 | `--log-file` | `~/Library/Logs/Spectra/daemon.jsonl` | JSONL daemon log path |
 | `--no-log-file` | false | Disable daemon JSONL logging |
 | `--daemon` | false | Start detached and return |
@@ -404,6 +405,12 @@ enrollment uses existing tsnet state, `TS_AUTHKEY`, or a login URL written
 to the daemon log or stderr. `--tsnet-allow-logins` and
 `--tsnet-allow-nodes` add an optional Spectra-side allowlist on top of
 Tailscale ACLs.
+
+`--artifact-policy=confirm` requires sensitive RPC artifact methods to
+carry `confirm_sensitive: true`. `deny` rejects daemon artifact writes
+entirely, which is useful for shared or unattended remote daemons.
+`allow` keeps auditing enabled but skips the confirmation gate for
+trusted automation.
 
 ### Examples
 
@@ -437,7 +444,7 @@ The install and `print-plist` forms accept the serve-listener flags
 `--sock`, `--tcp`, `--allow-remote`, `--tsnet`, `--tsnet-addr`,
 `--tsnet-hostname`, `--tsnet-state-dir`, `--tsnet-ephemeral`,
 `--tsnet-tags`, `--tsnet-allow-logins`, `--tsnet-allow-nodes`,
-`--log-file`, and `--no-log-file`.
+`--artifact-policy`, `--log-file`, and `--no-log-file`.
 
 ### Examples
 

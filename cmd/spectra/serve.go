@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/rpc"
@@ -32,6 +33,7 @@ func runServe(args []string) int {
 	tsnetTags := fs.String("tsnet-tags", "", "Comma-separated Tailscale tags to advertise, such as tag:engineer")
 	tsnetAllowLogins := fs.String("tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
 	tsnetAllowNodes := fs.String("tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
+	artifactPolicy := fs.String("artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
@@ -39,6 +41,11 @@ func runServe(args []string) int {
 		return 2
 	}
 	if err := validateServeListen(*tcpAddr, *allowRemote); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	policy := artifact.Policy{Mode: *artifactPolicy}
+	if err := policy.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
@@ -86,6 +93,7 @@ func runServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "spectra serve: joining tailnet via tsnet on %s\n", *tsnetAddr)
 		fmt.Fprintln(os.Stderr, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
 	}
+	fmt.Fprintf(os.Stderr, "spectra serve: artifact policy %s\n", policy.Normalize().Mode)
 
 	var detectStore *cache.ShardedStore
 	if cacheStores != nil {
@@ -104,6 +112,7 @@ func runServe(args []string) int {
 		TsnetAllowNodes:  splitCommaList(*tsnetAllowNodes),
 		SpectraVersion:   version,
 		DetectStore:      detectStore,
+		ArtifactPolicy:   policy,
 		Logger:           daemonLog,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)

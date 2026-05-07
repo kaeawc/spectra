@@ -187,7 +187,11 @@ The remote daemon is **read-only by default**. State-changing
 operations (snapshots, heap dumps, JFR recordings) require explicit
 consent on the client side and an audit log entry on the daemon. The
 daemon rejects sensitive artifact writes unless the request includes
-`confirm_sensitive: true`.
+`confirm_sensitive: true` under the default `--artifact-policy=confirm`.
+Operators can start the daemon with `--artifact-policy=deny` to make
+remote artifact capture unavailable, or `--artifact-policy=allow` for
+trusted automation. Clients can read the active setting through
+`health` or `artifact.policy`.
 
 The daemon does not expose:
 - Arbitrary file reads outside Spectra-managed paths.
