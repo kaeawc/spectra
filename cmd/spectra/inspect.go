@@ -153,6 +153,9 @@ func printTable(rs []detect.Result, verbose bool) {
 				}
 			}
 		}
+		if verbose && r.Rust != nil {
+			printRustInspection(r.Rust)
+		}
 	}
 }
 
@@ -176,6 +179,29 @@ func printMeta(r detect.Result) {
 	printStructureMeta(r)
 	printRuntimeMeta(r)
 	printStorageMeta(r)
+}
+
+func printRustInspection(r *detect.RustInspection) {
+	fmt.Printf("    rust: %s", r.Kind)
+	if r.PrimaryBinary != "" {
+		fmt.Printf("  binary=%s", r.PrimaryBinary)
+	}
+	if r.PanicStringHits > 0 {
+		fmt.Printf("  panic_strings=%d", r.PanicStringHits)
+	}
+	fmt.Println()
+	if len(r.LinkedFrameworks) > 0 {
+		fmt.Printf("    rust frameworks: %s\n", strings.Join(r.LinkedFrameworks, ", "))
+	}
+	if len(r.NativeModules) > 0 {
+		fmt.Printf("    rust modules: %s\n", truncateList(r.NativeModules, 4))
+	}
+	if len(r.Sidecars) > 0 {
+		fmt.Printf("    rust sidecars: %s\n", truncateList(r.Sidecars, 4))
+	}
+	if len(r.FollowUps) > 0 {
+		fmt.Printf("    rust follow-ups: %s\n", truncateList(r.FollowUps, 5))
+	}
 }
 
 func printIdentityMeta(r detect.Result) {

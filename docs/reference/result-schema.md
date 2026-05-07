@@ -18,6 +18,7 @@ Source of truth: `internal/detect/detect.go`.
 | `Signals` | []string | Human-readable evidence trail |
 | `NativeModules` | []NativeModule | Per-Electron-app native add-on classifications |
 | `ObjC` | *ObjCInspection | Per-AppKit Objective-C bundle profile |
+| `Rust` | *RustInspection | Rust-specific architecture attribution when Rust is present |
 
 ## Metadata fields
 
@@ -94,6 +95,20 @@ type ObjCDocumentType struct {
     Name       string
     Role       string
     Extensions []string
+}
+```
+
+### RustInspection
+
+```go
+type RustInspection struct {
+    Kind            string   // native, tauri, electron-native-module, embedded, none
+    PrimaryBinary   string   // bundle-relative executable inspected for top-level Rust
+    PanicStringHits int      // combined Rust panic-site marker hits
+    LinkedFrameworks []string // notable Apple/UI frameworks linked by the primary binary
+    NativeModules   []string // bundle-relative Rust Electron native modules
+    Sidecars        []string // bundle-relative Rust sidecar dylibs
+    FollowUps       []string // suggested next diagnostic surfaces
 }
 ```
 

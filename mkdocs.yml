@@ -91,6 +91,7 @@ nav:
       - Login items: inspection/login-items.md
       - Running processes: inspection/running-processes.md
       - Power and thermal: inspection/power-thermal.md
+      - Rust-based apps: inspection/rust-based-apps.md
       - Toolchains (planned): inspection/toolchains.md
       - JVM (planned): inspection/jvm.md
       - Live data sources: inspection/live-data-sources.md
