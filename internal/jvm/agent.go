@@ -2,9 +2,11 @@ package jvm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,15 +16,18 @@ import (
 )
 
 const (
-	agentPortProperty  = "spectra.agent.port"
-	agentTokenProperty = "spectra.agent.token"
+	agentPortProperty   = "spectra.agent.port"
+	agentTokenProperty  = "spectra.agent.token"
+	agentSocketProperty = "spectra.agent.socket"
 )
 
 type AgentStatus struct {
-	PID      int    `json:"pid"`
-	Attached bool   `json:"attached"`
-	Port     int    `json:"port,omitempty"`
-	Token    string `json:"-"`
+	PID       int    `json:"pid"`
+	Attached  bool   `json:"attached"`
+	Transport string `json:"transport,omitempty"`
+	Port      int    `json:"port,omitempty"`
+	Socket    string `json:"socket,omitempty"`
+	Token     string `json:"-"`
 }
 
 type MBeansResult struct {
@@ -59,6 +64,23 @@ type AgentProbes struct {
 	Threads struct {
 		Live int `json:"live"`
 	} `json:"threads"`
+	Counters  []AgentCounter  `json:"counters,omitempty"`
+	Workflows []WorkflowProbe `json:"workflows,omitempty"`
+}
+
+type AgentCounter struct {
+	Name      string `json:"name"`
+	MBean     string `json:"mbean"`
+	Attribute string `json:"attribute"`
+	Type      string `json:"type,omitempty"`
+	Value     any    `json:"value,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type WorkflowProbe struct {
+	Name     string         `json:"name"`
+	Counters []AgentCounter `json:"counters,omitempty"`
+	Error    string         `json:"error,omitempty"`
 }
 
 type MBeanAttributeValue struct {
@@ -99,10 +121,25 @@ func (p CmdStatusProvider) Status(pid int) AgentStatus {
 	return AgentStatusForPID(pid, p.Run)
 }
 
+type staticStatusProvider struct {
+	status AgentStatus
+}
+
+func (p staticStatusProvider) Status(pid int) AgentStatus {
+	p.status.PID = pid
+	return p.status
+}
+
 func NewAgentClient(run CmdRunner) AgentClient {
 	return AgentClient{
 		StatusProvider: CmdStatusProvider{Run: run},
-		Transport:      HTTPAgentTransport{Client: &http.Client{Timeout: 3 * time.Second}},
+	}
+}
+
+func NewAgentClientForStatus(status AgentStatus) AgentClient {
+	return AgentClient{
+		StatusProvider: staticStatusProvider{status: status},
+		Transport:      transportForStatus(status),
 	}
 }
 
@@ -155,11 +192,19 @@ func (c AgentClient) deps(pid int) (AgentStatus, AgentTransport) {
 	if provider == nil {
 		provider = CmdStatusProvider{}
 	}
+	status := provider.Status(pid)
 	transport := c.Transport
 	if transport == nil {
-		transport = HTTPAgentTransport{Client: &http.Client{Timeout: 3 * time.Second}}
+		transport = transportForStatus(status)
 	}
-	return provider.Status(pid), transport
+	return status, transport
+}
+
+func transportForStatus(status AgentStatus) AgentTransport {
+	if status.Transport == "unix" || status.Socket != "" {
+		return UnixAgentTransport{Client: unixHTTPClient(status.Socket)}
+	}
+	return HTTPAgentTransport{Client: &http.Client{Timeout: 3 * time.Second}}
 }
 
 type HTTPAgentTransport struct {
@@ -198,6 +243,64 @@ func (t HTTPAgentTransport) doJSON(method string, status AgentStatus, path strin
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Second}
 	}
+	return doAgentRequest(client, req, dest)
+}
+
+type UnixAgentTransport struct {
+	Client *http.Client
+}
+
+func (t UnixAgentTransport) GetJSON(status AgentStatus, path string, dest any) error {
+	return t.doJSON(http.MethodGet, status, path, nil, dest)
+}
+
+func (t UnixAgentTransport) PostJSON(status AgentStatus, path string, body any, dest any) error {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode agent request: %w", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	return t.doJSON(http.MethodPost, status, path, reader, dest)
+}
+
+func (t UnixAgentTransport) doJSON(method string, status AgentStatus, path string, body io.Reader, dest any) error {
+	if !status.Attached {
+		return fmt.Errorf("spectra agent is not attached to PID %d; run `spectra jvm attach %d` first", status.PID, status.PID)
+	}
+	if status.Socket == "" {
+		return fmt.Errorf("spectra agent did not publish a Unix socket for PID %d", status.PID)
+	}
+	req, err := http.NewRequest(method, "http://spectra-agent"+path, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Spectra-Agent-Token", status.Token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	client := t.Client
+	if client == nil {
+		client = unixHTTPClient(status.Socket)
+	}
+	return doAgentRequest(client, req, dest)
+}
+
+func unixHTTPClient(socket string) *http.Client {
+	return &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socket)
+			},
+		},
+	}
+}
+
+func doAgentRequest(client *http.Client, req *http.Request, dest any) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("agent request: %w", err)
@@ -216,10 +319,23 @@ func (t HTTPAgentTransport) doJSON(method string, status AgentStatus, path strin
 	return nil
 }
 
+type AttachOptions struct {
+	JarPath   string
+	Transport string
+	Socket    string
+	Counters  []string
+	Workflows []string
+}
+
 func AttachAgent(pid int, jarPath string, run CmdRunner) (AgentStatus, error) {
+	return AttachAgentWithOptions(pid, AttachOptions{JarPath: jarPath}, run)
+}
+
+func AttachAgentWithOptions(pid int, opts AttachOptions, run CmdRunner) (AgentStatus, error) {
 	if run == nil {
 		run = DefaultRunner
 	}
+	jarPath := opts.JarPath
 	if jarPath == "" {
 		var err error
 		jarPath, err = FindAgentJar()
@@ -230,7 +346,11 @@ func AttachAgent(pid int, jarPath string, run CmdRunner) (AgentStatus, error) {
 	if _, err := os.Stat(jarPath); err != nil {
 		return AgentStatus{PID: pid}, fmt.Errorf("agent jar %s: %w", jarPath, err)
 	}
-	_, err := run("java", "--add-modules", "jdk.attach", "-cp", jarPath, "com.spectra.agent.AttachMain", strconv.Itoa(pid), jarPath)
+	cmdArgs := []string{"--add-modules", "jdk.attach", "-cp", jarPath, "com.spectra.agent.AttachMain", strconv.Itoa(pid), jarPath}
+	if agentArgs := attachAgentArgs(opts); agentArgs != "" {
+		cmdArgs = append(cmdArgs, agentArgs)
+	}
+	_, err := run("java", cmdArgs...)
 	if err != nil {
 		return AgentStatus{PID: pid}, fmt.Errorf("attach agent: %w", err)
 	}
@@ -239,6 +359,23 @@ func AttachAgent(pid int, jarPath string, run CmdRunner) (AgentStatus, error) {
 		return status, fmt.Errorf("agent loaded but did not publish %s/%s", agentPortProperty, agentTokenProperty)
 	}
 	return status, nil
+}
+
+func attachAgentArgs(opts AttachOptions) string {
+	var parts []string
+	if opts.Transport != "" {
+		parts = append(parts, "transport="+opts.Transport)
+	}
+	if opts.Socket != "" {
+		parts = append(parts, "socket="+opts.Socket)
+	}
+	if len(opts.Counters) > 0 {
+		parts = append(parts, "counters="+strings.Join(opts.Counters, "|"))
+	}
+	if len(opts.Workflows) > 0 {
+		parts = append(parts, "workflows="+strings.Join(opts.Workflows, "|"))
+	}
+	return strings.Join(parts, ";")
 }
 
 func AgentStatusForPID(pid int, run CmdRunner) AgentStatus {
@@ -253,7 +390,14 @@ func AgentStatusFromSysProps(pid int, props map[string]string) AgentStatus {
 	port, err := strconv.Atoi(strings.TrimSpace(props[agentPortProperty]))
 	if err == nil && port > 0 && props[agentTokenProperty] != "" {
 		status.Attached = true
+		status.Transport = "http"
 		status.Port = port
+		status.Token = props[agentTokenProperty]
+	}
+	if props[agentSocketProperty] != "" && props[agentTokenProperty] != "" {
+		status.Attached = true
+		status.Transport = "unix"
+		status.Socket = props[agentSocketProperty]
 		status.Token = props[agentTokenProperty]
 	}
 	return status
@@ -311,7 +455,7 @@ func collectAgentSysProps(pid int, run CmdRunner) map[string]string {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		if k == agentPortProperty || k == agentTokenProperty {
+		if k == agentPortProperty || k == agentTokenProperty || k == agentSocketProperty {
 			props[k] = strings.TrimSpace(v)
 		}
 	}

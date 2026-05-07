@@ -142,6 +142,8 @@ The in-process layer is a small Java agent built from `agent/`:
 ```bash
 make agent
 spectra jvm attach <pid>
+spectra jvm attach --transport unix <pid>
+spectra jvm attach --counter heap=java.lang:type=Memory:HeapMemoryUsage <pid>
 spectra jvm mbeans <pid>
 spectra jvm mbean-read <pid> java.lang:type=Memory HeapMemoryUsage
 spectra jvm mbean-invoke <pid> java.lang:type=Memory gc
@@ -157,10 +159,13 @@ java --add-modules jdk.attach \
 ```
 
 Once loaded, the agent starts a loopback-only HTTP endpoint inside the
-target JVM, publishes `spectra.agent.port` and `spectra.agent.token` as
-system properties, and requires the token on every request. Spectra reads
-those properties with `jcmd <pid> VM.system_properties` and uses the
-endpoint to enumerate the platform MBean server or fetch lightweight probes.
+target JVM by default, publishes `spectra.agent.port` and
+`spectra.agent.token` as system properties, and requires the token on every
+request. `spectra jvm attach --transport unix` starts the same control
+protocol on a Unix-domain socket and publishes `spectra.agent.socket`
+instead. Spectra reads those properties with
+`jcmd <pid> VM.system_properties` and uses the endpoint to enumerate the
+platform MBean server or fetch lightweight probes.
 
 Implemented agent endpoints:
 
@@ -169,13 +174,12 @@ Implemented agent endpoints:
 | `/mbeans` | `spectra jvm mbeans <pid>` | MBean names, implementation class names, attributes, and operation signatures |
 | `/mbean-attribute` | `spectra jvm mbean-read <pid> ...` | One MBean attribute value |
 | `/mbean-operation` | `spectra jvm mbean-invoke <pid> ...` | Explicit zero-argument MBean operation invocation |
-| `/probes` | `spectra jvm probe <pid>` | Runtime memory, processor count, and live thread count |
+| `/probes` | `spectra jvm probe <pid>` | Runtime memory, processor count, live thread count, named counters, and workflow probes |
 
-Planned extensions:
-
-- Named custom counters and workflow-specific probes.
-- A Unix-domain-socket transport on Java versions where the target runtime
-  exposes the standard socket channel APIs.
+Named counters are opt-in at attach time with repeatable `--counter`
+definitions in the form `name=object-name:attribute`. Workflow probes group
+counter definitions with repeatable `--workflow` values such as
+`memory=heap=java.lang:type=Memory:HeapMemoryUsage+threads=java.lang:type=Threading:ThreadCount`.
 
 ## JDK installation discovery
 
@@ -270,10 +274,5 @@ Implemented:
 12. JVM GC-pressure recommendations from old-generation occupancy and
    full-GC counters.
 13. Optional Java Attach API agent with MBean browsing, MBean attribute
-    reads, zero-argument operation invocation, and in-process probes.
-
-Future:
-
-1. Named custom counters and workflow-specific probes.
-2. Unix-domain-socket transport for agent control on JDKs that expose the
-   standard socket channel APIs.
+    reads, zero-argument operation invocation, in-process probes, named
+    counters, workflow probes, and optional Unix-domain-socket transport.
