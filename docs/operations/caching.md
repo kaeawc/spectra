@@ -4,6 +4,9 @@ Spectra uses a versioned, hash-sharded blob cache for expensive or
 large artifacts. The CLI initializes all cache stores at startup and
 exposes shared `stats` / `clear` commands through a registry.
 
+For user-facing retention, sharing, and deletion guidance, see
+[Artifact lifecycle](artifacts.md).
+
 The cache layout follows the patterns proven out in
 [krit](https://github.com/kaeawc/krit). See
 [../design/storage.md](../design/storage.md) for the full storage stack.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -121,6 +122,15 @@ func runJVMThreadDump(args []string) int {
 			fmt.Fprintf(os.Stderr, "cached as threads/%x\n", key[:4])
 		}
 	}
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindThreadDump,
+		Sensitivity: artifact.SensitivityMediumHigh,
+		Source:      "cli",
+		Command:     "spectra jvm thread-dump",
+		CacheKind:   cache.KindThreads,
+		PID:         pid,
+		SizeBytes:   int64(len(data)),
+	})
 
 	os.Stdout.Write(data)
 	return 0
@@ -189,6 +199,15 @@ func runJVMHeapDump(args []string) int {
 		fmt.Fprintf(os.Stderr, "heap-dump failed for PID %d: %v\n", pid, err)
 		return 1
 	}
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindHeapDump,
+		Sensitivity: artifact.SensitivityVeryHigh,
+		Source:      "cli",
+		Command:     "spectra jvm heap-dump",
+		Path:        destPath,
+		CacheKind:   cache.KindHprof,
+		PID:         pid,
+	})
 	fmt.Println(destPath)
 	return 0
 }
@@ -355,6 +374,17 @@ func runJVMFlamegraph(args []string) int {
 		fmt.Fprintf(os.Stderr, "flamegraph failed for PID %d: %v\n", pid, err)
 		return 1
 	}
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindFlamegraph,
+		Sensitivity: artifact.SensitivityMediumHigh,
+		Source:      "cli",
+		Command:     "spectra jvm flamegraph",
+		Path:        dest,
+		PID:         pid,
+		Metadata: map[string]string{
+			"event": *event,
+		},
+	})
 	fmt.Println(dest)
 	return 0
 }
@@ -503,6 +533,18 @@ func runJFRDump(pid int, name, dest string) int {
 		return 1
 	}
 	cacheJFRDump(pid, dest)
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindJFRRecording,
+		Sensitivity: artifact.SensitivityMediumHigh,
+		Source:      "cli",
+		Command:     "spectra jvm jfr dump",
+		Path:        dest,
+		CacheKind:   cache.KindJFR,
+		PID:         pid,
+		Metadata: map[string]string{
+			"name": name,
+		},
+	})
 	fmt.Println(dest)
 	return 0
 }
@@ -552,6 +594,18 @@ func runJFRStop(pid int, name, dest string) int {
 	}
 	fmt.Fprintf(os.Stdout, "JFR recording %q stopped on PID %d\n", name, pid)
 	if dest != "" {
+		recordArtifactCLI(artifact.Record{
+			Kind:        artifact.KindJFRRecording,
+			Sensitivity: artifact.SensitivityMediumHigh,
+			Source:      "cli",
+			Command:     "spectra jvm jfr stop",
+			Path:        dest,
+			CacheKind:   cache.KindJFR,
+			PID:         pid,
+			Metadata: map[string]string{
+				"name": name,
+			},
+		})
 		fmt.Println(dest)
 	}
 	return 0

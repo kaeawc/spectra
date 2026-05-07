@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/logger"
@@ -76,7 +77,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, &artifact.FakeRecorder{}, nil, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -1215,6 +1216,51 @@ func TestDaemonJVMHeapDumpRequiresSensitiveConfirmation(t *testing.T) {
 	resp := rpcCall(t, enc, dec, 152, "jvm.heap_dump", `{"pid":42}`)
 	if resp.Error == nil {
 		t.Error("expected error when confirm_sensitive is missing")
+	}
+}
+
+func TestDaemonJVMHeapDumpRecordsArtifact(t *testing.T) {
+	orig := runHeapDump
+	var gotPID int
+	var gotDest string
+	runHeapDump = func(pid int, dest string, _ jvm.CmdRunner) error {
+		gotPID = pid
+		gotDest = dest
+		return os.WriteFile(dest, []byte("heap"), 0o600)
+	}
+	t.Cleanup(func() { runHeapDump = orig })
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake := &artifact.FakeRecorder{}
+	d := rpc.NewDispatcher()
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), cache.Default, nil, fake, nil, nil)
+	client, server := net.Pipe()
+	defer client.Close()
+	go d.Serve(server)
+	enc := json.NewEncoder(client)
+	dec := json.NewDecoder(client)
+
+	dest := filepath.Join(t.TempDir(), "heap.hprof")
+	resp := rpcCall(t, enc, dec, 1, "jvm.heap_dump", `{"pid":42,"dest":"`+dest+`","confirm_sensitive":true}`)
+	if resp.Error != nil {
+		t.Fatalf("jvm.heap_dump: %v", resp.Error)
+	}
+	if gotPID != 42 || gotDest != dest {
+		t.Fatalf("heap dump args = (%d, %q), want (42, %q)", gotPID, gotDest, dest)
+	}
+	records := fake.Snapshot()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0].Kind != artifact.KindHeapDump || records[0].Sensitivity != artifact.SensitivityVeryHigh {
+		t.Fatalf("record = %#v", records[0])
+	}
+	if records[0].Path != dest || records[0].PID != 42 || records[0].CacheKind != cache.KindHprof {
+		t.Fatalf("record target = %#v", records[0])
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/bundleid"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
@@ -39,6 +40,8 @@ import (
 var (
 	collectToolchains = toolchain.Collect
 	collectJDKs       = toolchain.CollectJDKs
+	runHeapDump       = jvm.HeapDump
+	runThreadDump     = jvm.ThreadDump
 	runJFRDump        = jvm.JFRDump
 	runJFRSummary     = jvm.SummarizeJFR
 )
@@ -69,6 +72,7 @@ type Options struct {
 	DBPath           string              // empty = store.DefaultPath()
 	CacheRegistry    *cache.Registry     // nil = cache.Default
 	DetectStore      *cache.ShardedStore // nil = no detect caching
+	ArtifactRecorder artifact.Recorder   // nil = default per-user manifest
 	Logger           logger.Logger       // nil = discard
 }
 
@@ -184,9 +188,17 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	if cacheReg == nil {
 		cacheReg = cache.Default
 	}
+	artifactRecorder := opts.ArtifactRecorder
+	if artifactRecorder == nil {
+		path, err := artifact.DefaultManifestPath()
+		if err != nil {
+			return fmt.Errorf("serve: resolve artifact manifest path: %w", err)
+		}
+		artifactRecorder = artifact.NewManager(artifact.NewJSONStore(path), nil)
+	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, tsnetStatus, tsNode)
+	registerHandlers(d, opts.SpectraVersion, db, collector, cacheReg, opts.DetectStore, artifactRecorder, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
 
 	go func() {
@@ -409,7 +421,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB) {
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, cacheReg *cache.Registry, detectStore *cache.ShardedStore, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		result := map[string]any{"ok": true, "version": version}
 		if tsnetStatus != nil {
@@ -828,11 +840,19 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.thread_dump requires {\"pid\": <pid>}")
 		}
-		out, err := jvm.ThreadDump(p.PID, nil)
+		out, err := runThreadDump(p.PID, nil)
 		if err != nil {
 			return nil, fmt.Errorf("thread dump pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindThreadDump,
+			Sensitivity: artifact.SensitivityMediumHigh,
+			Source:      "daemon-rpc",
+			Command:     "jvm.thread_dump",
+			CacheKind:   cache.KindThreads,
+			PID:         p.PID,
+			SizeBytes:   int64(len(out)),
+		}, map[string]any{"pid": p.PID, "output": string(out)}), nil
 	}
 	d.Register("jvm.thread_dump", jvmThreadDump)
 	d.Register("jvm.threadDump", jvmThreadDump)
@@ -970,7 +990,17 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}); err != nil {
 			return nil, fmt.Errorf("flamegraph pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "dest": p.Dest}, nil
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindFlamegraph,
+			Sensitivity: artifact.SensitivityMediumHigh,
+			Source:      "daemon-rpc",
+			Command:     "jvm.flamegraph",
+			Path:        p.Dest,
+			PID:         p.PID,
+			Metadata: map[string]string{
+				"event": p.Event,
+			},
+		}, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
 	})
 
 	// jvm.jfr.start — start a JFR recording on a JVM process.
@@ -1017,7 +1047,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := runJFRDump(p.PID, name, p.Dest, nil); err != nil {
 			return nil, fmt.Errorf("jfr dump pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "dumped": true}, nil
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindJFRRecording,
+			Sensitivity: artifact.SensitivityMediumHigh,
+			Source:      "daemon-rpc",
+			Command:     "jvm.jfr.dump",
+			Path:        p.Dest,
+			CacheKind:   cache.KindJFR,
+			PID:         p.PID,
+			Metadata: map[string]string{
+				"name": name,
+			},
+		}, map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "dumped": true}), nil
 	})
 
 	// jvm.jfr.stop — stop a JFR recording. Optional: {"dest": "/path/to/out.jfr"}.
@@ -1037,7 +1078,22 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := jvm.JFRStop(p.PID, name, p.Dest, nil); err != nil {
 			return nil, fmt.Errorf("jfr stop pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "stopped": true}, nil
+		result := map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "stopped": true}
+		if p.Dest == "" {
+			return result, nil
+		}
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindJFRRecording,
+			Sensitivity: artifact.SensitivityMediumHigh,
+			Source:      "daemon-rpc",
+			Command:     "jvm.jfr.stop",
+			Path:        p.Dest,
+			CacheKind:   cache.KindJFR,
+			PID:         p.PID,
+			Metadata: map[string]string{
+				"name": name,
+			},
+		}, result), nil
 	})
 
 	// jvm.jfr.summary — run `jfr summary <path>` and return parsed event counts.
@@ -1088,10 +1144,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 		}
-		if err := jvm.HeapDump(p.PID, p.Dest, nil); err != nil {
+		if err := runHeapDump(p.PID, p.Dest, nil); err != nil {
 			return nil, fmt.Errorf("heap dump pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "dest": p.Dest}, nil
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindHeapDump,
+			Sensitivity: artifact.SensitivityVeryHigh,
+			Source:      "daemon-rpc",
+			Command:     "jvm.heap_dump",
+			Path:        p.Dest,
+			CacheKind:   cache.KindHprof,
+			PID:         p.PID,
+		}, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
 	}
 	d.Register("jvm.heap_dump", jvmHeapDump)
 	d.Register("jvm.heapDump", jvmHeapDump)
@@ -1226,7 +1290,19 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err != nil {
 			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
 		}
-		return map[string]any{"pid": p.PID, "output": string(out)}, nil
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindProcessSample,
+			Sensitivity: artifact.SensitivityMedium,
+			Source:      "daemon-rpc",
+			Command:     "process.sample",
+			CacheKind:   cache.KindSamples,
+			PID:         p.PID,
+			SizeBytes:   int64(len(out)),
+			Metadata: map[string]string{
+				"duration": fmt.Sprint(p.Duration),
+				"interval": fmt.Sprint(p.Interval),
+			},
+		}, map[string]any{"pid": p.PID, "output": string(out)}), nil
 	})
 
 	// power.state — battery level, thermal pressure, assertions, and top energy users.
@@ -1373,7 +1449,23 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			}
 			return nil, err
 		}
-		return result, nil
+		out, _ := result["output_path"].(string)
+		handle, _ := result["handle"].(string)
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindPacketCapture,
+			Sensitivity: artifact.SensitivityHigh,
+			Source:      "daemon-rpc",
+			Command:     "helper.net_capture.start",
+			Path:        out,
+			CacheKind:   cache.KindNetcap,
+			Metadata: map[string]string{
+				"handle":    handle,
+				"interface": p.Interface,
+				"proto":     p.Proto,
+				"host":      p.Host,
+				"port":      fmt.Sprint(p.Port),
+			},
+		}, result), nil
 	})
 
 	d.Register("helper.net_capture.stop", func(params json.RawMessage) (any, error) {
@@ -1390,7 +1482,18 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			}
 			return nil, err
 		}
-		return result, nil
+		out, _ := result["output_path"].(string)
+		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+			Kind:        artifact.KindPacketCapture,
+			Sensitivity: artifact.SensitivityHigh,
+			Source:      "daemon-rpc",
+			Command:     "helper.net_capture.stop",
+			Path:        out,
+			CacheKind:   cache.KindNetcap,
+			Metadata: map[string]string{
+				"handle": p.Handle,
+			},
+		}, result), nil
 	})
 
 	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
@@ -1412,6 +1515,23 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		return result, nil
 	})
+}
+
+func recordArtifact(ctx context.Context, recorder artifact.Recorder, rec artifact.Record, result map[string]any) map[string]any {
+	if result == nil {
+		result = map[string]any{}
+	}
+	if recorder == nil {
+		return result
+	}
+	stored, err := recorder.Record(ctx, rec)
+	if err != nil {
+		result["artifact_error"] = err.Error()
+		return result
+	}
+	result["artifact_id"] = stored.ID
+	result["artifact_kind"] = stored.Kind
+	return result
 }
 
 func daemonJVMOptions() jvm.CollectOptions {

@@ -255,3 +255,5 @@ for the current reporting process.
 - [privileged-helper.md](privileged-helper.md) — protocol + boundary
 - [distribution.md](distribution.md) — code-signing context
 - [remote-portal.md](remote-portal.md) — tailnet exposure model
+- [Artifact lifecycle](../operations/artifacts.md) — retention, sharing,
+  and deletion guidance for sensitive artifacts

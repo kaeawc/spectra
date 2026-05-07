@@ -20,7 +20,8 @@ to live-snapshot retention.
 JFR recordings, thread dumps) that don't belong in
 [*SQLite*](#sqlite). Two-level hash-sharded layout under
 `~/.cache/spectra/v1/{kind}/{hash[:2]}/{hash[2:]}.bin`. See
-[../design/storage.md](../design/storage.md).
+[../design/storage.md](../design/storage.md) and
+[../operations/artifacts.md](../operations/artifacts.md).
 
 **Catalog.** The set of [*rules*](#rule) the
 [*recommendations engine*](#recommendations-engine) evaluates. Ships

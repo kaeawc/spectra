@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 )
 
@@ -51,6 +52,19 @@ func runSample(args []string) int {
 			fmt.Fprintf(os.Stderr, "cached as samples/%x\n", key[:4])
 		}
 	}
+	recordArtifactCLI(artifact.Record{
+		Kind:        artifact.KindProcessSample,
+		Sensitivity: artifact.SensitivityMedium,
+		Source:      "cli",
+		Command:     "spectra sample",
+		CacheKind:   cache.KindSamples,
+		PID:         pid,
+		SizeBytes:   int64(len(data)),
+		Metadata: map[string]string{
+			"duration": strconv.Itoa(*duration),
+			"interval": strconv.Itoa(*interval),
+		},
+	})
 
 	os.Stdout.Write(data)
 	return 0

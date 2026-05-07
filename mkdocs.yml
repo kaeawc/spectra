@@ -96,6 +96,7 @@ nav:
       - Daemon (planned): operations/daemon.md
       - Remote (planned): operations/remote.md
       - Caching (planned): operations/caching.md
+      - Artifact lifecycle: operations/artifacts.md
   - Reference:
       - Result schema: reference/result-schema.md
       - Glossary: reference/glossary.md
