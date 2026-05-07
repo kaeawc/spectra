@@ -47,6 +47,20 @@ const helperPlistContent = `<?xml version="1.0" encoding="UTF-8"?>
 const helperNewsyslogContent = helperLogPath + `	root:wheel	640	7	1024	*	J
 `
 
+type helperStatusClient interface {
+	Available() bool
+	Health() (map[string]any, error)
+}
+
+type helperInstallDeps struct {
+	executable func() (string, error)
+	stat       func(string) (os.FileInfo, error)
+	getenv     func(string) string
+	runRoot    rootRunner
+	writeTemp  tempTextWriter
+	client     func() helperStatusClient
+}
+
 func runInstallHelper(args []string) int {
 	fs := flag.NewFlagSet("spectra install-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -54,17 +68,22 @@ func runInstallHelper(args []string) int {
 		return 2
 	}
 
-	// Find the spectra-helper binary next to the running spectra binary.
-	self, err := os.Executable()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "install-helper: could not find executable path:", err)
+	if err := installHelper(defaultHelperInstallDeps()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	return 0
+}
+
+func installHelper(deps helperInstallDeps) error {
+	// Find the spectra-helper binary next to the running spectra binary.
+	self, err := deps.executable()
+	if err != nil {
+		return fmt.Errorf("install-helper: could not find executable path: %w", err)
+	}
 	helperSrc := filepath.Join(filepath.Dir(self), "spectra-helper")
-	if _, err := os.Stat(helperSrc); err != nil {
-		fmt.Fprintf(os.Stderr, "install-helper: spectra-helper binary not found at %s\n", helperSrc)
-		fmt.Fprintln(os.Stderr, "Build it with: go build ./cmd/spectra-helper")
-		return 1
+	if _, err := deps.stat(helperSrc); err != nil {
+		return fmt.Errorf("install-helper: spectra-helper binary not found at %s\nBuild it with: go build ./cmd/spectra-helper", helperSrc)
 	}
 
 	fmt.Fprintf(os.Stderr, "This requires administrator privilege. You may be prompted for your password.\n\n")
@@ -73,34 +92,36 @@ func runInstallHelper(args []string) int {
 		name string
 		fn   func() error
 	}{
-		{"Create _spectra group", ensureHelperGroup},
+		{"Create _spectra group", func() error {
+			return ensureHelperGroup(deps.runRoot)
+		}},
 		{"Add current user to _spectra group", func() error {
-			user := helperInstallUser(os.Getenv)
+			user := helperInstallUser(deps.getenv)
 			if user == "" || user == "root" {
 				return nil
 			}
-			return sudoRun("dseditgroup", "-o", "edit", "-a", user, "-t", "user", helperGroup)
+			return deps.runRoot("dseditgroup", "-o", "edit", "-a", user, "-t", "user", helperGroup)
 		}},
 		{"Create /Library/PrivilegedHelperTools/", func() error {
-			return sudoRun("mkdir", "-p", "/Library/PrivilegedHelperTools")
+			return deps.runRoot("mkdir", "-p", "/Library/PrivilegedHelperTools")
 		}},
 		{"Copy spectra-helper binary", func() error {
-			return sudoRun("cp", helperSrc, helperBinaryDest)
+			return deps.runRoot("cp", helperSrc, helperBinaryDest)
 		}},
 		{"Set ownership and permissions", func() error {
-			if err := sudoRun("chown", "root:wheel", helperBinaryDest); err != nil {
+			if err := deps.runRoot("chown", "root:wheel", helperBinaryDest); err != nil {
 				return err
 			}
-			return sudoRun("chmod", "755", helperBinaryDest)
+			return deps.runRoot("chmod", "755", helperBinaryDest)
 		}},
 		{"Install LaunchDaemon plist", func() error {
-			return installRootTextFile(helperPlist, helperPlistContent, sudoRun, writeTempText)
+			return installRootTextFile(helperPlist, helperPlistContent, deps.runRoot, deps.writeTemp)
 		}},
 		{"Install helper log rotation", func() error {
-			return installRootTextFile(helperNewsyslogConf, helperNewsyslogContent, sudoRun, writeTempText)
+			return installRootTextFile(helperNewsyslogConf, helperNewsyslogContent, deps.runRoot, deps.writeTemp)
 		}},
 		{"Load LaunchDaemon", func() error {
-			return sudoRun("launchctl", "load", "-w", helperPlist)
+			return deps.runRoot("launchctl", "load", "-w", helperPlist)
 		}},
 	}
 
@@ -108,8 +129,7 @@ func runInstallHelper(args []string) int {
 		fmt.Printf("  • %s… ", step.name)
 		if err := step.fn(); err != nil {
 			fmt.Println("FAILED")
-			fmt.Fprintln(os.Stderr, err)
-			return 1
+			return err
 		}
 		fmt.Println("done")
 	}
@@ -123,14 +143,14 @@ func runInstallHelper(args []string) int {
 	fmt.Println("If this is the first install, log out and back in so group membership is refreshed.")
 	fmt.Println()
 	fmt.Println("Verify with: spectra install-helper --status")
-	return 0
+	return nil
 }
 
-func ensureHelperGroup() error {
-	if err := sudoRun("dseditgroup", "-o", "read", helperGroup); err == nil {
+func ensureHelperGroup(run rootRunner) error {
+	if err := run("dseditgroup", "-o", "read", helperGroup); err == nil {
 		return nil
 	}
-	return sudoRun("dseditgroup", "-o", "create", helperGroup)
+	return run("dseditgroup", "-o", "create", helperGroup)
 }
 
 func helperInstallUser(getenv func(string) string) string {
@@ -180,21 +200,29 @@ func runUninstallHelper(args []string) int {
 		return 2
 	}
 
+	if err := uninstallHelper(defaultHelperInstallDeps()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func uninstallHelper(deps helperInstallDeps) error {
 	steps := []struct {
 		name string
 		fn   func() error
 	}{
 		{"Unload LaunchDaemon", func() error {
-			return sudoRun("launchctl", "unload", "-w", helperPlist)
+			return deps.runRoot("launchctl", "unload", "-w", helperPlist)
 		}},
 		{"Remove plist", func() error {
-			return sudoRun("rm", "-f", helperPlist)
+			return deps.runRoot("rm", "-f", helperPlist)
 		}},
 		{"Remove helper log rotation", func() error {
-			return sudoRun("rm", "-f", helperNewsyslogConf)
+			return deps.runRoot("rm", "-f", helperNewsyslogConf)
 		}},
 		{"Remove binary", func() error {
-			return sudoRun("rm", "-f", helperBinaryDest)
+			return deps.runRoot("rm", "-f", helperBinaryDest)
 		}},
 	}
 
@@ -202,14 +230,13 @@ func runUninstallHelper(args []string) int {
 		fmt.Printf("  • %s… ", step.name)
 		if err := step.fn(); err != nil {
 			fmt.Println("FAILED")
-			fmt.Fprintln(os.Stderr, err)
-			return 1
+			return err
 		}
 		fmt.Println("done")
 	}
 
 	fmt.Println("\nspectra-helper uninstalled.")
-	return 0
+	return nil
 }
 
 func runHelperStatus(args []string) int {
@@ -219,18 +246,41 @@ func runHelperStatus(args []string) int {
 		return 2
 	}
 
-	c := helperclient.New()
+	if err := helperStatus(defaultHelperInstallDeps()); err != nil {
+		if helperclient.IsUnavailable(err) {
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func helperStatus(deps helperInstallDeps) error {
+	c := deps.client()
 	if !c.Available() {
 		fmt.Println("spectra-helper: not running (socket unreachable)")
-		return 1
+		return helperclient.ErrHelperUnavailable
 	}
 	h, err := c.Health()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "spectra-helper health check failed: %v\n", err)
-		return 1
+		return fmt.Errorf("spectra-helper health check failed: %w", err)
 	}
 	fmt.Printf("spectra-helper: running — %v\n", h)
-	return 0
+	return nil
+}
+
+func defaultHelperInstallDeps() helperInstallDeps {
+	return helperInstallDeps{
+		executable: os.Executable,
+		stat:       os.Stat,
+		getenv:     os.Getenv,
+		runRoot:    sudoRun,
+		writeTemp:  writeTempText,
+		client: func() helperStatusClient {
+			return helperclient.New()
+		},
+	}
 }
 
 func sudoRun(name string, args ...string) error {
