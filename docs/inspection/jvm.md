@@ -93,6 +93,7 @@ JDK commands:
 | Process discovery | `jps -l` |
 | JVM args, system props | `jcmd <pid> VM.system_properties`, `VM.command_line` |
 | Live thread dump | `jcmd <pid> Thread.print` |
+| Virtual-thread-aware dump | `jcmd <pid> Thread.dump_to_file -format=json <path>` |
 | GC stats snapshot | `jstat -gc <pid>` |
 | Heap histogram | `jcmd <pid> GC.class_histogram` |
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
@@ -124,6 +125,41 @@ run and parse `jfr view` tables for GC pauses, allocation sites, hot methods,
 monitor blocking, file I/O, and socket I/O, then combine those event views with
 `jfr summary` counts into first-pass incident findings. The same structures are
 intended to back future CLI, daemon RPC, MCP, and remote-debugging views.
+
+## Compatibility posture
+
+Every `jvm.Info` JSON object includes a runtime-neutral
+`diagnostics` capability matrix. JVM support is modeled as data so the same
+shape can be reused by future native, Node, Python, and other app-runtime
+collectors through `internal/diag.Provider` without making those systems
+look like JVMs.
+
+| JDK line | Spectra posture | JVM diagnostics baseline |
+|---|---|---|
+| 8 | Legacy supported | `jps`, `jcmd`, `Thread.print`, `jstat`, heap histogram/dump, local JMX, NMT when enabled |
+| 11 | Modern baseline | JDK 8 baseline plus portable JFR control and summary |
+| 17 | LTS baseline | Same shell-tool support as 11; no production virtual threads |
+| 21 | Virtual-thread production baseline | Adds virtual-thread-era diagnostics through `Thread.dump_to_file` and JFR virtual-thread events |
+| 24 | Virtual-thread pinning-improvement line | Same Spectra commands as 21, with JDK-side synchronization/pinning improvements visible through JFR/thread diagnostics |
+| 25 | Current LTS virtual-thread line | Same Spectra commands as 21/24; tracked as a first-class support target for virtual-thread-heavy apps |
+
+The matrix currently exposes these capability IDs:
+
+| Capability ID | Purpose |
+|---|---|
+| `jvm.jcmd` | HotSpot diagnostic-command transport |
+| `jvm.thread_dump.platform` | Traditional platform-thread dump via `Thread.print` |
+| `jvm.thread_dump.virtual` | Virtual-thread-aware dump via `Thread.dump_to_file -format=json` |
+| `jvm.jfr.virtual_threads` | JFR virtual-thread lifecycle and pinning events |
+| `jvm.jstat.gc` | One-shot `jstat -gc` counters |
+| `jvm.jfr.control` | JFR start/dump/stop support |
+| `jvm.native_memory` | Native memory tracking summary when enabled at JVM startup |
+| `jvm.jmx.local` | Local JMX management-agent status/start |
+
+Traditional `Thread.print` remains useful for monitors, platform threads,
+and deadlock clues. It is not treated as the complete support story for
+virtual-thread-heavy applications. The virtual-thread capability is marked
+available for JDK 21+ targets and unavailable before JDK 21.
 
 `spectra jvm vm-memory --json <pid>` returns every memory section with
 its underlying command, output, and per-section error. Native memory
