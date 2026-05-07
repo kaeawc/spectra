@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/rpc"
@@ -32,6 +34,7 @@ func runServe(args []string) int {
 	tsnetTags := fs.String("tsnet-tags", "", "Comma-separated Tailscale tags to advertise, such as tag:engineer")
 	tsnetAllowLogins := fs.String("tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
 	tsnetAllowNodes := fs.String("tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
+	artifactPolicy := fs.String("artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
@@ -39,6 +42,11 @@ func runServe(args []string) int {
 		return 2
 	}
 	if err := validateServeListen(*tcpAddr, *allowRemote); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	policy, err := parseArtifactPolicy(*artifactPolicy)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
@@ -72,20 +80,15 @@ func runServe(args []string) int {
 	if closeLog != nil {
 		defer closeLog()
 	}
-	fmt.Fprintf(os.Stderr, "spectra serve: listening on %s\n", sock)
-	if resolvedLogPath != "" {
-		fmt.Fprintf(os.Stderr, "spectra serve: logging to %s\n", resolvedLogPath)
-	}
-	if *tcpAddr != "" {
-		if *allowRemote {
-			fmt.Fprintln(os.Stderr, "spectra serve: warning: TCP RPC has no Spectra-layer authentication; rely on SSH/Tailscale/firewall controls")
-		}
-		fmt.Fprintf(os.Stderr, "spectra serve: listening on tcp %s\n", *tcpAddr)
-	}
-	if *tsnetEnabled {
-		fmt.Fprintf(os.Stderr, "spectra serve: joining tailnet via tsnet on %s\n", *tsnetAddr)
-		fmt.Fprintln(os.Stderr, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
-	}
+	printServeStartup(os.Stderr, serveStartupStatus{
+		Sock:           sock,
+		LogPath:        resolvedLogPath,
+		TCPAddr:        *tcpAddr,
+		AllowRemote:    *allowRemote,
+		TsnetEnabled:   *tsnetEnabled,
+		TsnetAddr:      *tsnetAddr,
+		ArtifactPolicy: policy,
+	})
 
 	var detectStore *cache.ShardedStore
 	if cacheStores != nil {
@@ -104,12 +107,49 @@ func runServe(args []string) int {
 		TsnetAllowNodes:  splitCommaList(*tsnetAllowNodes),
 		SpectraVersion:   version,
 		DetectStore:      detectStore,
+		ArtifactPolicy:   policy,
 		Logger:           daemonLog,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+type serveStartupStatus struct {
+	Sock           string
+	LogPath        string
+	TCPAddr        string
+	AllowRemote    bool
+	TsnetEnabled   bool
+	TsnetAddr      string
+	ArtifactPolicy artifact.Policy
+}
+
+func printServeStartup(w io.Writer, status serveStartupStatus) {
+	fmt.Fprintf(w, "spectra serve: listening on %s\n", status.Sock)
+	if status.LogPath != "" {
+		fmt.Fprintf(w, "spectra serve: logging to %s\n", status.LogPath)
+	}
+	if status.TCPAddr != "" {
+		if status.AllowRemote {
+			fmt.Fprintln(w, "spectra serve: warning: TCP RPC has no Spectra-layer authentication; rely on SSH/Tailscale/firewall controls")
+		}
+		fmt.Fprintf(w, "spectra serve: listening on tcp %s\n", status.TCPAddr)
+	}
+	if status.TsnetEnabled {
+		fmt.Fprintf(w, "spectra serve: joining tailnet via tsnet on %s\n", status.TsnetAddr)
+		fmt.Fprintln(w, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
+	}
+	fmt.Fprintf(w, "spectra serve: artifact policy %s\n", status.ArtifactPolicy.Normalize().Mode)
+}
+
+func parseArtifactPolicy(mode string) (artifact.Policy, error) {
+	policy := artifact.Policy{Mode: mode}
+	if err := policy.Validate(); err != nil {
+		return artifact.Policy{}, err
+	}
+	return policy, nil
 }
 
 func validateServeListen(tcpAddr string, allowRemote bool) error {

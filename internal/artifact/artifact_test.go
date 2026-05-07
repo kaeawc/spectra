@@ -94,3 +94,22 @@ func TestFakeRecorder(t *testing.T) {
 		t.Fatal("snapshot exposed internal storage")
 	}
 }
+
+func TestPolicyAuthorize(t *testing.T) {
+	rec := Record{Kind: KindHeapDump}
+	if err := (Policy{}).Authorize(rec, false); err == nil {
+		t.Fatal("default policy allowed unconfirmed artifact")
+	}
+	if err := (Policy{}).Authorize(rec, true); err != nil {
+		t.Fatalf("default policy rejected confirmed artifact: %v", err)
+	}
+	if err := (Policy{Mode: PolicyDeny}).Authorize(rec, true); err == nil {
+		t.Fatal("deny policy allowed artifact")
+	}
+	if err := (Policy{Mode: PolicyAllow}).Authorize(rec, false); err != nil {
+		t.Fatalf("allow policy rejected artifact: %v", err)
+	}
+	if err := (Policy{Mode: "bogus"}).Validate(); err == nil {
+		t.Fatal("invalid policy mode validated")
+	}
+}

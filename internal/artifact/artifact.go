@@ -31,6 +31,12 @@ const (
 	SensitivityVeryHigh   = "very-high"
 )
 
+const (
+	PolicyConfirm = "confirm"
+	PolicyDeny    = "deny"
+	PolicyAllow   = "allow"
+)
+
 // Record describes one artifact that Spectra created or learned about.
 type Record struct {
 	ID          string            `json:"id"`
@@ -44,6 +50,51 @@ type Record struct {
 	SizeBytes   int64             `json:"size_bytes,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// Policy controls whether daemon RPC methods may create sensitive artifacts.
+type Policy struct {
+	Mode string `json:"mode"`
+}
+
+// Normalize returns p with defaults applied.
+func (p Policy) Normalize() Policy {
+	switch p.Mode {
+	case PolicyDeny, PolicyAllow, PolicyConfirm:
+		return p
+	case "":
+		return Policy{Mode: PolicyConfirm}
+	default:
+		return Policy{Mode: p.Mode}
+	}
+}
+
+// Validate reports invalid policy modes.
+func (p Policy) Validate() error {
+	switch p.Normalize().Mode {
+	case PolicyDeny, PolicyAllow, PolicyConfirm:
+		return nil
+	default:
+		return fmt.Errorf("artifact policy %q must be one of: confirm, deny, allow", p.Mode)
+	}
+}
+
+// Authorize checks whether rec may be created under this policy.
+func (p Policy) Authorize(rec Record, confirmed bool) error {
+	p = p.Normalize()
+	switch p.Mode {
+	case PolicyDeny:
+		return fmt.Errorf("artifact policy denies %s artifacts", rec.Kind)
+	case PolicyAllow:
+		return nil
+	case PolicyConfirm:
+		if confirmed {
+			return nil
+		}
+		return fmt.Errorf("%s requires confirm_sensitive=true under artifact policy %q", rec.Kind, p.Mode)
+	default:
+		return p.Validate()
+	}
 }
 
 // Recorder records artifact lifecycle metadata. Use this interface in

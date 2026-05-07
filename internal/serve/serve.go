@@ -76,6 +76,7 @@ type Options struct {
 	DetectStore      *cache.ShardedStore // nil = no detect caching
 	DetectWriter     *cache.AsyncWriter  // nil = sync writes or daemon-created writer
 	ArtifactRecorder artifact.Recorder   // nil = default per-user manifest
+	ArtifactPolicy   artifact.Policy     // empty = confirm per sensitive artifact
 	Logger           logger.Logger       // nil = discard
 }
 
@@ -205,10 +206,14 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 		}
 		artifactRecorder = artifact.NewManager(artifact.NewJSONStore(path), nil)
 	}
+	artifactPolicy := opts.ArtifactPolicy.Normalize()
+	if err := artifactPolicy.Validate(); err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, tsnetStatus, tsNode)
-	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners))
+	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
+	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners), "artifact_policy", artifactPolicy.Mode)
 
 	go func() {
 		<-ctx.Done()
@@ -431,13 +436,17 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	if history == nil {
 		history = livehistory.NewRing(livehistory.DefaultCapacity)
 	}
 	issueSvc := issueflow.Service{Store: db}
+	artifactPolicy = artifactPolicy.Normalize()
+	if log == nil {
+		log = logger.Discard()
+	}
 	d.Register("health", func(_ json.RawMessage) (any, error) {
-		result := map[string]any{"ok": true, "version": version}
+		result := map[string]any{"ok": true, "version": version, "artifact_policy": artifactPolicy}
 		if tsnetStatus != nil {
 			status := *tsnetStatus
 			if tsnetNode != nil {
@@ -452,6 +461,10 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			result["tsnet"] = status
 		}
 		return result, nil
+	})
+
+	d.Register("artifact.policy", func(_ json.RawMessage) (any, error) {
+		return artifactPolicy, nil
 	})
 
 	d.Register("snapshot.list", func(_ json.RawMessage) (any, error) {
@@ -876,19 +889,23 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
 			return nil, fmt.Errorf("jvm.thread_dump requires {\"pid\": <pid>}")
 		}
-		out, err := runThreadDump(p.PID, nil)
-		if err != nil {
-			return nil, fmt.Errorf("thread dump pid %d: %w", p.PID, err)
-		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+		rec := artifact.Record{
 			Kind:        artifact.KindThreadDump,
 			Sensitivity: artifact.SensitivityMediumHigh,
 			Source:      "daemon-rpc",
 			Command:     "jvm.thread_dump",
 			CacheKind:   cache.KindThreads,
 			PID:         p.PID,
-			SizeBytes:   int64(len(out)),
-		}, map[string]any{"pid": p.PID, "output": string(out)}), nil
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
+			return nil, err
+		}
+		out, err := runThreadDump(p.PID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("thread dump pid %d: %w", p.PID, err)
+		}
+		rec.SizeBytes = int64(len(out))
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "output": string(out)}), nil
 	}
 	d.Register("jvm.thread_dump", jvmThreadDump)
 	d.Register("jvm.threadDump", jvmThreadDump)
@@ -1082,15 +1099,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
 		}
-		if err := jvm.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{
-			AsprofPath:      p.AsprofPath,
-			Event:           p.Event,
-			DurationSeconds: p.DurationSeconds,
-			OutputPath:      p.Dest,
-		}); err != nil {
-			return nil, fmt.Errorf("flamegraph pid %d: %w", p.PID, err)
-		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+		rec := artifact.Record{
 			Kind:        artifact.KindFlamegraph,
 			Sensitivity: artifact.SensitivityMediumHigh,
 			Source:      "daemon-rpc",
@@ -1100,7 +1109,19 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			Metadata: map[string]string{
 				"event": p.Event,
 			},
-		}, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, p.ConfirmSensitive); err != nil {
+			return nil, err
+		}
+		if err := jvm.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{
+			AsprofPath:      p.AsprofPath,
+			Event:           p.Event,
+			DurationSeconds: p.DurationSeconds,
+			OutputPath:      p.Dest,
+		}); err != nil {
+			return nil, fmt.Errorf("flamegraph pid %d: %w", p.PID, err)
+		}
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
 	})
 
 	// jvm.jfr.start — start a JFR recording on a JVM process.
@@ -1144,10 +1165,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if name == "" {
 			name = "spectra"
 		}
-		if err := runJFRDump(p.PID, name, p.Dest, nil); err != nil {
-			return nil, fmt.Errorf("jfr dump pid %d: %w", p.PID, err)
-		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+		rec := artifact.Record{
 			Kind:        artifact.KindJFRRecording,
 			Sensitivity: artifact.SensitivityMediumHigh,
 			Source:      "daemon-rpc",
@@ -1158,7 +1176,14 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			Metadata: map[string]string{
 				"name": name,
 			},
-		}, map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "dumped": true}), nil
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, p.ConfirmSensitive); err != nil {
+			return nil, err
+		}
+		if err := runJFRDump(p.PID, name, p.Dest, nil); err != nil {
+			return nil, fmt.Errorf("jfr dump pid %d: %w", p.PID, err)
+		}
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "name": name, "dest": p.Dest, "dumped": true}), nil
 	})
 
 	// jvm.jfr.stop — stop a JFR recording. Optional: {"dest": "/path/to/out.jfr"}.
@@ -1175,6 +1200,24 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if name == "" {
 			name = "spectra"
 		}
+		var rec artifact.Record
+		if p.Dest != "" {
+			rec = artifact.Record{
+				Kind:        artifact.KindJFRRecording,
+				Sensitivity: artifact.SensitivityMediumHigh,
+				Source:      "daemon-rpc",
+				Command:     "jvm.jfr.stop",
+				Path:        p.Dest,
+				CacheKind:   cache.KindJFR,
+				PID:         p.PID,
+				Metadata: map[string]string{
+					"name": name,
+				},
+			}
+			if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
+				return nil, err
+			}
+		}
 		if err := jvm.JFRStop(p.PID, name, p.Dest, nil); err != nil {
 			return nil, fmt.Errorf("jfr stop pid %d: %w", p.PID, err)
 		}
@@ -1182,18 +1225,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if p.Dest == "" {
 			return result, nil
 		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
-			Kind:        artifact.KindJFRRecording,
-			Sensitivity: artifact.SensitivityMediumHigh,
-			Source:      "daemon-rpc",
-			Command:     "jvm.jfr.stop",
-			Path:        p.Dest,
-			CacheKind:   cache.KindJFR,
-			PID:         p.PID,
-			Metadata: map[string]string{
-				"name": name,
-			},
-		}, result), nil
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, result), nil
 	})
 
 	// jvm.jfr.summary — run `jfr summary <path>` and return parsed event counts.
@@ -1244,10 +1276,7 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 		}
-		if err := runHeapDump(p.PID, p.Dest, nil); err != nil {
-			return nil, fmt.Errorf("heap dump pid %d: %w", p.PID, err)
-		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+		rec := artifact.Record{
 			Kind:        artifact.KindHeapDump,
 			Sensitivity: artifact.SensitivityVeryHigh,
 			Source:      "daemon-rpc",
@@ -1255,7 +1284,14 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			Path:        p.Dest,
 			CacheKind:   cache.KindHprof,
 			PID:         p.PID,
-		}, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, p.ConfirmSensitive); err != nil {
+			return nil, err
+		}
+		if err := runHeapDump(p.PID, p.Dest, nil); err != nil {
+			return nil, fmt.Errorf("heap dump pid %d: %w", p.PID, err)
+		}
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "dest": p.Dest}), nil
 	}
 	d.Register("jvm.heap_dump", jvmHeapDump)
 	d.Register("jvm.heapDump", jvmHeapDump)
@@ -1386,23 +1422,27 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if p.Interval == 0 {
 			p.Interval = 10
 		}
-		out, err := runSampleCmd(p.PID, p.Duration, p.Interval)
-		if err != nil {
-			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
-		}
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
+		rec := artifact.Record{
 			Kind:        artifact.KindProcessSample,
 			Sensitivity: artifact.SensitivityMedium,
 			Source:      "daemon-rpc",
 			Command:     "process.sample",
 			CacheKind:   cache.KindSamples,
 			PID:         p.PID,
-			SizeBytes:   int64(len(out)),
 			Metadata: map[string]string{
 				"duration": fmt.Sprint(p.Duration),
 				"interval": fmt.Sprint(p.Interval),
 			},
-		}, map[string]any{"pid": p.PID, "output": string(out)}), nil
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
+			return nil, err
+		}
+		out, err := runSampleCmd(p.PID, p.Duration, p.Interval)
+		if err != nil {
+			return nil, fmt.Errorf("sample pid %d: %w", p.PID, err)
+		}
+		rec.SizeBytes = int64(len(out))
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, map[string]any{"pid": p.PID, "output": string(out)}), nil
 	})
 
 	// power.state — battery level, thermal pressure, assertions, and top energy users.
@@ -1542,6 +1582,22 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.Interface == "" {
 			return nil, fmt.Errorf("helper.net_capture.start requires {\"interface\": \"...\"}")
 		}
+		rec := artifact.Record{
+			Kind:        artifact.KindPacketCapture,
+			Sensitivity: artifact.SensitivityHigh,
+			Source:      "daemon-rpc",
+			Command:     "helper.net_capture.start",
+			CacheKind:   cache.KindNetcap,
+			Metadata: map[string]string{
+				"interface": p.Interface,
+				"proto":     p.Proto,
+				"host":      p.Host,
+				"port":      fmt.Sprint(p.Port),
+			},
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
+			return nil, err
+		}
 		result, err := hc.NetCaptureStart(p.Interface, p.DurationMS, p.SnapLen, p.Proto, p.Host, p.Port)
 		if err != nil {
 			if helperclient.IsUnavailable(err) {
@@ -1551,21 +1607,9 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		}
 		out, _ := result["output_path"].(string)
 		handle, _ := result["handle"].(string)
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
-			Kind:        artifact.KindPacketCapture,
-			Sensitivity: artifact.SensitivityHigh,
-			Source:      "daemon-rpc",
-			Command:     "helper.net_capture.start",
-			Path:        out,
-			CacheKind:   cache.KindNetcap,
-			Metadata: map[string]string{
-				"handle":    handle,
-				"interface": p.Interface,
-				"proto":     p.Proto,
-				"host":      p.Host,
-				"port":      fmt.Sprint(p.Port),
-			},
-		}, result), nil
+		rec.Path = out
+		rec.Metadata["handle"] = handle
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, result), nil
 	})
 
 	d.Register("helper.net_capture.stop", func(params json.RawMessage) (any, error) {
@@ -1575,6 +1619,19 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 		if err := json.Unmarshal(params, &p); err != nil || p.Handle == "" {
 			return nil, fmt.Errorf("helper.net_capture.stop requires {\"handle\": \"...\"}")
 		}
+		rec := artifact.Record{
+			Kind:        artifact.KindPacketCapture,
+			Sensitivity: artifact.SensitivityHigh,
+			Source:      "daemon-rpc",
+			Command:     "helper.net_capture.stop",
+			CacheKind:   cache.KindNetcap,
+			Metadata: map[string]string{
+				"handle": p.Handle,
+			},
+		}
+		if err := authorizeArtifact(log, artifactPolicy, rec, true); err != nil {
+			return nil, err
+		}
 		result, err := hc.NetCaptureStop(p.Handle)
 		if err != nil {
 			if helperclient.IsUnavailable(err) {
@@ -1583,17 +1640,8 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, err
 		}
 		out, _ := result["output_path"].(string)
-		return recordArtifact(context.Background(), artifactRecorder, artifact.Record{
-			Kind:        artifact.KindPacketCapture,
-			Sensitivity: artifact.SensitivityHigh,
-			Source:      "daemon-rpc",
-			Command:     "helper.net_capture.stop",
-			Path:        out,
-			CacheKind:   cache.KindNetcap,
-			Metadata: map[string]string{
-				"handle": p.Handle,
-			},
-		}, result), nil
+		rec.Path = out
+		return recordArtifact(context.Background(), log, artifactRecorder, rec, result), nil
 	})
 
 	d.Register("helper.tcc.system.query", func(params json.RawMessage) (any, error) {
@@ -1617,7 +1665,24 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	})
 }
 
-func recordArtifact(ctx context.Context, recorder artifact.Recorder, rec artifact.Record, result map[string]any) map[string]any {
+func authorizeArtifact(log logger.Logger, policy artifact.Policy, rec artifact.Record, confirmed bool) error {
+	if err := policy.Authorize(rec, confirmed); err != nil {
+		log.Warn(
+			"daemon artifact denied",
+			"kind", rec.Kind,
+			"sensitivity", rec.Sensitivity,
+			"command", rec.Command,
+			"pid", rec.PID,
+			"path", rec.Path,
+			"policy", policy.Normalize().Mode,
+			"error", err.Error(),
+		)
+		return err
+	}
+	return nil
+}
+
+func recordArtifact(ctx context.Context, log logger.Logger, recorder artifact.Recorder, rec artifact.Record, result map[string]any) map[string]any {
 	if result == nil {
 		result = map[string]any{}
 	}
@@ -1627,10 +1692,21 @@ func recordArtifact(ctx context.Context, recorder artifact.Recorder, rec artifac
 	stored, err := recorder.Record(ctx, rec)
 	if err != nil {
 		result["artifact_error"] = err.Error()
+		log.Warn("daemon artifact record failed", "kind", rec.Kind, "command", rec.Command, "pid", rec.PID, "path", rec.Path, "error", err.Error())
 		return result
 	}
 	result["artifact_id"] = stored.ID
 	result["artifact_kind"] = stored.Kind
+	log.Info(
+		"daemon artifact recorded",
+		"id", stored.ID,
+		"kind", stored.Kind,
+		"sensitivity", stored.Sensitivity,
+		"command", stored.Command,
+		"pid", stored.PID,
+		"path", stored.Path,
+		"size_bytes", stored.SizeBytes,
+	)
 	return result
 }
 

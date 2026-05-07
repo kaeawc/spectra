@@ -78,7 +78,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -1238,7 +1238,7 @@ func TestDaemonJVMHeapDumpRecordsArtifact(t *testing.T) {
 	defer db.Close()
 	fake := &artifact.FakeRecorder{}
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, artifact.Policy{}, logger.Discard(), nil, nil)
 	client, server := net.Pipe()
 	defer client.Close()
 	go d.Serve(server)

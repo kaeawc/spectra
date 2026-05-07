@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/fsutil"
 	"github.com/kaeawc/spectra/internal/serve"
 )
@@ -29,6 +30,7 @@ type daemonAgentOptions struct {
 	TsnetTags        string
 	TsnetAllowLogins string
 	TsnetAllowNodes  string
+	ArtifactPolicy   string
 	LogFile          string
 	NoLogFile        bool
 	NoLoad           bool
@@ -149,6 +151,7 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 	fs.StringVar(&opts.TsnetTags, "tsnet-tags", "", "Comma-separated Tailscale tags to advertise")
 	fs.StringVar(&opts.TsnetAllowLogins, "tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
 	fs.StringVar(&opts.TsnetAllowNodes, "tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
+	fs.StringVar(&opts.ArtifactPolicy, "artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	fs.StringVar(&opts.LogFile, "log-file", "", "JSONL daemon log path")
 	fs.BoolVar(&opts.NoLogFile, "no-log-file", false, "Disable daemon JSONL log file")
 	fs.BoolVar(&opts.NoLoad, "no-load", false, "Write plist but do not bootstrap with launchd")
@@ -156,7 +159,11 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 		return daemonAgentOptions{}, false
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--tsnet-allow-logins users] [--tsnet-allow-nodes nodes] [--log-file path|--no-log-file] [--no-load]")
+		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--tsnet-allow-logins users] [--tsnet-allow-nodes nodes] [--artifact-policy confirm|deny|allow] [--log-file path|--no-log-file] [--no-load]")
+		return daemonAgentOptions{}, false
+	}
+	if err := (artifact.Policy{Mode: opts.ArtifactPolicy}).Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
 		return daemonAgentOptions{}, false
 	}
 	if opts.LogFile != "" && opts.NoLogFile {
@@ -172,18 +179,25 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 
 func (o daemonAgentOptions) serveArgs() []string {
 	args := []string{"serve"}
+	args = appendServePathArgs(args, o)
+	args = appendServeRemoteArgs(args, o)
+	args = appendServeLogArgs(args, o)
+	return args
+}
+
+func appendServePathArgs(args []string, o daemonAgentOptions) []string {
 	if o.SockPath != "" {
 		args = append(args, "--sock", o.SockPath)
 	}
 	if o.TCPAddr != "" {
 		args = append(args, "--tcp", o.TCPAddr)
 	}
-	if o.AllowRemote {
-		args = append(args, "--allow-remote")
-	}
-	if o.TsnetEnabled {
-		args = append(args, "--tsnet")
-	}
+	return args
+}
+
+func appendServeRemoteArgs(args []string, o daemonAgentOptions) []string {
+	args = appendBoolArg(args, "--allow-remote", o.AllowRemote)
+	args = appendBoolArg(args, "--tsnet", o.TsnetEnabled)
 	if o.TsnetAddr != "" && o.TsnetAddr != serve.DefaultTsnetAddr {
 		args = append(args, "--tsnet-addr", o.TsnetAddr)
 	}
@@ -205,11 +219,22 @@ func (o daemonAgentOptions) serveArgs() []string {
 	if o.TsnetAllowNodes != "" {
 		args = append(args, "--tsnet-allow-nodes", o.TsnetAllowNodes)
 	}
+	if o.ArtifactPolicy != "" {
+		args = append(args, "--artifact-policy", o.ArtifactPolicy)
+	}
+	return args
+}
+
+func appendServeLogArgs(args []string, o daemonAgentOptions) []string {
 	if o.LogFile != "" {
 		args = append(args, "--log-file", o.LogFile)
 	}
-	if o.NoLogFile {
-		args = append(args, "--no-log-file")
+	return appendBoolArg(args, "--no-log-file", o.NoLogFile)
+}
+
+func appendBoolArg(args []string, flag string, enabled bool) []string {
+	if enabled {
+		return append(args, flag)
 	}
 	return args
 }
