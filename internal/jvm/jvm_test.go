@@ -441,6 +441,11 @@ java_command: com.example.Server
 `), nil
 			}
 		case "jstat":
+			if len(args) > 0 && args[0] == "-class" {
+				return []byte(`Loaded Bytes Unloaded Bytes Time
+1234 2048.0 12 32.0 0.42
+`), nil
+			}
 			return []byte(`S0C S1C S0U S1U EC EU OC OU MC MU CCSC CCSU YGC YGCT FGC FGCT GCT
 0.0 0.0 0.0 0.0 40960.0 20480.0 204800.0 4096.0 61440.0 59900.3 8064.0 7678.7 5 0.078 0 0.000 0.078
 `), nil
@@ -482,6 +487,9 @@ java_command: com.example.Server
 	}
 	if info.GC == nil || info.GC.YGC != 5 {
 		t.Fatalf("GC = %#v, want YGC=5", info.GC)
+	}
+	if info.Classes == nil || info.Classes.Loaded != 1234 {
+		t.Fatalf("Classes = %#v, want Loaded=1234", info.Classes)
 	}
 }
 

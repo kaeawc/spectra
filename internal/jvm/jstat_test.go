@@ -46,6 +46,22 @@ func TestParseGCStats(t *testing.T) {
 	}
 }
 
+func TestParseClassStats(t *testing.T) {
+	out := `Loaded  Bytes  Unloaded  Bytes     Time
+  1234  2048.0        12    32.0     0.42
+`
+	got, err := parseClassStats(out)
+	if err != nil {
+		t.Fatalf("parseClassStats: %v", err)
+	}
+	if got.Loaded != 1234 || got.LoadedKiB != 2048.0 {
+		t.Fatalf("loaded = %d/%v, want 1234/2048", got.Loaded, got.LoadedKiB)
+	}
+	if got.Unloaded != 12 || got.UnloadedKiB != 32.0 || got.ClassLoadTime != 0.42 {
+		t.Fatalf("unloaded/time = %#v", got)
+	}
+}
+
 func TestParseGCStatsSurvivorSpaces(t *testing.T) {
 	// ParallelGC survivor spaces are non-zero.
 	out := ` S0C    S1C    S0U    S1U      EC       EU        OC         OU       MC     MU    CCSC   CCSU   YGC     YGCT    FGC    FGCT     GCT

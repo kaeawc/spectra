@@ -36,6 +36,7 @@ import (
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/sysinfo"
+	"github.com/kaeawc/spectra/internal/telemetry"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -183,9 +184,12 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	log.Info("daemon storage ready", "db", dbPath)
 
 	collector := metrics.NewCollector()
+	liveTelemetry := telemetry.NewLiveCollector()
 	history := livehistory.NewRing(livehistory.DefaultCapacity)
 	sampler := metrics.NewSampler(collector, time.Second, nil)
+	jvmSampler := jvm.NewTelemetrySampler(liveTelemetry, 5*time.Second, daemonJVMOptions(), nil)
 	go sampler.Run(ctx)
+	go jvmSampler.Run(ctx)
 	go flushMetricsLoop(ctx, collector, db)
 	go snapshotLoop(ctx, opts.SpectraVersion, db, history)
 
@@ -212,7 +216,7 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
+	registerHandlers(d, opts.SpectraVersion, db, collector, liveTelemetry, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners), "artifact_policy", artifactPolicy.Mode)
 
 	go func() {
@@ -375,6 +379,19 @@ func closeListeners(listeners []net.Listener) {
 	}
 }
 
+func samplesForRuntime(samples []telemetry.LiveSample, runtimeName string) []telemetry.LiveSample {
+	if runtimeName == "" {
+		return samples
+	}
+	out := make([]telemetry.LiveSample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.TelemetrySubject().Runtime == runtimeName {
+			out = append(out, sample)
+		}
+	}
+	return out
+}
+
 // flushMetricsLoop writes 1-minute aggregates from the ring buffer to SQLite
 // on a 1-minute tick until ctx is cancelled.
 func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
@@ -436,9 +453,12 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	if history == nil {
 		history = livehistory.NewRing(livehistory.DefaultCapacity)
+	}
+	if liveTelemetry == nil {
+		liveTelemetry = telemetry.NewLiveCollector()
 	}
 	issueSvc := issueflow.Service{Store: db}
 	artifactPolicy = artifactPolicy.Normalize()
@@ -879,6 +899,57 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return info, nil
 		}
 		return jvm.CollectAll(context.Background(), jvmOpts), nil
+	})
+
+	registerTelemetryLive := func(method, runtimeName string) {
+		d.Register(method, func(params json.RawMessage) (any, error) {
+			var p struct {
+				PID   int `json:"pid"`
+				Limit int `json:"limit"`
+			}
+			_ = json.Unmarshal(params, &p)
+			if p.Limit <= 0 {
+				p.Limit = 120
+			}
+			if p.PID != 0 {
+				return liveTelemetry.RecentPID("process", p.PID, p.Limit), nil
+			}
+			all := liveTelemetry.RecentAll(p.Limit)
+			if runtimeName == "" {
+				return all, nil
+			}
+			result := make(map[string][]telemetry.LiveSample)
+			for key, samples := range all {
+				filtered := samplesForRuntime(samples, runtimeName)
+				if len(filtered) > 0 {
+					result[key] = filtered
+				}
+			}
+			return result, nil
+		})
+	}
+	// telemetry.live — recent runtime samples keyed by telemetry subject.
+	// Optional: { "pid": 1234, "limit": 120 }.
+	registerTelemetryLive("telemetry.live", "")
+
+	// jvm.telemetry.live — JVM-only compatibility view over telemetry.live.
+	registerTelemetryLive("jvm.telemetry.live", "jvm")
+
+	// jvm.telemetry.sample — collect one JVM telemetry point on demand.
+	d.Register("jvm.telemetry.sample", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.telemetry.sample requires {\"pid\": <pid>}")
+		}
+		info := jvm.InspectPID(context.Background(), p.PID, daemonJVMOptions())
+		if info == nil {
+			return nil, fmt.Errorf("JVM PID %d not found", p.PID)
+		}
+		sample := jvm.BuildTelemetrySample(time.Now(), *info, nil, nil)
+		liveTelemetry.Add(sample)
+		return sample, nil
 	})
 
 	// jvm.thread_dump — run `jcmd <pid> Thread.print` and return the raw text.

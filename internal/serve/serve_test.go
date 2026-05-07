@@ -23,6 +23,7 @@ import (
 	"github.com/kaeawc/spectra/internal/rpc"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/telemetry"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -78,7 +79,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -1189,6 +1190,49 @@ func TestDaemonJVMInspectRequiresPID(t *testing.T) {
 	}
 }
 
+func TestDaemonJVMTelemetryLiveReturnsRecentSamples(t *testing.T) {
+	dir, err := os.MkdirTemp("", "sp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	db, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	d := rpc.NewDispatcher()
+	liveTelemetry := telemetry.NewLiveCollector()
+	liveTelemetry.Add(jvm.TelemetrySample{PID: 42, TakenAt: time.Now().UTC(), HeapUsedKiB: 1024})
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), liveTelemetry, livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
+
+	sockPath := filepath.Join(dir, "s.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-ctx.Done(); ln.Close() }()
+	go d.ServeListener(ln)
+	time.Sleep(10 * time.Millisecond)
+	conn, err := rpc.DialUnix(sockPath)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	enc, dec := json.NewEncoder(conn), json.NewDecoder(conn)
+	defer cancel()
+	resp := rpcCall(t, enc, dec, 51, "jvm.telemetry.live", `{"pid":42,"limit":1}`)
+	if resp.Error != nil {
+		t.Fatalf("jvm.telemetry.live: %v", resp.Error)
+	}
+	samples, ok := resp.Result.([]any)
+	if !ok || len(samples) != 1 {
+		t.Fatalf("result = %#v, want one sample", resp.Result)
+	}
+}
+
 func TestDaemonNetworkByAppReturnsMap(t *testing.T) {
 	enc, dec, cancel := testDaemon(t)
 	defer cancel()
@@ -1238,7 +1282,7 @@ func TestDaemonJVMHeapDumpRecordsArtifact(t *testing.T) {
 	defer db.Close()
 	fake := &artifact.FakeRecorder{}
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, artifact.Policy{}, logger.Discard(), nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, artifact.Policy{}, logger.Discard(), nil, nil)
 	client, server := net.Pipe()
 	defer client.Close()
 	go d.Serve(server)
