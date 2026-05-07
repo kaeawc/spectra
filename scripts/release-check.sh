@@ -47,6 +47,9 @@ echo "Files:"
 check "README.md exists" test -f README.md
 check "LICENSE exists" test -f LICENSE
 check "mkdocs.yml exists" test -f mkdocs.yml
+check "dist script exists" test -x scripts/dist.sh
+check "notarize script exists" test -x scripts/notarize-archives.sh
+check "Homebrew formula template exists" test -f packaging/homebrew/spectra.rb
 
 echo ""
 echo "Git:"

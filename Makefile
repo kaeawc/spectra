@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-helper build-agent agent build-all test vet fmt lint complexity security licenses tidy ci clean all \
+.PHONY: build build-mcp build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all \
 	release-check validate-workflows \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
@@ -29,6 +29,12 @@ build-agent:
 agent: build-agent
 
 build-all: build build-mcp build-helper
+
+dist:
+	bash scripts/dist.sh
+
+notarize:
+	bash scripts/notarize-archives.sh
 
 # --- Quality -----------------------------------------------------------------
 
@@ -88,6 +94,6 @@ docs-validate: docs-nav docs-lychee docs-build
 
 clean:
 	rm -f $(BIN) $(MCP_BIN) $(HELPER_BIN) junit-report.xml gosec-report.xml
-	rm -rf site/
+	rm -rf dist/ site/
 
 all: build vet test docs-validate
