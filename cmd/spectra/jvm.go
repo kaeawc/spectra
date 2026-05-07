@@ -82,6 +82,11 @@ func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
 		"gc-stats":       runJVMGCStats,
 		"vm-memory":      runJVMVMMemory,
 		"jmx":            runJVMJMX,
+		"attach":         runJVMAttach,
+		"mbeans":         runJVMMBeans,
+		"mbean-read":     runJVMMBeanRead,
+		"mbean-invoke":   runJVMMBeanInvoke,
+		"probe":          runJVMProbe,
 		"flamegraph":     runJVMFlamegraph,
 		"explain":        runJVMExplain,
 	}
@@ -311,6 +316,164 @@ func runJVMJMX(args []string) int {
 		return 0
 	}
 	os.Stdout.Write(out)
+	return 0
+}
+
+func runJVMAttach(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm attach", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	jar := fs.String("agent", "", "Path to spectra-agent.jar (default: SPECTRA_AGENT_JAR, binary dir, or ./agent/spectra-agent.jar)")
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm attach [--agent <spectra-agent.jar>] [--json] <pid>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	status, err := jvm.AttachAgent(pid, *jar, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "attach failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(status)
+		return 0
+	}
+	fmt.Printf("spectra agent attached to PID %d on 127.0.0.1:%d\n", status.PID, status.Port)
+	return 0
+}
+
+func runJVMMBeans(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm mbeans", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm mbeans [--json] <pid>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	result, err := jvm.FetchMBeans(pid, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mbeans failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	printMBeans(result)
+	return 0
+}
+
+func runJVMMBeanRead(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm mbean-read", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 3 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm mbean-read [--json] <pid> <object-name> <attribute>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	result, err := jvm.ReadMBeanAttribute(pid, fs.Arg(1), fs.Arg(2), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mbean-read failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	printMBeanAttribute(result)
+	return 0
+}
+
+func runJVMMBeanInvoke(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm mbean-invoke", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 3 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm mbean-invoke [--json] <pid> <object-name> <zero-arg-operation>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	result, err := jvm.InvokeMBeanOperation(pid, fs.Arg(1), fs.Arg(2), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mbean-invoke failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	printMBeanInvocation(result)
+	return 0
+}
+
+func runJVMProbe(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm probe", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm probe [--json] <pid>")
+		return 2
+	}
+	pid, err := strconv.Atoi(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		return 2
+	}
+	probes, err := jvm.FetchAgentProbes(pid, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(probes)
+		return 0
+	}
+	fmt.Printf("Runtime processors  %d\n", probes.Runtime.AvailableProcessors)
+	fmt.Printf("Heap free/total/max  %d / %d / %d bytes\n", probes.Runtime.FreeMemory, probes.Runtime.TotalMemory, probes.Runtime.MaxMemory)
+	fmt.Printf("Live threads         %d\n", probes.Threads.Live)
 	return 0
 }
 
@@ -586,6 +749,38 @@ func printDiagnosticSection(title string, section jvm.DiagnosticSection) {
 		return
 	}
 	fmt.Println(section.Output)
+}
+
+func printMBeanAttribute(result jvm.MBeanAttributeValue) {
+	fmt.Printf("MBean      %s\n", result.MBean)
+	fmt.Printf("Attribute  %s\n", result.Attribute)
+	if result.Error != "" {
+		fmt.Printf("Error      %s\n", result.Error)
+		return
+	}
+	fmt.Printf("Type       %s\n", strOrDash(result.Type))
+	fmt.Printf("Value      %v\n", result.Value)
+}
+
+func printMBeanInvocation(result jvm.MBeanInvocation) {
+	fmt.Printf("MBean      %s\n", result.MBean)
+	fmt.Printf("Operation  %s\n", result.Operation)
+	if result.Error != "" {
+		fmt.Printf("Error      %s\n", result.Error)
+		return
+	}
+	fmt.Printf("Type       %s\n", strOrDash(result.Type))
+	fmt.Printf("Value      %v\n", result.Value)
+}
+
+func printMBeans(result jvm.MBeansResult) {
+	fmt.Printf("MBeans: %d\n", len(result.MBeans))
+	for _, bean := range result.MBeans {
+		fmt.Printf("%s\n", bean.Name)
+		fmt.Printf("  class       %s\n", strOrDash(bean.Class))
+		fmt.Printf("  attributes  %d\n", len(bean.Attributes))
+		fmt.Printf("  operations  %d\n", len(bean.Operations))
+	}
 }
 
 func printJVMExplanation(explanation jvm.Explanation) {

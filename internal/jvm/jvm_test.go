@@ -221,6 +221,29 @@ func TestCollectVMMemoryDiagnosticsCapturesSectionsAndErrors(t *testing.T) {
 	}
 }
 
+func TestAgentStatusFromSysProps(t *testing.T) {
+	got := AgentStatusFromSysProps(42, map[string]string{
+		agentPortProperty:  "49152",
+		agentTokenProperty: "secret",
+	})
+	if !got.Attached || got.PID != 42 || got.Port != 49152 || got.Token != "secret" {
+		t.Fatalf("status = %#v", got)
+	}
+}
+
+func TestAgentStatusFromSysPropsRequiresTokenAndPort(t *testing.T) {
+	tests := []map[string]string{
+		{agentPortProperty: "49152"},
+		{agentTokenProperty: "secret"},
+		{agentPortProperty: "nope", agentTokenProperty: "secret"},
+	}
+	for _, tt := range tests {
+		if got := AgentStatusFromSysProps(42, tt); got.Attached {
+			t.Fatalf("status attached for props %#v: %#v", tt, got)
+		}
+	}
+}
+
 func TestJMXCommandsFakeRunner(t *testing.T) {
 	var calls [][]string
 	run := func(name string, args ...string) ([]byte, error) {

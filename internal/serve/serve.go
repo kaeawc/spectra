@@ -917,6 +917,70 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 	d.Register("jvm.jmx.start_local", jvmJMXStartLocal)
 	d.Register("jvm.jmx.startLocal", jvmJMXStartLocal)
 
+	// jvm.attach — load spectra-agent.jar into a running JVM process.
+	d.Register("jvm.attach", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID   int    `json:"pid"`
+			Agent string `json:"agent"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.attach requires {\"pid\": <pid>}")
+		}
+		status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
+		if err != nil {
+			return nil, fmt.Errorf("attach agent pid %d: %w", p.PID, err)
+		}
+		return status, nil
+	})
+
+	// jvm.mbeans — browse MBeans through the in-process spectra agent.
+	d.Register("jvm.mbeans", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.mbeans requires {\"pid\": <pid>}")
+		}
+		return jvm.FetchMBeans(p.PID, nil)
+	})
+
+	// jvm.mbean.read — read one MBean attribute through the in-process agent.
+	d.Register("jvm.mbean.read", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID       int    `json:"pid"`
+			Name      string `json:"name"`
+			Attribute string `json:"attribute"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 || p.Name == "" || p.Attribute == "" {
+			return nil, fmt.Errorf("jvm.mbean.read requires {\"pid\": <pid>, \"name\": \"...\", \"attribute\": \"...\"}")
+		}
+		return jvm.ReadMBeanAttribute(p.PID, p.Name, p.Attribute, nil)
+	})
+
+	// jvm.mbean.invoke — invoke a zero-argument MBean operation through the agent.
+	d.Register("jvm.mbean.invoke", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID       int    `json:"pid"`
+			Name      string `json:"name"`
+			Operation string `json:"operation"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 || p.Name == "" || p.Operation == "" {
+			return nil, fmt.Errorf("jvm.mbean.invoke requires {\"pid\": <pid>, \"name\": \"...\", \"operation\": \"...\"}")
+		}
+		return jvm.InvokeMBeanOperation(p.PID, p.Name, p.Operation, nil)
+	})
+
+	// jvm.probe — collect lightweight in-process probes from spectra-agent.jar.
+	d.Register("jvm.probe", func(params json.RawMessage) (any, error) {
+		var p struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
+			return nil, fmt.Errorf("jvm.probe requires {\"pid\": <pid>}")
+		}
+		return jvm.FetchAgentProbes(p.PID, nil)
+	})
+
 	// jvm.explain — interpret JVM diagnostics into actionable observations.
 	d.Register("jvm.explain", func(params json.RawMessage) (any, error) {
 		var p struct {

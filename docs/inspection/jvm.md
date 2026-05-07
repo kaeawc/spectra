@@ -8,8 +8,8 @@ The JVM snapshot includes one-shot `jstat -gc` counters for each running
 JVM when `jstat` is available. It also parses `jfr summary` output into
 structured event counts and attributes running JVMs back to the
 installed-JDK inventory when `java.home` matches a discovered JDK path.
-The in-process Java agent layer remains future work for direct MBean
-enumeration, custom probes, and async-profiler integration.
+The optional in-process `spectra-agent.jar` adds direct MBean enumeration
+and lightweight in-process probes after an explicit attach step.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -29,6 +29,11 @@ spectra jvm gc-stats [--json] <pid>
 spectra jvm vm-memory [--json] <pid>
 spectra jvm jmx status [--json] <pid>
 spectra jvm jmx start-local [--json] <pid>
+spectra jvm attach [--agent <spectra-agent.jar>] [--json] <pid>
+spectra jvm mbeans [--json] <pid>
+spectra jvm mbean-read [--json] <pid> <object-name> <attribute>
+spectra jvm mbean-invoke [--json] <pid> <object-name> <zero-arg-operation>
+spectra jvm probe [--json] <pid>
 spectra jvm flamegraph [--event cpu] [--duration 30] [--out <path>] <pid>
 spectra jvm jfr start <pid> [--name spectra]
 spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
@@ -48,6 +53,11 @@ Daemon methods:
 - `jvm.vm_memory` / `jvm.vmMemory`
 - `jvm.jmx.status`
 - `jvm.jmx.start_local` / `jvm.jmx.startLocal`
+- `jvm.attach`
+- `jvm.mbeans`
+- `jvm.mbean.read`
+- `jvm.mbean.invoke`
+- `jvm.probe`
 - `jvm.flamegraph`
 - `jvm.jfr.start`
 - `jvm.jfr.dump`
@@ -127,23 +137,45 @@ can be used for non-CPU profiles.
 
 ### Layer 2 — Java agent (in-process)
 
-The remaining capabilities require either JMX client logic or code running
-inside the target JVM and are not implemented yet:
-
-- Live MBean enumeration, attribute reads, and operation invocation.
-- Custom counters, probes, and in-process workflow hooks.
-
-The planned shape is a small `spectra-agent.jar` alongside the Go binary,
-attached on demand through the Attach API:
+The in-process layer is a small Java agent built from `agent/`:
 
 ```bash
-spectra jvm attach <pid>      # loads the agent into a running JVM
-spectra jvm mbeans <pid>      # browses live MBeans through the agent/JMX bridge
-spectra jvm probe <pid> ...   # installs a custom in-process probe
+make agent
+spectra jvm attach <pid>
+spectra jvm mbeans <pid>
+spectra jvm mbean-read <pid> java.lang:type=Memory HeapMemoryUsage
+spectra jvm mbean-invoke <pid> java.lang:type=Memory gc
+spectra jvm probe <pid>
 ```
 
-The agent would expose its capabilities over a Unix socket so the Go daemon
-can drive it without speaking JMX/RMI directly.
+The attach command runs the JDK Attach API through the agent JAR's
+`AttachMain` entry point:
+
+```bash
+java --add-modules jdk.attach \
+  -cp spectra-agent.jar com.spectra.agent.AttachMain <pid> spectra-agent.jar
+```
+
+Once loaded, the agent starts a loopback-only HTTP endpoint inside the
+target JVM, publishes `spectra.agent.port` and `spectra.agent.token` as
+system properties, and requires the token on every request. Spectra reads
+those properties with `jcmd <pid> VM.system_properties` and uses the
+endpoint to enumerate the platform MBean server or fetch lightweight probes.
+
+Implemented agent endpoints:
+
+| Endpoint | CLI | Capability |
+|---|---|---|
+| `/mbeans` | `spectra jvm mbeans <pid>` | MBean names, implementation class names, attributes, and operation signatures |
+| `/mbean-attribute` | `spectra jvm mbean-read <pid> ...` | One MBean attribute value |
+| `/mbean-operation` | `spectra jvm mbean-invoke <pid> ...` | Explicit zero-argument MBean operation invocation |
+| `/probes` | `spectra jvm probe <pid>` | Runtime memory, processor count, and live thread count |
+
+Planned extensions:
+
+- Named custom counters and workflow-specific probes.
+- A Unix-domain-socket transport on Java versions where the target runtime
+  exposes the standard socket channel APIs.
 
 ## JDK installation discovery
 
@@ -218,6 +250,8 @@ Implemented:
 
 1. JDK installation discovery (no live JVM required).
 2. `jps`-based running-JVM discovery.
+3. JDK shell-tool diagnostics: `jcmd`, `jstat`, JFR, local JMX control, and
+   async-profiler orchestration.
 3. `jcmd`-based system properties, command-line parsing, VM flags,
    thread count, thread dump, class histogram, heap dump, and JFR control.
 4. `jstat -gc` one-shot GC counter parsing and snapshot attachment.
@@ -235,8 +269,11 @@ Implemented:
    counts.
 12. JVM GC-pressure recommendations from old-generation occupancy and
    full-GC counters.
+13. Optional Java Attach API agent with MBean browsing, MBean attribute
+    reads, zero-argument operation invocation, and in-process probes.
 
 Future:
 
-1. Java agent JAR for attach, in-process probes, and custom workflows.
-2. MBean browsing and operation invocation over the agent/JMX bridge.
+1. Named custom counters and workflow-specific probes.
+2. Unix-domain-socket transport for agent control on JDKs that expose the
+   standard socket channel APIs.
