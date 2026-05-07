@@ -42,6 +42,7 @@ func subcommandList() []subcommand {
 		{"power", "Show current battery and thermal state", runPower},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
+		{"playbook", "Show diagnostic playbooks and command plans", runPlaybook},
 		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},

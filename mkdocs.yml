@@ -94,6 +94,13 @@ nav:
       - Toolchains (planned): inspection/toolchains.md
       - JVM (planned): inspection/jvm.md
       - Live data sources: inspection/live-data-sources.md
+  - Playbooks:
+      - Overview: playbooks/index.md
+      - JVM memory: playbooks/jvm-memory.md
+      - Network failure: playbooks/network-failure.md
+      - Storage bloat: playbooks/storage-bloat.md
+      - Remote triage: playbooks/remote-triage.md
+      - Toolchain drift: playbooks/toolchain-drift.md
   - Operations:
       - CLI: operations/cli.md
       - Issues: operations/issues.md
