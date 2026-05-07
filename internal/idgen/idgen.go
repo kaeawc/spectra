@@ -2,16 +2,9 @@
 // string ids. Production code uses UUID; tests substitute Sequence
 // to make ids deterministic without seeding crypto/rand.
 //
-// Krit's existing id-shaped values (cache shard ids, oracle fingerprints,
-// experiment names) are derived from content hashes and remain
-// deterministic without this package — idgen is for the cases where
-// a request id, span id, or scratch identifier needs to be generated
-// fresh and a test wants to assert the exact string it sees.
-//
-// A separate Random abstraction is intentionally not provided: the
-// only call sites in the Krit tree that use math/rand are sampling
-// helpers that already seed deterministically from input, so a fake
-// would not improve any current test.
+// Content-addressed values such as cache keys remain deterministic without
+// this package. idgen is for records and request-shaped values that must be
+// generated fresh while tests still need exact assertions.
 package idgen
 
 import (

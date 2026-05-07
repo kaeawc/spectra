@@ -96,6 +96,23 @@ func (OS) Run(ctx context.Context, cmd Cmd) (Result, error) {
 // composition root. Prefer injecting a Runner explicitly.
 var Default Runner = OS{}
 
+// Output runs name with args via r and returns stdout, matching the common
+// exec.Command(...).Output shape used by collectors. A non-zero exit status is
+// converted to an error so legacy collector behavior stays unchanged.
+func Output(ctx context.Context, r Runner, name string, args ...string) ([]byte, error) {
+	if r == nil {
+		r = Default
+	}
+	res, err := r.Run(ctx, Cmd{Name: name, Args: args})
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("%s exited %d: %s", formatCmd(Cmd{Name: name, Args: args}), res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	return res.Stdout, nil
+}
+
 // Call records a single invocation observed by Fake.
 type Call struct {
 	Name string

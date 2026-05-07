@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Info is one running process at snapshot time.
@@ -54,7 +56,12 @@ type CollectOptions struct {
 	Deep bool
 
 	// CmdRunner overrides exec.Command for testing.
+	// Deprecated: prefer Runner for new code.
 	CmdRunner func(name string, args ...string) ([]byte, error)
+
+	// Runner overrides exec.Command for testing while preserving context,
+	// stderr, and exit-code details. Takes precedence over CmdRunner.
+	Runner proc.Runner
 
 	// DetailCollector overrides the platform process-detail collector for
 	// testing. On Darwin this is backed by libproc/proc_pidinfo.
@@ -75,8 +82,16 @@ type Details struct {
 
 // CollectAll returns all running processes. Any parse errors for individual
 // rows are silently skipped; a partial result is still useful.
-func CollectAll(_ context.Context, opts CollectOptions) []Info {
+func CollectAll(ctx context.Context, opts CollectOptions) []Info {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	run := opts.CmdRunner
+	if opts.Runner != nil {
+		run = func(name string, args ...string) ([]byte, error) {
+			return proc.Output(ctx, opts.Runner, name, args...)
+		}
+	}
 	if run == nil {
 		run = defaultRunner
 	}

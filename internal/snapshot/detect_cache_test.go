@@ -77,7 +77,7 @@ func TestDetectWithCacheNilStoreCallsLiveDetect(t *testing.T) {
 	dir := t.TempDir()
 	app := makeTestBundle(t, dir, "TestApp", "com.test.app", "TestApp")
 	// nil store → falls through to live detect
-	r, err := detectWithCache(app, detect.Options{}, nil)
+	r, err := detectWithCache(app, detect.Options{}, nil, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache(nil store): %v", err)
 	}
@@ -105,7 +105,7 @@ func TestDetectWithCacheStoresAndRetrieves(t *testing.T) {
 	}
 
 	// detectWithCache should return the sentinel without running live detect.
-	r, err := detectWithCache(app, detect.Options{}, st)
+	r, err := detectWithCache(app, detect.Options{}, st, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	st := cache.NewShardedStore(storeDir, "detect")
 
 	// Empty cache → live detect runs and result is stored.
-	r, err := detectWithCache(app, detect.Options{}, st)
+	r, err := detectWithCache(app, detect.Options{}, st, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
@@ -134,5 +134,28 @@ func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	key := detectCacheKey(app)
 	if _, ok, _ := st.Get(key); !ok {
 		t.Error("result was not stored in cache after live detect")
+	}
+}
+
+func TestDetectWithCacheUsesAsyncWriter(t *testing.T) {
+	dir := t.TempDir()
+	app := makeTestBundle(t, dir, "AsyncApp", "com.async.app", "AsyncApp")
+
+	storeDir := filepath.Join(dir, "cache", "v1")
+	st := cache.NewShardedStore(storeDir, "detect")
+	writer := cache.NewAsyncWriter(st, 8, 1)
+	defer writer.Close()
+
+	if _, err := detectWithCache(app, detect.Options{}, st, writer); err != nil {
+		t.Fatalf("detectWithCache: %v", err)
+	}
+	writer.Close()
+
+	key := detectCacheKey(app)
+	if _, ok, _ := st.Get(key); !ok {
+		t.Fatal("result was not stored by async writer")
+	}
+	if writer.Queued.Load() == 0 {
+		t.Fatal("async writer was not used")
 	}
 }

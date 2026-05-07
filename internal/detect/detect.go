@@ -11,6 +11,7 @@ package detect
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/bundleid"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Result is the diagnosis for one .app bundle.
@@ -253,6 +255,23 @@ type RustInspection struct {
 type Options struct {
 	ScanNetwork bool // scan binary + app.asar for embedded URL hosts
 	Now         func() time.Time
+	Runner      proc.Runner
+	Home        string
+}
+
+type detector struct {
+	opts Options
+}
+
+func newDetector(opts Options) detector {
+	return detector{opts: opts}
+}
+
+func (d detector) output(name string, args ...string) ([]byte, error) {
+	if d.opts.Runner != nil {
+		return proc.Output(context.Background(), d.opts.Runner, name, args...)
+	}
+	return exec.Command(name, args...).Output()
 }
 
 type nodeAppFS interface {
@@ -331,6 +350,7 @@ func Detect(appPath string) (Result, error) {
 // DetectWith is Detect with explicit options for callers that want the
 // optional, more expensive sub-detections (network endpoints).
 func DetectWith(appPath string, opts Options) (Result, error) {
+	d := newDetector(opts)
 	r := Result{Path: appPath, UI: "Unknown", Runtime: "unknown", Confidence: "low"}
 
 	info, err := os.Stat(appPath)
@@ -341,7 +361,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 		return r, fmt.Errorf("%s is not a .app bundle", appPath)
 	}
 
-	exe, err := mainExecutable(appPath)
+	exe, err := d.mainExecutable(appPath)
 	if err != nil {
 		r.Signals = append(r.Signals, "could not resolve main executable: "+err.Error())
 	}
@@ -371,17 +391,17 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	}
 	r.Rust = inspectRustApp(appPath, exe, &r)
 
-	populateMetadata(appPath, exe, &r)
+	d.populateMetadata(appPath, exe, &r)
 	r.PrivacyDescriptions = readPrivacyDescriptions(appPath)
 	r.Dependencies = scanDependencies(appPath)
 	r.PythonApp = scanPythonApp(appPath)
 	r.Helpers = scanHelpers(appPath)
 	r.ObjC = scanObjCInspection(appPath, exe, r)
-	r.LoginItems = scanLoginItems(appPath, r.BundleID)
-	r.RunningProcesses = scanRunningProcesses(appPath)
+	r.LoginItems = d.scanLoginItems(appPath, r.BundleID)
+	r.RunningProcesses = d.scanRunningProcesses(appPath)
 	r.AppStartedAt, r.AppUptimeSeconds = appUptime(r.RunningProcesses, detectNow(opts))
-	r.GrantedPermissions = scanGrantedPermissions(r.BundleID)
-	r.GatekeeperStatus = readGatekeeperStatus(appPath)
+	r.GrantedPermissions = d.scanGrantedPermissions(r.BundleID)
+	r.GatekeeperStatus = d.readGatekeeperStatus(appPath)
 	if opts.ScanNetwork {
 		r.NetworkEndpoints = scanNetworkEndpoints(appPath, exe)
 	}
@@ -398,26 +418,26 @@ func detectNow(opts Options) time.Time {
 // populateMetadata fills the metadata fields on Result. Each piece is
 // best-effort and silently skipped on failure — these are decoration,
 // not part of the verdict.
-func populateMetadata(appPath, exe string, r *Result) {
+func (d detector) populateMetadata(appPath, exe string, r *Result) {
 	plist := filepath.Join(appPath, "Contents", "Info.plist")
-	r.BundleID = readPlistString(plist, "CFBundleIdentifier")
-	r.AppVersion = readPlistString(plist, "CFBundleShortVersionString")
-	r.BuildNumber = readPlistString(plist, "CFBundleVersion")
-	r.SparkleFeedURL = readPlistString(plist, "SUFeedURL")
+	r.BundleID = d.readPlistString(plist, "CFBundleIdentifier")
+	r.AppVersion = d.readPlistString(plist, "CFBundleShortVersionString")
+	r.BuildNumber = d.readPlistString(plist, "CFBundleVersion")
+	r.SparkleFeedURL = d.readPlistString(plist, "SUFeedURL")
 
 	if r.UI == "Electron" {
 		efw := filepath.Join(appPath, "Contents", "Frameworks", "Electron Framework.framework", "Resources", "Info.plist")
-		r.ElectronVersion = readPlistString(efw, "CFBundleVersion")
+		r.ElectronVersion = d.readPlistString(efw, "CFBundleVersion")
 	}
 	r.FrameworkVersions = frameworkVersions(appPath, r)
 
 	if exe != "" {
-		r.Architectures = readArchitectures(exe)
+		r.Architectures = d.readArchitectures(exe)
 	}
 	r.BundleSizeBytes, r.ApparentSizeBytes = bundleSizes(appPath)
-	r.TeamID, r.HardenedRuntime = readSigning(appPath)
+	r.TeamID, r.HardenedRuntime = d.readSigning(appPath)
 	var appGroups []string
-	r.Sandboxed, r.Entitlements, appGroups = readEntitlementsDetail(appPath)
+	r.Sandboxed, r.Entitlements, appGroups = d.readEntitlementsDetail(appPath)
 	r.MASReceipt = exists(filepath.Join(appPath, "Contents", "_MASReceipt"))
 	r.Storage = scanStorage(appPath, r.BundleID)
 	r.Swift = inspectSwiftApp(appPath, exe, realSwiftInspectionSource{appGroups: appGroups})
@@ -546,7 +566,11 @@ func scanStorage(appPath, bundleID string) *StorageFootprint {
 }
 
 func readPlistString(plist, key string) string {
-	out, err := exec.Command("plutil", "-extract", key, "raw", "-o", "-", plist).Output()
+	return newDetector(Options{}).readPlistString(plist, key)
+}
+
+func (d detector) readPlistString(plist, key string) string {
+	out, err := d.output("plutil", "-extract", key, "raw", "-o", "-", plist)
 	if err != nil {
 		return ""
 	}
@@ -555,8 +579,8 @@ func readPlistString(plist, key string) string {
 
 // readArchitectures inspects the Mach-O header(s) of exe via `file` and
 // returns the architectures present. Universal binaries report both.
-func readArchitectures(exe string) []string {
-	out, err := exec.Command("file", exe).Output()
+func (d detector) readArchitectures(exe string) []string {
+	out, err := d.output("file", exe)
 	if err != nil {
 		return nil
 	}
@@ -600,12 +624,22 @@ func bundleSize(appPath string) int64 {
 
 // readSigning parses `codesign -dv` stderr for the team identifier and
 // the hardened-runtime flag (flags=0x10000(runtime)).
-func readSigning(appPath string) (teamID string, hardened bool) {
+func (d detector) readSigning(appPath string) (teamID string, hardened bool) {
+	if d.opts.Runner != nil {
+		res, err := d.opts.Runner.Run(context.Background(), proc.Cmd{Name: "codesign", Args: []string{"-dv", appPath}})
+		if err == nil {
+			return parseSigningOutput(string(append(res.Stdout, res.Stderr...)))
+		}
+	}
 	cmd := exec.Command("codesign", "-dv", appPath)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	_ = cmd.Run() // codesign writes its info to stderr regardless
-	for _, line := range strings.Split(stderr.String(), "\n") {
+	return parseSigningOutput(stderr.String())
+}
+
+func parseSigningOutput(out string) (teamID string, hardened bool) {
+	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "TeamIdentifier=") {
 			v := strings.TrimPrefix(line, "TeamIdentifier=")
 			if v != "not set" {
@@ -626,7 +660,13 @@ func readSigning(appPath string) (teamID string, hardened bool) {
 // returns "accepted", "rejected", or "" when spctl is unavailable or the
 // assessment cannot be completed. spctl writes its verdict to stderr
 // regardless of exit code, so we parse stderr for the verdict string.
-func readGatekeeperStatus(appPath string) string {
+func (d detector) readGatekeeperStatus(appPath string) string {
+	if d.opts.Runner != nil {
+		res, err := d.opts.Runner.Run(context.Background(), proc.Cmd{Name: "spctl", Args: []string{"--assess", "--type", "exec", appPath}})
+		if err == nil {
+			return parseGatekeeperOutput(string(append(res.Stdout, res.Stderr...)))
+		}
+	}
 	cmd := exec.Command("spctl", "--assess", "--type", "exec", appPath)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -649,8 +689,8 @@ func parseGatekeeperOutput(out string) string {
 	return ""
 }
 
-func readEntitlementsDetail(appPath string) (sandboxed bool, notable, appGroups []string) {
-	out, err := exec.Command("codesign", "-d", "--entitlements", ":-", appPath).Output()
+func (d detector) readEntitlementsDetail(appPath string) (sandboxed bool, notable, appGroups []string) {
+	out, err := d.output("codesign", "-d", "--entitlements", ":-", appPath)
 	if err != nil || len(out) == 0 {
 		return false, nil, nil
 	}
@@ -964,9 +1004,9 @@ func enrichFromExe(exe string, r *Result) {
 
 // mainExecutable resolves the real executable inside the bundle by reading
 // CFBundleExecutable from Info.plist via plutil.
-func mainExecutable(appPath string) (string, error) {
+func (d detector) mainExecutable(appPath string) (string, error) {
 	plist := filepath.Join(appPath, "Contents", "Info.plist")
-	out, err := exec.Command("plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", plist).Output()
+	out, err := d.output("plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", plist)
 	if err != nil {
 		return "", err
 	}
@@ -982,7 +1022,11 @@ func mainExecutable(appPath string) (string, error) {
 }
 
 func otoolL(exe string) []string {
-	out, err := exec.Command("otool", "-L", exe).Output()
+	return newDetector(Options{}).otoolL(exe)
+}
+
+func (d detector) otoolL(exe string) []string {
+	out, err := d.output("otool", "-L", exe)
 	if err != nil {
 		return nil
 	}
@@ -1430,7 +1474,7 @@ func hasFileLike(root, sub string) bool {
 // binary. When auth_value is 2 (allowed) or 3 (limited / always-allow)
 // the service is included. Result is a deduped, sorted slice of
 // human-readable service names with the kTCCService prefix stripped.
-func scanGrantedPermissions(bundleID string) []string {
+func (d detector) scanGrantedPermissions(bundleID string) []string {
 	if bundleID == "" {
 		return nil
 	}
@@ -1455,7 +1499,7 @@ func scanGrantedPermissions(bundleID string) []string {
 			"SELECT service FROM access WHERE client = '%s' AND auth_value >= 2;",
 			bundleID,
 		)
-		out, err := exec.Command("sqlite3", db, query).Output()
+		out, err := d.output("sqlite3", db, query)
 		if err != nil {
 			continue // typically: SIP-protected DB, no FDA — skip silently
 		}
@@ -1523,20 +1567,21 @@ func scanHelpers(appPath string) *Helpers {
 //   - filename / Label prefix matching the bundle's reverse-DNS prefix
 //     (first two segments, e.g. com.docker), or
 //   - any ProgramArguments path that resides inside the .app bundle.
-func scanLoginItems(appPath, bundleID string) []LoginItem {
+func (d detector) scanLoginItems(appPath, bundleID string) []LoginItem {
 	prefix := bundleIDPrefix(bundleID)
 	var items []LoginItem
+	homeDir := d.home()
 	dirs := []struct {
 		path   string
 		scope  string
 		daemon bool
 	}{
-		{filepath.Join(home(), "Library", "LaunchAgents"), "user", false},
+		{filepath.Join(homeDir, "Library", "LaunchAgents"), "user", false},
 		{"/Library/LaunchAgents", "system", false},
 		{"/Library/LaunchDaemons", "system", true},
 	}
-	for _, d := range dirs {
-		entries, err := os.ReadDir(d.path)
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir.path)
 		if err != nil {
 			continue
 		}
@@ -1544,24 +1589,24 @@ func scanLoginItems(appPath, bundleID string) []LoginItem {
 			if !strings.HasSuffix(e.Name(), ".plist") {
 				continue
 			}
-			full := filepath.Join(d.path, e.Name())
+			full := filepath.Join(dir.path, e.Name())
 			label := strings.TrimSuffix(e.Name(), ".plist")
 			matched := false
 			if prefix != "" && strings.HasPrefix(label, prefix) {
 				matched = true
 			} else {
 				// Fall back: peek at ProgramArguments / BundleProgram.
-				if plistMentionsAppPath(full, appPath) {
+				if d.plistMentionsAppPath(full, appPath) {
 					matched = true
 				}
 			}
 			if matched {
-				runAtLoad, keepAlive := parsePlistLaunchFlags(full)
+				runAtLoad, keepAlive := d.parsePlistLaunchFlags(full)
 				items = append(items, LoginItem{
 					Path:      full,
 					Label:     label,
-					Scope:     d.scope,
-					Daemon:    d.daemon,
+					Scope:     dir.scope,
+					Daemon:    dir.daemon,
 					RunAtLoad: runAtLoad,
 					KeepAlive: keepAlive,
 				})
@@ -1584,8 +1629,8 @@ func bundleIDPrefix(bundleID string) string {
 // plistMentionsAppPath returns true if the launchd plist's text payload
 // includes the app bundle path. We use the converted XML form to keep
 // this regex-friendly without requiring a plist parser.
-func plistMentionsAppPath(plistPath, appPath string) bool {
-	out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", plistPath).Output()
+func (d detector) plistMentionsAppPath(plistPath, appPath string) bool {
+	out, err := d.output("plutil", "-convert", "xml1", "-o", "-", plistPath)
 	if err != nil {
 		return false
 	}
@@ -1597,7 +1642,11 @@ func plistMentionsAppPath(plistPath, appPath string) bool {
 // It reads the plist once and checks both RunAtLoad and KeepAlive so the
 // caller gets both flags from a single plutil invocation.
 func parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
-	out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", plistPath).Output()
+	return newDetector(Options{}).parsePlistLaunchFlags(plistPath)
+}
+
+func (d detector) parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
+	out, err := d.output("plutil", "-convert", "xml1", "-o", "-", plistPath)
 	if err != nil {
 		return
 	}
@@ -1619,6 +1668,13 @@ func plistXMLBool(xml []byte, name string) bool {
 }
 
 func home() string {
+	return newDetector(Options{}).home()
+}
+
+func (d detector) home() string {
+	if d.opts.Home != "" {
+		return d.opts.Home
+	}
 	h, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -1636,8 +1692,8 @@ const lstartLayout = "Mon Jan  2 15:04:05 2006"
 // ps format: pid=,rss=,lstart=,comm=
 // lstart produces 5 whitespace-separated tokens ("Sat May  2 22:37:01 2026")
 // so the command starts at fields[7] (0-indexed: 0=pid, 1=rss, 2-6=lstart, 7+=comm).
-func scanRunningProcesses(appPath string) []ProcessInfo {
-	out, err := exec.Command("ps", "-axwwo", "pid=,rss=,lstart=,comm=").Output()
+func (d detector) scanRunningProcesses(appPath string) []ProcessInfo {
+	out, err := d.output("ps", "-axwwo", "pid=,rss=,lstart=,comm=")
 	if err != nil {
 		return nil
 	}
