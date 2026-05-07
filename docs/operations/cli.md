@@ -29,6 +29,7 @@ spectra [flags] <App.app>...     # routes to `inspect` (default)
 | `power` | Show current battery and thermal state |
 | `storage` | Show disk volumes and `~/Library` footprint |
 | `process` | List running processes sorted by memory |
+| `playbook` | Show diagnostic playbooks and command plans |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
 | `fan` | Run one daemon RPC call against multiple explicit targets |
@@ -327,6 +328,19 @@ spectra network capture stop --summarize netcap-1
 spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
 spectra network firewall
 spectra network firewall --json
+```
+
+## `spectra playbook`
+
+Shows problem-first diagnostic workflows over existing collectors. Use it
+to list playbooks, inspect one workflow, emit a command-only plan, or return
+the playbook definition as JSON.
+
+```bash
+spectra playbook
+spectra playbook jvm-memory
+spectra playbook --commands network-failure
+spectra playbook --json storage-bloat
 ```
 
 ## `spectra serve`
