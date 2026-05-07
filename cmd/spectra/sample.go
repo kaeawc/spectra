@@ -1,16 +1,30 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/process"
 )
+
+type sampleCacheStore struct {
+	store *cache.ShardedStore
+}
+
+func (s sampleCacheStore) PutSample(_ context.Context, sample process.SampleResult) error {
+	key := cache.Key([]byte(fmt.Sprintf("sample:%d:%d", sample.PID, sample.TakenAt.UnixNano())))
+	if err := s.store.Put(key, []byte(sample.Output)); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "cached as samples/%x\n", key[:4])
+	return nil
+}
 
 func runSample(args []string) int {
 	fs := flag.NewFlagSet("spectra sample", flag.ContinueOnError)
@@ -31,27 +45,22 @@ func runSample(args []string) int {
 		return 2
 	}
 
-	// Run: sample <pid> <duration> <interval> -e (stderr only for errors)
-	// stdout receives the formatted call tree.
-	// #nosec G204 -- PID, duration, and interval are parsed integers.
-	cmd := exec.Command("sample",
-		strconv.Itoa(pid),
-		strconv.Itoa(*duration),
-		strconv.Itoa(*interval),
-	)
-	cmd.Stderr = os.Stderr
-	data, err := cmd.Output()
+	var store process.SampleStore
+	if !*noCache && cacheStores != nil && cacheStores.Samples != nil {
+		store = sampleCacheStore{store: cacheStores.Samples}
+	}
+	sampler := process.NewSampler(nil, store)
+	result, err := sampler.Capture(context.Background(), process.SampleOptions{
+		PID:        pid,
+		Duration:   time.Duration(*duration) * time.Second,
+		IntervalMS: *interval,
+		Store:      store != nil,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sample failed for PID %d: %v\n", pid, err)
 		return 1
 	}
 
-	if !*noCache && cacheStores != nil && cacheStores.Samples != nil {
-		key := cache.Key([]byte(fmt.Sprintf("sample:%d:%d", pid, time.Now().UnixNano())))
-		if putErr := cacheStores.Samples.Put(key, data); putErr == nil {
-			fmt.Fprintf(os.Stderr, "cached as samples/%x\n", key[:4])
-		}
-	}
 	recordArtifactCLI(artifact.Record{
 		Kind:        artifact.KindProcessSample,
 		Sensitivity: artifact.SensitivityMedium,
@@ -59,13 +68,13 @@ func runSample(args []string) int {
 		Command:     "spectra sample",
 		CacheKind:   cache.KindSamples,
 		PID:         pid,
-		SizeBytes:   int64(len(data)),
+		SizeBytes:   int64(len(result.Output)),
 		Metadata: map[string]string{
 			"duration": strconv.Itoa(*duration),
 			"interval": strconv.Itoa(*interval),
 		},
 	})
 
-	os.Stdout.Write(data)
+	fmt.Fprint(os.Stdout, result.Output)
 	return 0
 }
