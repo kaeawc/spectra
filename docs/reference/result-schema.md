@@ -17,6 +17,7 @@ Source of truth: `internal/detect/detect.go`.
 | `Confidence` | string | high / medium / low |
 | `Signals` | []string | Human-readable evidence trail |
 | `NativeModules` | []NativeModule | Per-Electron-app native add-on classifications |
+| `ObjC` | *ObjCInspection | Per-AppKit Objective-C bundle profile |
 
 ## Metadata fields
 
@@ -71,6 +72,28 @@ type NativeModule struct {
     Language       string   // Rust, Swift, C++, unknown
     Hints          []string // additional context (linked frameworks, etc.)
     RiskHints      []string // security-sensitive capability patterns to review
+}
+```
+
+### ObjCInspection
+
+```go
+type ObjCInspection struct {
+    LinkedFrameworks       []string
+    PrincipalClass         string
+    MainNibFile            string
+    MainStoryboardFile     string
+    DocumentTypes          []ObjCDocumentType
+    URLSchemes             []string
+    Services               []string
+    AutomationEntitlements []string
+    UpdateMechanism        string
+}
+
+type ObjCDocumentType struct {
+    Name       string
+    Role       string
+    Extensions []string
 }
 ```
 

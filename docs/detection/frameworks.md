@@ -60,6 +60,8 @@ confirmed examples from real apps. Layer numbers refer to
 - **Layer 2:** AppKit/Cocoa linked, no Swift dylibs.
 - **Confirmed:** Telegram, Sublime Text, Steam, Alfred 5, Audacity
   (wxWidgets-based, falls under AppKit), Godot.
+- **Inspection:** See
+  [../inspection/objc-based-app.md](../inspection/objc-based-app.md).
 
 ### Mac Catalyst
 - **Layer 2:** Linked path contains `/iOSSupport/...UIKit*.framework/`
