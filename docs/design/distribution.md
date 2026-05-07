@@ -72,11 +72,34 @@ honest while the product surface is still changing quickly:
   `/Library/PrivilegedHelperTools/spectra-helper`, writes
   `/Library/LaunchDaemons/dev.spectra.helper.plist`, and loads it with
   `launchctl`.
+- Signed releases can require Developer ID helper verification with
+  `sudo spectra install-helper --require-signed` or
+  `SPECTRA_REQUIRE_SIGNED_HELPER=1`.
 - `spectra install-helper uninstall` unloads the LaunchDaemon and removes
   the installed helper files.
 
 This is intentionally less polished than a signed release package, but it
 matches the implemented code path and keeps root installation explicit.
+
+## Signed release path
+
+`make release-check` remains usable for source-build readiness without Apple
+credentials. When `SPECTRA_SIGN_IDENTITY` is set, it signs `spectra` and
+`spectra-helper` with hardened runtime and verifies the helper's Developer ID
+chain. When notary credentials are also present, it submits the signed binaries
+to Apple notarization:
+
+```bash
+SPECTRA_SIGN_IDENTITY="Developer ID Application: Example, Inc. (TEAMID)" \
+SPECTRA_NOTARY_KEYCHAIN_PROFILE=spectra-notary \
+make release-check
+```
+
+The notary step can also use `SPECTRA_NOTARY_APPLE_ID`,
+`SPECTRA_NOTARY_TEAM_ID`, and `SPECTRA_NOTARY_PASSWORD`. This does not replace
+the current shell installer with `SMAppService.daemon` yet, but it gives the
+release process the signed helper identity that `SMAppService` or
+`SMJobBless` registration will require.
 
 ## Homebrew channel
 
@@ -159,8 +182,10 @@ sudo spectra install-helper
 The current installer uses a LaunchDaemon plist and root-owned helper
 binary. Future signed packaging can move this to `SMAppService.daemon`
 or `SMJobBless` once Spectra has release signing, notarization, and
-helper identity verification in place. The unprivileged CLI/daemon talks
-to the helper over a local Unix socket when it needs root-only data.
+helper identity verification in place. Signed release installs should pass
+`--require-signed` so unsigned or locally ad-hoc helpers are rejected before
+root-owned files are touched. The unprivileged CLI/daemon talks to the helper
+over a local Unix socket when it needs root-only data.
 Users who don't install the helper still get every capability that
 doesn't strictly require root, which is the overwhelming majority of what
 Spectra extracts today.

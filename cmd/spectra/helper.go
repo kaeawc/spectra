@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
 )
@@ -56,6 +58,7 @@ type helperInstallDeps struct {
 	executable func() (string, error)
 	stat       func(string) (os.FileInfo, error)
 	getenv     func(string) string
+	runCheck   commandRunner
 	runRoot    rootRunner
 	writeTemp  tempTextWriter
 	client     func() helperStatusClient
@@ -64,18 +67,24 @@ type helperInstallDeps struct {
 func runInstallHelper(args []string) int {
 	fs := flag.NewFlagSet("spectra install-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	requireSigned := fs.Bool("require-signed", false, "require spectra-helper to carry a valid Developer ID signature before installing")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	if err := installHelper(defaultHelperInstallDeps()); err != nil {
+	opts := helperInstallOptions{RequireSigned: *requireSigned}
+	if err := installHelper(defaultHelperInstallDeps(), opts); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 
-func installHelper(deps helperInstallDeps) error {
+type helperInstallOptions struct {
+	RequireSigned bool
+}
+
+func installHelper(deps helperInstallDeps, opts helperInstallOptions) error {
 	// Find the spectra-helper binary next to the running spectra binary.
 	self, err := deps.executable()
 	if err != nil {
@@ -84,6 +93,11 @@ func installHelper(deps helperInstallDeps) error {
 	helperSrc := filepath.Join(filepath.Dir(self), "spectra-helper")
 	if _, err := deps.stat(helperSrc); err != nil {
 		return fmt.Errorf("install-helper: spectra-helper binary not found at %s\nBuild it with: go build ./cmd/spectra-helper", helperSrc)
+	}
+	if opts.RequireSigned || truthyEnv(deps.getenv("SPECTRA_REQUIRE_SIGNED_HELPER")) {
+		if err := verifyHelperSignature(helperSrc, deps.runCheck); err != nil {
+			return err
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "This requires administrator privilege. You may be prompted for your password.\n\n")
@@ -144,6 +158,30 @@ func installHelper(deps helperInstallDeps) error {
 	fmt.Println()
 	fmt.Println("Verify with: spectra install-helper --status")
 	return nil
+}
+
+func verifyHelperSignature(path string, run commandRunner) error {
+	if run == nil {
+		run = runCommand
+	}
+	if out, err := run("codesign", "-dv", "--verbose=4", path); err != nil {
+		return fmt.Errorf("install-helper: %s is not signed with a verifiable Developer ID signature: %w\n%s", path, err, strings.TrimSpace(out))
+	} else if !strings.Contains(out, "Authority=Developer ID Application:") {
+		return fmt.Errorf("install-helper: %s is signed, but not with a Developer ID Application certificate", path)
+	}
+	if out, err := run("codesign", "--verify", "--strict", "--verbose=2", path); err != nil {
+		return fmt.Errorf("install-helper: %s failed strict code-signature verification: %w\n%s", path, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+func truthyEnv(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "t", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureHelperGroup(run rootRunner) error {
@@ -275,12 +313,25 @@ func defaultHelperInstallDeps() helperInstallDeps {
 		executable: os.Executable,
 		stat:       os.Stat,
 		getenv:     os.Getenv,
+		runCheck:   runCommand,
 		runRoot:    sudoRun,
 		writeTemp:  writeTempText,
 		client: func() helperStatusClient {
 			return helperclient.New()
 		},
 	}
+}
+
+type commandRunner func(name string, args ...string) (string, error)
+
+func runCommand(name string, args ...string) (string, error) {
+	// #nosec G204 -- command names are fixed at call sites.
+	cmd := exec.Command(name, args...)
+	var combined bytes.Buffer
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
+	err := cmd.Run()
+	return combined.String(), err
 }
 
 func sudoRun(name string, args ...string) error {

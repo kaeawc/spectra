@@ -47,8 +47,22 @@ What this does:
 4. Prompts the user to grant Full Disk Access to the helper in System
    Settings → Privacy & Security → Full Disk Access.
 
-`SMAppService.daemon` / `SMJobBless` packaging is future distribution work.
-The current installer is intentionally explicit and shell-based.
+Source builds install unsigned helpers by default. Release builds can require
+Developer ID verification before any privileged copy happens:
+
+```bash
+sudo spectra install-helper --require-signed
+```
+
+The same policy can be enforced non-interactively with
+`SPECTRA_REQUIRE_SIGNED_HELPER=1`. The installer verifies that the helper is
+signed by a Developer ID Application certificate and passes strict
+`codesign --verify` before it creates or modifies any root-owned files.
+
+`SMAppService.daemon` / `SMJobBless` packaging is still future distribution
+work. The current installer remains intentionally explicit and shell-based,
+but the release path now has the signature verification needed before moving
+to signed registration.
 
 ```bash
 sudo spectra uninstall-helper
@@ -192,11 +206,25 @@ rotations and rolls the helper audit log after it reaches 1 MiB.
 
 ## Code signing and notarization
 
-- Release builds should sign the helper with the same Developer ID as
-  the main binary, hardened runtime enabled.
-- Future `SMAppService.daemon` registration should verify the embedded
-  helper's code-signing requirements before loading.
-- Notarization should staple both binaries for end-user distribution.
+Release builds should run:
+
+```bash
+SPECTRA_SIGN_IDENTITY="Developer ID Application: Example, Inc. (TEAMID)" \
+SPECTRA_NOTARY_KEYCHAIN_PROFILE=spectra-notary \
+make release-check
+```
+
+`scripts/release-check.sh` builds both binaries, signs them with hardened
+runtime (`--options runtime --timestamp`), verifies the helper's Developer ID
+chain, and submits a zip to Apple notarization when notary credentials are
+present. The script also accepts direct notary credentials through
+`SPECTRA_NOTARY_APPLE_ID`, `SPECTRA_NOTARY_TEAM_ID`, and
+`SPECTRA_NOTARY_PASSWORD`.
+
+Future `SMAppService.daemon` registration should embed the helper in a signed
+app-style release artifact and register it only after checking the helper
+requirement against the same Team ID. Older macOS support can use the same
+signed helper identity with an `SMJobBless` fallback.
 
 ## Why not a System Extension instead
 
