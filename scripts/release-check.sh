@@ -6,9 +6,11 @@ set -euo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 PASS=0
 FAIL=0
+SKIP=0
 
 check() {
     local name="$1"
@@ -23,12 +25,70 @@ check() {
     fi
 }
 
+skip() {
+    local name="$1"
+    echo -n "  $name... "
+    echo -e "${YELLOW}SKIP${NC}"
+    SKIP=$((SKIP + 1))
+}
+
+sign_binary() {
+    local path="$1"
+    codesign --force --timestamp --options runtime --sign "$SPECTRA_SIGN_IDENTITY" "$path"
+}
+
+notarize_archive() {
+    local archive="$1"
+    local submit_args=(notarytool submit "$archive" --wait)
+    if [ -n "${SPECTRA_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+        submit_args+=(--keychain-profile "$SPECTRA_NOTARY_KEYCHAIN_PROFILE")
+    else
+        submit_args+=(--apple-id "$SPECTRA_NOTARY_APPLE_ID" --team-id "$SPECTRA_NOTARY_TEAM_ID" --password "$SPECTRA_NOTARY_PASSWORD")
+    fi
+    xcrun "${submit_args[@]}"
+}
+
+create_notarization_zip() {
+    rm -rf spectra-notary
+    mkdir -p spectra-notary
+    cp spectra spectra-helper spectra-notary/
+    ditto -c -k --keepParent spectra-notary spectra-notary.zip
+}
+
+notary_configured() {
+    if [ -n "${SPECTRA_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+        return 0
+    fi
+    [ -n "${SPECTRA_NOTARY_APPLE_ID:-}" ] && [ -n "${SPECTRA_NOTARY_TEAM_ID:-}" ] && [ -n "${SPECTRA_NOTARY_PASSWORD:-}" ]
+}
+
 echo "=== Release Checklist ==="
 echo ""
 
 echo "Build:"
 check "spectra binary" go build -ldflags "-s -w" -o spectra ./cmd/spectra/
 check "spectra-helper binary" go build -ldflags "-s -w" -o spectra-helper ./cmd/spectra-helper/
+
+echo ""
+echo "Signing:"
+if [ -n "${SPECTRA_SIGN_IDENTITY:-}" ]; then
+    check "sign spectra" sign_binary spectra
+    check "sign spectra-helper" sign_binary spectra-helper
+    check "spectra signature valid" codesign --verify --strict --verbose=2 spectra
+    check "spectra-helper Developer ID signature" bash -c 'codesign -dv --verbose=4 spectra-helper 2>&1 | grep -q "Authority=Developer ID Application:"'
+    check "spectra-helper signature valid" codesign --verify --strict --verbose=2 spectra-helper
+else
+    skip "codesign binaries (set SPECTRA_SIGN_IDENTITY)"
+fi
+
+echo ""
+echo "Notarization:"
+if [ -n "${SPECTRA_SIGN_IDENTITY:-}" ] && notary_configured; then
+    check "create notarization zip" create_notarization_zip
+    check "submit notarization" notarize_archive spectra-notary.zip
+else
+    skip "notarize binaries (set signing + notary credentials)"
+fi
 
 echo ""
 echo "Quality:"
@@ -56,7 +116,7 @@ check "no untracked Go files" bash -c '[ -z "$(git ls-files --others --exclude-s
 
 echo ""
 echo "================================"
-echo -e "Results: ${GREEN}${PASS} passed${NC}, ${RED}${FAIL} failed${NC}"
+echo -e "Results: ${GREEN}${PASS} passed${NC}, ${RED}${FAIL} failed${NC}, ${YELLOW}${SKIP} skipped${NC}"
 
 if [ "$FAIL" -gt 0 ]; then
     echo ""

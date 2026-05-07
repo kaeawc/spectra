@@ -71,7 +71,7 @@ func TestInstallRootTextFileCopiesTemporaryContent(t *testing.T) {
 func TestInstallHelperRunsExpectedRootOperations(t *testing.T) {
 	fake := newFakeHelperInstallDeps(t)
 	fake.env["SUDO_USER"] = "alice"
-	if err := installHelper(fake.deps()); err != nil {
+	if err := installHelper(fake.deps(), helperInstallOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,7 +102,7 @@ func TestInstallHelperRunsExpectedRootOperations(t *testing.T) {
 func TestInstallHelperCreatesMissingGroup(t *testing.T) {
 	fake := newFakeHelperInstallDeps(t)
 	fake.runErrs["dseditgroup\x00-o\x00read\x00"+helperGroup] = errors.New("no group")
-	if err := installHelper(fake.deps()); err != nil {
+	if err := installHelper(fake.deps(), helperInstallOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	wantPrefix := [][]string{
@@ -117,7 +117,7 @@ func TestInstallHelperCreatesMissingGroup(t *testing.T) {
 func TestInstallHelperSkipsRootUserGroupEdit(t *testing.T) {
 	fake := newFakeHelperInstallDeps(t)
 	fake.env["SUDO_USER"] = "root"
-	if err := installHelper(fake.deps()); err != nil {
+	if err := installHelper(fake.deps(), helperInstallOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, run := range fake.runs {
@@ -130,7 +130,7 @@ func TestInstallHelperSkipsRootUserGroupEdit(t *testing.T) {
 func TestInstallHelperReportsMissingHelperBinary(t *testing.T) {
 	fake := newFakeHelperInstallDeps(t)
 	fake.statErr = os.ErrNotExist
-	err := installHelper(fake.deps())
+	err := installHelper(fake.deps(), helperInstallOptions{})
 	if err == nil {
 		t.Fatal("installHelper succeeded with missing helper binary")
 	}
@@ -155,6 +155,48 @@ func TestUninstallHelperRunsExpectedRootOperations(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fake.runs, wantRuns) {
 		t.Fatalf("runs = %v, want %v", fake.runs, wantRuns)
+	}
+}
+
+func TestInstallHelperCanRequireDeveloperIDSignature(t *testing.T) {
+	fake := newFakeHelperInstallDeps(t)
+	fake.checkOut["codesign\x00-dv\x00--verbose=4\x00"+fake.helperSrc()] = "Authority=Developer ID Application: Example, Inc. (ABCDE12345)\n"
+	if err := installHelper(fake.deps(), helperInstallOptions{RequireSigned: true}); err != nil {
+		t.Fatal(err)
+	}
+	wantChecks := [][]string{
+		{"codesign", "-dv", "--verbose=4", fake.helperSrc()},
+		{"codesign", "--verify", "--strict", "--verbose=2", fake.helperSrc()},
+	}
+	if !reflect.DeepEqual(fake.checks, wantChecks) {
+		t.Fatalf("checks = %v, want %v", fake.checks, wantChecks)
+	}
+}
+
+func TestInstallHelperRejectsNonDeveloperIDSignature(t *testing.T) {
+	fake := newFakeHelperInstallDeps(t)
+	fake.checkOut["codesign\x00-dv\x00--verbose=4\x00"+fake.helperSrc()] = "Authority=Apple Development: Example\n"
+	err := installHelper(fake.deps(), helperInstallOptions{RequireSigned: true})
+	if err == nil {
+		t.Fatal("installHelper accepted non-Developer ID signature")
+	}
+	if !strings.Contains(err.Error(), "not with a Developer ID Application certificate") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(fake.runs) != 0 {
+		t.Fatalf("runs = %v, want none", fake.runs)
+	}
+}
+
+func TestInstallHelperRequireSignedEnv(t *testing.T) {
+	fake := newFakeHelperInstallDeps(t)
+	fake.env["SPECTRA_REQUIRE_SIGNED_HELPER"] = "true"
+	fake.checkOut["codesign\x00-dv\x00--verbose=4\x00"+fake.helperSrc()] = "Authority=Developer ID Application: Example, Inc. (ABCDE12345)\n"
+	if err := installHelper(fake.deps(), helperInstallOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.checks) != 2 {
+		t.Fatalf("checks = %v, want codesign checks", fake.checks)
 	}
 }
 
@@ -189,6 +231,19 @@ func TestSudoCommandAllowedCoversHelperManagementCommands(t *testing.T) {
 	}
 }
 
+func TestTruthyEnv(t *testing.T) {
+	for _, v := range []string{"1", "true", "TRUE", "yes", "on"} {
+		if !truthyEnv(v) {
+			t.Fatalf("truthyEnv(%q) = false", v)
+		}
+	}
+	for _, v := range []string{"", "0", "false", "no", "off"} {
+		if truthyEnv(v) {
+			t.Fatalf("truthyEnv(%q) = true", v)
+		}
+	}
+}
+
 func TestSudoRunRejectsNonAllowlistedCommand(t *testing.T) {
 	err := sudoRun("sh", "-c", "echo should-not-run")
 	if err == nil {
@@ -204,6 +259,9 @@ type fakeHelperInstallDeps struct {
 	env            map[string]string
 	runs           [][]string
 	runErrs        map[string]error
+	checks         [][]string
+	checkOut       map[string]string
+	checkErrs      map[string]error
 	statErr        error
 	tempContents   []string
 	cleanups       int
@@ -216,8 +274,14 @@ func newFakeHelperInstallDeps(t *testing.T) *fakeHelperInstallDeps {
 		executablePath: filepath.Join(t.TempDir(), "spectra"),
 		env:            map[string]string{"USER": "alice"},
 		runErrs:        map[string]error{},
+		checkOut:       map[string]string{},
+		checkErrs:      map[string]error{},
 		statusClient:   &fakeHelperStatusClient{},
 	}
+}
+
+func (f *fakeHelperInstallDeps) helperSrc() string {
+	return filepath.Join(filepath.Dir(f.executablePath), "spectra-helper")
 }
 
 func (f *fakeHelperInstallDeps) deps() helperInstallDeps {
@@ -233,6 +297,12 @@ func (f *fakeHelperInstallDeps) deps() helperInstallDeps {
 		},
 		getenv: func(key string) string {
 			return f.env[key]
+		},
+		runCheck: func(name string, args ...string) (string, error) {
+			call := append([]string{name}, args...)
+			f.checks = append(f.checks, slices.Clone(call))
+			key := strings.Join(call, "\x00")
+			return f.checkOut[key], f.checkErrs[key]
 		},
 		runRoot: func(name string, args ...string) error {
 			call := append([]string{name}, args...)
