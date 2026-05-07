@@ -3,6 +3,8 @@ package jvm
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/heap"
 )
 
 // collectSysProps runs `jcmd <pid> VM.system_properties` and returns the
@@ -109,6 +111,16 @@ func HeapHistogram(pid int, run CmdRunner) ([]byte, error) {
 		run = DefaultRunner
 	}
 	return run("jcmd", fmt.Sprint(pid), "GC.class_histogram")
+}
+
+// HeapHistogramSnapshot runs GC.class_histogram and parses it into structured
+// rows for reusable heap-analysis workflows.
+func HeapHistogramSnapshot(pid int, run CmdRunner) (heap.Histogram, error) {
+	out, err := HeapHistogram(pid, run)
+	if err != nil {
+		return heap.Histogram{}, err
+	}
+	return heap.ParseHistogram(string(out))
 }
 
 // HeapDump runs `jcmd <pid> GC.heap_dump <destPath>` to write a .hprof file.

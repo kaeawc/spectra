@@ -167,6 +167,22 @@ func TestHeapHistogramFakeRunner(t *testing.T) {
 	}
 }
 
+func TestHeapHistogramSnapshotFakeRunner(t *testing.T) {
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "jcmd" && len(args) == 2 && args[1] == "GC.class_histogram" {
+			return []byte(" num     #instances         #bytes  class name\n   1:          1234       9876543  [B\nTotal         1234       9876543\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+	got, err := HeapHistogramSnapshot(42, run)
+	if err != nil {
+		t.Fatalf("HeapHistogramSnapshot: %v", err)
+	}
+	if len(got.Entries) != 1 || got.Entries[0].ClassName != "[B" || got.Total.Bytes != 9876543 {
+		t.Fatalf("snapshot = %#v", got)
+	}
+}
+
 func TestHeapDumpFakeRunner(t *testing.T) {
 	var capturedArgs []string
 	run := func(name string, args ...string) ([]byte, error) {
