@@ -1,8 +1,10 @@
 package snapshot
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestCollectHostMinimallyPopulated runs against the live machine; we
@@ -58,6 +60,76 @@ func TestHostInfoString(t *testing.T) {
 			t.Errorf("String() missing %q\nfull:\n%s", want, s)
 		}
 	}
+}
+
+func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
+	runner := fakeHostRunner{responses: map[string]string{
+		"sw_vers\x00-productVersion":                   "15.6.1",
+		"sw_vers\x00-buildVersion":                     "24G90",
+		"sysctl\x00-n\x00machdep.cpu.brand_string":     "Apple M99",
+		"sysctl\x00-n\x00hw.ncpu":                      "12",
+		"sysctl\x00-n\x00hw.memsize":                   "68719476736",
+		"sysctl\x00-n\x00kern.boottime":                "{ sec = 1000, usec = 0 }",
+		"ioreg\x00-d2\x00-c\x00IOPlatformExpertDevice": `"IOPlatformUUID" = "ABCDEF12-3456-7890-ABCD-EF1234567890"`,
+	}}
+	collector := LiveHostCollector{Options: HostCollectOptions{
+		Hostname: func() (string, error) { return "test-host", nil },
+		Runner:   runner,
+		Now:      func() time.Time { return time.Unix(4600, 0) },
+	}}
+
+	got := collector.CollectHost("test-version")
+	if got.Hostname != "test-host" {
+		t.Errorf("Hostname = %q, want test-host", got.Hostname)
+	}
+	if got.MachineUUID != "ABCDEF12-3456-7890-ABCD-EF1234567890" {
+		t.Errorf("MachineUUID = %q", got.MachineUUID)
+	}
+	if got.OSVersion != "15.6.1" || got.OSBuild != "24G90" {
+		t.Errorf("OS = %q (%q)", got.OSVersion, got.OSBuild)
+	}
+	if got.CPUBrand != "Apple M99" || got.CPUCores != 12 {
+		t.Errorf("CPU = %q %d", got.CPUBrand, got.CPUCores)
+	}
+	if got.RAMBytes != 68719476736 {
+		t.Errorf("RAMBytes = %d", got.RAMBytes)
+	}
+	if got.UptimeSeconds != 3600 {
+		t.Errorf("UptimeSeconds = %d, want 3600", got.UptimeSeconds)
+	}
+	if got.SpectraVersion != "test-version" {
+		t.Errorf("SpectraVersion = %q", got.SpectraVersion)
+	}
+}
+
+func TestLiveHostCollectorToleratesMissingMachineUUID(t *testing.T) {
+	collector := LiveHostCollector{Options: HostCollectOptions{
+		Hostname: func() (string, error) { return "fallback-host", nil },
+		Runner: fakeHostRunner{responses: map[string]string{
+			"sw_vers\x00-productVersion": "15.6.1",
+		}},
+		Now: func() time.Time { return time.Unix(4600, 0) },
+	}}
+
+	got := collector.CollectHost("test-version")
+	if got.Hostname != "fallback-host" {
+		t.Errorf("Hostname = %q", got.Hostname)
+	}
+	if got.MachineUUID != "" {
+		t.Errorf("MachineUUID = %q, want empty", got.MachineUUID)
+	}
+}
+
+type fakeHostRunner struct {
+	responses map[string]string
+}
+
+func (f fakeHostRunner) Run(name string, args ...string) (string, error) {
+	key := strings.Join(append([]string{name}, args...), "\x00")
+	if v, ok := f.responses[key]; ok {
+		return v, nil
+	}
+	return "", fmt.Errorf("unexpected command %s", key)
 }
 
 func TestHumanBytes(t *testing.T) {

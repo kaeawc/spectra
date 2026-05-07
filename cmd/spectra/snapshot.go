@@ -119,7 +119,10 @@ func saveSnapshotNamed(snap snapshot.Snapshot, name string) error {
 		return err
 	}
 	defer db.Close()
-	ctx := context.Background()
+	return saveSnapshotToRegistry(context.Background(), db, snap, name)
+}
+
+func saveSnapshotToRegistry(ctx context.Context, db snapshotRegistry, snap snapshot.Snapshot, name string) error {
 	input := store.FromSnapshot(snap)
 	input.Name = name
 	if err := db.SaveSnapshot(ctx, input); err != nil {
@@ -475,7 +478,20 @@ type remoteSnapshotLoader func(ctx context.Context, host string, snapshotID stri
 
 var loadRemoteSnapshot remoteSnapshotLoader = resolveRemoteSnapshot
 
-func resolveDiffOperands(ctx context.Context, db *store.DB, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
+type snapshotRegistry interface {
+	SaveSnapshot(context.Context, store.SnapshotInput) error
+	SaveSnapshotProcesses(context.Context, string, []store.ProcessSnapshotRow) error
+	SaveLoginItems(context.Context, string, []store.LoginItemRow) error
+	SaveGrantedPerms(context.Context, string, []store.GrantedPermRow) error
+	ListSnapshots(context.Context, string) ([]store.SnapshotRow, error)
+	GetSnapshot(context.Context, string) (store.SnapshotRow, error)
+	GetSnapshotJSON(context.Context, string) ([]byte, error)
+	GetSnapshotApps(context.Context, string) ([]store.AppRow, error)
+	DeleteSnapshot(context.Context, string) error
+	PruneSnapshots(context.Context, int) (int64, error)
+}
+
+func resolveDiffOperands(ctx context.Context, db snapshotRegistry, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
 	if len(args) > 0 && args[0] == "baseline" {
 		return resolveBaselineDiffOperands(ctx, db, args[1:])
 	}
@@ -495,7 +511,7 @@ func resolveDiffOperands(ctx context.Context, db *store.DB, args []string) (*sna
 	return snapA, snapB, nil
 }
 
-func resolveBaselineDiffOperands(ctx context.Context, db *store.DB, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
+func resolveBaselineDiffOperands(ctx context.Context, db snapshotRegistry, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
 	ref := ""
 	other := "live"
 	switch len(args) {
@@ -523,7 +539,7 @@ func resolveBaselineDiffOperands(ctx context.Context, db *store.DB, args []strin
 
 // resolveSnapshot loads a snapshot from the DB by ID, or captures a fresh
 // live snapshot when id is the sentinel "live".
-func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+func resolveSnapshot(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
 	if id == "live" {
 		snap := snapshot.Build(ctx, snapshot.Options{SpectraVersion: version})
 		return &snap, nil
@@ -531,7 +547,7 @@ func resolveSnapshot(ctx context.Context, db *store.DB, id string) (*snapshot.Sn
 	return loadSnapshotFromDB(ctx, db, id)
 }
 
-func resolveSnapshotWithHostFallback(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+func resolveSnapshotWithHostFallback(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
 	remoteHost, remoteSnapshot, isRemote, err := parseRemoteDiffOperand(id)
 	if err != nil {
 		return nil, err
@@ -604,7 +620,7 @@ func resolveRemoteSnapshot(ctx context.Context, host string, snapshotID string) 
 	return &snap, nil
 }
 
-func resolveBaselineSnapshot(ctx context.Context, db *store.DB, ref string) (*snapshot.Snapshot, error) {
+func resolveBaselineSnapshot(ctx context.Context, db snapshotRegistry, ref string) (*snapshot.Snapshot, error) {
 	if ref != "" {
 		row, err := db.GetSnapshot(ctx, ref)
 		if err == nil {
@@ -646,7 +662,7 @@ func baselineDisplayName(ref string) string {
 // loadSnapshotFromDB retrieves the full snapshot JSON blob for id and unmarshals
 // it into a snapshot.Snapshot. Returns an error if the snapshot is not found or
 // was saved without a JSON blob (pre-v0.8 rows).
-func loadSnapshotFromDB(ctx context.Context, db *store.DB, id string) (*snapshot.Snapshot, error) {
+func loadSnapshotFromDB(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
 	raw, err := db.GetSnapshotJSON(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("not found")

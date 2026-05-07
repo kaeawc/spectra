@@ -49,6 +49,10 @@ type Options struct {
 	// SpectraVersion is recorded on HostInfo.
 	SpectraVersion string
 
+	// HostCollector gathers host identity and capacity facts.
+	// Zero value uses the live machine collector.
+	HostCollector HostCollector
+
 	// AppPaths are the .app bundles to include. When empty, Build scans
 	// /Applications and /Applications/Utilities.
 	AppPaths []string
@@ -140,7 +144,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 
 	go func() {
 		defer wg.Done()
-		s.Host = CollectHost(opts.SpectraVersion)
+		hostCollector := opts.HostCollector
+		if hostCollector == nil {
+			hostCollector = LiveHostCollector{}
+		}
+		s.Host = hostCollector.CollectHost(opts.SpectraVersion)
 	}()
 	if !opts.SkipApps {
 		go func() {

@@ -285,6 +285,9 @@ exposes config. Until then, retention is hardcoded.
 
 ## See also
 
+- [../operations/snapshots-and-hosts.md](../operations/snapshots-and-hosts.md) —
+  host identity, registry lifecycle, baselines, retention, and diff
+  workflows
 - [storage.md](storage.md) — where snapshots are persisted
 - [../inspection/](../inspection/) — per-collector deep dives
 - [recommendations-engine.md](recommendations-engine.md) — what fires
