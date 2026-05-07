@@ -1,10 +1,11 @@
-.PHONY: build build-helper build-all test vet fmt lint complexity security licenses tidy ci clean all \
+.PHONY: build build-mcp build-helper build-all test vet fmt lint complexity security licenses tidy ci clean all \
 	release-check validate-workflows \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
 BIN ?= spectra
+MCP_BIN ?= spectra-mcp
 HELPER_BIN ?= spectra-helper
 
 # --- Build -------------------------------------------------------------------
@@ -12,10 +13,13 @@ HELPER_BIN ?= spectra-helper
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/spectra/
 
+build-mcp:
+	go build -ldflags "$(LDFLAGS)" -o $(MCP_BIN) ./cmd/spectra-mcp/
+
 build-helper:
 	go build -ldflags "$(LDFLAGS)" -o $(HELPER_BIN) ./cmd/spectra-helper/
 
-build-all: build build-helper
+build-all: build build-mcp build-helper
 
 # --- Quality -----------------------------------------------------------------
 
@@ -74,7 +78,7 @@ docs-validate: docs-nav docs-lychee docs-build
 # --- Cleanup -----------------------------------------------------------------
 
 clean:
-	rm -f $(BIN) $(HELPER_BIN) junit-report.xml gosec-report.xml
+	rm -f $(BIN) $(MCP_BIN) $(HELPER_BIN) junit-report.xml gosec-report.xml
 	rm -rf site/
 
 all: build vet test docs-validate
