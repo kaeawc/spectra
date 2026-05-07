@@ -53,6 +53,20 @@ func printPowerState(w io.Writer, s sysinfo.PowerState) {
 	if s.ThermalPressure != "" {
 		fmt.Fprintf(w, "thermal:   %s\n", s.ThermalPressure)
 	}
+	if s.CPUSpeedLimitPct > 0 {
+		fmt.Fprintf(w, "cpu limit: %d%%\n", s.CPUSpeedLimitPct)
+	}
+	if s.ThermalThrottled {
+		fmt.Fprintf(w, "throttled: yes")
+		if len(s.CPUSpeedLimitSamples) > 1 {
+			fmt.Fprintf(w, " (lowest %d%%, average %d%%, %d%% of samples)",
+				s.LowestCPUSpeedLimitPct,
+				s.AverageCPUSpeedLimitPct,
+				s.PercentThermalThrottled,
+			)
+		}
+		fmt.Fprintln(w)
+	}
 
 	if len(s.Assertions) > 0 {
 		fmt.Fprintln(w)

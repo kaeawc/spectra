@@ -197,6 +197,12 @@ reports actual allocation rather than the multi-TB virtual disk size.
 PowerState {
   on_battery, battery_pct
   thermal_pressure ∈ {nominal, fair, serious, critical}
+  thermal_throttled
+  cpu_speed_limit_pct
+  lowest_cpu_speed_limit_pct
+  average_cpu_speed_limit_pct
+  percent_thermal_throttled
+  cpu_speed_limit_samples []
   assertions []{
     type, pid, name
   }

@@ -9,11 +9,17 @@ import (
 // PowerState captures battery and thermal facts.
 // See docs/design/system-inventory.md#powerstate.
 type PowerState struct {
-	OnBattery       bool             `json:"on_battery"`
-	BatteryPct      int              `json:"battery_pct"`
-	ThermalPressure string           `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
-	Assertions      []PowerAssertion `json:"assertions,omitempty"`
-	EnergyTopUsers  []EnergyUser     `json:"energy_top_users,omitempty"`
+	OnBattery               bool             `json:"on_battery"`
+	BatteryPct              int              `json:"battery_pct"`
+	ThermalPressure         string           `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
+	ThermalThrottled        bool             `json:"thermal_throttled"`
+	CPUSpeedLimitPct        int              `json:"cpu_speed_limit_pct,omitempty"`
+	LowestCPUSpeedLimitPct  int              `json:"lowest_cpu_speed_limit_pct,omitempty"`
+	AverageCPUSpeedLimitPct int              `json:"average_cpu_speed_limit_pct,omitempty"`
+	PercentThermalThrottled int              `json:"percent_thermal_throttled,omitempty"`
+	CPUSpeedLimitSamples    []int            `json:"cpu_speed_limit_samples,omitempty"`
+	Assertions              []PowerAssertion `json:"assertions,omitempty"`
+	EnergyTopUsers          []EnergyUser     `json:"energy_top_users,omitempty"`
 }
 
 // EnergyUser is one entry from `top -l 1 -o power`.
@@ -160,14 +166,56 @@ func parseTherm(out string, ps *PowerState) {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "System thermal state:") {
 			ps.ThermalPressure = strings.TrimSpace(strings.TrimPrefix(line, "System thermal state:"))
-			return
+			continue
 		}
 		// Fallback: some macOS versions print "thermal state: X"
 		if strings.HasPrefix(line, "thermal state:") {
 			ps.ThermalPressure = strings.TrimSpace(strings.TrimPrefix(line, "thermal state:"))
-			return
+			continue
+		}
+		if strings.Contains(line, "CPU_Speed_Limit") {
+			if limit, ok := parseDiagnosticInt(line); ok {
+				ps.CPUSpeedLimitSamples = append(ps.CPUSpeedLimitSamples, limit)
+			}
 		}
 	}
+	summarizeCPUSpeedLimits(ps)
+}
+
+func parseDiagnosticInt(line string) (int, bool) {
+	_, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func summarizeCPUSpeedLimits(ps *PowerState) {
+	if len(ps.CPUSpeedLimitSamples) == 0 {
+		return
+	}
+	latest := ps.CPUSpeedLimitSamples[len(ps.CPUSpeedLimitSamples)-1]
+	lowest := ps.CPUSpeedLimitSamples[0]
+	sum := 0
+	throttled := 0
+	for _, limit := range ps.CPUSpeedLimitSamples {
+		sum += limit
+		if limit < lowest {
+			lowest = limit
+		}
+		if limit < 100 {
+			throttled++
+		}
+	}
+	ps.CPUSpeedLimitPct = latest
+	ps.LowestCPUSpeedLimitPct = lowest
+	ps.AverageCPUSpeedLimitPct = sum / len(ps.CPUSpeedLimitSamples)
+	ps.PercentThermalThrottled = (throttled * 100) / len(ps.CPUSpeedLimitSamples)
+	ps.ThermalThrottled = throttled > 0
 }
 
 // parseAssertions extracts active assertions from `pmset -g assertions`.

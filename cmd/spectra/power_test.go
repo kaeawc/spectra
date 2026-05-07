@@ -11,9 +11,15 @@ import (
 
 func fakePowerState() sysinfo.PowerState {
 	return sysinfo.PowerState{
-		OnBattery:       true,
-		BatteryPct:      85,
-		ThermalPressure: "serious",
+		OnBattery:               true,
+		BatteryPct:              85,
+		ThermalPressure:         "serious",
+		ThermalThrottled:        true,
+		CPUSpeedLimitPct:        92,
+		LowestCPUSpeedLimitPct:  90,
+		AverageCPUSpeedLimitPct: 94,
+		PercentThermalThrottled: 66,
+		CPUSpeedLimitSamples:    []int{90, 92, 100},
 		Assertions: []sysinfo.PowerAssertion{
 			{Type: "PreventUserIdleSleep", PID: 412, Name: "playing audio"},
 		},
@@ -34,6 +40,8 @@ func TestRunPowerHumanOutput(t *testing.T) {
 		"=== Power state ===",
 		"source:    battery (85%)",
 		"thermal:   serious",
+		"cpu limit: 92%",
+		"throttled: yes (lowest 90%, average 94%, 66% of samples)",
 		"PreventUserIdleSleep",
 		"Google Chrome Helper",
 	} {
@@ -55,6 +63,9 @@ func TestRunPowerJSONOutput(t *testing.T) {
 	}
 	if !got.OnBattery || got.BatteryPct != 85 || got.ThermalPressure != "serious" {
 		t.Fatalf("state = %+v, want fake power state", got)
+	}
+	if !got.ThermalThrottled || got.CPUSpeedLimitPct != 92 {
+		t.Fatalf("thermal state = %+v, want throttled with 92%% CPU limit", got)
 	}
 	if len(got.EnergyTopUsers) != 1 || got.EnergyTopUsers[0].Command != "Google Chrome Helper" {
 		t.Fatalf("energy users = %+v, want Google Chrome Helper", got.EnergyTopUsers)
