@@ -69,6 +69,7 @@ func inspectAppToolDef() ToolDefinition {
 		InputSchema: objectSchema(map[string]interface{}{
 			"paths":       arrayStringProp(".app paths."),
 			"network":     boolProp("Scan app URLs."),
+			"deep":        boolProp("Join live process, open-FD/listening-port, and connection state for each app."),
 			"include_raw": boolProp("Return raw data."),
 		}, []string{"paths"}),
 	}
@@ -199,7 +200,7 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 	}
 
 	if p.AppPath != "" {
-		app, err := detect.DetectWith(p.AppPath, detect.Options{ScanNetwork: p.Network})
+		app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(p.Network))
 		if err != nil {
 			evidence = append(evidence, fmt.Sprintf("app inspection failed: %v", err))
 		} else {
@@ -212,7 +213,7 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 				next = append(next, "Use network operation=diagnose with host/port when a specific endpoint is failing.")
 			}
 		}
-		procs := process.CollectAll(context.Background(), process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
 		appProcs := filterAppProcesses(procs, p.AppPath)
 		if len(appProcs) > 0 {
 			evidence = append(evidence, summarizeProcesses(appProcs, 5)...)
@@ -221,14 +222,14 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 	}
 
 	if p.PID > 0 {
-		procs := process.CollectAll(context.Background(), process.CollectOptions{Deep: true})
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{Deep: true})
 		if proc, ok := findProcess(procs, p.PID); ok {
 			evidence = append(evidence, summarizeProcesses([]process.Info{proc}, 1)...)
 			rawOut["process"] = proc
 		} else {
 			evidence = append(evidence, fmt.Sprintf("pid %d not found in process list", p.PID))
 		}
-		if info := inspectJVM(p.PID); info != nil {
+		if info := s.inspectJVM(p.PID); info != nil {
 			evidence = append(evidence, summarizeJVM(*info)...)
 			rawOut["jvm"] = info
 			next = append(next, "Use jvm operation=explain for GC/thread/memory interpretation.")
@@ -236,7 +237,7 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 	}
 
 	if p.BundleID != "" {
-		snap := snapshot.Build(context.Background(), snapshot.Options{SpectraVersion: s.Version, DetectOpts: detect.Options{ScanNetwork: p.Network}})
+		snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
 		for _, app := range snap.Apps {
 			if app.BundleID == p.BundleID {
 				evidence = append(evidence, summarizeApp(app)...)
@@ -246,7 +247,7 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 		}
 	}
 
-	findings, err := evaluateLiveRules(s.Version, "")
+	findings, err := s.evaluateLiveRules("")
 	if err == nil && len(findings) > 0 {
 		evidence = append(evidence, summarizeFindings(findings, 5)...)
 		rawOut["findings"] = findings
@@ -260,7 +261,7 @@ func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
 		Summary:     triageSummary(evidence),
 		Evidence:    evidence,
 		NextActions: next,
-		Timestamp:   time.Now().UTC(),
+		Timestamp:   s.now(),
 	}
 	if p.IncludeRaw {
 		env.Raw = rawOut
@@ -272,6 +273,7 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 	var p struct {
 		Paths      []string `json:"paths"`
 		Network    bool     `json:"network"`
+		Deep       bool     `json:"deep"`
 		IncludeRaw bool     `json:"include_raw"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
@@ -283,7 +285,7 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 	results := make([]inspectResult, 0, len(p.Paths))
 	evidence := []string{}
 	for _, path := range p.Paths {
-		r, err := detect.DetectWith(path, detect.Options{ScanNetwork: p.Network})
+		r, err := s.collect.Apps.InspectApp(path, s.detectOptions(p.Network))
 		item := inspectResult{Path: path}
 		if err != nil {
 			item.Error = err.Error()
@@ -292,6 +294,11 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 			item.Success = true
 			item.Result = r
 			evidence = append(evidence, summarizeApp(r)...)
+			if p.Deep {
+				deep := s.deepInspectApp(path, r)
+				item.Deep = &deep
+				evidence = append(evidence, summarizeDeepInspect(path, deep)...)
+			}
 		}
 		results = append(results, item)
 	}
@@ -299,9 +306,9 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 		Summary:     fmt.Sprintf("inspected %d app path(s)", len(p.Paths)),
 		Evidence:    evidence,
 		NextActions: []string{"Use triage with app_path for prioritized process/network/rules context."},
-		Timestamp:   time.Now().UTC(),
+		Timestamp:   s.now(),
 	}
-	if p.IncludeRaw {
+	if p.IncludeRaw || p.Deep {
 		env.Raw = results
 	}
 	return toolText(env)
@@ -329,9 +336,9 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "create", "baseline":
-		snap := snapshot.Build(context.Background(), snapshot.Options{
+		snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
 			SpectraVersion: s.Version,
-			DetectOpts:     detect.Options{ScanNetwork: p.Network},
+			DetectOpts:     s.detectOptions(p.Network),
 			SkipApps:       p.SkipApps,
 		})
 		if p.Operation == "baseline" {
@@ -350,7 +357,7 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 			Summary:     fmt.Sprintf("created %s snapshot %s", snap.Kind, snap.ID),
 			Evidence:    evidence,
 			NextActions: []string{"Use snapshot operation=diff against a baseline to inspect changes."},
-			Timestamp:   time.Now().UTC(),
+			Timestamp:   s.now(),
 		}
 		if p.IncludeRaw {
 			env.Raw = snap
@@ -366,7 +373,7 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d stored snapshot(s)", len(rows)), Raw: rows, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d stored snapshot(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 	case "get":
 		if p.ID == "" {
 			return toolError("snapshot get requires id")
@@ -375,7 +382,7 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		env := toolEnvelope{Summary: "loaded snapshot " + p.ID, Evidence: summarizeSnapshot(snap, p.LimitSummary), Timestamp: time.Now().UTC()}
+		env := toolEnvelope{Summary: "loaded snapshot " + p.ID, Evidence: summarizeSnapshot(snap, p.LimitSummary), Timestamp: s.now()}
 		if p.IncludeRaw {
 			env.Raw = snap
 		}
@@ -393,7 +400,7 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 			return toolError(err.Error())
 		}
 		result := diff.Compare(a, b)
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: s.now()})
 	default:
 		return toolError("unknown snapshot operation: " + p.Operation)
 	}
@@ -409,7 +416,7 @@ func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	snap, findings, err := evaluateRules(s.Version, p.SnapshotID, p.RulesConfig)
+	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -423,7 +430,7 @@ func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 		evidence = append(evidence, fmt.Sprintf("persisted %d issue(s)", len(ids)))
 		next = []string{"Use issues operation=list with this machine_uuid to inspect persisted issue lifecycle."}
 	}
-	env := toolEnvelope{Summary: fmt.Sprintf("%d finding(s)", len(findings)), Evidence: evidence, NextActions: next, Timestamp: time.Now().UTC()}
+	env := toolEnvelope{Summary: fmt.Sprintf("%d finding(s)", len(findings)), Evidence: evidence, NextActions: next, Timestamp: s.now()}
 	if p.IncludeRaw {
 		env.Raw = findings
 	}
@@ -449,22 +456,22 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 	bundles = append(bundles, p.Paths...)
 	switch p.Operation {
 	case "list", "":
-		procs := process.CollectAll(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
 		sortProcesses(procs)
 		if p.Limit > 0 && p.Limit < len(procs) {
 			procs = procs[:p.Limit]
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %d process(es)", len(procs)), Evidence: summarizeProcesses(procs, 10), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %d process(es)", len(procs)), Evidence: summarizeProcesses(procs, 10), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: s.now()})
 	case "tree":
-		procs := process.CollectAll(context.Background(), process.CollectOptions{BundlePaths: bundles})
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles})
 		tree := process.BuildTree(procs)
-		return toolText(toolEnvelope{Summary: "built process tree", Raw: tree, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "built process tree", Raw: tree, Timestamp: s.now()})
 	case "by_app":
 		if len(bundles) == 0 {
 			return toolError("process by_app requires paths or bundles")
 		}
-		procs := process.CollectAll(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected processes for %d app bundle(s)", len(bundles)), Evidence: summarizeProcesses(procs, 20), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: time.Now().UTC()})
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected processes for %d app bundle(s)", len(bundles)), Evidence: summarizeProcesses(procs, 20), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: s.now()})
 	case "sample":
 		if p.PID == 0 {
 			return toolError("process sample requires pid")
@@ -477,11 +484,11 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 		if interval <= 0 {
 			interval = 10
 		}
-		out, err := sampleProcess(p.PID, duration, interval)
+		out, err := s.collect.Processes.SampleProcess(p.PID, duration, interval)
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
 	case "history":
 		return toolError("process history requires a running spectra daemon; use remote operation=rpc method=process.history")
 	default:
@@ -511,44 +518,44 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "list", "":
-		jvms := jvm.CollectAll(context.Background(), jvmOptions())
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JVM process(es)", len(jvms)), Evidence: summarizeJVMs(jvms), Raw: optionalRaw(p.IncludeRaw, jvms), Timestamp: time.Now().UTC()})
+		jvms := s.collect.JVMs.CollectJVMs(context.Background(), s.jvmOptions())
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JVM process(es)", len(jvms)), Evidence: summarizeJVMs(jvms), Raw: optionalRaw(p.IncludeRaw, jvms), Timestamp: s.now()})
 	case "inspect":
 		if p.PID == 0 {
 			return toolError("jvm inspect requires pid")
 		}
-		info := inspectJVM(p.PID)
+		info := s.inspectJVM(p.PID)
 		if info == nil {
 			return toolError(fmt.Sprintf("JVM pid %d not found", p.PID))
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("inspected JVM pid %d", p.PID), Evidence: summarizeJVM(*info), Raw: optionalRaw(p.IncludeRaw, info), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("inspected JVM pid %d", p.PID), Evidence: summarizeJVM(*info), Raw: optionalRaw(p.IncludeRaw, info), Timestamp: s.now()})
 	case "explain":
 		if p.PID == 0 {
 			return toolError("jvm explain requires pid")
 		}
-		explanation, err := jvm.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
+		explanation, err := s.collect.JVMs.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
 	case "thread_dump":
-		return jcmdText(p.PID, "thread dump", jvm.ThreadDump)
+		return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump)
 	case "gc_stats":
 		if p.PID == 0 {
 			return toolError("jvm gc_stats requires pid")
 		}
-		stats, err := jvm.CollectGCStats(p.PID, nil)
+		stats, err := s.collect.JVMs.CollectGCStats(p.PID)
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
 	case "vm_memory":
 		if p.PID == 0 {
 			return toolError("jvm vm_memory requires pid")
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: jvm.CollectVMMemoryDiagnostics(p.PID, nil), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(p.PID), Timestamp: s.now()})
 	case "heap_histogram":
-		return jcmdText(p.PID, "heap histogram", jvm.HeapHistogram)
+		return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram)
 	case "attach":
 		if p.PID == 0 {
 			return toolError("jvm attach requires pid")
@@ -557,7 +564,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
 	case "mbeans":
 		if p.PID == 0 {
 			return toolError("jvm mbeans requires pid")
@@ -566,7 +573,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
 	case "mbean_read":
 		if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
 			return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
@@ -575,7 +582,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
 	case "mbean_invoke":
 		if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
 			return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
@@ -584,7 +591,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
 	case "probe":
 		if p.PID == 0 {
 			return toolError("jvm probe requires pid")
@@ -593,7 +600,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
 	case "heap_dump":
 		if !p.ConfirmSensitive {
 			return toolError("jvm heap_dump requires confirm_sensitive=true")
@@ -604,10 +611,10 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 		}
-		if err := jvm.HeapDump(p.PID, p.Dest, nil); err != nil {
+		if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
 	case "flamegraph":
 		if !p.ConfirmSensitive {
 			return toolError("jvm flamegraph requires confirm_sensitive=true")
@@ -618,11 +625,11 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
 		}
-		err := jvm.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+		err := s.collect.JVMs.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
 	default:
 		return toolError("unknown jvm operation: " + p.Operation)
 	}
@@ -642,21 +649,21 @@ func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "state", "":
-		state := netstate.Collect(netstate.DefaultRunner)
-		return toolText(toolEnvelope{Summary: summarizeNetworkState(state), Evidence: networkEvidence(state), Raw: optionalRaw(p.IncludeRaw, state), Timestamp: time.Now().UTC()})
+		state := s.collect.Network.CollectNetworkState()
+		return toolText(toolEnvelope{Summary: summarizeNetworkState(state), Evidence: networkEvidence(state), Raw: optionalRaw(p.IncludeRaw, state), Timestamp: s.now()})
 	case "connections":
-		conns := netstate.CollectConnections(netstate.DefaultRunner)
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d active connection(s)", len(conns)), Raw: optionalRaw(true, conns), Timestamp: time.Now().UTC()})
+		conns := s.collect.Network.CollectConnections()
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d active connection(s)", len(conns)), Raw: optionalRaw(true, conns), Timestamp: s.now()})
 	case "by_app":
 		bundles := append([]string{}, p.Bundles...)
 		bundles = append(bundles, p.Paths...)
-		conns := netstate.CollectConnections(netstate.DefaultRunner)
-		procs := process.CollectAll(context.Background(), process.CollectOptions{BundlePaths: bundles})
+		conns := s.collect.Network.CollectConnections()
+		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles})
 		grouped := netstate.GroupConnectionsByApp(conns, procs)
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("grouped %d connection(s) by app", len(conns)), Raw: grouped, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("grouped %d connection(s) by app", len(conns)), Raw: grouped, Timestamp: s.now()})
 	case "diagnose":
-		state := netstate.Collect(netstate.DefaultRunner)
-		conns := netstate.CollectConnections(netstate.DefaultRunner)
+		state := s.collect.Network.CollectNetworkState()
+		conns := s.collect.Network.CollectConnections()
 		evidence := networkEvidence(state)
 		if p.Host != "" {
 			evidence = append(evidence, connectionEvidenceForHost(conns, p.Host)...)
@@ -664,7 +671,7 @@ func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
 		if p.Port > 0 {
 			evidence = append(evidence, connectionEvidenceForPort(conns, p.Port)...)
 		}
-		return toolText(toolEnvelope{Summary: "network diagnostic snapshot collected", Evidence: evidence, Raw: optionalRaw(p.IncludeRaw, map[string]interface{}{"state": state, "connections": conns}), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "network diagnostic snapshot collected", Evidence: evidence, Raw: optionalRaw(p.IncludeRaw, map[string]interface{}{"state": state, "connections": conns}), Timestamp: s.now()})
 	case "firewall", "capture_start", "capture_stop":
 		return toolError("network " + p.Operation + " requires the privileged helper via a running spectra daemon; use remote operation=rpc")
 	default:
@@ -680,21 +687,21 @@ func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+	tc := s.collect.Toolchain.CollectToolchains(context.Background(), toolchain.CollectOptions{})
 	switch p.Operation {
 	case "scan", "":
-		return toolText(toolEnvelope{Summary: summarizeToolchains(tc), Raw: optionalRaw(p.IncludeRaw, tc), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: summarizeToolchains(tc), Raw: optionalRaw(p.IncludeRaw, tc), Timestamp: s.now()})
 	case "jdk":
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JDK install(s)", len(tc.JDKs)), Raw: tc.JDKs, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JDK install(s)", len(tc.JDKs)), Raw: tc.JDKs, Timestamp: s.now()})
 	case "runtimes":
-		return toolText(toolEnvelope{Summary: "collected language runtimes", Raw: map[string]interface{}{"node": tc.Node, "python": tc.Python, "go": tc.Go, "ruby": tc.Ruby, "rust": tc.Rust}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "collected language runtimes", Raw: map[string]interface{}{"node": tc.Node, "python": tc.Python, "go": tc.Go, "ruby": tc.Ruby, "rust": tc.Rust}, Timestamp: s.now()})
 	case "build_tools":
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d build tool install(s)", len(tc.BuildTools)), Raw: tc.BuildTools, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d build tool install(s)", len(tc.BuildTools)), Raw: tc.BuildTools, Timestamp: s.now()})
 	case "brew":
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("brew: %d formulae, %d casks, %d taps", len(tc.Brew.Formulae), len(tc.Brew.Casks), len(tc.Brew.Taps)), Raw: tc.Brew, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("brew: %d formulae, %d casks, %d taps", len(tc.Brew.Formulae), len(tc.Brew.Casks), len(tc.Brew.Taps)), Raw: tc.Brew, Timestamp: s.now()})
 	case "drift":
 		findings := toolchainDriftEvidence(tc)
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d toolchain drift signal(s)", len(findings)), Evidence: findings, Raw: optionalRaw(p.IncludeRaw, tc), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d toolchain drift signal(s)", len(findings)), Evidence: findings, Raw: optionalRaw(p.IncludeRaw, tc), Timestamp: s.now()})
 	default:
 		return toolError("unknown toolchain operation: " + p.Operation)
 	}
@@ -723,7 +730,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 	defer db.Close()
 	switch p.Operation {
 	case "check", "":
-		snap, findings, err := evaluateRules(s.Version, p.SnapshotID, "")
+		snap, findings, err := s.evaluateRules(p.SnapshotID, "")
 		if err != nil {
 			return toolError(err.Error())
 		}
@@ -731,7 +738,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("persisted %d issue(s)", len(ids)), Evidence: summarizeFindings(findings, 10), Raw: map[string]interface{}{"snapshot_id": snap.ID, "ids": ids}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("persisted %d issue(s)", len(ids)), Evidence: summarizeFindings(findings, 10), Raw: map[string]interface{}{"snapshot_id": snap.ID, "ids": ids}, Timestamp: s.now()})
 	case "list":
 		if p.MachineUUID == "" {
 			return toolError("issues list requires machine_uuid")
@@ -740,7 +747,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d issue(s)", len(rows)), Raw: rows, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d issue(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 	case "acknowledge", "dismiss":
 		if p.ID == "" {
 			return toolError("issues " + p.Operation + " requires id")
@@ -752,7 +759,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 		if err := db.UpdateIssueStatus(context.Background(), p.ID, status); err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: s.now()})
 	case "record_fix":
 		if p.IssueID == "" {
 			return toolError("issues record_fix requires issue_id")
@@ -761,7 +768,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: "recorded applied fix", Raw: map[string]interface{}{"id": id}, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "recorded applied fix", Raw: map[string]interface{}{"id": id}, Timestamp: s.now()})
 	case "fix_history":
 		if p.IssueID == "" {
 			return toolError("issues fix_history requires issue_id")
@@ -770,7 +777,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 	default:
 		return toolError("unknown issues operation: " + p.Operation)
 	}
@@ -801,7 +808,7 @@ func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: "remote health check completed", Raw: resp, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "remote health check completed", Raw: resp, Timestamp: s.now()})
 	case "rpc":
 		if p.Address == "" || p.Method == "" {
 			return toolError("remote rpc requires address and method")
@@ -810,7 +817,7 @@ func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: "remote rpc completed: " + p.Method, Raw: resp, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: "remote rpc completed: " + p.Method, Raw: resp, Timestamp: s.now()})
 	case "triage":
 		return toolError("remote triage is not a daemon RPC yet; use remote operation=rpc with method names such as snapshot.create, rules.check, jvm.list")
 	case "fanout":
@@ -826,17 +833,151 @@ func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
 				out[host] = resp
 			}
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("fanout completed for %d host(s)", len(p.Hosts)), Raw: out, Timestamp: time.Now().UTC()})
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("fanout completed for %d host(s)", len(p.Hosts)), Raw: out, Timestamp: s.now()})
 	default:
 		return toolError("unknown remote operation: " + p.Operation)
 	}
 }
 
 type inspectResult struct {
-	Path    string        `json:"path"`
-	Success bool          `json:"success"`
-	Result  detect.Result `json:"result,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	Path    string             `json:"path"`
+	Success bool               `json:"success"`
+	Result  detect.Result      `json:"result,omitempty"`
+	Deep    *deepInspectResult `json:"deep,omitempty"`
+	Error   string             `json:"error,omitempty"`
+}
+
+type deepInspectResult struct {
+	Processes        []process.Info                          `json:"processes,omitempty"`
+	Connections      []netstate.AttributedConnection         `json:"connections,omitempty"`
+	ListeningPorts   []netstate.ListeningPort                `json:"listening_ports,omitempty"`
+	ProcessTotals    deepProcessTotals                       `json:"process_totals"`
+	Security         deepSecuritySummary                     `json:"security"`
+	MissingSignals   []string                                `json:"missing_signals,omitempty"`
+	ConnectionsByPID map[int][]netstate.AttributedConnection `json:"connections_by_pid,omitempty"`
+}
+
+type deepProcessTotals struct {
+	Count       int     `json:"count"`
+	RSSKiB      int64   `json:"rss_kib"`
+	OpenFDs     int     `json:"open_fds,omitempty"`
+	CPUPercent  float64 `json:"cpu_pct,omitempty"`
+	ThreadCount int     `json:"thread_count,omitempty"`
+}
+
+type deepSecuritySummary struct {
+	TeamID             string   `json:"team_id,omitempty"`
+	HardenedRuntime    bool     `json:"hardened_runtime"`
+	Sandboxed          bool     `json:"sandboxed"`
+	Entitlements       []string `json:"entitlements,omitempty"`
+	GrantedPermissions []string `json:"granted_permissions,omitempty"`
+	GatekeeperStatus   string   `json:"gatekeeper_status,omitempty"`
+}
+
+func (s *Server) deepInspectApp(appPath string, app detect.Result) deepInspectResult {
+	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{appPath}, Deep: true})
+	appProcs := filterAppProcesses(procs, appPath)
+	sortProcesses(appProcs)
+
+	conns := s.collect.Network.CollectConnections()
+	grouped := netstate.GroupConnectionsByApp(conns, appProcs)
+	attributed := append([]netstate.AttributedConnection{}, grouped[appPath]...)
+	sort.SliceStable(attributed, func(i, j int) bool {
+		if attributed[i].PID != attributed[j].PID {
+			return attributed[i].PID < attributed[j].PID
+		}
+		return attributed[i].RemoteAddr < attributed[j].RemoteAddr
+	})
+
+	state := s.collect.Network.CollectNetworkState()
+	listening := listeningPortsForProcesses(state.ListeningPorts, appPath, appProcs)
+
+	out := deepInspectResult{
+		Processes:        appProcs,
+		Connections:      attributed,
+		ListeningPorts:   listening,
+		ProcessTotals:    totalProcesses(appProcs),
+		ConnectionsByPID: groupConnectionsByPID(attributed),
+		Security: deepSecuritySummary{
+			TeamID:             app.TeamID,
+			HardenedRuntime:    app.HardenedRuntime,
+			Sandboxed:          app.Sandboxed,
+			Entitlements:       append([]string{}, app.Entitlements...),
+			GrantedPermissions: append([]string{}, app.GrantedPermissions...),
+			GatekeeperStatus:   app.GatekeeperStatus,
+		},
+	}
+	if len(appProcs) == 0 {
+		out.MissingSignals = append(out.MissingSignals, "no running processes matched this app bundle")
+	}
+	if len(attributed) == 0 {
+		out.MissingSignals = append(out.MissingSignals, "no active app-attributed connections found")
+	}
+	return out
+}
+
+func summarizeDeepInspect(appPath string, deep deepInspectResult) []string {
+	evidence := []string{
+		fmt.Sprintf("%s live: processes=%d rss=%dKiB cpu=%.1f open_fds=%d listening=%d connections=%d",
+			appPath, deep.ProcessTotals.Count, deep.ProcessTotals.RSSKiB, deep.ProcessTotals.CPUPercent, deep.ProcessTotals.OpenFDs, len(deep.ListeningPorts), len(deep.Connections)),
+	}
+	if len(deep.MissingSignals) > 0 {
+		evidence = append(evidence, "missing: "+strings.Join(deep.MissingSignals, "; "))
+	}
+	return evidence
+}
+
+func totalProcesses(procs []process.Info) deepProcessTotals {
+	var total deepProcessTotals
+	total.Count = len(procs)
+	for _, p := range procs {
+		total.RSSKiB += p.RSSKiB
+		total.OpenFDs += p.OpenFDs
+		total.CPUPercent += p.CPUPct
+		total.ThreadCount += p.ThreadCount
+	}
+	return total
+}
+
+func listeningPortsForProcesses(ports []netstate.ListeningPort, appPath string, procs []process.Info) []netstate.ListeningPort {
+	pids := make(map[int]bool, len(procs))
+	for _, p := range procs {
+		pids[p.PID] = true
+	}
+	out := make([]netstate.ListeningPort, 0)
+	for _, port := range ports {
+		if port.AppPath == appPath || (port.PID > 0 && pids[port.PID]) {
+			out = append(out, port)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Port != out[j].Port {
+			return out[i].Port < out[j].Port
+		}
+		return out[i].Proto < out[j].Proto
+	})
+	return out
+}
+
+func groupConnectionsByPID(conns []netstate.AttributedConnection) map[int][]netstate.AttributedConnection {
+	if len(conns) == 0 {
+		return nil
+	}
+	out := make(map[int][]netstate.AttributedConnection)
+	for _, conn := range conns {
+		if conn.PID > 0 {
+			out[conn.PID] = append(out[conn.PID], conn)
+		}
+	}
+	return out
+}
+
+func (s *Server) detectOptions(scanNetwork bool) detect.Options {
+	return detect.Options{ScanNetwork: scanNetwork, Now: s.collect.Clock.Now}
+}
+
+func (s *Server) now() time.Time {
+	return s.collect.Clock.Now().UTC()
 }
 
 func decodeArgs(raw json.RawMessage, dst interface{}) error {
@@ -929,12 +1070,12 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 	return nil
 }
 
-func evaluateLiveRules(version, config string) ([]rules.Finding, error) {
-	_, findings, err := evaluateRules(version, "", config)
+func (s *Server) evaluateLiveRules(config string) ([]rules.Finding, error) {
+	_, findings, err := s.evaluateRules("", config)
 	return findings, err
 }
 
-func evaluateRules(version, snapshotID, config string) (snapshot.Snapshot, []rules.Finding, error) {
+func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []rules.Finding, error) {
 	var snap snapshot.Snapshot
 	var err error
 	if snapshotID != "" {
@@ -943,7 +1084,7 @@ func evaluateRules(version, snapshotID, config string) (snapshot.Snapshot, []rul
 			return snap, nil, err
 		}
 	} else {
-		snap = snapshot.Build(context.Background(), snapshot.Options{SpectraVersion: version})
+		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version})
 	}
 	catalog, err := resolveRulesCatalog(config)
 	if err != nil {
@@ -979,24 +1120,24 @@ func persistFindingsWithDB(db *store.DB, snap snapshot.Snapshot, findings []rule
 	return db.UpsertIssues(context.Background(), machineUUID, snap.ID, inputs)
 }
 
-func jvmOptions() jvm.CollectOptions {
-	tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+func (s *Server) jvmOptions() jvm.CollectOptions {
+	tc := s.collect.Toolchain.CollectToolchains(context.Background(), toolchain.CollectOptions{})
 	return jvm.CollectOptions{JDKs: tc.JDKs}
 }
 
-func inspectJVM(pid int) *jvm.Info {
-	return jvm.InspectPID(context.Background(), pid, jvmOptions())
+func (s *Server) inspectJVM(pid int) *jvm.Info {
+	return s.collect.JVMs.InspectJVM(context.Background(), pid, s.jvmOptions())
 }
 
-func jcmdText(pid int, label string, fn func(int, jvm.CmdRunner) ([]byte, error)) ToolResult {
+func (s *Server) jcmdText(pid int, label string, fn func(int) ([]byte, error)) ToolResult {
 	if pid == 0 {
 		return toolError("jvm " + label + " requires pid")
 	}
-	out, err := fn(pid, nil)
+	out, err := fn(pid)
 	if err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %s for pid %d", label, pid), Raw: map[string]interface{}{"pid": pid, "output": string(out)}, Timestamp: time.Now().UTC()})
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %s for pid %d", label, pid), Raw: map[string]interface{}{"pid": pid, "output": string(out)}, Timestamp: s.now()})
 }
 
 func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
