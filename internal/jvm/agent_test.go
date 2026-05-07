@@ -3,6 +3,10 @@ package jvm
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -138,6 +142,68 @@ func TestHTTPAgentTransportRejectsDetachedStatus(t *testing.T) {
 	}
 	if got := err.Error(); got != "spectra agent is not attached to PID 42; run `spectra jvm attach 42` first" {
 		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestUnixAgentTransportUsesSocket(t *testing.T) {
+	socket := filepath.Join(os.TempDir(), fmt.Sprintf("spectra-agent-test-%d.sock", os.Getpid()))
+	_ = os.Remove(socket)
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Spectra-Agent-Token") != "secret" {
+			t.Fatalf("token header = %q", r.Header.Get("X-Spectra-Agent-Token"))
+		}
+		_, _ = w.Write([]byte(`{"mbeans":[{"name":"java.lang:type=Memory"}]}`))
+	})}
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = os.Remove(socket)
+		<-done
+	})
+
+	var got MBeansResult
+	err = UnixAgentTransport{}.GetJSON(AgentStatus{
+		PID:       42,
+		Attached:  true,
+		Transport: "unix",
+		Socket:    socket,
+		Token:     "secret",
+	}, "/mbeans", &got)
+	if err != nil {
+		t.Fatalf("GetJSON: %v", err)
+	}
+	if len(got.MBeans) != 1 || got.MBeans[0].Name != "java.lang:type=Memory" {
+		t.Fatalf("mbeans = %#v", got)
+	}
+}
+
+func TestAgentStatusFromSysPropsSupportsUnixSocket(t *testing.T) {
+	got := AgentStatusFromSysProps(42, map[string]string{
+		agentSocketProperty: "/tmp/spectra.sock",
+		agentTokenProperty:  "secret",
+	})
+	if !got.Attached || got.Transport != "unix" || got.Socket != "/tmp/spectra.sock" || got.Token != "secret" {
+		t.Fatalf("status = %#v", got)
+	}
+}
+
+func TestAttachAgentArgsIncludesTransportCountersAndWorkflows(t *testing.T) {
+	got := attachAgentArgs(AttachOptions{
+		Transport: "unix",
+		Socket:    "/tmp/spectra.sock",
+		Counters:  []string{"heap=java.lang:type=Memory:HeapMemoryUsage"},
+		Workflows: []string{"memory=heap=java.lang:type=Memory:HeapMemoryUsage"},
+	})
+	want := "transport=unix;socket=/tmp/spectra.sock;counters=heap=java.lang:type=Memory:HeapMemoryUsage;workflows=memory=heap=java.lang:type=Memory:HeapMemoryUsage"
+	if got != want {
+		t.Fatalf("args = %q, want %q", got, want)
 	}
 }
 

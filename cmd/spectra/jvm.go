@@ -18,6 +18,17 @@ import (
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func runJVM(args []string) int {
 	// Dispatch subcommands before flag parsing so "--help" on a subcommand works.
 	if handler, ok := resolveJVMSubcommand(args); ok {
@@ -342,6 +353,12 @@ func runJVMAttach(args []string) int {
 	fs := flag.NewFlagSet("spectra jvm attach", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	jar := fs.String("agent", "", "Path to spectra-agent.jar (default: SPECTRA_AGENT_JAR, binary dir, or ./agent/spectra-agent.jar)")
+	transport := fs.String("transport", "http", "Agent transport: http or unix")
+	socket := fs.String("socket", "", "Unix socket path when --transport unix (default: target JVM temp dir)")
+	var counters stringListFlag
+	var workflows stringListFlag
+	fs.Var(&counters, "counter", "Named counter as name=object-name:attribute; repeatable")
+	fs.Var(&workflows, "workflow", "Workflow probe as name=counter=object-name:attribute[+...]; repeatable")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -355,7 +372,17 @@ func runJVMAttach(args []string) int {
 		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
-	status, err := jvm.AttachAgent(pid, *jar, nil)
+	if *transport != "http" && *transport != "unix" {
+		fmt.Fprintln(os.Stderr, "--transport must be http or unix")
+		return 2
+	}
+	status, err := jvm.AttachAgentWithOptions(pid, jvm.AttachOptions{
+		JarPath:   *jar,
+		Transport: *transport,
+		Socket:    *socket,
+		Counters:  counters,
+		Workflows: workflows,
+	}, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attach failed for PID %d: %v\n", pid, err)
 		return 1
@@ -366,7 +393,11 @@ func runJVMAttach(args []string) int {
 		_ = enc.Encode(status)
 		return 0
 	}
-	fmt.Printf("spectra agent attached to PID %d on 127.0.0.1:%d\n", status.PID, status.Port)
+	if status.Transport == "unix" {
+		fmt.Printf("spectra agent attached to PID %d on %s\n", status.PID, status.Socket)
+	} else {
+		fmt.Printf("spectra agent attached to PID %d on 127.0.0.1:%d\n", status.PID, status.Port)
+	}
 	return 0
 }
 
@@ -493,6 +524,23 @@ func runJVMProbe(args []string) int {
 	fmt.Printf("Runtime processors  %d\n", probes.Runtime.AvailableProcessors)
 	fmt.Printf("Heap free/total/max  %d / %d / %d bytes\n", probes.Runtime.FreeMemory, probes.Runtime.TotalMemory, probes.Runtime.MaxMemory)
 	fmt.Printf("Live threads         %d\n", probes.Threads.Live)
+	for _, counter := range probes.Counters {
+		if counter.Error != "" {
+			fmt.Printf("Counter %-14s error: %s\n", counter.Name, counter.Error)
+			continue
+		}
+		fmt.Printf("Counter %-14s %v\n", counter.Name, counter.Value)
+	}
+	for _, workflow := range probes.Workflows {
+		fmt.Printf("Workflow %s\n", workflow.Name)
+		for _, counter := range workflow.Counters {
+			if counter.Error != "" {
+				fmt.Printf("  %-16s error: %s\n", counter.Name, counter.Error)
+				continue
+			}
+			fmt.Printf("  %-16s %v\n", counter.Name, counter.Value)
+		}
+	}
 	return 0
 }
 
