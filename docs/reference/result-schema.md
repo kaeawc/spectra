@@ -58,6 +58,7 @@ Source of truth: `internal/detect/detect.go`.
 | `Storage` | *StorageFootprint | Per-`~/Library`-location size sweep |
 | `Dependencies` | *Dependencies | Third-party frameworks, npm packages, jar count |
 | `Swift` | *SwiftInspection | Swift runtime libraries, Apple frameworks, app-group signals |
+| `PythonApp` | *PythonApp | Python runtime, packaging, package, and native-extension inspection |
 | `NetworkEndpoints` | []string | URL hosts (only when `--network` set) |
 
 ## Nested types
@@ -180,6 +181,24 @@ type SwiftInspection struct {
     UsesAppIntents   bool
     UsesScreenCapture bool
     AppGroups        []string
+}
+```
+
+### PythonApp
+
+Nested field for Python-backed `.app` bundles. See
+[../inspection/python-apps.md](../inspection/python-apps.md).
+
+```go
+type PythonApp struct {
+    Packaging        string
+    RuntimeSource    string
+    RuntimePath      string
+    Version          string
+    ModuleRoots      []string
+    Packages         []PythonPackage
+    NativeExtensions []PythonNativeExtension
+    RiskHints        []string
 }
 ```
 

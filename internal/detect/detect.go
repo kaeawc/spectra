@@ -77,6 +77,10 @@ type Result struct {
 	// signals for native Swift or Swift-hybrid apps.
 	Swift *SwiftInspection
 
+	// PythonApp describes a Python runtime embedded in or launched by this
+	// bundle. It is enrichment, not necessarily the top-level UI verdict.
+	PythonApp *PythonApp
+
 	// Helpers enumerates the bundle's sub-bundles: helper apps (Electron's
 	// GPU/Renderer/Plugin), XPC services, and plugins/extensions.
 	Helpers *Helpers
@@ -169,6 +173,36 @@ type ObjCDocumentType struct {
 	Name       string
 	Role       string
 	Extensions []string
+}
+
+// PythonApp describes Python-specific packaging and runtime details for a
+// macOS app bundle.
+type PythonApp struct {
+	Packaging        string
+	RuntimeSource    string
+	RuntimePath      string
+	Version          string
+	ModuleRoots      []string
+	Packages         []PythonPackage
+	NativeExtensions []PythonNativeExtension
+	RiskHints        []string
+}
+
+// PythonPackage is one installed Python distribution discovered from package
+// metadata.
+type PythonPackage struct {
+	Name    string
+	Version string
+	Path    string // bundle-relative metadata path
+}
+
+// PythonNativeExtension is a compiled Python extension module.
+type PythonNativeExtension struct {
+	Name       string
+	Path       string // bundle-relative
+	LinkedLibs []string
+	Hints      []string
+	RiskHints  []string
 }
 
 // StorageFootprint is the on-disk size, in bytes, of each well-known
@@ -340,6 +374,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	populateMetadata(appPath, exe, &r)
 	r.PrivacyDescriptions = readPrivacyDescriptions(appPath)
 	r.Dependencies = scanDependencies(appPath)
+	r.PythonApp = scanPythonApp(appPath)
 	r.Helpers = scanHelpers(appPath)
 	r.ObjC = scanObjCInspection(appPath, exe, r)
 	r.LoginItems = scanLoginItems(appPath, r.BundleID)
@@ -612,11 +647,6 @@ func parseGatekeeperOutput(out string) string {
 		return "rejected"
 	}
 	return ""
-}
-
-func readEntitlements(appPath string) (sandboxed bool, notable []string) {
-	sandboxed, notable, _ = readEntitlementsDetail(appPath)
-	return sandboxed, notable
 }
 
 func readEntitlementsDetail(appPath string) (sandboxed bool, notable, appGroups []string) {
@@ -1219,10 +1249,6 @@ func appendNativeModuleRiskHints(m *NativeModule) {
 	m.RiskHints = append(m.RiskHints, nativeModuleRiskHints[strings.ToLower(m.PackageName)]...)
 }
 
-func readNativeModulePackage(absPath string, m *NativeModule) {
-	defaultNodeAppInspector().readNativeModulePackage(absPath, m)
-}
-
 func (ins nodeAppInspector) readNativeModulePackage(absPath string, m *NativeModule) {
 	root := nativeModulePackageRoot(absPath)
 	if root == "" {
@@ -1263,10 +1289,6 @@ func nativeModulePackageRoot(absPath string) string {
 		return root
 	}
 	return ""
-}
-
-func nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {
-	return defaultNodeAppInspector().nativeModuleSidecars(absPath, libs, m)
 }
 
 func (ins nodeAppInspector) nativeModuleSidecars(absPath string, libs []string, m *NativeModule) []string {
