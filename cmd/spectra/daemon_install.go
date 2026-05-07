@@ -179,18 +179,25 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 
 func (o daemonAgentOptions) serveArgs() []string {
 	args := []string{"serve"}
+	args = appendServePathArgs(args, o)
+	args = appendServeRemoteArgs(args, o)
+	args = appendServeLogArgs(args, o)
+	return args
+}
+
+func appendServePathArgs(args []string, o daemonAgentOptions) []string {
 	if o.SockPath != "" {
 		args = append(args, "--sock", o.SockPath)
 	}
 	if o.TCPAddr != "" {
 		args = append(args, "--tcp", o.TCPAddr)
 	}
-	if o.AllowRemote {
-		args = append(args, "--allow-remote")
-	}
-	if o.TsnetEnabled {
-		args = append(args, "--tsnet")
-	}
+	return args
+}
+
+func appendServeRemoteArgs(args []string, o daemonAgentOptions) []string {
+	args = appendBoolArg(args, "--allow-remote", o.AllowRemote)
+	args = appendBoolArg(args, "--tsnet", o.TsnetEnabled)
 	if o.TsnetAddr != "" && o.TsnetAddr != serve.DefaultTsnetAddr {
 		args = append(args, "--tsnet-addr", o.TsnetAddr)
 	}
@@ -215,11 +222,19 @@ func (o daemonAgentOptions) serveArgs() []string {
 	if o.ArtifactPolicy != "" {
 		args = append(args, "--artifact-policy", o.ArtifactPolicy)
 	}
+	return args
+}
+
+func appendServeLogArgs(args []string, o daemonAgentOptions) []string {
 	if o.LogFile != "" {
 		args = append(args, "--log-file", o.LogFile)
 	}
-	if o.NoLogFile {
-		args = append(args, "--no-log-file")
+	return appendBoolArg(args, "--no-log-file", o.NoLogFile)
+}
+
+func appendBoolArg(args []string, flag string, enabled bool) []string {
+	if enabled {
+		return append(args, flag)
 	}
 	return args
 }
