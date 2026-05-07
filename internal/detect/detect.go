@@ -38,6 +38,7 @@ type Result struct {
 	Signals       []string        // human-readable reasons we picked this
 	NativeModules []NativeModule  // sub-detection: custom native code embedded in the bundle
 	ObjC          *ObjCInspection // Objective-C/AppKit bundle profile, when applicable
+	Rust          *RustInspection // Rust bundle profile, when applicable
 
 	// Metadata pulled from Info.plist and frameworks. Best-effort; any
 	// field may be empty if the bundle doesn't expose it.
@@ -202,6 +203,18 @@ type NativeModule struct {
 	RiskHints      []string // security-sensitive capability patterns to review
 }
 
+// RustInspection describes where Rust was found inside a bundle and how
+// engineers should interpret that architecture.
+type RustInspection struct {
+	Kind             string   // native, tauri, electron-native-module, embedded, none
+	PrimaryBinary    string   // bundle-relative executable inspected for top-level Rust
+	PanicStringHits  int      // combined Rust panic-site marker hits
+	LinkedFrameworks []string // notable Apple/UI frameworks linked by the primary binary
+	NativeModules    []string // bundle-relative Rust Electron native modules
+	Sidecars         []string // bundle-relative Rust sidecar dylibs
+	FollowUps        []string // suggested next diagnostic surfaces
+}
+
 // Options controls optional, more expensive sub-detections.
 type Options struct {
 	ScanNetwork bool // scan binary + app.asar for embedded URL hosts
@@ -322,6 +335,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	if r.UI == "Electron" {
 		r.NativeModules = scanNativeModules(appPath)
 	}
+	r.Rust = inspectRustApp(appPath, exe, &r)
 
 	populateMetadata(appPath, exe, &r)
 	r.PrivacyDescriptions = readPrivacyDescriptions(appPath)

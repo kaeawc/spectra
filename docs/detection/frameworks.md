@@ -109,6 +109,8 @@ confirmed examples from real apps. Layer numbers refer to
 ### Native (Rust)
 - **Layer 3:** Rust panic strings ≥ 100, no AppKit+WebKit (so not Tauri).
 - **Confirmed:** Warp (699 strings), Zed (384 strings).
+- **Inspection:** see
+  [../inspection/rust-based-apps.md](../inspection/rust-based-apps.md).
 
 ### Native (Go)
 - **Layer 3:** Go buildinfo, no AppKit+WebKit.

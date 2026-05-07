@@ -63,7 +63,9 @@ runtimes without dynamic library hints:
 
 The Rust threshold (100) was chosen empirically: a single bundled Rust
 dylib in a non-Rust app produces under 30 hits; native Rust apps
-produce hundreds.
+produce hundreds. See
+[../inspection/rust-based-apps.md](../inspection/rust-based-apps.md) for
+the Rust-specific inspection path.
 
 For Tauri specifically, Layer 2 first records the app as an
 `AppKit+WebKit` suspect; Layer 3 promotes that verdict to `Tauri` only
