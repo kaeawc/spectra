@@ -55,6 +55,7 @@ Source of truth: `internal/detect/detect.go`.
 | `AppUptimeSeconds` | int64 | Seconds between inspection time and `AppStartedAt` |
 | `Storage` | *StorageFootprint | Per-`~/Library`-location size sweep |
 | `Dependencies` | *Dependencies | Third-party frameworks, npm packages, jar count |
+| `Swift` | *SwiftInspection | Swift runtime libraries, Apple frameworks, app-group signals |
 | `NetworkEndpoints` | []string | URL hosts (only when `--network` set) |
 
 ## Nested types
@@ -128,6 +129,19 @@ type Dependencies struct {
     ThirdPartyFrameworks []string // framework basenames, Apple-filtered
     NPMPackages          []string // top-level dirs in app.asar.unpacked
     JavaJars             int      // count of .jar files anywhere in bundle
+}
+```
+
+### SwiftInspection
+
+```go
+type SwiftInspection struct {
+    RuntimeLibraries []string // libswift*.dylib basenames
+    AppleFrameworks  []string // normalized linked Apple frameworks
+    UsesSwiftUI      bool
+    UsesAppIntents   bool
+    UsesScreenCapture bool
+    AppGroups        []string
 }
 ```
 

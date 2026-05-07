@@ -44,6 +44,8 @@ Mac Catalyst:
 | Any `/iOSSupport/...` or `/UIKitMacHelper.framework/` | Mac Catalyst |
 
 See [catalyst.md](catalyst.md) for the Catalyst path.
+See [../inspection/swift-apps.md](../inspection/swift-apps.md) for the
+deeper app-level Swift inspection surface.
 
 ### Layer 3 — Binary content scanning
 
