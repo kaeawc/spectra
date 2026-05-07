@@ -3,6 +3,7 @@ package jvm
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/heap"
 )
@@ -169,21 +170,7 @@ func JFRStop(pid int, recordingName, destPath string, run CmdRunner) error {
 	return err
 }
 
-// countThreads counts threads in `jcmd Thread.print` output.
-//
-// Thread entries begin with a line like:
-//
-//	"main" #1 prio=5 os_prio=31 cpu=... elapsed=... tid=... nid=... waiting [...]
-//
-// We count lines that start with `"` followed by a non-whitespace char
-// (thread name in quotes) as one thread entry.
+// countThreads counts parsed thread entries in `jcmd Thread.print` output.
 func countThreads(out string) int {
-	count := 0
-	for _, line := range strings.Split(out, "\n") {
-		// Thread name lines start with a double-quote.
-		if len(line) > 0 && line[0] == '"' {
-			count++
-		}
-	}
-	return count
+	return len(ParseThreadDump(out, time.Time{}).Threads)
 }
