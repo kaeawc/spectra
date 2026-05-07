@@ -18,6 +18,7 @@ import (
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/sysinfo"
+	"github.com/kaeawc/spectra/internal/telemetry"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -43,7 +44,8 @@ type Snapshot struct {
 	Network    netstate.State       `json:"network"`
 	Storage    storagestate.State   `json:"storage"`
 
-	JVMs []jvm.Info `json:"jvms,omitempty"`
+	JVMs             []jvm.Info          `json:"jvms,omitempty"`
+	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
 }
 
 // Options configure a snapshot Build.
@@ -101,6 +103,15 @@ type Options struct {
 	// Zero value uses the real jps/jcmd commands.
 	JVMOpts jvm.CollectOptions
 
+	// JVMTelemetryOpts are forwarded to the JVM telemetry adapter.
+	// Zero value keeps telemetry lightweight and uses JVMOpts for discovery.
+	JVMTelemetryOpts jvm.TelemetryOptions
+
+	// RuntimeTelemetryCollectors can add runtime-neutral telemetry from other
+	// application architectures. JVM telemetry is collected separately unless
+	// SkipJVMs is true.
+	RuntimeTelemetryCollectors []telemetry.Collector
+
 	// SkipJVMs disables JVM process discovery (faster for tests; requires jps
 	// in PATH for real collection).
 	SkipJVMs bool
@@ -146,28 +157,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 
 	var wg sync.WaitGroup
-	collectors := 5 // host, toolchains, power, sysctls, network
-	if !opts.SkipApps {
-		collectors++
-	}
-	if !opts.SkipProcesses {
-		collectors++
-	}
-	if !opts.SkipStorage {
-		collectors++
-	}
-	if !opts.SkipJVMs {
-		collectors++
-	}
-	wg.Add(collectors)
+	wg.Add(snapshotCollectorCount(opts))
 
 	go func() {
 		defer wg.Done()
-		hostCollector := opts.HostCollector
-		if hostCollector == nil {
-			hostCollector = LiveHostCollector{}
-		}
-		s.Host = hostCollector.CollectHost(opts.SpectraVersion)
+		s.Host = hostCollectorFor(opts).CollectHost(opts.SpectraVersion)
 	}()
 	if !opts.SkipApps {
 		go func() {
@@ -216,10 +210,47 @@ func Build(ctx context.Context, opts Options) Snapshot {
 			s.JVMs = jvm.CollectAll(ctx, opts.JVMOpts)
 		}()
 	}
+	if len(opts.RuntimeTelemetryCollectors) > 0 {
+		go func() {
+			defer wg.Done()
+			s.RuntimeTelemetry = collectRuntimeTelemetry(ctx, opts.RuntimeTelemetryCollectors)
+		}()
+	}
 
 	wg.Wait()
 	jvm.AttributeJDKs(s.JVMs, s.Toolchains.JDKs)
+	if !opts.SkipJVMs {
+		s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
+	}
+	attributeRuntimeJDKs(s.RuntimeTelemetry, s.Toolchains.JDKs)
 	return s
+}
+
+func snapshotCollectorCount(opts Options) int {
+	collectors := 5 // host, toolchains, power, sysctls, network
+	if !opts.SkipApps {
+		collectors++
+	}
+	if !opts.SkipProcesses {
+		collectors++
+	}
+	if !opts.SkipStorage {
+		collectors++
+	}
+	if !opts.SkipJVMs {
+		collectors++
+	}
+	if len(opts.RuntimeTelemetryCollectors) > 0 {
+		collectors++
+	}
+	return collectors
+}
+
+func hostCollectorFor(opts Options) HostCollector {
+	if opts.HostCollector != nil {
+		return opts.HostCollector
+	}
+	return LiveHostCollector{}
 }
 
 func snapshotAppPaths(opts Options) []string {
