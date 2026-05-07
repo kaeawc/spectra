@@ -87,6 +87,9 @@ func TestCollectExplanationTrend(t *testing.T) {
 				return nil, nil
 			}
 		case "jstat":
+			if len(args) > 0 && args[0] == "-class" {
+				return []byte("Loaded Bytes Unloaded Bytes Time\n1000 2000.0 0 0.0 0.1\n"), nil
+			}
 			jstatCalls++
 			mu := "1000.0"
 			ou := "1000.0"

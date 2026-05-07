@@ -2,6 +2,7 @@ package jvm
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/telemetry"
@@ -54,6 +55,12 @@ func TelemetryForInfo(info Info, opts TelemetryOptions) telemetry.Process {
 	if info.GC != nil {
 		proc.GC = telemetryFromGCStats(*info.GC)
 		proc.Heap = heapFromGCStats(*info.GC)
+	}
+	if info.Classes != nil {
+		proc.Sections = append(proc.Sections, telemetry.Section{
+			Name:   "jvm.class_stats",
+			Output: classStatsSummary(*info.Classes),
+		})
 	}
 
 	client := opts.AgentClient
@@ -174,4 +181,159 @@ func kibToBytes(kib float64) int64 {
 		return 0
 	}
 	return int64(kib * 1024)
+}
+
+func classStatsSummary(stats ClassStats) string {
+	return "loaded=" + strconv.FormatInt(stats.Loaded, 10) +
+		" loaded_kib=" + strconv.FormatFloat(stats.LoadedKiB, 'f', -1, 64) +
+		" unloaded=" + strconv.FormatInt(stats.Unloaded, 10) +
+		" unloaded_kib=" + strconv.FormatFloat(stats.UnloadedKiB, 'f', -1, 64) +
+		" class_load_time=" + strconv.FormatFloat(stats.ClassLoadTime, 'f', -1, 64)
+}
+
+// TelemetrySample is one chart-friendly observation of a JVM process.
+type TelemetrySample struct {
+	TakenAt time.Time `json:"taken_at"`
+	PID     int       `json:"pid"`
+
+	MainClass string `json:"main_class,omitempty"`
+
+	HeapUsedKiB     float64 `json:"heap_used_kib,omitempty"`
+	HeapCapacityKiB float64 `json:"heap_capacity_kib,omitempty"`
+	HeapMaxBytes    int64   `json:"heap_max_bytes,omitempty"`
+
+	MetaspaceUsedKiB     float64 `json:"metaspace_used_kib,omitempty"`
+	MetaspaceCapacityKiB float64 `json:"metaspace_capacity_kib,omitempty"`
+
+	YoungGCCount int64   `json:"young_gc_count,omitempty"`
+	YoungGCTime  float64 `json:"young_gc_time_seconds,omitempty"`
+	FullGCCount  int64   `json:"full_gc_count,omitempty"`
+	FullGCTime   float64 `json:"full_gc_time_seconds,omitempty"`
+	TotalGCTime  float64 `json:"total_gc_time_seconds,omitempty"`
+
+	ThreadCount        int   `json:"thread_count,omitempty"`
+	AgentThreadCount   int   `json:"agent_thread_count,omitempty"`
+	LoadedClassCount   int64 `json:"loaded_class_count,omitempty"`
+	VirtualThreadCount int64 `json:"virtual_thread_count,omitempty"`
+
+	AgentAttached bool   `json:"agent_attached"`
+	Error         string `json:"error,omitempty"`
+}
+
+func (s TelemetrySample) TelemetrySubject() telemetry.Subject {
+	return telemetry.Subject{Kind: "process", Runtime: string(telemetry.RuntimeJVM), PID: s.PID, Name: s.MainClass}
+}
+
+func (s TelemetrySample) TelemetryTakenAt() time.Time {
+	return s.TakenAt
+}
+
+// BuildTelemetrySample converts the existing one-shot JVM inspection shape into
+// a time-series point that UI clients can plot without parsing jcmd text.
+func BuildTelemetrySample(at time.Time, info Info, probes *AgentProbes, err error) TelemetrySample {
+	s := TelemetrySample{
+		TakenAt:     at.UTC(),
+		PID:         info.PID,
+		MainClass:   info.MainClass,
+		ThreadCount: info.ThreadCount,
+	}
+	if info.GC != nil {
+		s.HeapUsedKiB = info.GC.EU + info.GC.OU
+		s.HeapCapacityKiB = info.GC.EC + info.GC.OC
+		s.MetaspaceUsedKiB = info.GC.MU
+		s.MetaspaceCapacityKiB = info.GC.MC
+		s.YoungGCCount = info.GC.YGC
+		s.YoungGCTime = info.GC.YGCT
+		s.FullGCCount = info.GC.FGC
+		s.FullGCTime = info.GC.FGCT
+		s.TotalGCTime = info.GC.GCT
+	}
+	if probes != nil {
+		s.AgentAttached = true
+		s.HeapMaxBytes = probes.Runtime.MaxMemory
+		s.AgentThreadCount = probes.Threads.Live
+		s.LoadedClassCount = intCounter(probes.Counters, "loaded_classes")
+		s.VirtualThreadCount = intCounter(probes.Counters, "virtual_threads")
+	}
+	if info.Classes != nil {
+		s.LoadedClassCount = info.Classes.Loaded
+	}
+	if err != nil {
+		s.Error = err.Error()
+	}
+	return s
+}
+
+func intCounter(counters []AgentCounter, name string) int64 {
+	for _, counter := range counters {
+		if counter.Name != name || counter.Error != "" {
+			continue
+		}
+		switch v := counter.Value.(type) {
+		case float64:
+			if v <= 0 {
+				return 0
+			}
+			if v > float64(^uint64(0)>>1) {
+				return int64(^uint64(0) >> 1)
+			}
+			return int64(v)
+		case int:
+			return int64(v)
+		case int64:
+			if v <= 0 {
+				return 0
+			}
+			return v
+		}
+	}
+	return 0
+}
+
+// TelemetrySampler periodically samples all visible JVMs and records points in
+// a live telemetry collector.
+type TelemetrySampler struct {
+	collector *telemetry.LiveCollector
+	interval  time.Duration
+	opts      CollectOptions
+	probes    func(pid int) (AgentProbes, error)
+}
+
+func NewTelemetrySampler(c *telemetry.LiveCollector, interval time.Duration, opts CollectOptions, probes func(pid int) (AgentProbes, error)) *TelemetrySampler {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	if probes == nil {
+		probes = func(pid int) (AgentProbes, error) {
+			return FetchAgentProbes(pid, opts.CmdRunner)
+		}
+	}
+	return &TelemetrySampler{collector: c, interval: interval, opts: opts, probes: probes}
+}
+
+func (s *TelemetrySampler) Run(ctx context.Context) {
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			s.sample(ctx, t)
+		}
+	}
+}
+
+func (s *TelemetrySampler) sample(ctx context.Context, at time.Time) {
+	for _, info := range CollectAll(ctx, s.opts) {
+		var probes *AgentProbes
+		if s.probes != nil {
+			p, err := s.probes(info.PID)
+			if err == nil {
+				probes = &p
+			}
+		}
+		s.collector.Add(BuildTelemetrySample(at, info, probes, nil))
+	}
+	s.collector.Flush(telemetry.DefaultLiveRetainWindow, at)
 }

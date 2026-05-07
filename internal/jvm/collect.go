@@ -91,6 +91,9 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []t
 	if gc, err := CollectGCStats(pid, run); err == nil {
 		info.GC = gc
 	}
+	if classes, err := CollectClassStats(pid, run); err == nil {
+		info.Classes = classes
+	}
 	attributeJDK(&info, jdks)
 
 	return info

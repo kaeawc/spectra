@@ -76,6 +76,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra connect [--timeout 3s] <target> [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm <pid> | jvm-gc <pid> | jvm-threads <pid> | jvm-heap <pid> | jvm-vm-memory <pid>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm telemetry [pid] [limit] | jvm-telemetry [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-explain <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-jmx-status <pid> | jvm-jmx-start-local <pid>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-attach <pid> | jvm-mbeans <pid> | jvm-probe <pid>")
@@ -84,7 +85,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot diff <id-a> <id-b>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> diff <id-a> <id-b>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> jvm-heap-dump <pid> [dest] | jvm-jfr-start <pid> [name] | jvm-jfr-dump <pid> <dest> [name] | jvm-jfr-stop <pid> [dest] | jvm-jfr-summary <path>")
-	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit] | telemetry [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp|udp] [host=HOST] [port=N]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-stop <handle>")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
@@ -209,9 +210,11 @@ func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage
 		"jvm-jfr-dump":          parseConnectJFRDump,
 		"jvm-jfr-summary":       parseConnectJFRSummary,
 		"jvm-flamegraph":        parseConnectJVMFlamegraph,
+		"jvm-telemetry":         parseConnectJVMTelemetry,
 		"jvm-heap-dump":         parseConnectJVMHeapDump,
 		"jvm-mbean-read":        parseConnectJVMMBeanRead,
 		"jvm-mbean-invoke":      parseConnectJVMMBeanInvoke,
+		"telemetry":             parseConnectTelemetry,
 		"metrics":               parseConnectMetrics,
 		"network-capture-start": parseConnectNetworkCaptureStart,
 		"netcap-start":          parseConnectNetworkCaptureStart,
@@ -265,6 +268,9 @@ func connectJVMSubcommands() map[string]func([]string) (string, json.RawMessage,
 	}
 	out := make(map[string]func([]string) (string, json.RawMessage, bool, error), len(nestedPID)+7)
 	out["list"] = parseConnectJVMList
+	out["telemetry"] = func(args []string) (string, json.RawMessage, bool, error) {
+		return parseConnectJVMTelemetry(append([]string{"jvm-telemetry"}, args[2:]...))
+	}
 	out["heap-dump"] = func(args []string) (string, json.RawMessage, bool, error) {
 		return parseConnectJVMHeapDump(append([]string{"jvm-heap-dump"}, args[2:]...))
 	}
@@ -297,6 +303,56 @@ func parseConnectJVMList(args []string) (string, json.RawMessage, bool, error) {
 		return "", nil, true, fmt.Errorf("connect jvm list takes no extra arguments")
 	}
 	return "jvm.list", nil, true, nil
+}
+
+func parseConnectJVMTelemetry(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) > 3 {
+		return "", nil, true, fmt.Errorf("connect jvm-telemetry accepts optional [pid] [limit]")
+	}
+	params := map[string]int{}
+	if len(args) >= 2 {
+		pid, err := parseConnectPositiveInt(args[1], "pid")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["pid"] = pid
+	}
+	if len(args) == 3 {
+		limit, err := parseConnectPositiveInt(args[2], "limit")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["limit"] = limit
+	}
+	if len(params) == 0 {
+		return "jvm.telemetry.live", nil, true, nil
+	}
+	return "jvm.telemetry.live", connectParams(params), true, nil
+}
+
+func parseConnectTelemetry(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) > 3 {
+		return "", nil, true, fmt.Errorf("connect telemetry accepts optional [pid] [limit]")
+	}
+	params := map[string]int{}
+	if len(args) >= 2 {
+		pid, err := parseConnectPositiveInt(args[1], "pid")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["pid"] = pid
+	}
+	if len(args) == 3 {
+		limit, err := parseConnectPositiveInt(args[2], "limit")
+		if err != nil {
+			return "", nil, true, err
+		}
+		params["limit"] = limit
+	}
+	if len(params) == 0 {
+		return "telemetry.live", nil, true, nil
+	}
+	return "telemetry.live", connectParams(params), true, nil
 }
 
 func parseConnectNestedPIDCall(args []string, method string) (string, json.RawMessage, bool, error) {

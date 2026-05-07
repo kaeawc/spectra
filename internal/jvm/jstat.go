@@ -36,6 +36,15 @@ type GCStats struct {
 	GCT  float64 `json:"gct"`  // Total GC time (seconds)
 }
 
+// ClassStats holds the class-loading counters returned by `jstat -class <pid>`.
+type ClassStats struct {
+	Loaded        int64   `json:"loaded"`          // loaded class count
+	LoadedKiB     float64 `json:"loaded_kib"`      // bytes column, reported by jstat as KiB
+	Unloaded      int64   `json:"unloaded"`        // unloaded class count
+	UnloadedKiB   float64 `json:"unloaded_kib"`    // bytes column, reported by jstat as KiB
+	ClassLoadTime float64 `json:"class_load_time"` // seconds spent loading/unloading classes
+}
+
 // CollectGCStats runs `jstat -gc <pid>` once and returns the current GC counters.
 // Pass nil for run to use the default system runner.
 func CollectGCStats(pid int, run CmdRunner) (*GCStats, error) {
@@ -49,14 +58,66 @@ func CollectGCStats(pid int, run CmdRunner) (*GCStats, error) {
 	return parseGCStats(string(out))
 }
 
-// parseGCStats parses `jstat -gc` output.
-//
-// jstat -gc emits two lines: a header row and a data row.
-//
-// Example:
-//
-//	S0C    S1C    S0U    S1U      EC       EU        OC         OU       MC     MU    CCSC   CCSU   YGC     YGCT    FGC    FGCT     GCT
-//	0.0    0.0    0.0    0.0   40960.0  20480.0  204800.0    4096.0  61440.0 59900.3 8064.0 7678.7     5    0.078   0      0.000    0.078
+// CollectClassStats runs `jstat -class <pid>` once and returns class counters.
+func CollectClassStats(pid int, run CmdRunner) (*ClassStats, error) {
+	if run == nil {
+		run = DefaultRunner
+	}
+	out, err := run("jstat", "-class", fmt.Sprint(pid))
+	if err != nil {
+		return nil, fmt.Errorf("jstat class: %w", err)
+	}
+	return parseClassStats(string(out))
+}
+
+func parseClassStats(out string) (*ClassStats, error) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		return nil, fmt.Errorf("jstat class: unexpected output (got %d lines)", len(lines))
+	}
+	headers := strings.Fields(lines[0])
+	values := strings.Fields(lines[len(lines)-1])
+	if len(headers) != len(values) {
+		return nil, fmt.Errorf("jstat class: header/value count mismatch (%d vs %d)", len(headers), len(values))
+	}
+	colF := func(name string) float64 {
+		return colFOccurrence(headers, values, name, 1)
+	}
+	colF2 := func(name string) float64 {
+		return colFOccurrence(headers, values, name, 2)
+	}
+	colI := func(name string) int64 {
+		for i, h := range headers {
+			if strings.EqualFold(h, name) {
+				n, _ := strconv.ParseInt(values[i], 10, 64)
+				return n
+			}
+		}
+		return 0
+	}
+	return &ClassStats{
+		Loaded:        colI("Loaded"),
+		LoadedKiB:     colF("Bytes"),
+		Unloaded:      colI("Unloaded"),
+		UnloadedKiB:   colF2("Bytes"),
+		ClassLoadTime: colF("Time"),
+	}, nil
+}
+
+func colFOccurrence(headers, values []string, name string, occurrence int) float64 {
+	seen := 0
+	for i, h := range headers {
+		if strings.EqualFold(h, name) {
+			seen++
+			if seen == occurrence {
+				f, _ := strconv.ParseFloat(values[i], 64)
+				return f
+			}
+		}
+	}
+	return 0
+}
+
 func parseGCStats(out string) (*GCStats, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) < 2 {
