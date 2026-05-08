@@ -114,6 +114,11 @@ func ruleJVMHeapVsSystemRAM() Rule {
 // consumed meaningful wall time. The rule consults VM args before firing —
 // when -XX:MaxHeapFreeRatio is set low (Toolbox-style "tight by design"),
 // near-full old-gen is the configured steady state and is suppressed.
+//
+// When trend history is available for the PID, the rule additionally requires
+// that old-gen occupancy be rising — a steady high level is consistent with a
+// healthy app at its working size; rising occupancy is what predicts trouble.
+// Without trend history, behavior degrades gracefully to the level check.
 func ruleJVMGCPressure() Rule {
 	return Rule{
 		ID:       "jvm-gc-pressure",
@@ -125,7 +130,14 @@ func ruleJVMGCPressure() Rule {
 					continue
 				}
 				args := FactsFor(j)
-				if OldGenHigh(j) && !TightHeapByDesign(args) {
+				levelFires := OldGenHigh(j) && !TightHeapByDesign(args)
+				if levelFires {
+					if HasTrendFor(s.JVMHistory, j.PID) && !RisingOldGenFor(s.JVMHistory, j.PID) {
+						// We have enough history to say this is steady-state, not pressure.
+						levelFires = false
+					}
+				}
+				if levelFires {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -186,6 +187,53 @@ func TestJVMGCPressureFiresWhenNotTightByDesign(t *testing.T) {
 	}}
 	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 1 {
 		t.Fatalf("expected 1 finding without tight-heap config, got %d: %v", len(findings), findings)
+	}
+}
+
+// Trend gating: when history shows a flat-but-high old gen, suppress.
+// This is the steady-state-at-working-size case (e.g. a JVM operating at
+// its real working set, not actually leaking).
+func TestJVMGCPressureSuppressedByFlatTrend(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2001,
+		MainClass: "steady.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		s.JVMHistory = append(s.JVMHistory, snapshot.JVMSample{
+			PID:       2001,
+			At:        now.Add(time.Duration(i-5) * time.Minute),
+			OldGenPct: 94 + float64(i)*0.2, // 94 -> 94.8, well below MinOldGenRiseDelta
+		})
+	}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("flat trend should suppress finding, got %v", findings)
+	}
+}
+
+// Trend gating: when history shows a rising old gen, fire even if the level
+// rule alone would have fired (this is the leak-suspect case).
+func TestJVMGCPressureFiresOnRisingTrend(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2002,
+		MainClass: "leaky.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		s.JVMHistory = append(s.JVMHistory, snapshot.JVMSample{
+			PID:       2002,
+			At:        now.Add(time.Duration(i-5) * time.Minute),
+			OldGenPct: 70 + float64(i)*6, // 70 -> 94, clearly rising
+		})
+	}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 1 {
+		t.Fatalf("rising trend should fire, got %d findings: %v", len(findings), findings)
 	}
 }
 

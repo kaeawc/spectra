@@ -46,6 +46,11 @@ type Snapshot struct {
 
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
+
+	// JVMHistory is recent per-PID JVM samples (oldest first) populated by
+	// callers that have access to a snapshot store. Optional: rules that
+	// don't see history fall back to point-in-time checks.
+	JVMHistory JVMHistory `json:"jvm_history,omitempty"`
 }
 
 // Options configure a snapshot Build.
