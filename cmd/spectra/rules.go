@@ -45,10 +45,18 @@ func runRules(args []string) int {
 		}
 		snap = *s
 	} else {
-		snap = snapshot.Build(context.Background(), snapshot.Options{
+		opts := snapshot.Options{
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
-		})
+		}
+		// Reuse the persistent on-disk detect cache so per-app inspection
+		// (codesign, plist, framework scan) is amortized across CLI calls.
+		// Cache key is content-addressed (Info.plist + first 64 KiB of exe),
+		// so an entry invalidates automatically when the bundle changes.
+		if cacheStores != nil {
+			opts.DetectStore = cacheStores.Detect
+		}
+		snap = snapshot.Build(context.Background(), opts)
 	}
 
 	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
