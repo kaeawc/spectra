@@ -159,6 +159,36 @@ func TestJVMGCPressureNoFire(t *testing.T) {
 	}
 }
 
+// Regression: JetBrains Toolbox sits at >90% old-gen by design via
+// -XX:MaxHeapFreeRatio=10. The old surface-level rule fired on every
+// snapshot; the composed rule must suppress it.
+func TestJVMGCPressureSuppressedForTightHeapByDesign(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       1127,
+		MainClass: "JetBrains Toolbox",
+		VMArgs:    "-Xmx190m -XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=10",
+		GC:        &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("tight-heap-by-design should suppress old-gen finding, got %v", findings)
+	}
+}
+
+// Companion: same heap occupancy WITHOUT the tight-heap flags must still fire.
+func TestJVMGCPressureFiresWhenNotTightByDesign(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2000,
+		MainClass: "real.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 1 {
+		t.Fatalf("expected 1 finding without tight-heap config, got %d: %v", len(findings), findings)
+	}
+}
+
 // --- jdk-major-version-drift ---
 
 func TestJDKDriftFires(t *testing.T) {

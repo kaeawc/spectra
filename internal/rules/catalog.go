@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -112,7 +111,9 @@ func ruleJVMHeapVsSystemRAM() Rule {
 
 // ruleJVMGCPressure fires when a one-shot jstat snapshot suggests the JVM is
 // under memory pressure: old generation is nearly full or full GC has already
-// consumed meaningful wall time.
+// consumed meaningful wall time. The rule consults VM args before firing —
+// when -XX:MaxHeapFreeRatio is set low (Toolbox-style "tight by design"),
+// near-full old-gen is the configured steady state and is suppressed.
 func ruleJVMGCPressure() Rule {
 	return Rule{
 		ID:       "jvm-gc-pressure",
@@ -123,17 +124,18 @@ func ruleJVMGCPressure() Rule {
 				if j.GC == nil {
 					continue
 				}
-				if pct := oldGenUsedPct(j.GC); pct >= 90 {
+				args := FactsFor(j)
+				if OldGenHigh(j) && !TightHeapByDesign(args) {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,
 						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
-						Message:  fmt.Sprintf("Old generation is %.0f%% full; allocation pressure may trigger frequent full GC.", pct),
+						Message:  fmt.Sprintf("Old generation is %.0f%% full; allocation pressure may trigger frequent full GC.", OldGenUsedPct(j)),
 						Fix:      "Inspect heap histogram/JFR allocation events and reduce live-set size or adjust heap sizing.",
 					})
 					continue
 				}
-				if j.GC.FGC >= 5 && j.GC.FGCT >= 1 {
+				if FullGCBurst(j) {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,
@@ -146,13 +148,6 @@ func ruleJVMGCPressure() Rule {
 			return findings
 		},
 	}
-}
-
-func oldGenUsedPct(stats *jvm.GCStats) float64 {
-	if stats == nil || stats.OC <= 0 {
-		return 0
-	}
-	return stats.OU * 100 / stats.OC
 }
 
 // ruleJDKMajorVersionDrift fires when more than one installed JDK shares
