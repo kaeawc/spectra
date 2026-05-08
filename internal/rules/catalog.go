@@ -166,7 +166,13 @@ func ruleJVMGCPressure() Rule {
 					})
 					continue
 				}
-				if FullGCBurst(j) {
+				// Cumulative full-GC time can look high simply because the JVM is
+				// configured to GC frequently (Serial + low MaxHeapFreeRatio is the
+				// canonical pattern). Apply the same suppressors before firing.
+				burstFires := FullGCBurst(j) &&
+					!TightHeapByDesign(args) &&
+					!HasTag(profile, TagTightHeapExpected)
+				if burstFires {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,

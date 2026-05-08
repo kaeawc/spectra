@@ -236,6 +236,22 @@ func TestJVMGCPressureSuppressedByFlatTrend(t *testing.T) {
 	}
 }
 
+// FullGCBurst branch is also suppressed when the suppressors apply.
+// 166 full GCs over a 5-day uptime is normal for SerialGC with a low
+// MaxHeapFreeRatio (Toolbox's actual configuration in the wild).
+func TestJVMGCPressureFullGCBurstSuppressedForTightHeap(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:      1127,
+		JavaHome: "/Applications/JetBrains Toolbox.app/Contents/jre/Contents/Home",
+		VMArgs:   "-Xmx190m -XX:+UseSerialGC -XX:MaxHeapFreeRatio=10",
+		GC:       &jvm.GCStats{OC: 1000, OU: 600, FGC: 166, FGCT: 10.1}, // burst threshold met
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("FGC burst should be suppressed for tight-heap JVMs, got %v", findings)
+	}
+}
+
 // Profile-based suppression: a Toolbox JVM identified by JavaHome — even
 // without the explicit -XX:MaxHeapFreeRatio flag in vmargs — must be
 // suppressed because the profile catalog tags it tight_heap_expected.
