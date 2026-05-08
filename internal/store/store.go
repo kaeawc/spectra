@@ -900,6 +900,42 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapsho
 	return out, nil
 }
 
+// AttachJVMHistory persists the current snapshot's JVMs as samples and
+// loads recent samples per PID into snap.JVMHistory so trend-aware rules
+// see a multi-sample window. Errors are accumulated but never abort the
+// caller — history is an enhancement, not a contract; rules degrade to
+// point-in-time checks when nothing is loaded.
+//
+// The snapshot's TakenAt is used as the sample timestamp when set, so
+// historical snapshots replayed against the store don't get a time.Now()
+// stamp that would corrupt trend ordering.
+func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
+	if snap == nil || len(snap.JVMs) == 0 {
+		return
+	}
+	now := snap.TakenAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
+	for _, j := range snap.JVMs {
+		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
+			current = append(current, sm)
+		}
+	}
+	_ = s.SaveJVMSamples(ctx, current)
+
+	var history snapshot.JVMHistory
+	for _, j := range snap.JVMs {
+		samples, err := s.GetRecentJVMSamples(ctx, j.PID, 0)
+		if err != nil {
+			continue
+		}
+		history = append(history, samples...)
+	}
+	snap.JVMHistory = history
+}
+
 // PruneJVMSamples deletes jvm_samples rows older than keepDays. Returns the
 // number of rows removed. keepDays <= 0 keeps the default of 7 days.
 func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {

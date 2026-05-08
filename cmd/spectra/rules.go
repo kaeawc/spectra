@@ -59,6 +59,7 @@ func runRules(args []string) int {
 		fmt.Fprintf(os.Stderr, "rules: %v\n", err)
 		return 1
 	}
+	attachCLIHistory(&snap)
 	findings := rules.Evaluate(snap, catalog)
 
 	if *asJSON {
@@ -222,6 +223,25 @@ func resolveRulesConfigPath(configPath string) (path string, explicit bool) {
 		return configPath, true
 	}
 	return "spectra.yml", false
+}
+
+// attachCLIHistory opens the local samples store, persists the current
+// JVM samples and loads recent history so trend-aware rules engage when
+// `spectra rules` is invoked. Failure is silent: history is an enhancement.
+func attachCLIHistory(snap *snapshot.Snapshot) {
+	if len(snap.JVMs) == 0 {
+		return
+	}
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		return
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	db.AttachJVMHistory(context.Background(), snap)
 }
 
 func loadStoredSnapshot(id string) (*snapshot.Snapshot, error) {

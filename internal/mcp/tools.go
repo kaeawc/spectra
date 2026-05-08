@@ -1215,9 +1215,9 @@ func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []
 	return snap, rules.Evaluate(snap, catalog), nil
 }
 
-// attachJVMHistory persists the current snapshot's JVMs into the samples
-// store and loads recent samples for each PID into snap.JVMHistory.
-// Errors are silently absorbed: history is an enhancement, not a contract.
+// attachJVMHistory opens the local samples store, calls AttachJVMHistory,
+// and closes the connection. Failure is silent — history is an enhancement,
+// not a contract.
 func attachJVMHistory(snap *snapshot.Snapshot) {
 	if len(snap.JVMs) == 0 {
 		return
@@ -1227,29 +1227,7 @@ func attachJVMHistory(snap *snapshot.Snapshot) {
 		return
 	}
 	defer db.Close()
-	ctx := context.Background()
-
-	now := snap.TakenAt
-	if now.IsZero() {
-		now = time.Now()
-	}
-	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
-	for _, j := range snap.JVMs {
-		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
-			current = append(current, sm)
-		}
-	}
-	_ = db.SaveJVMSamples(ctx, current)
-
-	var history snapshot.JVMHistory
-	for _, j := range snap.JVMs {
-		samples, err := db.GetRecentJVMSamples(ctx, j.PID, 0)
-		if err != nil {
-			continue
-		}
-		history = append(history, samples...)
-	}
-	snap.JVMHistory = history
+	db.AttachJVMHistory(context.Background(), snap)
 }
 
 func persistFindings(snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
