@@ -111,26 +111,32 @@ func ruleJVMHeapVsSystemRAM() Rule {
 
 // ruleJVMGCPressure fires when a one-shot jstat snapshot suggests the JVM is
 // under memory pressure: old generation is nearly full or full GC has already
-// consumed meaningful wall time. The rule consults VM args before firing —
-// when -XX:MaxHeapFreeRatio is set low (Toolbox-style "tight by design"),
-// near-full old-gen is the configured steady state and is suppressed.
+// consumed meaningful wall time. The rule consults three orthogonal signals
+// before firing on level:
 //
-// When trend history is available for the PID, the rule additionally requires
-// that old-gen occupancy be rising — a steady high level is consistent with a
-// healthy app at its working size; rising occupancy is what predicts trouble.
-// Without trend history, behavior degrades gracefully to the level check.
+//  1. VM args — -XX:MaxHeapFreeRatio low ("tight by design").
+//  2. App profile — known apps tagged tight_heap_expected (Toolbox, Gradle
+//     daemon) where near-full old-gen is the operating point.
+//  3. Trend history — when ≥3 samples exist, require a rising slope.
+//
+// Each signal is a sufficient suppressor; the level finding fires only when
+// none of them explain the high occupancy.
 func ruleJVMGCPressure() Rule {
 	return Rule{
 		ID:       "jvm-gc-pressure",
 		Severity: SeverityMedium,
 		MatchFn: func(s snapshot.Snapshot) []Finding {
+			profiles := BuiltinProfiles()
 			var findings []Finding
 			for _, j := range s.JVMs {
 				if j.GC == nil {
 					continue
 				}
 				args := FactsFor(j)
-				levelFires := OldGenHigh(j) && !TightHeapByDesign(args)
+				profile := MatchProfile(j, profiles)
+				levelFires := OldGenHigh(j) &&
+					!TightHeapByDesign(args) &&
+					!HasTag(profile, TagTightHeapExpected)
 				if levelFires {
 					if HasTrendFor(s.JVMHistory, j.PID) && !RisingOldGenFor(s.JVMHistory, j.PID) {
 						// We have enough history to say this is steady-state, not pressure.

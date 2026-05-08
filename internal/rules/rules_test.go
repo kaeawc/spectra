@@ -214,6 +214,38 @@ func TestJVMGCPressureSuppressedByFlatTrend(t *testing.T) {
 	}
 }
 
+// Profile-based suppression: a Toolbox JVM identified by JavaHome — even
+// without the explicit -XX:MaxHeapFreeRatio flag in vmargs — must be
+// suppressed because the profile catalog tags it tight_heap_expected.
+func TestJVMGCPressureSuppressedByProfileTag(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       1127,
+		MainClass: "JetBrains Toolbox",
+		JavaHome:  "/Applications/JetBrains Toolbox.app/Contents/jre/Contents/Home",
+		// no -XX:MaxHeapFreeRatio in args
+		VMArgs: "-Xmx190m -XX:+UseSerialGC",
+		GC:     &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("toolbox profile should suppress finding via tag, got %v", findings)
+	}
+}
+
+// Profile-based suppression for Gradle daemon (matched by main class).
+func TestJVMGCPressureSuppressedForGradleDaemon(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       9001,
+		MainClass: "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+		VMArgs:    "-Xmx512m",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("gradle daemon should be suppressed via profile, got %v", findings)
+	}
+}
+
 // Trend gating: when history shows a rising old gen, fire even if the level
 // rule alone would have fired (this is the leak-suspect case).
 func TestJVMGCPressureFiresOnRisingTrend(t *testing.T) {
