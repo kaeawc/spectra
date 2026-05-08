@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -49,12 +50,22 @@ func runRules(args []string) int {
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
 		}
-		// Reuse the persistent on-disk detect cache so per-app inspection
-		// (codesign, plist, framework scan) is amortized across CLI calls.
-		// Cache key is content-addressed (Info.plist + first 64 KiB of exe),
-		// so an entry invalidates automatically when the bundle changes.
+		// Reuse the persistent on-disk caches so per-app inspection
+		// (detect: codesign + plist + framework scan), toolchain enumeration,
+		// and the ~/Library walk in storage state are amortized across CLI
+		// calls. Cache writes go through async writers so the main collection
+		// loop never blocks on disk I/O.
 		if cacheStores != nil {
+			detectWriter := cache.NewAsyncWriter(cacheStores.Detect, 64, 2)
+			toolchainWriter := cache.NewAsyncWriter(cacheStores.Toolchain, 8, 1)
+			storageWriter := cache.NewAsyncWriter(cacheStores.Storage, 8, 1)
+			defer detectWriter.Close()
+			defer toolchainWriter.Close()
+			defer storageWriter.Close()
 			opts.DetectStore = cacheStores.Detect
+			opts.DetectWriter = detectWriter
+			opts.ToolchainCache = cache.NewTTLStore(cacheStores.Toolchain, toolchainWriter)
+			opts.StorageCache = cache.NewTTLStore(cacheStores.Storage, storageWriter)
 		}
 		snap = snapshot.Build(context.Background(), opts)
 	}
