@@ -17,6 +17,7 @@ type State struct {
 	UserLibraryBytes int64     `json:"user_library_bytes"`
 	AppCachesBytes   int64     `json:"app_caches_bytes"`
 	LargestApps      []AppSize `json:"largest_apps,omitempty"`
+	LogFiles         []LogFile `json:"log_files,omitempty"`
 }
 
 // Volume is one mounted filesystem.
@@ -82,6 +83,7 @@ func Collect(opts CollectOptions) State {
 	if len(opts.AppPaths) > 0 {
 		s.LargestApps = topApps(opts.AppPaths, opts.LargestAppsN)
 	}
+	s.LogFiles = CollectLogFiles(opts.Home)
 	return s
 }
 

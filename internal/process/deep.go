@@ -31,6 +31,7 @@ type deepResult struct {
 	fdCount       int
 	listenPorts   []int
 	outboundConns []string
+	logFiles      []string
 }
 
 // parseLSOFDeep merges lsof output into the procs slice in-place.
@@ -82,6 +83,50 @@ func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
 	if len(fields) >= 9 && strings.EqualFold(fields[7], "TCP") {
 		recordTCPName(r, strings.Join(fields[8:], " "))
 	}
+	if len(fields) >= 9 && strings.EqualFold(fields[4], "REG") && fdIsWritable(fd) {
+		recordLogFile(r, strings.Join(fields[8:], " "))
+	}
+}
+
+// fdIsWritable reports whether the lsof FD column indicates write access.
+// Examples: "12u" (read-write), "13w" (write-only) → true; "9r" → false.
+// Numeric-only FDs without a mode flag are skipped (rare on macOS lsof).
+func fdIsWritable(fd string) bool {
+	if fd == "" {
+		return false
+	}
+	last := fd[len(fd)-1]
+	return last == 'w' || last == 'u'
+}
+
+// isLogShapedPath returns true when path looks like an application log:
+// a file under a "/Logs/" directory, or with a .log extension. Avoids
+// false positives like .gitignore'd "/Frameworks/Network.framework/"
+// by requiring the segment match exactly.
+func isLogShapedPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	if strings.HasSuffix(path, ".log") {
+		return true
+	}
+	// "/Logs/" as a path segment, not just substring (avoids "Dialogs/").
+	if strings.Contains(path, "/Logs/") {
+		return true
+	}
+	return false
+}
+
+func recordLogFile(r *deepResult, name string) {
+	// lsof can append flags like "(deleted)" after the path; trim from first space.
+	path := name
+	if sp := strings.Index(path, " "); sp >= 0 {
+		path = path[:sp]
+	}
+	if !isLogShapedPath(path) {
+		return
+	}
+	r.logFiles = append(r.logFiles, path)
 }
 
 func recordTCPName(r *deepResult, name string) {
@@ -134,5 +179,23 @@ func applyDeepResults(procs []Info, idx map[int]int, results map[int]*deepResult
 			sort.Strings(r.outboundConns)
 			procs[i].OutboundConnections = r.outboundConns
 		}
+		if len(r.logFiles) > 0 {
+			sort.Strings(r.logFiles)
+			procs[i].LogFiles = uniqStrings(r.logFiles)
+		}
 	}
+}
+
+// uniqStrings returns s with consecutive duplicates removed (input must be sorted).
+func uniqStrings(s []string) []string {
+	if len(s) <= 1 {
+		return s
+	}
+	out := s[:1]
+	for _, v := range s[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
