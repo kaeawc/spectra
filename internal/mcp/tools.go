@@ -1208,7 +1208,48 @@ func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []
 	if err != nil {
 		return snap, nil, err
 	}
+	// Best-effort: persist current JVMs as samples and read recent history
+	// back into the snapshot so trend-aware rules see a multi-sample window.
+	// Failure here is non-fatal; rules degrade to point-in-time checks.
+	attachJVMHistory(&snap)
 	return snap, rules.Evaluate(snap, catalog), nil
+}
+
+// attachJVMHistory persists the current snapshot's JVMs into the samples
+// store and loads recent samples for each PID into snap.JVMHistory.
+// Errors are silently absorbed: history is an enhancement, not a contract.
+func attachJVMHistory(snap *snapshot.Snapshot) {
+	if len(snap.JVMs) == 0 {
+		return
+	}
+	db, err := openStore()
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	now := snap.TakenAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
+	for _, j := range snap.JVMs {
+		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
+			current = append(current, sm)
+		}
+	}
+	_ = db.SaveJVMSamples(ctx, current)
+
+	var history snapshot.JVMHistory
+	for _, j := range snap.JVMs {
+		samples, err := db.GetRecentJVMSamples(ctx, j.PID, 0)
+		if err != nil {
+			continue
+		}
+		history = append(history, samples...)
+	}
+	snap.JVMHistory = history
 }
 
 func persistFindings(snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {

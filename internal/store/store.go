@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/idgen"
+	"github.com/kaeawc/spectra/internal/snapshot"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
@@ -209,6 +210,18 @@ CREATE TABLE IF NOT EXISTS process_metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_process_metrics_pid ON process_metrics(pid, minute_at DESC);
+
+CREATE TABLE IF NOT EXISTS jvm_samples (
+    pid          INTEGER NOT NULL,
+    at_unix      INTEGER NOT NULL,
+    old_gen_pct  REAL NOT NULL DEFAULT 0,
+    fgc          INTEGER NOT NULL DEFAULT 0,
+    fgct         REAL NOT NULL DEFAULT 0,
+    heap_mb      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pid, at_unix)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_unix DESC);
 
 CREATE TABLE IF NOT EXISTS issues (
     id                     TEXT PRIMARY KEY,
@@ -787,6 +800,73 @@ type ProcessMetricRow struct {
 	AvgCPUPct   float64
 	MaxCPUPct   float64
 	SampleCount int
+}
+
+// SaveJVMSamples upserts compact per-PID JVM samples used by trend-aware
+// rules. Existing rows for the same (pid, at_unix) are overwritten so a
+// re-run within the same second is idempotent.
+func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, sm := range samples {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO jvm_samples (pid, at_unix, old_gen_pct, fgc, fgct, heap_mb)
+			VALUES (?,?,?,?,?,?)
+			ON CONFLICT(pid, at_unix) DO UPDATE SET
+			    old_gen_pct=excluded.old_gen_pct,
+			    fgc=excluded.fgc,
+			    fgct=excluded.fgct,
+			    heap_mb=excluded.heap_mb`,
+			sm.PID, sm.At.UTC().Unix(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetRecentJVMSamples returns up to limit JVM samples for pid, ordered
+// oldest-first so callers can hand the slice straight to trend predicates.
+// Pass limit=0 for the default cap (60 samples).
+func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapshot.JVMSample, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pid, at_unix, old_gen_pct, fgc, fgct, heap_mb
+		FROM jvm_samples WHERE pid=?
+		ORDER BY at_unix DESC LIMIT ?`, pid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []snapshot.JVMSample
+	for rows.Next() {
+		var sm snapshot.JVMSample
+		var atUnix int64
+		if err := rows.Scan(&sm.PID, &atUnix, &sm.OldGenPct, &sm.FGC, &sm.FGCT, &sm.HeapMB); err != nil {
+			return nil, err
+		}
+		sm.At = time.Unix(atUnix, 0).UTC()
+		out = append(out, sm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reverse to oldest-first.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
 }
 
 // PruneSnapshots deletes live snapshots beyond the retention limit for each
