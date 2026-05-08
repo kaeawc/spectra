@@ -73,6 +73,11 @@ func ruleJVMEOLVersion() Rule {
 
 // ruleJVMHeapVsSystemRAM fires when a running JVM's -Xmx setting allocates
 // more than 60% of system RAM, which can cause OS-level swap pressure.
+//
+// When the JVM matches a profile tagged large_heap_expected (IntelliJ-family
+// IDEs), the finding is demoted from high to medium: the swap-pressure risk
+// is real but the user opted in by configuring the IDE's vmoptions. We
+// recalibrate severity rather than suppress so the signal is still visible.
 func ruleJVMHeapVsSystemRAM() Rule {
 	return Rule{
 		ID:       "jvm-heap-vs-system",
@@ -84,6 +89,7 @@ func ruleJVMHeapVsSystemRAM() Rule {
 				return nil
 			}
 			ramMBInt := int64(ramMB)
+			profiles := BuiltinProfiles()
 			var findings []Finding
 			for _, j := range s.JVMs {
 				if j.VMArgs == "" {
@@ -94,15 +100,22 @@ func ruleJVMHeapVsSystemRAM() Rule {
 					continue
 				}
 				pct := xmxMB * 100 / ramMBInt
-				if pct > 60 {
-					findings = append(findings, Finding{
-						RuleID:   "jvm-heap-vs-system",
-						Severity: SeverityHigh,
-						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
-						Message:  fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMBInt),
-						Fix:      "Reduce -Xmx, or if this is intentional ensure sufficient swap headroom.",
-					})
+				if pct <= 60 {
+					continue
 				}
+				severity := SeverityHigh
+				message := fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMBInt)
+				if HasTag(MatchProfile(j, profiles), TagLargeHeapExpected) {
+					severity = SeverityMedium
+					message = fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). High but expected for this app; ensure swap headroom.", xmxMB, pct, ramMBInt)
+				}
+				findings = append(findings, Finding{
+					RuleID:   "jvm-heap-vs-system",
+					Severity: severity,
+					Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+					Message:  message,
+					Fix:      "Reduce -Xmx, or if this is intentional ensure sufficient swap headroom.",
+				})
 			}
 			return findings
 		},

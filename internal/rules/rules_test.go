@@ -3,6 +3,7 @@ package rules
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,27 @@ func TestJVMHeapVsSystemNoFire(t *testing.T) {
 	s.JVMs = []jvm.Info{{PID: 1, VMArgs: "-Xmx2g"}} // 12.5% → ok
 	if findings := ruleJVMHeapVsSystemRAM().MatchFn(s); len(findings) != 0 {
 		t.Errorf("expected no findings for -Xmx2g on 16 GiB, got %v", findings)
+	}
+}
+
+// IDE-family JVMs are tagged large_heap_expected — the rule still fires but
+// at medium severity to communicate "noted, not alarming."
+func TestJVMHeapVsSystemDemotedForIDE(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2222,
+		MainClass: "com.intellij.idea.Main",
+		VMArgs:    "-Xmx12g",
+	}}
+	findings := ruleJVMHeapVsSystemRAM().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Errorf("severity = %q, want medium for IDE", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "expected for this app") {
+		t.Errorf("message should be recalibrated, got %q", findings[0].Message)
 	}
 }
 

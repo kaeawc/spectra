@@ -35,6 +35,7 @@ type AppProfile struct {
 // Common tag names. Centralized so rule code and tests don't drift.
 const (
 	TagTightHeapExpected = "tight_heap_expected"
+	TagLargeHeapExpected = "large_heap_expected"
 	TagLauncher          = "launcher"
 	TagBuildToolDaemon   = "build_tool_daemon"
 	TagIDE               = "ide"
@@ -54,14 +55,14 @@ func BuiltinProfiles() []AppProfile {
 			ID:                "intellij-idea",
 			Name:              "IntelliJ IDEA",
 			MainClassContains: "com.intellij.idea.main",
-			Tags:              []string{TagIDE},
+			Tags:              []string{TagIDE, TagLargeHeapExpected},
 		},
 		{
 			ID:                "android-studio",
 			Name:              "Android Studio",
 			JavaHomeContains:  "android studio.app",
 			MainClassContains: "com.intellij.idea.main",
-			Tags:              []string{TagIDE},
+			Tags:              []string{TagIDE, TagLargeHeapExpected},
 		},
 		{
 			ID:                "gradle-daemon",
