@@ -97,3 +97,47 @@ func TestSaveJVMSamples_Idempotent(t *testing.T) {
 		t.Errorf("upsert should overwrite, got %v", got)
 	}
 }
+
+// Parallel diagnose calls landing within the same wall-clock second must
+// produce distinct rows because at_nano is the timestamp granularity.
+func TestSaveJVMSamples_SubSecondDistinct(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	one := snapshot.JVMSample{PID: 1, At: base.Add(100_000), OldGenPct: 60}     // +100µs
+	two := snapshot.JVMSample{PID: 1, At: base.Add(200_000), OldGenPct: 65}     // +200µs
+	three := snapshot.JVMSample{PID: 1, At: base.Add(300_000), OldGenPct: 70}   // +300µs
+	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{one, two, three}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := db.GetRecentJVMSamples(ctx, 1, 0)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 distinct sub-second rows, got %d", len(got))
+	}
+}
+
+func TestPruneJVMSamples(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	old1 := snapshot.JVMSample{PID: 1, At: now.Add(-30 * 24 * time.Hour), OldGenPct: 10}
+	old2 := snapshot.JVMSample{PID: 1, At: now.Add(-10 * 24 * time.Hour), OldGenPct: 20}
+	recent := snapshot.JVMSample{PID: 1, At: now.Add(-1 * time.Hour), OldGenPct: 90}
+	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{old1, old2, recent}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	deleted, err := db.PruneJVMSamples(ctx, 7)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("expected 2 deleted, got %d", deleted)
+	}
+	got, _ := db.GetRecentJVMSamples(ctx, 1, 0)
+	if len(got) != 1 || got[0].OldGenPct != 90 {
+		t.Errorf("only the recent row should survive, got %v", got)
+	}
+}

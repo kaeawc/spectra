@@ -444,6 +444,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 			_ = db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap))
 			_ = db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap))
 			_, _ = db.PruneSnapshots(ctx, 100)
+			_, _ = db.PruneJVMSamples(ctx, 7)
 		}
 	}
 }
