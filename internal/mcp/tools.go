@@ -215,6 +215,7 @@ func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]i
 	if p.Symptom != "" {
 		evidence = append(evidence, "symptom: "+p.Symptom)
 	}
+	hasTarget := p.AppPath != "" || p.PID > 0 || p.BundleID != ""
 	if p.AppPath != "" {
 		evidence, next = s.collectTriageApp(p, evidence, next, rawOut)
 	}
@@ -224,11 +225,21 @@ func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]i
 	if p.BundleID != "" {
 		evidence = s.collectTriageBundle(p, evidence, rawOut)
 	}
-	findings, err := s.evaluateLiveRules("")
-	if err == nil && len(findings) > 0 {
-		evidence = append(evidence, summarizeFindings(findings, 5)...)
-		rawOut["findings"] = findings
-		next = append(next, "Use diagnose include_raw=true for the full rules output.")
+	// When triage has no target (pure symptom or empty call), the global
+	// rules pass is the only way to surface anything actionable. With a
+	// target, skip the full snapshot cost — the per-target collectors above
+	// already gathered what was asked for, and global findings would be
+	// noise relative to the explicit target. Direct callers to diagnose
+	// when they want host-wide context.
+	if !hasTarget {
+		findings, err := s.evaluateLiveRules("")
+		if err == nil && len(findings) > 0 {
+			evidence = append(evidence, summarizeFindings(findings, 5)...)
+			rawOut["findings"] = findings
+			next = append(next, "Use diagnose include_raw=true for the full rules output.")
+		}
+	} else {
+		next = append(next, "Use diagnose for host-wide rule findings; this triage was scoped to your target.")
 	}
 	if len(next) == 0 {
 		next = append(next, "Use snapshot operation=create store=true to preserve current state for later diffing.")
