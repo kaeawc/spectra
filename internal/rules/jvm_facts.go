@@ -53,27 +53,30 @@ func ParseVMArgs(raw string) VMArgsFacts {
 			f.MaxMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MaxMetaspaceFreeRatio="):])
 		case strings.HasPrefix(tok, "-XX:MinMetaspaceFreeRatio="):
 			f.MinMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MinMetaspaceFreeRatio="):])
-		case tok == "-XX:+UseSerialGC":
-			f.GCAlgorithm = "Serial"
-		case tok == "-XX:+UseParallelGC":
-			f.GCAlgorithm = "Parallel"
-		case tok == "-XX:+UseG1GC":
-			f.GCAlgorithm = "G1"
-		case tok == "-XX:+UseZGC":
-			f.GCAlgorithm = "Z"
-		case tok == "-XX:+UseShenandoahGC":
-			f.GCAlgorithm = "Shenandoah"
-		case tok == "-XX:+UseEpsilonGC":
-			f.GCAlgorithm = "Epsilon"
 		case strings.HasPrefix(tok, "-XX:NativeMemoryTracking="):
 			v := tok[len("-XX:NativeMemoryTracking="):]
 			f.NMTEnabled = v == "summary" || v == "detail"
 		case tok == "-XX:+HeapDumpOnOutOfMemoryError":
 			f.HeapDumpOnOOM = true
+		default:
+			if gc := gcAlgorithmFor(tok); gc != "" {
+				f.GCAlgorithm = gc
+			}
 		}
 	}
 	return f
 }
+
+var gcFlagToAlgorithm = map[string]string{
+	"-XX:+UseSerialGC":     "Serial",
+	"-XX:+UseParallelGC":   "Parallel",
+	"-XX:+UseG1GC":         "G1",
+	"-XX:+UseZGC":          "Z",
+	"-XX:+UseShenandoahGC": "Shenandoah",
+	"-XX:+UseEpsilonGC":    "Epsilon",
+}
+
+func gcAlgorithmFor(tok string) string { return gcFlagToAlgorithm[tok] }
 
 // parseSizeSuffix interprets a size with optional k/m/g/t suffix and returns bytes.
 // Returns 0 on parse failure.
