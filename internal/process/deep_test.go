@@ -87,14 +87,14 @@ func TestParseLSOFDeepLogFiles(t *testing.T) {
 
 func TestIsLogShapedPath(t *testing.T) {
 	cases := map[string]bool{
-		"/tmp/slack.log":                                       true,
-		"/Users/foo/Library/Logs/Slack/main.log":               true,
-		"/Users/foo/Library/Application Support/Slack/Logs/x":  true,
-		"/var/log/system.log":                                  true,
-		"/Users/foo/Documents/Catalogs/index":                  false, // "Catalogs/", not "Logs/"
-		"/Users/foo/work/Dialogs/notes":                        false, // "Dialogs/", not "Logs/"
-		"/Applications/Slack.app/Contents/MacOS/Slack":         false,
-		"":                                                     false,
+		"/tmp/slack.log":                                      true,
+		"/Users/foo/Library/Logs/Slack/main.log":              true,
+		"/Users/foo/Library/Application Support/Slack/Logs/x": true,
+		"/var/log/system.log":                                 true,
+		"/Users/foo/Documents/Catalogs/index":                 false, // "Catalogs/", not "Logs/"
+		"/Users/foo/work/Dialogs/notes":                       false, // "Dialogs/", not "Logs/"
+		"/Applications/Slack.app/Contents/MacOS/Slack":        false,
+		"": false,
 	}
 	for in, want := range cases {
 		if got := isLogShapedPath(in); got != want {

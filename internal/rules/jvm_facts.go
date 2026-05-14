@@ -14,8 +14,8 @@ type VMArgsFacts struct {
 	XmxBytes int64
 	XmsBytes int64
 
-	MaxHeapFreeRatio     int
-	MinHeapFreeRatio     int
+	MaxHeapFreeRatio      int
+	MinHeapFreeRatio      int
 	MaxMetaspaceFreeRatio int
 	MinMetaspaceFreeRatio int
 
