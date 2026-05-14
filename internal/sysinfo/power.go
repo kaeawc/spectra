@@ -69,7 +69,9 @@ func (s CommandPowerSource) Assertions() ([]byte, error) {
 }
 
 func (s CommandPowerSource) EnergyTop() ([]byte, error) {
-	return s.runner()("top", "-l", "1", "-n", "10", "-o", "power", "-stats", "pid,power,command")
+	// Two samples 1s apart: `top` computes the power column as a delta between
+	// consecutive samples, so a single-sample run reports 0.0 for every pid.
+	return s.runner()("top", "-l", "2", "-s", "1", "-n", "10", "-o", "power", "-stats", "pid,power,command")
 }
 
 // PowerCollector turns raw source output into structured power state.
@@ -108,7 +110,10 @@ func (c PowerCollector) Collect() PowerState {
 	return ps
 }
 
-// parseEnergyTop parses `top -l 1 -n 10 -o power -stats pid,power,command` output.
+// parseEnergyTop parses `top -l N -o power -stats pid,power,command` output.
+// When N>1 there are multiple sample blocks; we keep only entries from the
+// last block, since `top` computes the power column as a delta from the
+// previous sample and the first block always reports zeros.
 func parseEnergyTop(out string) []EnergyUser {
 	var result []EnergyUser
 	for _, line := range strings.Split(out, "\n") {
@@ -117,6 +122,7 @@ func parseEnergyTop(out string) []EnergyUser {
 			continue
 		}
 		if fields[0] == "PID" {
+			result = result[:0]
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])

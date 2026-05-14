@@ -224,6 +224,24 @@ func TestParseEnergyTop(t *testing.T) {
 	}
 }
 
+func TestParseEnergyTopKeepsLastSampleBlock(t *testing.T) {
+	// `top -l 2` emits two blocks; first has zero power (no baseline), second has real deltas.
+	const twoSample = `PID    POWER  COMMAND
+99647  0.0    Slack
+412    0.0    com.apple.WebKit
+PID    POWER  COMMAND
+99647  17.4   Slack
+412    4.1    com.apple.WebKit
+`
+	users := parseEnergyTop(twoSample)
+	if len(users) != 2 {
+		t.Fatalf("len = %d, want 2 (only last block)", len(users))
+	}
+	if users[0].EnergyImpact != 17.4 {
+		t.Errorf("EnergyImpact = %v, want 17.4 from second block", users[0].EnergyImpact)
+	}
+}
+
 func TestParseEnergyTopPreservesCommandWithSpaces(t *testing.T) {
 	users := parseEnergyTop(topEnergyOutputWithSpaces)
 	if len(users) != 1 {
