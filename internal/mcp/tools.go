@@ -40,7 +40,7 @@ func toolDefinitions() []ToolDefinition {
 		snapshotToolDef(),
 		diagnoseToolDef(),
 		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
+		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read, mbean_invoke, probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
 		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
@@ -145,6 +145,13 @@ func operationToolDef(name, description string, operations []string) ToolDefinit
 			"proto":             stringProp("Protocol."),
 			"handle":            stringProp("Capture handle."),
 			"limit":             integerProp("Limit."),
+			"auto_attach":       boolProp("Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out."),
+			"mbean_name":        stringProp("MBean ObjectName."),
+			"attribute":         stringProp("MBean attribute name."),
+			"mbean_operation":   stringProp("MBean operation name."),
+			"agent":             stringProp("Path to spectra-agent.jar override."),
+			"samples":           integerProp("Number of samples."),
+			"asprof_path":       stringProp("async-profiler asprof path override."),
 		}, []string{"operation"}),
 	}
 }
@@ -590,6 +597,56 @@ type jvmParams struct {
 	Attribute        string `json:"attribute"`
 	MBeanOperation   string `json:"mbean_operation"`
 	IncludeRaw       bool   `json:"include_raw"`
+	AutoAttach       *bool  `json:"auto_attach,omitempty"`
+}
+
+// withAgentAttached invokes op; if the agent isn't attached and auto-attach is
+// enabled (default), it attempts a one-time attach and retries. On persistent
+// failure it returns a structured agent_not_attached tool error.
+func (s *Server) withAgentAttached(p jvmParams, op func() error) (ToolResult, bool) {
+	err := op()
+	if err == nil {
+		return ToolResult{}, true
+	}
+	var notAttached *jvm.NotAttachedError
+	if !errors.As(err, &notAttached) {
+		return toolError(err.Error()), false
+	}
+	autoAttach := p.AutoAttach == nil || *p.AutoAttach
+	if autoAttach {
+		if _, attachErr := jvm.AttachAgent(p.PID, p.Agent, nil); attachErr == nil {
+			if retryErr := op(); retryErr == nil {
+				return ToolResult{}, true
+			} else if !errors.As(retryErr, &notAttached) {
+				return toolError(retryErr.Error()), false
+			}
+		}
+	}
+	return agentNotAttachedResult(p.PID, autoAttach), false
+}
+
+func agentNotAttachedResult(pid int, autoAttachAttempted bool) ToolResult {
+	msg := fmt.Sprintf("spectra agent is not attached to PID %d", pid)
+	if autoAttachAttempted {
+		msg += "; auto-attach failed"
+	} else {
+		msg += "; auto_attach is disabled"
+	}
+	payload := map[string]interface{}{
+		"error":   "agent_not_attached",
+		"pid":     pid,
+		"message": msg,
+		"remediation": map[string]interface{}{
+			"tool":      "jvm",
+			"operation": "attach",
+			"pid":       pid,
+		},
+	}
+	body, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return toolError(msg)
+	}
+	return ToolResult{IsError: true, Content: []ContentBlock{{Type: "text", Text: string(body)}}}
 }
 
 func (s *Server) toolJVMList(p jvmParams) ToolResult {
@@ -652,9 +709,14 @@ func (s *Server) toolJVMMBeans(p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm mbeans requires pid")
 	}
-	mbeans, err := jvm.FetchMBeans(p.PID, nil)
-	if err != nil {
-		return toolError(err.Error())
+	var mbeans jvm.MBeansResult
+	res, ok := s.withAgentAttached(p, func() error {
+		var err error
+		mbeans, err = jvm.FetchMBeans(p.PID, nil)
+		return err
+	})
+	if !ok {
+		return res
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
 }
@@ -663,9 +725,14 @@ func (s *Server) toolJVMMBeanRead(p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
 		return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
 	}
-	value, err := jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
-	if err != nil {
-		return toolError(err.Error())
+	var value jvm.MBeanAttributeValue
+	res, ok := s.withAgentAttached(p, func() error {
+		var err error
+		value, err = jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
+		return err
+	})
+	if !ok {
+		return res
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
 }
@@ -674,9 +741,14 @@ func (s *Server) toolJVMMBeanInvoke(p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
 		return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
 	}
-	value, err := jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
-	if err != nil {
-		return toolError(err.Error())
+	var value jvm.MBeanInvocation
+	res, ok := s.withAgentAttached(p, func() error {
+		var err error
+		value, err = jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
+		return err
+	})
+	if !ok {
+		return res
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
 }
@@ -685,9 +757,14 @@ func (s *Server) toolJVMProbe(p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm probe requires pid")
 	}
-	probes, err := jvm.FetchAgentProbes(p.PID, nil)
-	if err != nil {
-		return toolError(err.Error())
+	var probes jvm.AgentProbes
+	res, ok := s.withAgentAttached(p, func() error {
+		var err error
+		probes, err = jvm.FetchAgentProbes(p.PID, nil)
+		return err
+	})
+	if !ok {
+		return res
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
 }
