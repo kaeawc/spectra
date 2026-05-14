@@ -104,9 +104,9 @@ func TestSaveJVMSamples_SubSecondDistinct(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
-	one := snapshot.JVMSample{PID: 1, At: base.Add(100_000), OldGenPct: 60}     // +100µs
-	two := snapshot.JVMSample{PID: 1, At: base.Add(200_000), OldGenPct: 65}     // +200µs
-	three := snapshot.JVMSample{PID: 1, At: base.Add(300_000), OldGenPct: 70}   // +300µs
+	one := snapshot.JVMSample{PID: 1, At: base.Add(100_000), OldGenPct: 60}   // +100µs
+	two := snapshot.JVMSample{PID: 1, At: base.Add(200_000), OldGenPct: 65}   // +200µs
+	three := snapshot.JVMSample{PID: 1, At: base.Add(300_000), OldGenPct: 70} // +300µs
 	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{one, two, three}); err != nil {
 		t.Fatalf("save: %v", err)
 	}

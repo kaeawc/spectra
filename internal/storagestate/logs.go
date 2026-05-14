@@ -58,7 +58,7 @@ func walkLogs(root, owner string) []LogFile {
 	var out []LogFile
 	filepath.Walk(root, func(path string, fi os.FileInfo, err error) error { //nolint:errcheck
 		if err != nil {
-			return nil // tolerate permission errors silently
+			return nil //nolint:nilerr // tolerate permission errors silently
 		}
 		if fi == nil || fi.IsDir() {
 			return nil

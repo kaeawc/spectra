@@ -14,8 +14,8 @@ type VMArgsFacts struct {
 	XmxBytes int64
 	XmsBytes int64
 
-	MaxHeapFreeRatio     int
-	MinHeapFreeRatio     int
+	MaxHeapFreeRatio      int
+	MinHeapFreeRatio      int
 	MaxMetaspaceFreeRatio int
 	MinMetaspaceFreeRatio int
 
@@ -24,6 +24,15 @@ type VMArgsFacts struct {
 	HeapDumpOnOOM bool
 
 	Raw string
+}
+
+var gcAlgorithms = map[string]string{
+	"-XX:+UseSerialGC":     "Serial",
+	"-XX:+UseParallelGC":   "Parallel",
+	"-XX:+UseG1GC":         "G1",
+	"-XX:+UseZGC":          "Z",
+	"-XX:+UseShenandoahGC": "Shenandoah",
+	"-XX:+UseEpsilonGC":    "Epsilon",
 }
 
 // ParseVMArgs builds a VMArgsFacts from a raw VM args string.
@@ -40,39 +49,42 @@ func ParseVMArgs(raw string) VMArgsFacts {
 		return f
 	}
 	for _, tok := range strings.Fields(raw) {
-		switch {
-		case strings.HasPrefix(tok, "-Xmx"):
-			f.XmxBytes = parseSizeSuffix(tok[len("-Xmx"):])
-		case strings.HasPrefix(tok, "-Xms"):
-			f.XmsBytes = parseSizeSuffix(tok[len("-Xms"):])
-		case strings.HasPrefix(tok, "-XX:MaxHeapFreeRatio="):
-			f.MaxHeapFreeRatio = atoiOrNeg1(tok[len("-XX:MaxHeapFreeRatio="):])
-		case strings.HasPrefix(tok, "-XX:MinHeapFreeRatio="):
-			f.MinHeapFreeRatio = atoiOrNeg1(tok[len("-XX:MinHeapFreeRatio="):])
-		case strings.HasPrefix(tok, "-XX:MaxMetaspaceFreeRatio="):
-			f.MaxMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MaxMetaspaceFreeRatio="):])
-		case strings.HasPrefix(tok, "-XX:MinMetaspaceFreeRatio="):
-			f.MinMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MinMetaspaceFreeRatio="):])
-		case tok == "-XX:+UseSerialGC":
-			f.GCAlgorithm = "Serial"
-		case tok == "-XX:+UseParallelGC":
-			f.GCAlgorithm = "Parallel"
-		case tok == "-XX:+UseG1GC":
-			f.GCAlgorithm = "G1"
-		case tok == "-XX:+UseZGC":
-			f.GCAlgorithm = "Z"
-		case tok == "-XX:+UseShenandoahGC":
-			f.GCAlgorithm = "Shenandoah"
-		case tok == "-XX:+UseEpsilonGC":
-			f.GCAlgorithm = "Epsilon"
-		case strings.HasPrefix(tok, "-XX:NativeMemoryTracking="):
-			v := tok[len("-XX:NativeMemoryTracking="):]
-			f.NMTEnabled = v == "summary" || v == "detail"
-		case tok == "-XX:+HeapDumpOnOutOfMemoryError":
+		if applyVMArgToken(&f, tok) {
+			continue
+		}
+		if name, ok := gcAlgorithms[tok]; ok {
+			f.GCAlgorithm = name
+			continue
+		}
+		if tok == "-XX:+HeapDumpOnOutOfMemoryError" {
 			f.HeapDumpOnOOM = true
 		}
 	}
 	return f
+}
+
+// applyVMArgToken handles prefix-style flags. Returns true if tok matched.
+func applyVMArgToken(f *VMArgsFacts, tok string) bool {
+	switch {
+	case strings.HasPrefix(tok, "-Xmx"):
+		f.XmxBytes = parseSizeSuffix(tok[len("-Xmx"):])
+	case strings.HasPrefix(tok, "-Xms"):
+		f.XmsBytes = parseSizeSuffix(tok[len("-Xms"):])
+	case strings.HasPrefix(tok, "-XX:MaxHeapFreeRatio="):
+		f.MaxHeapFreeRatio = atoiOrNeg1(tok[len("-XX:MaxHeapFreeRatio="):])
+	case strings.HasPrefix(tok, "-XX:MinHeapFreeRatio="):
+		f.MinHeapFreeRatio = atoiOrNeg1(tok[len("-XX:MinHeapFreeRatio="):])
+	case strings.HasPrefix(tok, "-XX:MaxMetaspaceFreeRatio="):
+		f.MaxMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MaxMetaspaceFreeRatio="):])
+	case strings.HasPrefix(tok, "-XX:MinMetaspaceFreeRatio="):
+		f.MinMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MinMetaspaceFreeRatio="):])
+	case strings.HasPrefix(tok, "-XX:NativeMemoryTracking="):
+		v := tok[len("-XX:NativeMemoryTracking="):]
+		f.NMTEnabled = v == "summary" || v == "detail"
+	default:
+		return false
+	}
+	return true
 }
 
 // parseSizeSuffix interprets a size with optional k/m/g/t suffix and returns bytes.

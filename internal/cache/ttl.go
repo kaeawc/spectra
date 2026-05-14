@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"time"
 )
 
@@ -40,13 +41,17 @@ func (t *TTLStore) Get(key []byte) (payload []byte, ok bool) {
 	if err != nil || !present || len(blob) < 8 {
 		return nil, false
 	}
-	expiresAt := time.Unix(0, int64(binary.BigEndian.Uint64(blob[:8])))
+	raw := binary.BigEndian.Uint64(blob[:8])
+	if raw > math.MaxInt64 {
+		return nil, false
+	}
+	expiresAt := time.Unix(0, int64(raw))
 	if !t.clock().Before(expiresAt) {
 		return nil, false
 	}
-	out := make([]byte, len(blob)-8)
-	copy(out, blob[8:])
-	return out, true
+	payload = make([]byte, len(blob)-8)
+	copy(payload, blob[8:])
+	return payload, true
 }
 
 // Put stores payload with a freshness window of ttl. Errors from a sync
@@ -56,6 +61,12 @@ func (t *TTLStore) Put(key, payload []byte, ttl time.Duration) error {
 		return errors.New("ttl store: nil backing store")
 	}
 	expiresAt := t.clock().Add(ttl).UnixNano()
+	if expiresAt < 0 {
+		return errors.New("ttl store: ttl yields negative unix-nano expiry")
+	}
+	if len(payload) > math.MaxInt-8 {
+		return errors.New("ttl store: payload too large")
+	}
 	blob := make([]byte, 8+len(payload))
 	binary.BigEndian.PutUint64(blob[:8], uint64(expiresAt))
 	copy(blob[8:], payload)

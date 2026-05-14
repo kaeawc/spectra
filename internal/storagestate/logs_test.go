@@ -28,8 +28,8 @@ func TestCollectLogFiles(t *testing.T) {
 	}
 
 	want := map[string]string{
-		filepath.Join(home, "Library", "Logs", "Foo", "foo.log"):                            "",
-		filepath.Join(home, "Library", "Logs", "Bar", "bar.txt"):                            "",
+		filepath.Join(home, "Library", "Logs", "Foo", "foo.log"):                           "",
+		filepath.Join(home, "Library", "Logs", "Bar", "bar.txt"):                           "",
 		filepath.Join(home, "Library", "Application Support", "Slack", "Logs", "main.log"): "Slack",
 	}
 
@@ -66,12 +66,12 @@ func TestCollectLogFiles_SortedBySizeDesc(t *testing.T) {
 
 func TestIsLogShapedFile(t *testing.T) {
 	cases := map[string]bool{
-		"/Users/foo/Library/Logs/x.log":               true,
-		"/Users/foo/Library/Logs/sub/notes.txt":       true, // under /Logs/
-		"/Users/foo/Library/Caches/myapp/cache.bin":   false,
-		"/Users/foo/work/Catalogs/index":              false, // similar but distinct segment
-		"/var/log/system.log":                          true,
-		"":                                             false,
+		"/Users/foo/Library/Logs/x.log":             true,
+		"/Users/foo/Library/Logs/sub/notes.txt":     true, // under /Logs/
+		"/Users/foo/Library/Caches/myapp/cache.bin": false,
+		"/Users/foo/work/Catalogs/index":            false, // similar but distinct segment
+		"/var/log/system.log":                       true,
+		"":                                          false,
 	}
 	for in, want := range cases {
 		if got := isLogShapedFile(in); got != want {
