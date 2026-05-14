@@ -1,14 +1,14 @@
-// Package jsonrpc implements Content-Length-framed JSON-RPC 2.0 transport primitives.
+// Package jsonrpc implements newline-delimited JSON-RPC 2.0 transport primitives,
+// matching the MCP stdio transport: each message is a single JSON object on its
+// own line, terminated by '\n'. Embedded newlines are not permitted in payloads.
 package jsonrpc
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/kaeawc/spectra/internal/logger"
@@ -62,59 +62,40 @@ type Notification struct {
 	Params  interface{} `json:"params,omitempty"`
 }
 
-// ReadMessage reads a single JSON-RPC body from Content-Length framing.
+// ReadMessage reads a single newline-delimited JSON-RPC body. Blank lines are
+// skipped so stray whitespace from a peer does not abort the loop.
 func ReadMessage(r *bufio.Reader) ([]byte, error) {
-	var contentLength int
-	headerDone := false
-
 	for {
-		line, err := r.ReadString('\n')
-		if err != nil {
+		line, err := r.ReadBytes('\n')
+		if len(line) == 0 && err != nil {
 			return nil, err
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			headerDone = true
-			break
-		}
-		if strings.HasPrefix(line, "Content-Length: ") {
-			trim := strings.TrimPrefix(line, "Content-Length: ")
-			contentLength, err = strconv.Atoi(trim)
+		trimmed := bytes.TrimRight(line, "\r\n")
+		if len(trimmed) == 0 {
 			if err != nil {
-				return nil, fmt.Errorf("parse Content-Length %q: %w", trim, err)
+				return nil, err
 			}
+			continue
 		}
+		return trimmed, nil
 	}
-	if !headerDone {
-		return nil, fmt.Errorf("unexpected EOF while reading headers")
-	}
-	if contentLength <= 0 {
-		return nil, fmt.Errorf("invalid content-length %d", contentLength)
-	}
-	body := make([]byte, contentLength)
-	_, err := io.ReadFull(r, body)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
 }
 
-// WriteMessage serializes and writes one Message with Content-Length framing.
+// WriteMessage serializes msg as one newline-terminated JSON object.
 func WriteMessage(w io.Writer, mu *sync.Mutex, msg any) {
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		pkgLog.Error("jsonrpc marshal failed", "err", err)
 		return
 	}
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(payload))
 	mu.Lock()
 	defer mu.Unlock()
-	if _, err := w.Write([]byte(header)); err != nil {
-		pkgLog.Error("jsonrpc write header failed", "err", err)
-		return
-	}
 	if _, err := w.Write(payload); err != nil {
 		pkgLog.Error("jsonrpc write body failed", "err", err)
+		return
+	}
+	if _, err := w.Write([]byte{'\n'}); err != nil {
+		pkgLog.Error("jsonrpc write newline failed", "err", err)
 	}
 }
 

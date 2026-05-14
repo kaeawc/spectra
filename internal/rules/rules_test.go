@@ -3,7 +3,9 @@ package rules
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -119,6 +121,27 @@ func TestJVMHeapVsSystemNoFire(t *testing.T) {
 	}
 }
 
+// IDE-family JVMs are tagged large_heap_expected — the rule still fires but
+// at medium severity to communicate "noted, not alarming."
+func TestJVMHeapVsSystemDemotedForIDE(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2222,
+		MainClass: "com.intellij.idea.Main",
+		VMArgs:    "-Xmx12g",
+	}}
+	findings := ruleJVMHeapVsSystemRAM().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Errorf("severity = %q, want medium for IDE", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "expected for this app") {
+		t.Errorf("message should be recalibrated, got %q", findings[0].Message)
+	}
+}
+
 // --- jvm-gc-pressure ---
 
 func TestJVMGCPressureFiresForOldGenOccupancy(t *testing.T) {
@@ -156,6 +179,131 @@ func TestJVMGCPressureNoFire(t *testing.T) {
 	}
 	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
 		t.Fatalf("expected no GC pressure findings, got %v", findings)
+	}
+}
+
+// Regression: JetBrains Toolbox sits at >90% old-gen by design via
+// -XX:MaxHeapFreeRatio=10. The old surface-level rule fired on every
+// snapshot; the composed rule must suppress it.
+func TestJVMGCPressureSuppressedForTightHeapByDesign(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       1127,
+		MainClass: "JetBrains Toolbox",
+		VMArgs:    "-Xmx190m -XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=10",
+		GC:        &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("tight-heap-by-design should suppress old-gen finding, got %v", findings)
+	}
+}
+
+// Companion: same heap occupancy WITHOUT the tight-heap flags must still fire.
+func TestJVMGCPressureFiresWhenNotTightByDesign(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2000,
+		MainClass: "real.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 1 {
+		t.Fatalf("expected 1 finding without tight-heap config, got %d: %v", len(findings), findings)
+	}
+}
+
+// Trend gating: when history shows a flat-but-high old gen, suppress.
+// This is the steady-state-at-working-size case (e.g. a JVM operating at
+// its real working set, not actually leaking).
+func TestJVMGCPressureSuppressedByFlatTrend(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2001,
+		MainClass: "steady.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		s.JVMHistory = append(s.JVMHistory, snapshot.JVMSample{
+			PID:       2001,
+			At:        now.Add(time.Duration(i-5) * time.Minute),
+			OldGenPct: 94 + float64(i)*0.2, // 94 -> 94.8, well below MinOldGenRiseDelta
+		})
+	}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("flat trend should suppress finding, got %v", findings)
+	}
+}
+
+// FullGCBurst branch is also suppressed when the suppressors apply.
+// 166 full GCs over a 5-day uptime is normal for SerialGC with a low
+// MaxHeapFreeRatio (Toolbox's actual configuration in the wild).
+func TestJVMGCPressureFullGCBurstSuppressedForTightHeap(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:      1127,
+		JavaHome: "/Applications/JetBrains Toolbox.app/Contents/jre/Contents/Home",
+		VMArgs:   "-Xmx190m -XX:+UseSerialGC -XX:MaxHeapFreeRatio=10",
+		GC:       &jvm.GCStats{OC: 1000, OU: 600, FGC: 166, FGCT: 10.1}, // burst threshold met
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("FGC burst should be suppressed for tight-heap JVMs, got %v", findings)
+	}
+}
+
+// Profile-based suppression: a Toolbox JVM identified by JavaHome — even
+// without the explicit -XX:MaxHeapFreeRatio flag in vmargs — must be
+// suppressed because the profile catalog tags it tight_heap_expected.
+func TestJVMGCPressureSuppressedByProfileTag(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       1127,
+		MainClass: "JetBrains Toolbox",
+		JavaHome:  "/Applications/JetBrains Toolbox.app/Contents/jre/Contents/Home",
+		// no -XX:MaxHeapFreeRatio in args
+		VMArgs: "-Xmx190m -XX:+UseSerialGC",
+		GC:     &jvm.GCStats{OC: 67648, OU: 64650},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("toolbox profile should suppress finding via tag, got %v", findings)
+	}
+}
+
+// Profile-based suppression for Gradle daemon (matched by main class).
+func TestJVMGCPressureSuppressedForGradleDaemon(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       9001,
+		MainClass: "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+		VMArgs:    "-Xmx512m",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("gradle daemon should be suppressed via profile, got %v", findings)
+	}
+}
+
+// Trend gating: when history shows a rising old gen, fire even if the level
+// rule alone would have fired (this is the leak-suspect case).
+func TestJVMGCPressureFiresOnRisingTrend(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       2002,
+		MainClass: "leaky.App",
+		VMArgs:    "-Xmx2g -XX:+UseG1GC",
+		GC:        &jvm.GCStats{OC: 1000, OU: 950},
+	}}
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		s.JVMHistory = append(s.JVMHistory, snapshot.JVMSample{
+			PID:       2002,
+			At:        now.Add(time.Duration(i-5) * time.Minute),
+			OldGenPct: 70 + float64(i)*6, // 70 -> 94, clearly rising
+		})
+	}
+	if findings := ruleJVMGCPressure().MatchFn(s); len(findings) != 1 {
+		t.Fatalf("rising trend should fire, got %d findings: %v", len(findings), findings)
 	}
 }
 

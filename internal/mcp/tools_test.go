@@ -3,14 +3,79 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 )
+
+func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	disabled := false
+	calls := 0
+	res, ok := s.withAgentAttached(jvmParams{PID: 4321, AutoAttach: &disabled}, func() error {
+		calls++
+		return &jvm.NotAttachedError{PID: 4321}
+	})
+	if ok {
+		t.Fatal("expected withAgentAttached to report failure")
+	}
+	if calls != 1 {
+		t.Fatalf("expected one op call, got %d", calls)
+	}
+	if !res.IsError || len(res.Content) == 0 {
+		t.Fatalf("expected structured error result, got %+v", res)
+	}
+	var payload struct {
+		Error       string `json:"error"`
+		PID         int    `json:"pid"`
+		Message     string `json:"message"`
+		Remediation struct {
+			Tool      string `json:"tool"`
+			Operation string `json:"operation"`
+			PID       int    `json:"pid"`
+		} `json:"remediation"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, res.Content[0].Text)
+	}
+	if payload.Error != "agent_not_attached" || payload.PID != 4321 {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if payload.Remediation.Tool != "jvm" || payload.Remediation.Operation != "attach" || payload.Remediation.PID != 4321 {
+		t.Fatalf("unexpected remediation: %+v", payload.Remediation)
+	}
+	if !strings.Contains(payload.Message, "auto_attach is disabled") {
+		t.Fatalf("expected disabled message, got %q", payload.Message)
+	}
+}
+
+func TestWithAgentAttachedPassesThroughOtherErrors(t *testing.T) {
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	disabled := false
+	res, ok := s.withAgentAttached(jvmParams{PID: 1, AutoAttach: &disabled}, func() error {
+		return errors.New("boom")
+	})
+	if ok {
+		t.Fatal("expected failure for non-NotAttached error")
+	}
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "boom") {
+		t.Fatalf("expected plain error, got %+v", res)
+	}
+}
+
+func TestWithAgentAttachedReturnsSuccess(t *testing.T) {
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	res, ok := s.withAgentAttached(jvmParams{PID: 1}, func() error { return nil })
+	if !ok {
+		t.Fatalf("expected success, got %+v", res)
+	}
+}
 
 func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 	got := map[string]bool{}

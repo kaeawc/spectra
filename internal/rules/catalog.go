@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -74,6 +73,11 @@ func ruleJVMEOLVersion() Rule {
 
 // ruleJVMHeapVsSystemRAM fires when a running JVM's -Xmx setting allocates
 // more than 60% of system RAM, which can cause OS-level swap pressure.
+//
+// When the JVM matches a profile tagged large_heap_expected (IntelliJ-family
+// IDEs), the finding is demoted from high to medium: the swap-pressure risk
+// is real but the user opted in by configuring the IDE's vmoptions. We
+// recalibrate severity rather than suppress so the signal is still visible.
 func ruleJVMHeapVsSystemRAM() Rule {
 	return Rule{
 		ID:       "jvm-heap-vs-system",
@@ -85,6 +89,7 @@ func ruleJVMHeapVsSystemRAM() Rule {
 				return nil
 			}
 			ramMBInt := int64(ramMB)
+			profiles := BuiltinProfiles()
 			var findings []Finding
 			for _, j := range s.JVMs {
 				if j.VMArgs == "" {
@@ -95,15 +100,22 @@ func ruleJVMHeapVsSystemRAM() Rule {
 					continue
 				}
 				pct := xmxMB * 100 / ramMBInt
-				if pct > 60 {
-					findings = append(findings, Finding{
-						RuleID:   "jvm-heap-vs-system",
-						Severity: SeverityHigh,
-						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
-						Message:  fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMBInt),
-						Fix:      "Reduce -Xmx, or if this is intentional ensure sufficient swap headroom.",
-					})
+				if pct <= 60 {
+					continue
 				}
+				severity := SeverityHigh
+				message := fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). Swap thrashing likely under GC pressure.", xmxMB, pct, ramMBInt)
+				if HasTag(MatchProfile(j, profiles), TagLargeHeapExpected) {
+					severity = SeverityMedium
+					message = fmt.Sprintf("-Xmx%dMB is %d%% of system RAM (%dMB). High but expected for this app; ensure swap headroom.", xmxMB, pct, ramMBInt)
+				}
+				findings = append(findings, Finding{
+					RuleID:   "jvm-heap-vs-system",
+					Severity: severity,
+					Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+					Message:  message,
+					Fix:      "Reduce -Xmx, or if this is intentional ensure sufficient swap headroom.",
+				})
 			}
 			return findings
 		},
@@ -112,28 +124,55 @@ func ruleJVMHeapVsSystemRAM() Rule {
 
 // ruleJVMGCPressure fires when a one-shot jstat snapshot suggests the JVM is
 // under memory pressure: old generation is nearly full or full GC has already
-// consumed meaningful wall time.
+// consumed meaningful wall time. The rule consults three orthogonal signals
+// before firing on level:
+//
+//  1. VM args — -XX:MaxHeapFreeRatio low ("tight by design").
+//  2. App profile — known apps tagged tight_heap_expected (Toolbox, Gradle
+//     daemon) where near-full old-gen is the operating point.
+//  3. Trend history — when ≥3 samples exist, require a rising slope.
+//
+// Each signal is a sufficient suppressor; the level finding fires only when
+// none of them explain the high occupancy.
 func ruleJVMGCPressure() Rule {
 	return Rule{
 		ID:       "jvm-gc-pressure",
 		Severity: SeverityMedium,
 		MatchFn: func(s snapshot.Snapshot) []Finding {
+			profiles := BuiltinProfiles()
 			var findings []Finding
 			for _, j := range s.JVMs {
 				if j.GC == nil {
 					continue
 				}
-				if pct := oldGenUsedPct(j.GC); pct >= 90 {
+				args := FactsFor(j)
+				profile := MatchProfile(j, profiles)
+				levelFires := OldGenHigh(j) &&
+					!TightHeapByDesign(args) &&
+					!HasTag(profile, TagTightHeapExpected)
+				if levelFires {
+					if HasTrendFor(s.JVMHistory, j.PID) && !RisingOldGenFor(s.JVMHistory, j.PID) {
+						// We have enough history to say this is steady-state, not pressure.
+						levelFires = false
+					}
+				}
+				if levelFires {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,
 						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
-						Message:  fmt.Sprintf("Old generation is %.0f%% full; allocation pressure may trigger frequent full GC.", pct),
+						Message:  fmt.Sprintf("Old generation is %.0f%% full; allocation pressure may trigger frequent full GC.", OldGenUsedPct(j)),
 						Fix:      "Inspect heap histogram/JFR allocation events and reduce live-set size or adjust heap sizing.",
 					})
 					continue
 				}
-				if j.GC.FGC >= 5 && j.GC.FGCT >= 1 {
+				// Cumulative full-GC time can look high simply because the JVM is
+				// configured to GC frequently (Serial + low MaxHeapFreeRatio is the
+				// canonical pattern). Apply the same suppressors before firing.
+				burstFires := FullGCBurst(j) &&
+					!TightHeapByDesign(args) &&
+					!HasTag(profile, TagTightHeapExpected)
+				if burstFires {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-gc-pressure",
 						Severity: SeverityMedium,
@@ -146,13 +185,6 @@ func ruleJVMGCPressure() Rule {
 			return findings
 		},
 	}
-}
-
-func oldGenUsedPct(stats *jvm.GCStats) float64 {
-	if stats == nil || stats.OC <= 0 {
-		return 0
-	}
-	return stats.OU * 100 / stats.OC
 }
 
 // ruleJDKMajorVersionDrift fires when more than one installed JDK shares

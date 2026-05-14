@@ -46,6 +46,11 @@ type Snapshot struct {
 
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
+
+	// JVMHistory is recent per-PID JVM samples (oldest first) populated by
+	// callers that have access to a snapshot store. Optional: rules that
+	// don't see history fall back to point-in-time checks.
+	JVMHistory JVMHistory `json:"jvm_history,omitempty"`
 }
 
 // Options configure a snapshot Build.
@@ -129,6 +134,17 @@ type Options struct {
 	// DetectWriter optionally writes detect-cache misses asynchronously.
 	// DetectStore must also be set; nil writes synchronously.
 	DetectWriter *cache.AsyncWriter
+
+	// ToolchainCache is a TTL cache for the toolchain.Toolchains JSON.
+	// Toolchains rarely change within a session; a 5-minute TTL is enough
+	// to amortize repeated rules invocations.
+	ToolchainCache *cache.TTLStore
+
+	// StorageCache is a TTL cache for storagestate.State JSON. Storage walks
+	// can be slow (~Library on a developer machine is large); a 30-second
+	// TTL keeps results meaningfully fresh while collapsing close-together
+	// invocations.
+	StorageCache *cache.TTLStore
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -173,7 +189,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 	go func() {
 		defer wg.Done()
-		s.Toolchains = toolchain.Collect(ctx, opts.ToolchainOpts)
+		s.Toolchains = collectToolchainCached(ctx, opts.ToolchainOpts, opts.ToolchainCache)
 	}()
 	go func() {
 		defer wg.Done()
@@ -190,7 +206,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipStorage {
 		go func() {
 			defer wg.Done()
-			s.Storage = storagestate.Collect(opts.StorageOpts)
+			s.Storage = collectStorageCached(opts.StorageOpts, opts.StorageCache)
 		}()
 	}
 

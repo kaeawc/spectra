@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/idgen"
+	"github.com/kaeawc/spectra/internal/snapshot"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
@@ -100,12 +101,42 @@ func (s *DB) applyPragmas() error {
 // migrate creates tables that don't yet exist. Idempotent.
 // Also adds new columns to existing tables when the schema evolves.
 func (s *DB) migrate() error {
+	// jvm_samples shipped briefly with second-resolution at_unix. Drop the
+	// old shape so the new nanosecond schema applies — no real users yet.
+	if hasJVMSamplesAtUnix(s.db) {
+		if _, err := s.db.Exec(`DROP TABLE IF EXISTS jvm_samples`); err != nil {
+			return err
+		}
+	}
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
 	// Add snapshot_json column if this is an existing DB without it.
 	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN snapshot_json TEXT`)
 	return nil
+}
+
+// hasJVMSamplesAtUnix reports whether jvm_samples exists with the legacy
+// at_unix column. Used only by migrate() to decide whether to recreate it.
+func hasJVMSamplesAtUnix(db *sql.DB) bool {
+	rows, err := db.Query(`PRAGMA table_info(jvm_samples)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false
+		}
+		if name == "at_unix" {
+			return true
+		}
+	}
+	return false
 }
 
 const schema = `
@@ -209,6 +240,18 @@ CREATE TABLE IF NOT EXISTS process_metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_process_metrics_pid ON process_metrics(pid, minute_at DESC);
+
+CREATE TABLE IF NOT EXISTS jvm_samples (
+    pid          INTEGER NOT NULL,
+    at_nano      INTEGER NOT NULL,
+    old_gen_pct  REAL NOT NULL DEFAULT 0,
+    fgc          INTEGER NOT NULL DEFAULT 0,
+    fgct         REAL NOT NULL DEFAULT 0,
+    heap_mb      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pid, at_nano)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_nano DESC);
 
 CREATE TABLE IF NOT EXISTS issues (
     id                     TEXT PRIMARY KEY,
@@ -787,6 +830,124 @@ type ProcessMetricRow struct {
 	AvgCPUPct   float64
 	MaxCPUPct   float64
 	SampleCount int
+}
+
+// SaveJVMSamples upserts compact per-PID JVM samples used by trend-aware
+// rules. Timestamps are stored as nanoseconds so two parallel diagnose
+// calls within the same wall-clock second produce distinct rows; the
+// upsert clause keeps reruns at literally the same instant idempotent.
+func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, sm := range samples {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO jvm_samples (pid, at_nano, old_gen_pct, fgc, fgct, heap_mb)
+			VALUES (?,?,?,?,?,?)
+			ON CONFLICT(pid, at_nano) DO UPDATE SET
+			    old_gen_pct=excluded.old_gen_pct,
+			    fgc=excluded.fgc,
+			    fgct=excluded.fgct,
+			    heap_mb=excluded.heap_mb`,
+			sm.PID, sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetRecentJVMSamples returns up to limit JVM samples for pid, ordered
+// oldest-first so callers can hand the slice straight to trend predicates.
+// Pass limit=0 for the default cap (60 samples).
+func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapshot.JVMSample, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pid, at_nano, old_gen_pct, fgc, fgct, heap_mb
+		FROM jvm_samples WHERE pid=?
+		ORDER BY at_nano DESC LIMIT ?`, pid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []snapshot.JVMSample
+	for rows.Next() {
+		var sm snapshot.JVMSample
+		var atNano int64
+		if err := rows.Scan(&sm.PID, &atNano, &sm.OldGenPct, &sm.FGC, &sm.FGCT, &sm.HeapMB); err != nil {
+			return nil, err
+		}
+		sm.At = time.Unix(0, atNano).UTC()
+		out = append(out, sm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reverse to oldest-first.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// AttachJVMHistory persists the current snapshot's JVMs as samples and
+// loads recent samples per PID into snap.JVMHistory so trend-aware rules
+// see a multi-sample window. Errors are accumulated but never abort the
+// caller — history is an enhancement, not a contract; rules degrade to
+// point-in-time checks when nothing is loaded.
+//
+// The snapshot's TakenAt is used as the sample timestamp when set, so
+// historical snapshots replayed against the store don't get a time.Now()
+// stamp that would corrupt trend ordering.
+func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
+	if snap == nil || len(snap.JVMs) == 0 {
+		return
+	}
+	now := snap.TakenAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
+	for _, j := range snap.JVMs {
+		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
+			current = append(current, sm)
+		}
+	}
+	_ = s.SaveJVMSamples(ctx, current)
+
+	var history snapshot.JVMHistory
+	for _, j := range snap.JVMs {
+		samples, err := s.GetRecentJVMSamples(ctx, j.PID, 0)
+		if err != nil {
+			continue
+		}
+		history = append(history, samples...)
+	}
+	snap.JVMHistory = history
+}
+
+// PruneJVMSamples deletes jvm_samples rows older than keepDays. Returns the
+// number of rows removed. keepDays <= 0 keeps the default of 7 days.
+func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
+	if keepDays <= 0 {
+		keepDays = 7
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	res, err := s.db.ExecContext(ctx, `DELETE FROM jvm_samples WHERE at_nano < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // PruneSnapshots deletes live snapshots beyond the retention limit for each

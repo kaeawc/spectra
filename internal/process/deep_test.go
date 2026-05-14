@@ -68,6 +68,57 @@ func TestParseLSOFDeepOutboundConnections(t *testing.T) {
 	}
 }
 
+func TestParseLSOFDeepLogFiles(t *testing.T) {
+	// fixture has Slack writing to /tmp/slack.log on FDs 1w and 2w (duplicates).
+	// bash has only /dev/tty (CHR, not REG, not log-shaped).
+	procs := []Info{
+		{PID: 412, Command: "Slack"},
+		{PID: 999, Command: "bash"},
+	}
+	parseLSOFDeep(procs, lsofDeepFixture)
+
+	if len(procs[0].LogFiles) != 1 || procs[0].LogFiles[0] != "/tmp/slack.log" {
+		t.Errorf("Slack LogFiles = %v, want [/tmp/slack.log]", procs[0].LogFiles)
+	}
+	if len(procs[1].LogFiles) != 0 {
+		t.Errorf("bash LogFiles = %v, want []", procs[1].LogFiles)
+	}
+}
+
+func TestIsLogShapedPath(t *testing.T) {
+	cases := map[string]bool{
+		"/tmp/slack.log":                                      true,
+		"/Users/foo/Library/Logs/Slack/main.log":              true,
+		"/Users/foo/Library/Application Support/Slack/Logs/x": true,
+		"/var/log/system.log":                                 true,
+		"/Users/foo/Documents/Catalogs/index":                 false, // "Catalogs/", not "Logs/"
+		"/Users/foo/work/Dialogs/notes":                       false, // "Dialogs/", not "Logs/"
+		"/Applications/Slack.app/Contents/MacOS/Slack":        false,
+		"": false,
+	}
+	for in, want := range cases {
+		if got := isLogShapedPath(in); got != want {
+			t.Errorf("isLogShapedPath(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestFdIsWritable(t *testing.T) {
+	cases := map[string]bool{
+		"1w":  true,
+		"12u": true,
+		"9r":  false,
+		"":    false,
+		"cwd": false,
+		"txt": false,
+	}
+	for in, want := range cases {
+		if got := fdIsWritable(in); got != want {
+			t.Errorf("fdIsWritable(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestParseLSOFDeepUnknownPIDSkipped(t *testing.T) {
 	// PID 999 not in procs — should not panic or produce errors.
 	procs := []Info{{PID: 412, Command: "Slack"}}

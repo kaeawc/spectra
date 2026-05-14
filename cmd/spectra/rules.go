@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -45,10 +46,28 @@ func runRules(args []string) int {
 		}
 		snap = *s
 	} else {
-		snap = snapshot.Build(context.Background(), snapshot.Options{
+		opts := snapshot.Options{
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
-		})
+		}
+		// Reuse the persistent on-disk caches so per-app inspection
+		// (detect: codesign + plist + framework scan), toolchain enumeration,
+		// and the ~/Library walk in storage state are amortized across CLI
+		// calls. Cache writes go through async writers so the main collection
+		// loop never blocks on disk I/O.
+		if cacheStores != nil {
+			detectWriter := cache.NewAsyncWriter(cacheStores.Detect, 64, 2)
+			toolchainWriter := cache.NewAsyncWriter(cacheStores.Toolchain, 8, 1)
+			storageWriter := cache.NewAsyncWriter(cacheStores.Storage, 8, 1)
+			defer detectWriter.Close()
+			defer toolchainWriter.Close()
+			defer storageWriter.Close()
+			opts.DetectStore = cacheStores.Detect
+			opts.DetectWriter = detectWriter
+			opts.ToolchainCache = cache.NewTTLStore(cacheStores.Toolchain, toolchainWriter)
+			opts.StorageCache = cache.NewTTLStore(cacheStores.Storage, storageWriter)
+		}
+		snap = snapshot.Build(context.Background(), opts)
 	}
 
 	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
@@ -59,6 +78,7 @@ func runRules(args []string) int {
 		fmt.Fprintf(os.Stderr, "rules: %v\n", err)
 		return 1
 	}
+	attachCLIHistory(&snap)
 	findings := rules.Evaluate(snap, catalog)
 
 	if *asJSON {
@@ -222,6 +242,25 @@ func resolveRulesConfigPath(configPath string) (path string, explicit bool) {
 		return configPath, true
 	}
 	return "spectra.yml", false
+}
+
+// attachCLIHistory opens the local samples store, persists the current
+// JVM samples and loads recent history so trend-aware rules engage when
+// `spectra rules` is invoked. Failure is silent: history is an enhancement.
+func attachCLIHistory(snap *snapshot.Snapshot) {
+	if len(snap.JVMs) == 0 {
+		return
+	}
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		return
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	db.AttachJVMHistory(context.Background(), snap)
 }
 
 func loadStoredSnapshot(id string) (*snapshot.Snapshot, error) {

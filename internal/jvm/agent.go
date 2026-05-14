@@ -21,6 +21,17 @@ const (
 	agentSocketProperty = "spectra.agent.socket"
 )
 
+// NotAttachedError is returned when an agent-required call is made against a
+// JVM that has not yet had the spectra agent attached. Callers (notably the
+// MCP server) can detect it via errors.As and recover by attaching.
+type NotAttachedError struct {
+	PID int
+}
+
+func (e *NotAttachedError) Error() string {
+	return fmt.Sprintf("spectra agent is not attached to PID %d; run `spectra jvm attach %d` first", e.PID, e.PID)
+}
+
 type AgentStatus struct {
 	PID       int    `json:"pid"`
 	Attached  bool   `json:"attached"`
@@ -235,7 +246,7 @@ func (t HTTPAgentTransport) PostJSON(status AgentStatus, path string, body any, 
 
 func (t HTTPAgentTransport) doJSON(method string, status AgentStatus, path string, body io.Reader, dest any) error {
 	if !status.Attached {
-		return fmt.Errorf("spectra agent is not attached to PID %d; run `spectra jvm attach %d` first", status.PID, status.PID)
+		return &NotAttachedError{PID: status.PID}
 	}
 	req, err := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1:%d%s", status.Port, path), body)
 	if err != nil {
@@ -274,7 +285,7 @@ func (t UnixAgentTransport) PostJSON(status AgentStatus, path string, body any, 
 
 func (t UnixAgentTransport) doJSON(method string, status AgentStatus, path string, body io.Reader, dest any) error {
 	if !status.Attached {
-		return fmt.Errorf("spectra agent is not attached to PID %d; run `spectra jvm attach %d` first", status.PID, status.PID)
+		return &NotAttachedError{PID: status.PID}
 	}
 	if status.Socket == "" {
 		return fmt.Errorf("spectra agent did not publish a Unix socket for PID %d", status.PID)
