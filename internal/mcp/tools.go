@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ func triageToolDef() ToolDefinition {
 			"pid":         integerProp("PID."),
 			"bundle_id":   stringProp("Bundle ID."),
 			"symptom":     stringProp("Problem to investigate."),
+			"scope":       enumProp([]string{"target", "global"}, "target"),
 			"network":     boolProp("Scan app URLs."),
 			"include_raw": boolProp("Return raw data."),
 		}, nil),
@@ -211,6 +213,7 @@ type triageParams struct {
 	PID        int    `json:"pid"`
 	BundleID   string `json:"bundle_id"`
 	Symptom    string `json:"symptom"`
+	Scope      string `json:"scope"`
 	Network    bool   `json:"network"`
 	IncludeRaw bool   `json:"include_raw"`
 }
@@ -223,35 +226,54 @@ func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]i
 		evidence = append(evidence, "symptom: "+p.Symptom)
 	}
 	hasTarget := p.AppPath != "" || p.PID > 0 || p.BundleID != ""
+	var pidProc *process.Info
 	if p.AppPath != "" {
 		evidence, next = s.collectTriageApp(p, evidence, next, rawOut)
 	}
 	if p.PID > 0 {
-		evidence, next = s.collectTriagePID(p.PID, evidence, next, rawOut)
+		evidence, next, pidProc = s.collectTriagePID(p.PID, evidence, next, rawOut)
 	}
 	if p.BundleID != "" {
 		evidence = s.collectTriageBundle(p, evidence, rawOut)
 	}
-	// When triage has no target (pure symptom or empty call), the global
-	// rules pass is the only way to surface anything actionable. With a
-	// target, skip the full snapshot cost — the per-target collectors above
-	// already gathered what was asked for, and global findings would be
-	// noise relative to the explicit target. Direct callers to diagnose
-	// when they want host-wide context.
-	if !hasTarget {
-		findings, err := s.evaluateLiveRules("")
-		if err == nil && len(findings) > 0 {
-			evidence = append(evidence, summarizeFindings(findings, 5)...)
-			rawOut["findings"] = findings
-			next = append(next, "Use diagnose include_raw=true for the full rules output.")
-		}
-	} else {
-		next = append(next, "Use diagnose for host-wide rule findings; this triage was scoped to your target.")
-	}
+	evidence, next = s.appendTriageFindings(p, hasTarget, pidProc, evidence, next, rawOut)
 	if len(next) == 0 {
 		next = append(next, "Use snapshot operation=create store=true to preserve current state for later diffing.")
 	}
 	return evidence, next, rawOut
+}
+
+func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *process.Info, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+	scope := strings.ToLower(strings.TrimSpace(p.Scope))
+	if scope == "" {
+		scope = "global"
+		if hasTarget {
+			scope = "target"
+		}
+	}
+	findings, err := s.evaluateLiveRules("")
+	if err != nil {
+		return evidence, next
+	}
+	if !hasTarget || scope == "global" {
+		if len(findings) > 0 {
+			evidence = append(evidence, summarizeFindings(findings, 5)...)
+			rawOut["findings"] = findings
+			next = append(next, "Use diagnose include_raw=true for the full rules output.")
+		}
+		return evidence, next
+	}
+	target := triageTarget(p, pidProc, rawOut)
+	matched := filterFindingsForTarget(findings, target)
+	rawOut["target"] = target
+	if len(matched) > 0 {
+		evidence = append(evidence, summarizeFindings(matched, 5)...)
+		rawOut["findings"] = matched
+	} else {
+		evidence = append(evidence, fmt.Sprintf("no rules matched for %s", target.describe()))
+	}
+	next = append(next, "Use diagnose for host-wide rule findings; this triage was scoped to your target.")
+	return evidence, next
 }
 
 func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
@@ -277,11 +299,14 @@ func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOu
 	return evidence, next
 }
 
-func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[string]interface{}) ([]string, []string, *process.Info) {
 	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{Deep: true})
+	var matched *process.Info
 	if proc, ok := findProcess(procs, pid); ok {
 		evidence = append(evidence, summarizeProcesses([]process.Info{proc}, 1)...)
 		rawOut["process"] = proc
+		p := proc
+		matched = &p
 	} else {
 		evidence = append(evidence, fmt.Sprintf("pid %d not found in process list", pid))
 	}
@@ -290,7 +315,7 @@ func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[s
 		rawOut["jvm"] = info
 		next = append(next, "Use jvm operation=explain for GC/thread/memory interpretation.")
 	}
-	return evidence, next
+	return evidence, next, matched
 }
 
 func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut map[string]interface{}) []string {
@@ -303,6 +328,79 @@ func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut m
 		}
 	}
 	return evidence
+}
+
+// triageTargetInfo names the resolved identifiers a triage call is scoped to.
+// Subjects on findings are matched against the AppNames set (app-rule
+// subjects use the .app display name) or the PID set (process/JVM-rule
+// subjects embed "PID <n>").
+type triageTargetInfo struct {
+	AppNames []string `json:"app_names,omitempty"`
+	PID      int      `json:"pid,omitempty"`
+	BundleID string   `json:"bundle_id,omitempty"`
+}
+
+func (t triageTargetInfo) describe() string {
+	parts := make([]string, 0, 3)
+	if t.PID > 0 {
+		parts = append(parts, fmt.Sprintf("pid %d", t.PID))
+	}
+	parts = append(parts, t.AppNames...)
+	if t.BundleID != "" {
+		parts = append(parts, t.BundleID)
+	}
+	if len(parts) == 0 {
+		return "target"
+	}
+	return strings.Join(parts, " / ")
+}
+
+func triageTarget(p triageParams, pidProc *process.Info, rawOut map[string]interface{}) triageTargetInfo {
+	t := triageTargetInfo{PID: p.PID, BundleID: p.BundleID}
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		t.AppNames = append(t.AppNames, name)
+	}
+	if p.AppPath != "" {
+		add(triageAppNameFromPath(p.AppPath))
+	}
+	if pidProc != nil && pidProc.AppPath != "" {
+		add(triageAppNameFromPath(pidProc.AppPath))
+	}
+	if app, ok := rawOut["matched_app"].(detect.Result); ok && app.Path != "" {
+		add(triageAppNameFromPath(app.Path))
+	}
+	return t
+}
+
+func triageAppNameFromPath(appPath string) string {
+	return strings.TrimSuffix(filepath.Base(appPath), ".app")
+}
+
+func filterFindingsForTarget(findings []rules.Finding, t triageTargetInfo) []rules.Finding {
+	names := map[string]bool{}
+	for _, n := range t.AppNames {
+		names[n] = true
+	}
+	pidToken := ""
+	if t.PID > 0 {
+		pidToken = fmt.Sprintf("PID %d", t.PID)
+	}
+	var out []rules.Finding
+	for _, f := range findings {
+		if names[f.Subject] {
+			out = append(out, f)
+			continue
+		}
+		if pidToken != "" && strings.HasPrefix(f.Subject, pidToken) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
