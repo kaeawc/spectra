@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
 func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
@@ -190,6 +191,96 @@ func TestInspectAppDeepUsesInjectedCollectors(t *testing.T) {
 			t.Fatalf("inspect_app deep output missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestTriageScopedToTargetFiltersFindings(t *testing.T) {
+	slackPath := "/Applications/Slack.app"
+	apps := []detect.Result{
+		{Path: slackPath, BundleID: "com.tinyspeck.slackmacgap", TeamID: "BQR82RBBHL", HardenedRuntime: true, GatekeeperStatus: "accepted"},
+		{Path: "/Applications/Arbigent.app", BundleID: "com.arbigent", TeamID: "", GatekeeperStatus: "rejected"},
+		{Path: "/Applications/Xcode-26.3.0.app", BundleID: "com.apple.dt.Xcode", TeamID: "APPLECORP", HardenedRuntime: false},
+	}
+	procs := []process.Info{
+		{PID: 96454, PPID: 1, Command: "Slack", AppPath: slackPath, RSSKiB: 4096},
+	}
+
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	s.SetCollectors(Collectors{
+		Processes: &fakeProcessCollector{procs: procs},
+		Snapshots: fakeSnapshotCollector{snap: snapshot.Snapshot{Apps: apps}},
+		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
+	})
+
+	result := s.toolTriage(json.RawMessage(`{"pid":96454,"include_raw":true}`))
+	if result.IsError {
+		t.Fatalf("triage returned error: %+v", result.Content)
+	}
+	text := result.Content[0].Text
+	for _, bad := range []string{"Arbigent", "Xcode-26.3.0"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("triage pid=96454 leaked unrelated finding mentioning %q:\n%s", bad, text)
+		}
+	}
+	if !strings.Contains(text, "no rules matched") {
+		t.Fatalf("expected explicit \"no rules matched\" message when target has no findings:\n%s", text)
+	}
+}
+
+func TestTriageScopedKeepsMatchingFindings(t *testing.T) {
+	slackPath := "/Applications/Slack.app"
+	apps := []detect.Result{
+		{Path: slackPath, BundleID: "com.tinyspeck.slackmacgap", TeamID: ""},
+		{Path: "/Applications/Arbigent.app", BundleID: "com.arbigent", TeamID: ""},
+	}
+
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	s.SetCollectors(Collectors{
+		Snapshots: fakeSnapshotCollector{snap: snapshot.Snapshot{Apps: apps}},
+		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
+	})
+
+	result := s.toolTriage(json.RawMessage(`{"app_path":"/Applications/Slack.app","include_raw":true}`))
+	if result.IsError {
+		t.Fatalf("triage returned error: %+v", result.Content)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "Slack") {
+		t.Fatalf("expected Slack finding to be present:\n%s", text)
+	}
+	if strings.Contains(text, "Arbigent") {
+		t.Fatalf("Arbigent must not appear in target-scoped triage:\n%s", text)
+	}
+}
+
+func TestTriageScopeGlobalRestoresHostWideFindings(t *testing.T) {
+	apps := []detect.Result{
+		{Path: "/Applications/Slack.app", BundleID: "com.tinyspeck.slackmacgap", TeamID: "BQR82RBBHL", HardenedRuntime: true, GatekeeperStatus: "accepted"},
+		{Path: "/Applications/Arbigent.app", BundleID: "com.arbigent", TeamID: ""},
+	}
+	procs := []process.Info{{PID: 1, Command: "Slack", AppPath: "/Applications/Slack.app"}}
+
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
+	s.SetCollectors(Collectors{
+		Processes: &fakeProcessCollector{procs: procs},
+		Snapshots: fakeSnapshotCollector{snap: snapshot.Snapshot{Apps: apps}},
+		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
+	})
+
+	result := s.toolTriage(json.RawMessage(`{"pid":1,"scope":"global","include_raw":true}`))
+	if result.IsError {
+		t.Fatalf("triage returned error: %+v", result.Content)
+	}
+	if !strings.Contains(result.Content[0].Text, "Arbigent") {
+		t.Fatalf("scope=global must include host-wide findings; got:\n%s", result.Content[0].Text)
+	}
+}
+
+type fakeSnapshotCollector struct {
+	snap snapshot.Snapshot
+}
+
+func (f fakeSnapshotCollector) BuildSnapshot(_ context.Context, _ snapshot.Options) snapshot.Snapshot {
+	return f.snap
 }
 
 type fakeAppInspector struct {
