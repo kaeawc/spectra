@@ -123,6 +123,36 @@ func TestRemoteHealthDefaultsToTCP(t *testing.T) {
 	}
 }
 
+func TestJVMToolSchemaExposesMBeanProperties(t *testing.T) {
+	var jvm ToolDefinition
+	for _, def := range toolDefinitions() {
+		if def.Name == "jvm" {
+			jvm = def
+			break
+		}
+	}
+	if jvm.Name == "" {
+		t.Fatal("jvm tool definition missing")
+	}
+	raw, err := json.Marshal(jvm.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(raw)
+	for _, want := range []string{
+		`"mbean_name"`,
+		`"attribute"`,
+		`"mbean_operation"`,
+		`"asprof_path"`,
+		`"agent"`,
+		`"samples"`,
+	} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("jvm input schema missing %s:\n%s", want, schema)
+		}
+	}
+}
+
 func TestInspectAppDeepUsesInjectedCollectors(t *testing.T) {
 	appPath := "/Applications/Codex.app"
 	apps := &fakeAppInspector{
