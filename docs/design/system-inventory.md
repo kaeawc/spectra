@@ -255,6 +255,15 @@ Source: `pmset -g assertions`, `pmset -g batt`, `pmset -g therm`,
 [../inspection/power-thermal.md](../inspection/power-thermal.md) and
 [../inspection/live-data-sources.md](../inspection/live-data-sources.md).
 
+### SoC power gauge (Apple Silicon)
+
+`spectra power --joules` takes two IOReport "Energy Model" samples Δ apart
+and reports system-wide energy per subsystem (CPU P/E clusters, GPU, ANE,
+DRAM, package). The private `libIOReport.dylib` is loaded via `dlopen` so
+the binary stays linkable on Intel and degrades to
+`ErrUnsupportedHardware` on hardware without the framework. No sudo
+required; the same counters back Activity Monitor's "Energy Used" column.
+
 ## EnvSnapshot
 
 Just the shell-environment bits relevant to runtime behavior:
