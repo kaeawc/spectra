@@ -390,3 +390,65 @@ func TestFSUsageStartStop(t *testing.T) {
 		t.Fatalf("stopped = %v, want true", stopResult["stopped"])
 	}
 }
+
+func TestPowermetricsAcceptsAllowlistedSamplers(t *testing.T) {
+	d := NewDispatcher()
+	var gotArgs []string
+	RegisterAll(d, func(_ string, args ...string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return []byte(`<?xml version="1.0"?><plist><dict><key>tasks</key><array/></dict></plist>`), nil
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.powermetrics.sample","params":{"duration_ms":250,"samplers":["tasks","cpu_power","ane_power"]}}`)
+	resp := d.handle(501, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	wantSamplers := "tasks,cpu_power,ane_power"
+	foundSamplers := false
+	for i, a := range gotArgs {
+		if a == "--samplers" && i+1 < len(gotArgs) {
+			if gotArgs[i+1] != wantSamplers {
+				t.Errorf("samplers = %q, want %q", gotArgs[i+1], wantSamplers)
+			}
+			foundSamplers = true
+		}
+	}
+	if !foundSamplers {
+		t.Fatalf("--samplers not present in args: %v", gotArgs)
+	}
+}
+
+func TestPowermetricsRejectsUnknownSamplerFallsBackToDefault(t *testing.T) {
+	d := NewDispatcher()
+	var gotArgs []string
+	RegisterAll(d, func(_ string, args ...string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return []byte(""), nil
+	})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.powermetrics.sample","params":{"samplers":["tasks","rm -rf /"]}}`)
+	resp := d.handle(501, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	for i, a := range gotArgs {
+		if a == "--samplers" && i+1 < len(gotArgs) {
+			if gotArgs[i+1] != "cpu_power,gpu_power,network,disk" {
+				t.Errorf("samplers = %q, want default fallback", gotArgs[i+1])
+			}
+		}
+	}
+}
+
+func TestValidatePowermetricsSamplersDedupesAndRejects(t *testing.T) {
+	if got := validatePowermetricsSamplers([]string{"tasks", "tasks", "cpu_power"}); got != "tasks,cpu_power" {
+		t.Errorf("dedupe = %q, want tasks,cpu_power", got)
+	}
+	if got := validatePowermetricsSamplers([]string{"tasks", "bogus"}); got != "" {
+		t.Errorf("bogus sampler should produce empty fallback, got %q", got)
+	}
+	if got := validatePowermetricsSamplers(nil); got != "" {
+		t.Errorf("nil input = %q, want empty", got)
+	}
+}

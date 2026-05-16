@@ -4,12 +4,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/kaeawc/spectra/internal/bundleid"
 )
 
 // CmdRunner abstracts subprocess calls for testability.
 type CmdRunner func(name string, args ...string) ([]byte, error)
+
+// allowedPowermetricsSamplers is the strict allowlist of sampler names the
+// helper will pass to powermetrics. Untrusted callers may name any subset.
+var allowedPowermetricsSamplers = map[string]bool{
+	"tasks":      true,
+	"cpu_power":  true,
+	"gpu_power":  true,
+	"ane_power":  true,
+	"network":    true,
+	"disk":       true,
+	"interrupts": true,
+	"thermal":    true,
+}
+
+// validatePowermetricsSamplers returns the joined sampler string when every
+// element is on the allowlist. An empty list (or any unknown sampler) yields
+// the empty string so the caller falls back to the helper default.
+func validatePowermetricsSamplers(in []string) string {
+	if len(in) == 0 {
+		return ""
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if !allowedPowermetricsSamplers[s] {
+			return ""
+		}
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return strings.Join(out, ",")
+}
 
 // defaultRunner runs the real command.
 func defaultRunner(name string, args ...string) ([]byte, error) {
@@ -35,14 +71,19 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 
 	d.Register("helper.powermetrics.sample", func(_ uint32, params json.RawMessage) (any, error) {
 		var p struct {
-			DurationMS int `json:"duration_ms"`
+			DurationMS int      `json:"duration_ms"`
+			Samplers   []string `json:"samplers"`
 		}
 		_ = json.Unmarshal(params, &p)
 		if p.DurationMS <= 0 {
 			p.DurationMS = 500
 		}
+		samplers := validatePowermetricsSamplers(p.Samplers)
+		if samplers == "" {
+			samplers = "cpu_power,gpu_power,network,disk"
+		}
 		out, err := run("powermetrics",
-			"--samplers", "cpu_power,gpu_power,network,disk",
+			"--samplers", samplers,
 			"-n", "1",
 			"-i", fmt.Sprint(p.DurationMS),
 			"--format", "plist",

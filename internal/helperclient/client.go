@@ -115,6 +115,25 @@ func (c *Client) PowermetricsSample(durationMS int) (map[string]any, error) {
 	return m, json.Unmarshal(raw, &m)
 }
 
+// PowermetricsTasks requests a tasks-sampler powermetrics plist and returns
+// the raw plist bytes. Caller parses with sysinfo.ParseTasksPlist.
+func (c *Client) PowermetricsTasks(durationMS int) ([]byte, error) {
+	raw, err := c.call("helper.powermetrics.sample", map[string]any{
+		"duration_ms": durationMS,
+		"samplers":    []string{"tasks", "cpu_power", "gpu_power", "ane_power"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var m struct {
+		RawPlist string `json:"raw_plist"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("helperclient: parse powermetrics tasks: %w", err)
+	}
+	return []byte(m.RawPlist), nil
+}
+
 // TCCSystemQuery returns the TCC grants for bundleID from the system TCC.db.
 func (c *Client) TCCSystemQuery(bundleID string) (map[string]any, error) {
 	raw, err := c.call("helper.tcc.system.query", map[string]any{"bundle_id": bundleID})
