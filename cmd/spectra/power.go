@@ -2,30 +2,50 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
 
 func runPower(args []string) int {
-	return runPowerWithIO(args, os.Stdout, os.Stderr, func() sysinfo.PowerState {
-		return sysinfo.CollectPower(sysinfo.DefaultRunner)
-	})
+	return runPowerWithIO(args, os.Stdout, os.Stderr, defaultPowerDeps())
 }
 
-func runPowerWithIO(args []string, stdout, stderr io.Writer, collect func() sysinfo.PowerState) int {
+type powerDeps struct {
+	collect func() sysinfo.PowerState
+	sample  func(time.Duration) (sysinfo.SoCPower, error)
+}
+
+func defaultPowerDeps() powerDeps {
+	return powerDeps{
+		collect: func() sysinfo.PowerState {
+			return sysinfo.CollectPower(sysinfo.DefaultRunner)
+		},
+		sample: sysinfo.SampleSoCPower,
+	}
+}
+
+func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int {
 	fs := flag.NewFlagSet("spectra power", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	joules := fs.Bool("joules", false, "Sample SoC-wide energy via IOReport (Apple Silicon)")
+	interval := fs.Duration("interval", time.Second, "Sampling window for --joules")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	state := collect()
+	if *joules {
+		return runJoulesSample(stdout, stderr, *interval, *asJSON, deps.sample)
+	}
+
+	state := deps.collect()
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -36,6 +56,36 @@ func runPowerWithIO(args []string, stdout, stderr io.Writer, collect func() sysi
 
 	printPowerState(stdout, state)
 	return 0
+}
+
+func runJoulesSample(stdout, stderr io.Writer, interval time.Duration, asJSON bool, sample func(time.Duration) (sysinfo.SoCPower, error)) int {
+	p, err := sample(interval)
+	if err != nil {
+		if errors.Is(err, sysinfo.ErrUnsupportedHardware) {
+			fmt.Fprintln(stderr, "SoC power sampling is unavailable on this hardware (requires Apple Silicon on macOS 12+).")
+			return 3
+		}
+		fmt.Fprintf(stderr, "sample failed: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(p)
+		return 0
+	}
+	printSoCPower(stdout, p)
+	return 0
+}
+
+func printSoCPower(w io.Writer, p sysinfo.SoCPower) {
+	fmt.Fprintln(w, "=== SoC power (IOReport) ===")
+	fmt.Fprintf(w, "Package:   %.2f J over %s  (%.2f W)\n", p.PackageJoules, p.Interval, p.Watts())
+	fmt.Fprintf(w, "  CPU P:   %.2f J\n", p.CPUPJoules)
+	fmt.Fprintf(w, "  CPU E:   %.2f J\n", p.CPUEJoules)
+	fmt.Fprintf(w, "  GPU:     %.2f J\n", p.GPUJoules)
+	fmt.Fprintf(w, "  ANE:     %.2f J\n", p.ANEJoules)
+	fmt.Fprintf(w, "  DRAM:    %.2f J\n", p.DRAMJoules)
 }
 
 func printPowerState(w io.Writer, s sysinfo.PowerState) {
