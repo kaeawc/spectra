@@ -11,6 +11,7 @@ package sysinfo
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -50,7 +51,7 @@ func ReadRusage(pid int) (ProcRusage, error) {
 		if isPermissionErrno(err) {
 			return ProcRusage{}, fmt.Errorf("pid %d: %w", pid, ErrRusagePermission)
 		}
-		return ProcRusage{}, fmt.Errorf("proc_pid_rusage(%d): rc=%d err=%v", pid, int(rc), err)
+		return ProcRusage{}, fmt.Errorf("proc_pid_rusage(%d): rc=%d: %w", pid, int(rc), err)
 	}
 	return ProcRusage{
 		PID:              pid,
@@ -66,6 +67,9 @@ func ReadRusage(pid int) (ProcRusage, error) {
 }
 
 func isPermissionErrno(err error) bool {
-	errno, ok := err.(syscall.Errno)
-	return ok && (errno == syscall.EPERM || errno == syscall.EACCES)
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == syscall.EPERM || errno == syscall.EACCES
 }

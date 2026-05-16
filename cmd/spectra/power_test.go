@@ -236,10 +236,12 @@ func TestRunPowerTopHumanOutput(t *testing.T) {
 func TestRunPowerTopUnsupported(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	deps := powerDeps{
-		collect:      fakePowerState,
-		procs:        fakeProcs(map[int]string{1: "launchd"}),
-		sampleRusage: func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) { return nil, sysinfo.ErrRusageUnsupported },
-		clock:        time.Now,
+		collect: fakePowerState,
+		procs:   fakeProcs(map[int]string{1: "launchd"}),
+		sampleRusage: func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) {
+			return nil, sysinfo.ErrRusageUnsupported
+		},
+		clock: time.Now,
 	}
 	code := runPowerWithIO([]string{"--top", "5"}, &stdout, &stderr, deps)
 	if code != 3 {
