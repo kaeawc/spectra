@@ -2,13 +2,25 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
+
+func fakeProcs(items map[int]string) func(context.Context) []process.Info {
+	return func(context.Context) []process.Info {
+		out := make([]process.Info, 0, len(items))
+		for pid, cmd := range items {
+			out = append(out, process.Info{PID: pid, Command: cmd})
+		}
+		return out
+	}
+}
 
 func fakePowerDeps() powerDeps {
 	return powerDeps{
@@ -151,6 +163,90 @@ func TestRunPowerJoulesUnsupportedHardware(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unavailable") {
 		t.Fatalf("stderr = %q, want graceful unavailable message", stderr.String())
+	}
+}
+
+func TestRunPowerTopJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	deps := powerDeps{
+		collect: fakePowerState,
+		procs:   fakeProcs(map[int]string{101: "claude", 202: "WindowServer", 303: "claude-busy"}),
+		sampleRusage: func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
+			return []sysinfo.EnergyDelta{
+				{PID: 101, Interval: interval, BilledEnergyNJ: 200, InterruptWakeups: 5},
+				{PID: 303, Interval: interval, BilledEnergyNJ: 1_500_000, InterruptWakeups: 99},
+			}, nil
+		},
+		clock: func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+	}
+	code := runPowerWithIO([]string{"--top", "10", "--json", "--interval", "100ms"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	var got EnergyTopReport
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
+	if got.IntervalNS != int64(100*time.Millisecond) {
+		t.Fatalf("interval_ns = %d", got.IntervalNS)
+	}
+	if got.Skipped != 1 {
+		t.Fatalf("skipped = %d, want 1 (pid 202 was not sampled)", got.Skipped)
+	}
+	if len(got.Top) != 2 || got.Top[0].PID != 303 {
+		t.Fatalf("top order = %+v, want pid 303 first", got.Top)
+	}
+	if got.Top[0].BilledEnergyNJ != 1_500_000 {
+		t.Fatalf("raw nanojoules = %d, want 1_500_000", got.Top[0].BilledEnergyNJ)
+	}
+	if got.Top[0].Command != "claude-busy" {
+		t.Fatalf("command = %q, want claude-busy", got.Top[0].Command)
+	}
+}
+
+func TestRunPowerTopHumanOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	deps := powerDeps{
+		collect: fakePowerState,
+		procs:   fakeProcs(map[int]string{42: "busybox"}),
+		sampleRusage: func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
+			return []sysinfo.EnergyDelta{
+				{PID: 42, Interval: interval, BilledEnergyNJ: 250_000, InterruptWakeups: 7, UserNs: 12_000_000, SystemNs: 3_000_000},
+			}, nil
+		},
+		clock: time.Now,
+	}
+	code := runPowerWithIO([]string{"--top", "3", "--interval", "500ms"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"=== Energy top users (Δ over 500ms) ===",
+		"BILLED(nJ)",
+		"250000",
+		"busybox",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunPowerTopUnsupported(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	deps := powerDeps{
+		collect:      fakePowerState,
+		procs:        fakeProcs(map[int]string{1: "launchd"}),
+		sampleRusage: func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) { return nil, sysinfo.ErrRusageUnsupported },
+		clock:        time.Now,
+	}
+	code := runPowerWithIO([]string{"--top", "5"}, &stdout, &stderr, deps)
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3 for unsupported platform", code)
+	}
+	if !strings.Contains(stderr.String(), "per-pid energy unavailable") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 
