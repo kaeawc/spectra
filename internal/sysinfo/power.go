@@ -79,6 +79,17 @@ type PowerCollector struct {
 	Source PowerSource
 }
 
+// CollectAssertions runs only the assertions sub-command. Callers that need
+// just the active assertions (e.g. the impact subcommand) shouldn't pay for
+// battery/thermal/top.
+func CollectAssertions(run CmdRunner) []PowerAssertion {
+	out, err := CommandPowerSource{Run: run}.Assertions()
+	if err != nil {
+		return nil
+	}
+	return parseAssertions(string(out))
+}
+
 // CollectPower gathers PowerState from pmset. Any sub-command failure is
 // silently absorbed; partial results are still valid.
 func CollectPower(run CmdRunner) PowerState {

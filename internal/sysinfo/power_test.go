@@ -194,6 +194,34 @@ func TestCollectPowerAssertions(t *testing.T) {
 	}
 }
 
+func TestCollectAssertionsOnly(t *testing.T) {
+	calls := 0
+	run := func(name string, args ...string) ([]byte, error) {
+		calls++
+		if name == "pmset" && len(args) >= 2 && args[1] == "assertions" {
+			return []byte(assertionsOutput), nil
+		}
+		t.Fatalf("unexpected command: %s %v", name, args)
+		return nil, nil
+	}
+	got := CollectAssertions(run)
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1 (assertions-only must not invoke batt/therm/top)", calls)
+	}
+	if len(got) != 1 || got[0].PID != 412 {
+		t.Fatalf("assertions = %+v, want one entry for pid 412", got)
+	}
+}
+
+func TestCollectAssertionsAbsorbsError(t *testing.T) {
+	run := func(name string, args ...string) ([]byte, error) {
+		return nil, errors.New("nope")
+	}
+	if got := CollectAssertions(run); got != nil {
+		t.Fatalf("got %+v, want nil on error", got)
+	}
+}
+
 func TestCollectPowerAllFail(t *testing.T) {
 	stub := func(name string, args ...string) ([]byte, error) {
 		return nil, errors.New("command not found")
