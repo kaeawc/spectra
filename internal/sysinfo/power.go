@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // PowerState captures battery and thermal facts.
@@ -96,8 +97,9 @@ func CollectPower(run CmdRunner) PowerState {
 	return PowerCollector{Source: CommandPowerSource{Run: run}}.Collect()
 }
 
-// Collect gathers PowerState. Any source failure is silently absorbed; partial
-// results are still valid.
+// Collect gathers PowerState. Probes run concurrently; any source failure is
+// silently absorbed and partial results are still valid. Wall-clock is bounded
+// by the slowest single probe — typically ~1s for `top -l 2`.
 func (c PowerCollector) Collect() PowerState {
 	var ps PowerState
 	src := c.Source
@@ -105,19 +107,36 @@ func (c PowerCollector) Collect() PowerState {
 		src = CommandPowerSource{}
 	}
 
-	if out, err := src.Battery(); err == nil {
-		parseBatt(string(out), &ps)
-	}
-	if out, err := src.Thermal(); err == nil {
-		parseTherm(string(out), &ps)
-	}
-	if out, err := src.Assertions(); err == nil {
-		ps.Assertions = parseAssertions(string(out))
-	}
-	if out, err := src.EnergyTop(); err == nil {
-		ps.EnergyTopUsers = parseEnergyTop(string(out))
+	var mu sync.Mutex
+	run := func(fetch func() ([]byte, error), apply func(string, *PowerState)) func() {
+		return func() {
+			out, err := fetch()
+			if err != nil {
+				return
+			}
+			s := string(out)
+			mu.Lock()
+			defer mu.Unlock()
+			apply(s, &ps)
+		}
 	}
 
+	probes := []func(){
+		run(src.Battery, parseBatt),
+		run(src.Thermal, parseTherm),
+		run(src.Assertions, func(s string, p *PowerState) { p.Assertions = parseAssertions(s) }),
+		run(src.EnergyTop, func(s string, p *PowerState) { p.EnergyTopUsers = parseEnergyTop(s) }),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(probes))
+	for _, p := range probes {
+		go func(p func()) {
+			defer wg.Done()
+			p()
+		}(p)
+	}
+	wg.Wait()
 	return ps
 }
 
