@@ -288,7 +288,7 @@ func runPowerWatch(stdout, stderr io.Writer, deps powerDeps, cfg powerRunCfg) in
 // and assembles a PowerReport. Returns (report, exit_code, ok). If ok is
 // false the caller should return exit_code immediately (e.g. unsupported
 // hardware on --joules, --top on non-darwin).
-func collectPower(stdout, stderr io.Writer, deps powerDeps, cfg powerRunCfg) (PowerReport, int, bool) {
+func collectPower(_, stderr io.Writer, deps powerDeps, cfg powerRunCfg) (PowerReport, int, bool) {
 	state := deps.collect()
 	report := PowerReport{
 		IntervalMS: cfg.interval.Milliseconds(),
