@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,7 +100,7 @@ func (p PowermetricsTasks) TopTasks(n int) []TaskPowerSample {
 
 func taskFromDict(m map[string]any) TaskPowerSample {
 	return TaskPowerSample{
-		PID:               int(intFromAny(m["pid"])),
+		PID:               clampPID(intFromAny(m["pid"])),
 		Command:           strFromAny(m["name"], m["command"]),
 		EnergyImpact:      floatFromAny(m["energy_impact"], m["energyImpact"]),
 		CPUNs:             uintFromAny(m["cputime_ns"], m["cputimeNs"]),
@@ -113,6 +114,16 @@ func taskFromDict(m map[string]any) TaskPowerSample {
 
 // msPerSToPct converts a ms-per-second rate into a wall-clock percentage.
 func msPerSToPct(msPerS float64) float64 { return msPerS / 10.0 }
+
+// clampPID narrows the int64 PID from the plist to int with bounds checking.
+// macOS pids never exceed PID_MAX (99999); anything outside int range is a
+// malformed plist and gets clamped rather than wrapping.
+func clampPID(n int64) int {
+	if n < 0 || n > int64(math.MaxInt32) {
+		return 0
+	}
+	return int(n)
+}
 
 // --- plist value decoding ---
 
