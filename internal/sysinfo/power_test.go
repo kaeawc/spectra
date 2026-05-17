@@ -3,6 +3,7 @@ package sysinfo
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 const battOnBattery = `Now drawing from 'Battery Power'
@@ -281,6 +282,97 @@ func TestCollectPowerEnergyTopUsers(t *testing.T) {
 	}
 	if ps.EnergyTopUsers[1].PID != 412 {
 		t.Errorf("second PID = %d, want 412", ps.EnergyTopUsers[1].PID)
+	}
+}
+
+// slowPowerSource adds a per-probe sleep so we can observe wall-clock fan-out.
+type slowPowerSource struct {
+	fakePowerSource
+	delay time.Duration
+}
+
+func (s slowPowerSource) Battery() ([]byte, error) {
+	time.Sleep(s.delay)
+	return s.fakePowerSource.Battery()
+}
+
+func (s slowPowerSource) Thermal() ([]byte, error) {
+	time.Sleep(s.delay)
+	return s.fakePowerSource.Thermal()
+}
+
+func (s slowPowerSource) Assertions() ([]byte, error) {
+	time.Sleep(s.delay)
+	return s.fakePowerSource.Assertions()
+}
+
+func (s slowPowerSource) EnergyTop() ([]byte, error) {
+	time.Sleep(s.delay)
+	return s.fakePowerSource.EnergyTop()
+}
+
+func newSlowPowerSource(delay time.Duration) slowPowerSource {
+	return slowPowerSource{
+		delay: delay,
+		fakePowerSource: fakePowerSource{
+			batt:       battOnBattery,
+			therm:      thermNominal,
+			assertions: assertionsOutput,
+			topEnergy:  topEnergyOutput,
+		},
+	}
+}
+
+func TestCollectPowerRunsProbesConcurrently(t *testing.T) {
+	const delay = 150 * time.Millisecond
+	start := time.Now()
+	ps := PowerCollector{Source: newSlowPowerSource(delay)}.Collect()
+	elapsed := time.Since(start)
+
+	// Serial would be 4*delay. Generous slack for slow CI; the cap is well
+	// below the serial floor.
+	if elapsed >= 3*delay {
+		t.Errorf("Collect took %v with 4 probes at %v each; expected concurrent execution", elapsed, delay)
+	}
+	if !ps.OnBattery {
+		t.Error("OnBattery = false, want true")
+	}
+	if ps.ThermalPressure != "nominal" {
+		t.Errorf("ThermalPressure = %q, want nominal", ps.ThermalPressure)
+	}
+	if len(ps.Assertions) != 1 {
+		t.Errorf("Assertions = %d, want 1", len(ps.Assertions))
+	}
+	if len(ps.EnergyTopUsers) != 3 {
+		t.Errorf("EnergyTopUsers = %d, want 3", len(ps.EnergyTopUsers))
+	}
+}
+
+func TestCollectPowerPartialFailure(t *testing.T) {
+	ps := PowerCollector{Source: fakePowerSource{
+		batt:       battOnBattery,
+		assertions: assertionsOutput,
+		topEnergy:  topEnergyOutput,
+	}}.Collect()
+	if !ps.OnBattery {
+		t.Error("OnBattery = false, want true")
+	}
+	if ps.ThermalPressure != "" {
+		t.Errorf("ThermalPressure = %q, want empty after failed thermal probe", ps.ThermalPressure)
+	}
+	if len(ps.Assertions) != 1 {
+		t.Errorf("Assertions = %d, want 1", len(ps.Assertions))
+	}
+	if len(ps.EnergyTopUsers) != 3 {
+		t.Errorf("EnergyTopUsers = %d, want 3", len(ps.EnergyTopUsers))
+	}
+}
+
+func BenchmarkPowerCollect(b *testing.B) {
+	collector := PowerCollector{Source: newSlowPowerSource(100 * time.Millisecond)}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = collector.Collect()
 	}
 }
 
