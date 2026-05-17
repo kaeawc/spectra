@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
@@ -260,5 +262,127 @@ func TestRunPowerFlagError(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+const deepTasksPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>elapsed_ns</key>
+	<integer>500000000</integer>
+	<key>tasks</key>
+	<array>
+		<dict>
+			<key>pid</key><integer>501</integer>
+			<key>name</key><string>Google Chrome Helper</string>
+			<key>energy_impact</key><real>9.9</real>
+			<key>cputime_ns</key><integer>123000000</integer>
+		</dict>
+	</array>
+</dict>
+</plist>
+`
+
+func fakeDeepFetcher(plist string, err error) func(int) ([]byte, error) {
+	return func(int) ([]byte, error) {
+		if err != nil {
+			return nil, err
+		}
+		return []byte(plist), nil
+	}
+}
+
+func deepFakeDeps(fetch func(int) ([]byte, error)) powerDeps {
+	d := fakePowerDeps()
+	d.fetchDeep = fetch
+	return d
+}
+
+func TestRunPowerDeepHumanOutput(t *testing.T) {
+	deps := deepFakeDeps(func(d int) ([]byte, error) {
+		if d < 100 {
+			t.Errorf("duration = %d, want >= 100", d)
+		}
+		return []byte(deepTasksPlist), nil
+	})
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--deep"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"=== Power state ===",
+		"=== Deep (powermetrics --samplers tasks) ===",
+		"Google Chrome Helper",
+		"501",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunPowerDeepJSONIsSupersetOfJoulesAndPowerState(t *testing.T) {
+	deps := deepFakeDeps(fakeDeepFetcher(deepTasksPlist, nil))
+	deps.sample = func(d time.Duration) (sysinfo.SoCPower, error) {
+		return sysinfo.SoCPower{Interval: d, PackageJoules: 7.5, GPUJoules: 1.5}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--deep", "--json"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["on_battery"] != true {
+		t.Errorf("on_battery = %v, want true (PowerState superset)", got["on_battery"])
+	}
+	soc, ok := got["soc"].(map[string]any)
+	if !ok {
+		t.Fatalf("soc = %T, want map (joules superset)", got["soc"])
+	}
+	if soc["package_joules"] != 7.5 {
+		t.Errorf("soc.package_joules = %v, want 7.5", soc["package_joules"])
+	}
+	deep, ok := got["deep"].(map[string]any)
+	if !ok {
+		t.Fatalf("deep = %T, want map", got["deep"])
+	}
+	tasks, ok := deep["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("deep.tasks = %+v", deep["tasks"])
+	}
+}
+
+func TestRunPowerDeepHelperUnavailableFallsBack(t *testing.T) {
+	deps := deepFakeDeps(fakeDeepFetcher("", helperclient.ErrHelperUnavailable))
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--deep"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "sudo spectra install-helper") {
+		t.Errorf("stderr should hint at install-helper:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "=== Power state ===") {
+		t.Errorf("L1+L2 fallback missing:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "=== Deep") {
+		t.Errorf("unexpected deep section:\n%s", stdout.String())
+	}
+}
+
+func TestRunPowerDeepHelperErrorFallsBack(t *testing.T) {
+	deps := deepFakeDeps(fakeDeepFetcher("", fmt.Errorf("powermetrics exploded")))
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--deep"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "powermetrics exploded") {
+		t.Errorf("stderr should contain helper error:\n%s", stderr.String())
 	}
 }

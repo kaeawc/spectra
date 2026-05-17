@@ -79,7 +79,7 @@ The helper's RPC surface is intentionally narrow. It listens on
 | Method | Purpose |
 |---|---|
 | `helper.tcc.system.query(bundleID)` | Query system TCC.db for granted services |
-| `helper.powermetrics.sample(duration)` | One-shot powermetrics output |
+| `helper.powermetrics.sample(duration, samplers?)` | One-shot powermetrics output; `samplers` is an optional allowlisted subset of `tasks,cpu_power,gpu_power,ane_power,network,disk,interrupts,thermal` |
 | `helper.firewall.rules()` | Current pf firewall rules |
 | `helper.fs_usage.start(pid, mode, duration)` | Start a bounded root `fs_usage` trace for one PID |
 | `helper.fs_usage.stop(handle)` | Stop a trace and return captured output |

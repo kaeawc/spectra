@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
@@ -25,6 +26,7 @@ type powerDeps struct {
 	sample       func(time.Duration) (sysinfo.SoCPower, error)
 	procs        func(context.Context) []process.Info
 	sampleRusage func(ctx context.Context, interval time.Duration, pids []int) ([]sysinfo.EnergyDelta, error)
+	fetchDeep    func(durationMS int) ([]byte, error)
 	clock        func() time.Time
 }
 
@@ -40,8 +42,20 @@ func defaultPowerDeps() powerDeps {
 		sampleRusage: func(ctx context.Context, interval time.Duration, pids []int) ([]sysinfo.EnergyDelta, error) {
 			return sysinfo.EnergySampler{Interval: interval}.Sample(ctx, pids)
 		},
+		fetchDeep: func(durationMS int) ([]byte, error) {
+			return helperclient.New().PowermetricsTasks(durationMS)
+		},
 		clock: time.Now,
 	}
+}
+
+// deepPowerState is a strict superset of sysinfo.PowerState — adding a
+// SoCPower sample and per-pid powermetrics tasks data — so consumers can
+// request --deep opportunistically without losing any --json fields.
+type deepPowerState struct {
+	sysinfo.PowerState
+	SoC  *sysinfo.SoCPower          `json:"soc,omitempty"`
+	Deep *sysinfo.PowermetricsTasks `json:"deep,omitempty"`
 }
 
 func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int {
@@ -51,6 +65,8 @@ func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int
 	joules := fs.Bool("joules", false, "Sample SoC-wide energy via IOReport (Apple Silicon)")
 	top := fs.Int("top", 0, "Rank top-N pids by ΔbilledEnergy over --interval (per-pid kernel-billed nanojoules via proc_pid_rusage)")
 	interval := fs.Duration("interval", time.Second, "Sampling window for --joules / --top")
+	deep := fs.Bool("deep", false, "Ground-truth per-pid energy via powermetrics (requires privileged helper)")
+	deepDurationMS := fs.Int("deep-duration", 500, "Sample window in ms for --deep (min 100)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -64,15 +80,59 @@ func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int
 
 	state := deps.collect()
 
+	var deepTasks *sysinfo.PowermetricsTasks
+	var soc *sysinfo.SoCPower
+	if *deep {
+		dur := *deepDurationMS
+		if dur < 100 {
+			dur = 100
+		}
+		deepTasks = collectDeepTasks(stderr, deps.fetchDeep, dur)
+		// --deep --json must be a superset of --joules --json, so include the
+		// SoC sample when available. Silently omit on unsupported hardware.
+		if s, err := deps.sample(*interval); err == nil {
+			soc = &s
+		}
+	}
+
 	if *asJSON {
+		out := deepPowerState{PowerState: state, SoC: soc, Deep: deepTasks}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(state)
+		_ = enc.Encode(out)
 		return 0
 	}
 
 	printPowerState(stdout, state)
+	if soc != nil {
+		fmt.Fprintln(stdout)
+		printSoCPower(stdout, *soc)
+	}
+	if deepTasks != nil {
+		printDeepTasks(stdout, *deepTasks, 10)
+	}
 	return 0
+}
+
+func collectDeepTasks(stderr io.Writer, fetch func(int) ([]byte, error), durationMS int) *sysinfo.PowermetricsTasks {
+	plist, err := fetch(durationMS)
+	switch {
+	case helperclient.IsUnavailable(err):
+		fmt.Fprintln(stderr, "spectra power: privileged helper not installed.")
+		fmt.Fprintln(stderr, "Install with: sudo spectra install-helper")
+		fmt.Fprintln(stderr, "Falling back to L1+L2 (no-privilege) energy estimate.")
+		return nil
+	case err != nil:
+		fmt.Fprintf(stderr, "spectra power: --deep failed: %v\n", err)
+		fmt.Fprintln(stderr, "Falling back to L1+L2 (no-privilege) energy estimate.")
+		return nil
+	}
+	parsed, perr := sysinfo.ParseTasksPlist(plist)
+	if perr != nil {
+		fmt.Fprintf(stderr, "spectra power: parsing powermetrics plist: %v\n", perr)
+		return nil
+	}
+	return &parsed
 }
 
 func runJoulesSample(stdout, stderr io.Writer, interval time.Duration, asJSON bool, sample func(time.Duration) (sysinfo.SoCPower, error)) int {
@@ -229,5 +289,30 @@ func printPowerState(w io.Writer, s sysinfo.PowerState) {
 		for _, u := range s.EnergyTopUsers {
 			fmt.Fprintf(w, "  %-7d  %-8.1f  %s\n", u.PID, u.EnergyImpact, u.Command)
 		}
+	}
+}
+
+func printDeepTasks(w io.Writer, p sysinfo.PowermetricsTasks, topN int) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "=== Deep (powermetrics --samplers tasks) ===")
+	if len(p.Tasks) == 0 {
+		fmt.Fprintln(w, "no per-pid task samples returned")
+		return
+	}
+	fmt.Fprintf(w, "elapsed:  %.0f ms\n", float64(p.ElapsedNs)/1e6)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %-7s  %-8s  %-10s  %-10s  %-8s  %-8s  %s\n",
+		"PID", "IMPACT", "CPU(ms)", "GPU(ms)", "WAKEUPS", "QOS-DEF%", "COMMAND")
+	fmt.Fprintln(w, "  "+strings.Repeat("-", 80))
+	for _, t := range p.TopTasks(topN) {
+		fmt.Fprintf(w, "  %-7d  %-8.1f  %-10.2f  %-10.2f  %-8d  %-8.1f  %s\n",
+			t.PID,
+			t.EnergyImpact,
+			float64(t.CPUNs)/1e6,
+			float64(t.GPUNs)/1e6,
+			t.ShortTimerWakeups,
+			t.QoSDefaultPct,
+			t.Command,
+		)
 	}
 }
