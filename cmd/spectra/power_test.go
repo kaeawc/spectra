@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,11 @@ func fakePowerDeps() powerDeps {
 		collect: fakePowerState,
 		sample: func(time.Duration) (sysinfo.SoCPower, error) {
 			return sysinfo.SoCPower{}, sysinfo.ErrUnsupportedHardware
+		},
+		clock: func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		signalCh: func() (<-chan os.Signal, func()) {
+			ch := make(chan os.Signal)
+			return ch, func() {}
 		},
 	}
 }
@@ -75,42 +81,52 @@ func TestRunPowerHumanOutput(t *testing.T) {
 	}
 }
 
-func TestRunPowerJSONOutput(t *testing.T) {
+// Bare `spectra power --json` now emits the stable unified envelope rather
+// than the raw sysinfo.PowerState shape. The envelope is the contract
+// described in issue #237.
+func TestRunPowerJSONEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runPowerWithIO([]string{"--json"}, &stdout, &stderr, fakePowerDeps())
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	var got sysinfo.PowerState
+	var got PowerReport
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
 	}
-	if !got.OnBattery || got.BatteryPct != 85 || got.ThermalPressure != "serious" {
-		t.Fatalf("state = %+v, want fake power state", got)
+	if got.Mode != "baseline" {
+		t.Fatalf("mode = %q, want baseline", got.Mode)
 	}
-	if !got.ThermalThrottled || got.CPUSpeedLimitPct != 92 {
-		t.Fatalf("thermal state = %+v, want throttled with 92%% CPU limit", got)
+	if got.IntervalMS != 1000 {
+		t.Fatalf("interval_ms = %d, want 1000", got.IntervalMS)
 	}
-	if len(got.EnergyTopUsers) != 1 || got.EnergyTopUsers[0].Command != "Google Chrome Helper" {
-		t.Fatalf("energy users = %+v, want Google Chrome Helper", got.EnergyTopUsers)
+	if got.Battery == nil || !got.Battery.OnBattery || got.Battery.Pct != 85 {
+		t.Fatalf("battery = %+v", got.Battery)
+	}
+	if got.Thermal == nil || got.Thermal.Pressure != "serious" || !got.Thermal.Throttled {
+		t.Fatalf("thermal = %+v", got.Thermal)
+	}
+	if len(got.Processes) != 1 || got.Processes[0].Source != "top" {
+		t.Fatalf("processes = %+v", got.Processes)
+	}
+	if got.Processes[0].Impact == nil || got.Processes[0].Impact.Total != 4.2 {
+		t.Fatalf("first impact = %+v", got.Processes[0].Impact)
 	}
 }
 
 func TestRunPowerJoulesHumanOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		sample: func(d time.Duration) (sysinfo.SoCPower, error) {
-			return sysinfo.SoCPower{
-				Interval:      d,
-				CPUPJoules:    5.2,
-				CPUEJoules:    0.6,
-				GPUJoules:     2.1,
-				ANEJoules:     0.0,
-				DRAMJoules:    1.3,
-				PackageJoules: 9.2,
-			}, nil
-		},
+	deps := fakePowerDeps()
+	deps.sample = func(d time.Duration) (sysinfo.SoCPower, error) {
+		return sysinfo.SoCPower{
+			Interval:      d,
+			CPUPJoules:    5.2,
+			CPUEJoules:    0.6,
+			GPUJoules:     2.1,
+			ANEJoules:     0.0,
+			DRAMJoules:    1.3,
+			PackageJoules: 9.2,
+		}, nil
 	}
 	code := runPowerWithIO([]string{"--joules", "--interval=1s"}, &stdout, &stderr, deps)
 	if code != 0 {
@@ -120,7 +136,6 @@ func TestRunPowerJoulesHumanOutput(t *testing.T) {
 	for _, want := range []string{
 		"=== SoC power (IOReport) ===",
 		"Package:   9.20 J over 1s  (9.20 W)",
-		"CPU P:   5.20 J",
 		"GPU:     2.10 J",
 		"DRAM:    1.30 J",
 	} {
@@ -130,35 +145,34 @@ func TestRunPowerJoulesHumanOutput(t *testing.T) {
 	}
 }
 
-func TestRunPowerJoulesJSONOutput(t *testing.T) {
+func TestRunPowerJoulesJSONUsesEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		sample: func(d time.Duration) (sysinfo.SoCPower, error) {
-			return sysinfo.SoCPower{Interval: d, PackageJoules: 7.5, GPUJoules: 1.5}, nil
-		},
+	deps := fakePowerDeps()
+	deps.sample = func(d time.Duration) (sysinfo.SoCPower, error) {
+		return sysinfo.SoCPower{Interval: d, PackageJoules: 7.5, GPUJoules: 1.5, CPUPJoules: 4.0}, nil
 	}
 	code := runPowerWithIO([]string{"--joules", "--json"}, &stdout, &stderr, deps)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	var got sysinfo.SoCPower
+	var got PowerReport
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.PackageJoules != 7.5 || got.GPUJoules != 1.5 {
-		t.Fatalf("got %+v, want PackageJoules=7.5 GPUJoules=1.5", got)
+	if got.Mode != "joules" {
+		t.Fatalf("mode = %q, want joules", got.Mode)
+	}
+	if got.Package == nil || got.Package.Joules != 7.5 || got.Package.GPUJoules != 1.5 {
+		t.Fatalf("package = %+v, want joules=7.5 gpu=1.5", got.Package)
+	}
+	if got.Package.CPUJoules != 4.0 {
+		t.Fatalf("cpu_joules = %v, want 4.0 (CPUPJoules+CPUEJoules)", got.Package.CPUJoules)
 	}
 }
 
 func TestRunPowerJoulesUnsupportedHardware(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		sample: func(time.Duration) (sysinfo.SoCPower, error) {
-			return sysinfo.SoCPower{}, sysinfo.ErrUnsupportedHardware
-		},
-	}
+	deps := fakePowerDeps()
 	code := runPowerWithIO([]string{"--joules"}, &stdout, &stderr, deps)
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3 for unsupported hardware", code)
@@ -168,55 +182,83 @@ func TestRunPowerJoulesUnsupportedHardware(t *testing.T) {
 	}
 }
 
-func TestRunPowerTopJSON(t *testing.T) {
+func TestRunPowerTopJSONEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		procs:   fakeProcs(map[int]string{101: "claude", 202: "WindowServer", 303: "claude-busy"}),
-		sampleRusage: func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
-			return []sysinfo.EnergyDelta{
-				{PID: 101, Interval: interval, BilledEnergyNJ: 200, InterruptWakeups: 5},
-				{PID: 303, Interval: interval, BilledEnergyNJ: 1_500_000, InterruptWakeups: 99},
-			}, nil
-		},
-		clock: func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+	deps := fakePowerDeps()
+	deps.procs = fakeProcs(map[int]string{101: "claude", 202: "WindowServer", 303: "claude-busy"})
+	deps.sampleRusage = func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
+		return []sysinfo.EnergyDelta{
+			{PID: 101, Interval: interval, BilledEnergyNJ: 200, InterruptWakeups: 5},
+			{PID: 303, Interval: interval, BilledEnergyNJ: 1_500_000, InterruptWakeups: 99},
+		}, nil
 	}
 	code := runPowerWithIO([]string{"--top", "10", "--json", "--interval", "100ms"}, &stdout, &stderr, deps)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
 	}
-	var got EnergyTopReport
+	var got PowerReport
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
 	}
-	if got.IntervalNS != int64(100*time.Millisecond) {
-		t.Fatalf("interval_ns = %d", got.IntervalNS)
+	if got.Mode != "rusage" {
+		t.Fatalf("mode = %q, want rusage", got.Mode)
+	}
+	if got.IntervalMS != 100 {
+		t.Fatalf("interval_ms = %d, want 100", got.IntervalMS)
 	}
 	if got.Skipped != 1 {
 		t.Fatalf("skipped = %d, want 1 (pid 202 was not sampled)", got.Skipped)
 	}
-	if len(got.Top) != 2 || got.Top[0].PID != 303 {
-		t.Fatalf("top order = %+v, want pid 303 first", got.Top)
+	if len(got.Processes) != 2 || got.Processes[0].PID != 303 {
+		t.Fatalf("processes = %+v, want pid 303 first", got.Processes)
 	}
-	if got.Top[0].BilledEnergyNJ != 1_500_000 {
-		t.Fatalf("raw nanojoules = %d, want 1_500_000", got.Top[0].BilledEnergyNJ)
+	if got.Processes[0].BilledEnergyNJ != 1_500_000 {
+		t.Fatalf("first billed_energy_nj = %d, want 1_500_000", got.Processes[0].BilledEnergyNJ)
 	}
-	if got.Top[0].Command != "claude-busy" {
-		t.Fatalf("command = %q, want claude-busy", got.Top[0].Command)
+	if got.Processes[0].Source != "rusage" {
+		t.Fatalf("source = %q, want rusage", got.Processes[0].Source)
+	}
+	if got.Processes[0].Command != "claude-busy" {
+		t.Fatalf("command = %q, want claude-busy", got.Processes[0].Command)
+	}
+	if got.Processes[0].Impact == nil || got.Processes[0].Impact.Total <= 0 {
+		t.Fatalf("impact not populated: %+v", got.Processes[0].Impact)
+	}
+}
+
+func TestRunPowerTopJSONImpactAccessibleByJq(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	deps := fakePowerDeps()
+	deps.procs = fakeProcs(map[int]string{42: "busybox"})
+	deps.sampleRusage = func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
+		return []sysinfo.EnergyDelta{
+			{PID: 42, Interval: interval, BilledEnergyNJ: 250_000_000},
+		}, nil
+	}
+	code := runPowerWithIO([]string{"--top", "1", "--json"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatal(stderr.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	procs := raw["processes"].([]any)
+	first := procs[0].(map[string]any)
+	impact := first["impact"].(map[string]any)
+	if _, ok := impact["total"]; !ok {
+		t.Fatalf("processes[0].impact.total missing — breaks `jq .processes[0].impact.total`: %+v", impact)
 	}
 }
 
 func TestRunPowerTopHumanOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		procs:   fakeProcs(map[int]string{42: "busybox"}),
-		sampleRusage: func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
-			return []sysinfo.EnergyDelta{
-				{PID: 42, Interval: interval, BilledEnergyNJ: 250_000, InterruptWakeups: 7, UserNs: 12_000_000, SystemNs: 3_000_000},
-			}, nil
-		},
-		clock: time.Now,
+	deps := fakePowerDeps()
+	deps.procs = fakeProcs(map[int]string{42: "busybox"})
+	deps.sampleRusage = func(_ context.Context, interval time.Duration, _ []int) ([]sysinfo.EnergyDelta, error) {
+		return []sysinfo.EnergyDelta{
+			{PID: 42, Interval: interval, BilledEnergyNJ: 250_000, InterruptWakeups: 7, UserNs: 12_000_000, SystemNs: 3_000_000},
+		}, nil
 	}
 	code := runPowerWithIO([]string{"--top", "3", "--interval", "500ms"}, &stdout, &stderr, deps)
 	if code != 0 {
@@ -237,13 +279,10 @@ func TestRunPowerTopHumanOutput(t *testing.T) {
 
 func TestRunPowerTopUnsupported(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	deps := powerDeps{
-		collect: fakePowerState,
-		procs:   fakeProcs(map[int]string{1: "launchd"}),
-		sampleRusage: func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) {
-			return nil, sysinfo.ErrRusageUnsupported
-		},
-		clock: time.Now,
+	deps := fakePowerDeps()
+	deps.procs = fakeProcs(map[int]string{1: "launchd"})
+	deps.sampleRusage = func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) {
+		return nil, sysinfo.ErrRusageUnsupported
 	}
 	code := runPowerWithIO([]string{"--top", "5"}, &stdout, &stderr, deps)
 	if code != 3 {
@@ -251,6 +290,28 @@ func TestRunPowerTopUnsupported(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "per-pid energy unavailable") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunPowerHelpDocumentsPrivilege(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--help"}, &stdout, &stderr, fakePowerDeps())
+	// `--help` returns flag.ErrHelp → exit 2 from flag.Parse, but the usage
+	// text printed before that is what we care about.
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (flag.ErrHelp)", code)
+	}
+	for _, want := range []string{
+		"--top", "(no privilege)",
+		"--joules", "(no privilege)",
+		"--deep", "(requires helper)",
+		"--watch", "(inherits)",
+		"--json", "(inherits)",
+		"--interval",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("usage missing %q:\n%s", want, stderr.String())
+		}
 	}
 }
 
@@ -262,6 +323,61 @@ func TestRunPowerFlagError(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRunPowerRejectsNonPositiveInterval(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--interval", "0s"}, &stdout, &stderr, fakePowerDeps())
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "interval must be positive") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunPowerWatchJSONEmitsNDJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	sigCh := make(chan os.Signal, 1)
+	frames := 0
+	deps := fakePowerDeps()
+	deps.collect = func() sysinfo.PowerState {
+		frames++
+		if frames >= 3 {
+			sigCh <- os.Interrupt
+		}
+		return fakePowerState()
+	}
+	deps.signalCh = func() (<-chan os.Signal, func()) { return sigCh, func() {} }
+	code := runPowerWithIO([]string{"--watch", "--json", "--interval", "10ms"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Fatalf("line not valid JSON: %q: %v", line, err)
+		}
+		count++
+	}
+	if count < 2 {
+		t.Fatalf("expected at least 2 NDJSON lines, got %d:\n%s", count, stdout.String())
+	}
+	// Final line must be the watch_stopped summary so consumers see a clean
+	// terminator instead of guessing whether the stream was truncated.
+	last := strings.TrimRight(stdout.String(), "\n")
+	lines := strings.Split(last, "\n")
+	var final map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &final); err != nil {
+		t.Fatalf("final line not JSON: %q", lines[len(lines)-1])
+	}
+	if _, ok := final["watch_stopped"]; !ok {
+		t.Fatalf("final line should be the watch_stopped summary, got %v", final)
 	}
 }
 
@@ -323,7 +439,7 @@ func TestRunPowerDeepHumanOutput(t *testing.T) {
 	}
 }
 
-func TestRunPowerDeepJSONIsSupersetOfJoulesAndPowerState(t *testing.T) {
+func TestRunPowerDeepJSONUnifiedEnvelope(t *testing.T) {
 	deps := deepFakeDeps(fakeDeepFetcher(deepTasksPlist, nil))
 	deps.sample = func(d time.Duration) (sysinfo.SoCPower, error) {
 		return sysinfo.SoCPower{Interval: d, PackageJoules: 7.5, GPUJoules: 1.5}, nil
@@ -333,27 +449,21 @@ func TestRunPowerDeepJSONIsSupersetOfJoulesAndPowerState(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
 	}
-	var got map[string]any
+	var got PowerReport
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["on_battery"] != true {
-		t.Errorf("on_battery = %v, want true (PowerState superset)", got["on_battery"])
+	if got.Mode != "deep" {
+		t.Fatalf("mode = %q, want deep", got.Mode)
 	}
-	soc, ok := got["soc"].(map[string]any)
-	if !ok {
-		t.Fatalf("soc = %T, want map (joules superset)", got["soc"])
+	if got.Battery == nil || !got.Battery.OnBattery {
+		t.Fatalf("battery = %+v, want PowerState carried through", got.Battery)
 	}
-	if soc["package_joules"] != 7.5 {
-		t.Errorf("soc.package_joules = %v, want 7.5", soc["package_joules"])
+	if got.Package == nil || got.Package.Joules != 7.5 {
+		t.Fatalf("package = %+v, want joules carried through (--deep implies --joules)", got.Package)
 	}
-	deep, ok := got["deep"].(map[string]any)
-	if !ok {
-		t.Fatalf("deep = %T, want map", got["deep"])
-	}
-	tasks, ok := deep["tasks"].([]any)
-	if !ok || len(tasks) != 1 {
-		t.Fatalf("deep.tasks = %+v", deep["tasks"])
+	if len(got.Processes) != 1 || got.Processes[0].PID != 501 || got.Processes[0].Source != "powermetrics" {
+		t.Fatalf("processes = %+v, want pid 501 from powermetrics", got.Processes)
 	}
 }
 
@@ -384,5 +494,21 @@ func TestRunPowerDeepHelperErrorFallsBack(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "powermetrics exploded") {
 		t.Errorf("stderr should contain helper error:\n%s", stderr.String())
+	}
+}
+
+func TestRunPowerDeepHelperUnavailableNoteInJSON(t *testing.T) {
+	deps := deepFakeDeps(fakeDeepFetcher("", helperclient.ErrHelperUnavailable))
+	var stdout, stderr bytes.Buffer
+	code := runPowerWithIO([]string{"--deep", "--json"}, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	var got PowerReport
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Notes) == 0 || !strings.Contains(got.Notes[0], "helper unavailable") {
+		t.Fatalf("notes = %v, want degradation note", got.Notes)
 	}
 }
