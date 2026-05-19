@@ -1,12 +1,12 @@
 module github.com/kaeawc/spectra
 
-go 1.26.2
+go 1.26.3
 
 require (
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.28.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
-	tailscale.com v1.98.1
+	tailscale.com v1.98.2
 )
 
 require (
@@ -46,6 +46,7 @@ require (
 	github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976 // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20260427181203-e3ac4a0afb4e // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.50.0 // indirect
