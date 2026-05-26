@@ -91,6 +91,7 @@ nav:
       - Helpers and XPC: inspection/helpers-and-xpc.md
       - Login items: inspection/login-items.md
       - Running processes: inspection/running-processes.md
+      - System limits: inspection/system-limits.md
       - Power and thermal: inspection/power-thermal.md
       - Python-based apps: inspection/python-apps.md
       - Rust-based apps: inspection/rust-based-apps.md
