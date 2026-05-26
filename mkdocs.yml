@@ -104,6 +104,7 @@ nav:
       - JVM memory: playbooks/jvm-memory.md
       - Network failure: playbooks/network-failure.md
       - Storage bloat: playbooks/storage-bloat.md
+      - Terminal spawning: playbooks/terminal-spawning.md
       - Remote triage: playbooks/remote-triage.md
       - Toolchain drift: playbooks/toolchain-drift.md
   - Operations:
