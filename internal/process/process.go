@@ -34,15 +34,29 @@ type Info struct {
 	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
 
 	// Deep fields — populated only when CollectOptions.Deep is true.
-	OpenFDs             int      `json:"open_fds,omitempty"`             // open file descriptor count
-	ListeningPorts      []int    `json:"listening_ports,omitempty"`      // TCP ports this process listens on
-	OutboundConnections []string `json:"outbound_connections,omitempty"` // active TCP remote addresses (host:port)
-	LogFiles            []string `json:"log_files,omitempty"`            // writable log-shaped files this process holds open
+	OpenFDs             int          `json:"open_fds,omitempty"`             // open file descriptor count
+	FDBreakdown         *FDBreakdown `json:"fd_breakdown,omitempty"`         // typed FD counts from lsof
+	ListeningPorts      []int        `json:"listening_ports,omitempty"`      // TCP ports this process listens on
+	OutboundConnections []string     `json:"outbound_connections,omitempty"` // active TCP remote addresses (host:port)
+	LogFiles            []string     `json:"log_files,omitempty"`            // writable log-shaped files this process holds open
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
 	// of app paths (BundlePaths option).
 	AppPath string `json:"app_path,omitempty"`
+}
+
+// FDBreakdown groups open descriptors by lsof TYPE and path.
+type FDBreakdown struct {
+	Total   int `json:"total"`
+	PTY     int `json:"pty"`
+	Socket  int `json:"socket"`
+	Regular int `json:"regular"`
+	Dir     int `json:"dir"`
+	Pipe    int `json:"pipe"`
+	Char    int `json:"char"`
+	Kqueue  int `json:"kqueue"`
+	Other   int `json:"other"`
 }
 
 // CollectOptions parameterises CollectAll.

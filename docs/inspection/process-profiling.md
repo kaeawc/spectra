@@ -29,6 +29,17 @@ connections. `process-tree` adds parent/child context. `metrics` shows recent
 daemon samples. `sample` captures call stacks when the process is actively
 burning CPU.
 
+For descriptor leaks, add `--fd-breakdown`:
+
+```bash
+spectra process --deep --fd-breakdown --sort rss
+```
+
+This keeps the same process inventory but splits open descriptors into ptys,
+sockets, regular files, pipes, character devices, kqueues, and other handles.
+The JSON output includes `fd_breakdown` automatically whenever `--deep`
+populates descriptor data.
+
 ## Samples
 
 macOS ships `sample <pid>`, which records stack traces over a bounded interval.
@@ -126,6 +137,31 @@ questions:
 
 For a sustained burn, capture `sample` while CPU is high. For a sawtooth, use a
 longer history window first, then sample during the hot phase.
+
+## Pty leaks
+
+Pseudo-tty leaks usually present as a terminal problem even when another app is
+responsible. iTerm2, Terminal.app, VS Code, or a JetBrains terminal can show an
+empty pane or an immediate "Session Ended" because `forkpty()` cannot allocate a
+new `/dev/ptmx` or `/dev/ttys*` pair.
+
+Start with the descriptor breakdown:
+
+```bash
+spectra process --deep --fd-breakdown --sort rss
+```
+
+Look for one app or helper with a high `PTY` count. Electron and Chromium apps
+normally run several helpers, but they should not hold dozens of ptys when no
+embedded terminal sessions are active. Pair the row with a scoped tree:
+
+```bash
+spectra connect local process-tree /Applications/Claude.app
+```
+
+If the pty count drops after quitting the suspect app, the terminal was the
+victim and the descriptor holder was the culprit. Use snapshots before and
+after remediation when you need a durable incident record.
 
 ## RSS trends
 
