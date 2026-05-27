@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -35,6 +36,84 @@ func TestParseLSOFDeepFDCount(t *testing.T) {
 	// bash: FDs 0, 1, 2 = 3 open FDs.
 	if procs[1].OpenFDs != 3 {
 		t.Errorf("bash OpenFDs = %d, want 3", procs[1].OpenFDs)
+	}
+}
+
+func TestParseLSOFDeepFDBreakdown(t *testing.T) {
+	const fixture = `COMMAND    PID   USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+App        777   alice    0u   CHR                3,2      0t0     339 /dev/ptmx
+App        777   alice    1u   CHR                3,2      0t0     339 /dev/ttys000
+App        777   alice    2u   CHR                3,2      0t0     339 /dev/ptyq1
+App        777   alice    3u  IPv4 0xabc          0t0     TCP 127.0.0.1:1->127.0.0.1:2 (ESTABLISHED)
+App        777   alice    4u  IPv6 0xabc          0t0     TCP [::1]:1->[::1]:2 (ESTABLISHED)
+App        777   alice    5u  unix 0xabc          0t0         0 /var/run/app.sock
+App        777   alice    6u  IPv4 0xabc          0t0     TCP *:3000 (LISTEN)
+App        777   alice    7u  unix 0xabc          0t0         0 /var/run/app2.sock
+App        777   alice    8r   REG               1,15        0     100 /tmp/a
+App        777   alice    9r   REG               1,15        0     101 /tmp/b
+App        777   alice   10r   REG               1,15        0     102 /tmp/c
+App        777   alice   11r   REG               1,15        0     103 /tmp/d
+App        777   alice   12r   REG               1,15        0     104 /tmp/e
+App        777   alice   13r   REG               1,15        0     105 /tmp/f
+App        777   alice   14r   REG               1,15        0     106 /tmp/g
+App        777   alice   15r   REG               1,15        0     107 /tmp/h
+App        777   alice   16r   REG               1,15        0     108 /tmp/i
+App        777   alice   17r   REG               1,15        0     109 /tmp/j
+App        777   alice   18u  PIPE               0,15      0t0         0
+App        777   alice   19u  FIFO               0,15      0t0         0
+App        777   alice   20u KQUEUE                                        count=1, state=0
+`
+	procs := []Info{{PID: 777, Command: "App"}}
+	parseLSOFDeep(procs, fixture)
+
+	b := procs[0].FDBreakdown
+	if b == nil {
+		t.Fatal("FDBreakdown is nil")
+	}
+	if procs[0].OpenFDs != 21 {
+		t.Fatalf("OpenFDs = %d, want 21", procs[0].OpenFDs)
+	}
+	if b.Total != procs[0].OpenFDs {
+		t.Fatalf("breakdown total = %d, want OpenFDs %d", b.Total, procs[0].OpenFDs)
+	}
+	if b.PTY != 3 || b.Socket != 5 || b.Regular != 10 || b.Pipe != 2 || b.Kqueue != 1 {
+		t.Fatalf("breakdown = %+v, want pty=3 socket=5 regular=10 pipe=2 kqueue=1", *b)
+	}
+}
+
+func TestParseLSOFDeepFDBreakdownCharDevice(t *testing.T) {
+	const fixture = `COMMAND    PID   USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+App        777   alice    0u   CHR                3,2      0t0     339 /dev/null
+`
+	procs := []Info{{PID: 777, Command: "App"}}
+	parseLSOFDeep(procs, fixture)
+
+	b := procs[0].FDBreakdown
+	if b == nil {
+		t.Fatal("FDBreakdown is nil")
+	}
+	if b.Char != 1 || b.PTY != 0 {
+		t.Fatalf("breakdown = %+v, want char=1 pty=0", *b)
+	}
+}
+
+func TestParseLSOFDeepFDBreakdownAddsUp(t *testing.T) {
+	procs := []Info{
+		{PID: 412, Command: "Slack"},
+		{PID: 999, Command: "bash"},
+	}
+	parseLSOFDeep(procs, lsofDeepFixture)
+
+	for _, p := range procs {
+		if p.FDBreakdown == nil {
+			t.Fatalf("%s FDBreakdown is nil", p.Command)
+		}
+		sum := p.FDBreakdown.PTY + p.FDBreakdown.Socket + p.FDBreakdown.Regular +
+			p.FDBreakdown.Dir + p.FDBreakdown.Pipe + p.FDBreakdown.Char +
+			p.FDBreakdown.Kqueue + p.FDBreakdown.Other
+		if sum != p.OpenFDs || p.FDBreakdown.Total != p.OpenFDs {
+			t.Fatalf("%s breakdown = %+v, OpenFDs = %d, category sum = %d", p.Command, *p.FDBreakdown, p.OpenFDs, sum)
+		}
 	}
 }
 
@@ -137,6 +216,21 @@ func TestEnrichDeepError(t *testing.T) {
 	enrichDeep(procs, run)
 	if procs[0].OpenFDs != 0 {
 		t.Errorf("expected OpenFDs=0 for empty lsof output, got %d", procs[0].OpenFDs)
+	}
+}
+
+func TestEnrichDeepParsesPartialOutputOnError(t *testing.T) {
+	procs := []Info{{PID: 412, Command: "Slack"}}
+	run := func(string, ...string) ([]byte, error) {
+		return []byte(lsofDeepFixture), errors.New("lsof: partial failure")
+	}
+
+	enrichDeep(procs, run)
+	if procs[0].OpenFDs != 5 {
+		t.Fatalf("OpenFDs = %d, want 5", procs[0].OpenFDs)
+	}
+	if procs[0].FDBreakdown == nil || procs[0].FDBreakdown.Total != 5 {
+		t.Fatalf("FDBreakdown = %+v, want total 5", procs[0].FDBreakdown)
 	}
 }
 

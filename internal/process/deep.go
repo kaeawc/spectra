@@ -20,7 +20,7 @@ func enrichDeep(procs []Info, run func(string, ...string) ([]byte, error)) {
 	pidArg := strings.Join(pids, ",")
 
 	out, err := run("lsof", "-p", pidArg)
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return
 	}
 	parseLSOFDeep(procs, string(out))
@@ -29,6 +29,7 @@ func enrichDeep(procs []Info, run func(string, ...string) ([]byte, error)) {
 // deepResult accumulates per-PID results during lsof parsing.
 type deepResult struct {
 	fdCount       int
+	breakdown     *FDBreakdown
 	listenPorts   []int
 	outboundConns []string
 	logFiles      []string
@@ -79,6 +80,14 @@ func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
 	// Count rows where FD starts with a digit — those are real open descriptors.
 	if len(fd) > 0 && fd[0] >= '0' && fd[0] <= '9' {
 		r.fdCount++
+		if r.breakdown == nil {
+			r.breakdown = &FDBreakdown{}
+		}
+		name := ""
+		if len(fields) >= 9 {
+			name = strings.Join(fields[8:], " ")
+		}
+		classifyFD(r.breakdown, fields[4], name)
 	}
 	if len(fields) >= 9 && strings.EqualFold(fields[7], "TCP") {
 		recordTCPName(r, strings.Join(fields[8:], " "))
@@ -86,6 +95,36 @@ func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
 	if len(fields) >= 9 && strings.EqualFold(fields[4], "REG") && fdIsWritable(fd) {
 		recordLogFile(r, strings.Join(fields[8:], " "))
 	}
+}
+
+func classifyFD(b *FDBreakdown, typ, name string) {
+	b.Total++
+	switch typ {
+	case "IPv4", "IPv6", "unix":
+		b.Socket++
+	case "REG":
+		b.Regular++
+	case "DIR":
+		b.Dir++
+	case "PIPE", "FIFO":
+		b.Pipe++
+	case "KQUEUE":
+		b.Kqueue++
+	case "CHR":
+		if isPTYPath(name) {
+			b.PTY++
+		} else {
+			b.Char++
+		}
+	default:
+		b.Other++
+	}
+}
+
+func isPTYPath(name string) bool {
+	return strings.HasPrefix(name, "/dev/ttys") ||
+		strings.HasPrefix(name, "/dev/pty") ||
+		name == "/dev/ptmx"
 }
 
 // fdIsWritable reports whether the lsof FD column indicates write access.
@@ -171,6 +210,7 @@ func applyDeepResults(procs []Info, idx map[int]int, results map[int]*deepResult
 	for pid, r := range results {
 		i := idx[pid]
 		procs[i].OpenFDs = r.fdCount
+		procs[i].FDBreakdown = r.breakdown
 		if len(r.listenPorts) > 0 {
 			sort.Ints(r.listenPorts)
 			procs[i].ListeningPorts = r.listenPorts
