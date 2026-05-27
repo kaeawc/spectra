@@ -65,6 +65,7 @@ func Compare(a, b snapshot.Snapshot) Result {
 			diffListeningPorts(a, b),
 			diffVPN(a, b),
 			diffPathDirs(a, b),
+			diffSystemLimits(a, b),
 			diffSysctls(a, b),
 		},
 	}
@@ -339,6 +340,32 @@ func diffSysctls(a, b snapshot.Snapshot) Section {
 		}
 	}
 	return Section{Name: "sysctls", Changes: changes}
+}
+
+func diffSystemLimits(a, b snapshot.Snapshot) Section {
+	type row struct {
+		name string
+		a    float64
+		b    float64
+	}
+	rows := []row{
+		{"pty", a.SystemLimits.PTY.Pct, b.SystemLimits.PTY.Pct},
+		{"files", a.SystemLimits.Files.Pct, b.SystemLimits.Files.Pct},
+		{"procs", a.SystemLimits.Procs.Pct, b.SystemLimits.Procs.Pct},
+		{"procs_per_uid", a.SystemLimits.ProcsPerUID.Pct, b.SystemLimits.ProcsPerUID.Pct},
+	}
+	var changes []Change
+	for _, r := range rows {
+		if fmt.Sprintf("%.1f", r.a) != fmt.Sprintf("%.1f", r.b) {
+			changes = append(changes, Change{
+				Kind:   Changed,
+				Key:    r.name + ":pct",
+				Before: fmt.Sprintf("%.1f", r.a),
+				After:  fmt.Sprintf("%.1f", r.b),
+			})
+		}
+	}
+	return Section{Name: "system_limits", Changes: changes}
 }
 
 // diffActiveRuntimes compares the active version for each language runtime

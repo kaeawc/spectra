@@ -43,6 +43,7 @@ func subcommandList() []subcommand {
 		{"power", "Show current battery and thermal state", runPower},
 		{"impact", "Compute the documented per-pid energy impact score from delta records", runImpact},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
+		{"system", "Show system resource limits and saturation", runSystem},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
 		{"playbook", "Show diagnostic playbooks and command plans", runPlaybook},
 		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},

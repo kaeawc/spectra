@@ -6,6 +6,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
+	"github.com/kaeawc/spectra/internal/syslimits"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -262,6 +263,27 @@ func TestDiffSysctls(t *testing.T) {
 	}
 	if hasChange(sec.Changes, Changed, "hw.ncpu") {
 		t.Error("hw.ncpu unchanged, should not appear")
+	}
+}
+
+func TestDiffSystemLimits(t *testing.T) {
+	a := base()
+	b := base()
+	a.SystemLimits.PTY = syslimits.ResourceUsage{Pct: 40}
+	b.SystemLimits.PTY = syslimits.ResourceUsage{Pct: 98}
+	a.SystemLimits.Files = syslimits.ResourceUsage{Pct: 30}
+	b.SystemLimits.Files = syslimits.ResourceUsage{Pct: 30}
+
+	r := Compare(a, b)
+	sec := findSection(r, "system_limits")
+	if sec == nil {
+		t.Fatal("system_limits section missing")
+	}
+	if !hasChange(sec.Changes, Changed, "pty:pct") {
+		t.Fatalf("expected pty pct change, got %+v", sec.Changes)
+	}
+	if hasChange(sec.Changes, Changed, "files:pct") {
+		t.Fatalf("unexpected files pct change: %+v", sec.Changes)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/sysinfo"
+	"github.com/kaeawc/spectra/internal/syslimits"
 	"github.com/kaeawc/spectra/internal/telemetry"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -32,17 +33,18 @@ const (
 
 // Snapshot is the structured capture of one host at one point in time.
 type Snapshot struct {
-	ID         string               `json:"id"`
-	TakenAt    time.Time            `json:"taken_at"`
-	Kind       Kind                 `json:"kind"`
-	Host       HostInfo             `json:"host"`
-	Apps       []detect.Result      `json:"apps"`
-	Processes  []process.Info       `json:"processes,omitempty"`
-	Toolchains toolchain.Toolchains `json:"toolchains"`
-	Power      sysinfo.PowerState   `json:"power"`
-	Sysctls    map[string]string    `json:"sysctls,omitempty"`
-	Network    netstate.State       `json:"network"`
-	Storage    storagestate.State   `json:"storage"`
+	ID           string                 `json:"id"`
+	TakenAt      time.Time              `json:"taken_at"`
+	Kind         Kind                   `json:"kind"`
+	Host         HostInfo               `json:"host"`
+	Apps         []detect.Result        `json:"apps"`
+	Processes    []process.Info         `json:"processes,omitempty"`
+	Toolchains   toolchain.Toolchains   `json:"toolchains"`
+	Power        sysinfo.PowerState     `json:"power"`
+	SystemLimits syslimits.SystemLimits `json:"system_limits"`
+	Sysctls      map[string]string      `json:"sysctls,omitempty"`
+	Network      netstate.State         `json:"network"`
+	Storage      storagestate.State     `json:"storage"`
 
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
@@ -95,6 +97,10 @@ type Options struct {
 	// SysinfoCmdRunner is forwarded to sysinfo collectors (sysctls + power).
 	// Zero value uses the real commands.
 	SysinfoCmdRunner sysinfo.CmdRunner
+
+	// SyslimitsOpts are forwarded to the system limits collector.
+	// Zero value uses production defaults.
+	SyslimitsOpts syslimits.Options
 
 	// NetCmdRunner is forwarded to the network state collector.
 	// Zero value uses the real commands.
@@ -197,6 +203,10 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}()
 	go func() {
 		defer wg.Done()
+		s.SystemLimits = syslimits.Collect(opts.SyslimitsOpts)
+	}()
+	go func() {
+		defer wg.Done()
 		s.Sysctls = sysinfo.CollectSysctls(siRun)
 	}()
 	go func() {
@@ -243,7 +253,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 }
 
 func snapshotCollectorCount(opts Options) int {
-	collectors := 5 // host, toolchains, power, sysctls, network
+	collectors := 6 // host, toolchains, power, system limits, sysctls, network
 	if !opts.SkipApps {
 		collectors++
 	}

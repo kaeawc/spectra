@@ -171,6 +171,35 @@ type Dependencies struct {
 }
 ```
 
+## System limits
+
+`spectra system limits --json` and snapshot `system_limits` fields use this
+shape:
+
+```go
+type SystemLimits struct {
+    PTY             ResourceUsage
+    Files           ResourceUsage
+    FilesPerProc    int
+    Procs           ResourceUsage
+    ProcsPerUID     ResourceUsage
+    CollectedAt     time.Time
+    PartialFailures []string
+}
+
+type ResourceUsage struct {
+    Limit    int
+    Current  int
+    Pct      float64
+    Warn     bool
+    Critical bool
+}
+```
+
+JSON field names are `pty`, `files`, `max_files_per_proc`, `procs`,
+`procs_per_uid`, `collected_at`, and `partial_failures`. `Warn` is true above
+80%; `Critical` is true above 95%.
+
 ### SwiftInspection
 
 ```go
