@@ -57,6 +57,15 @@ func (w *AsyncWriter) Write(key, data []byte) (wroteSync bool) {
 		_ = w.store.Put(key, data)
 		return true
 	}
+	if cap(w.queue) == 0 {
+		if err := w.store.Put(key, data); err != nil {
+			w.Failed.Add(1)
+		} else {
+			w.Completed.Add(1)
+			w.Bytes.Add(int64(len(data)))
+		}
+		return true
+	}
 	job := writeJob{key: key, data: data}
 	select {
 	case w.queue <- job:
