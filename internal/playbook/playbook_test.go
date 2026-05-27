@@ -7,7 +7,7 @@ import (
 
 func TestDefaultCatalogContainsExpectedPlaybooks(t *testing.T) {
 	c := MustDefaultCatalog()
-	want := []string{"jvm-memory", "network-failure", "remote-triage", "storage-bloat", "toolchain-drift"}
+	want := []string{"jvm-memory", "network-failure", "remote-triage", "storage-bloat", "terminal-spawning", "toolchain-drift"}
 	got := c.List()
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d", len(got), len(want))

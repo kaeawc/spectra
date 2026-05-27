@@ -5,6 +5,7 @@ func defaultPlaybooks() []Playbook {
 		jvmMemory(),
 		networkFailure(),
 		storageBloat(),
+		terminalSpawning(),
 		remoteTriage(),
 		toolchainDrift(),
 	}
@@ -164,6 +165,77 @@ func storageBloat() Playbook {
 			{Title: "Storage footprint", Path: "docs/inspection/storage-footprint.md"},
 			{Title: "Storage design", Path: "docs/design/storage.md"},
 			{Title: "CLI storage commands", Path: "docs/operations/cli.md"},
+		},
+	}
+}
+
+func terminalSpawning() Playbook {
+	return Playbook{
+		ID:          "terminal-spawning",
+		Title:       "Terminal sessions die at launch",
+		Symptom:     "iTerm2, Terminal.app, VS Code, or another terminal app reports Session Ended immediately after spawning a shell, with no shell output.",
+		Description: "Diagnose the system-wide resource that is exhausted, then identify which process or app is holding it.",
+		Steps: []Step{
+			{
+				ID:      "system-limits",
+				Title:   "Check system resource saturation",
+				Purpose: "Identify whether ptys, file descriptors, or process slots are exhausted.",
+				Commands: []Command{
+					{Args: []string{"system", "limits"}, Description: "Show pty, file, and process usage against kernel limits"},
+					{Args: []string{"system", "limits", "--top"}, Description: "Show top holders for saturated resources"},
+					{Args: []string{"system", "limits", "--json"}, Description: "Emit limit state as JSON for sharing or automation"},
+				},
+				Signals: []Signal{
+					{Name: "pty slots CRITICAL", Meaning: "A process is holding too many pseudo-ttys; top pty holders are suspect."},
+					{Name: "open files CRITICAL", Meaning: "FD exhaustion can prevent new shells from opening stdin, stdout, or stderr."},
+					{Name: "processes/uid CRITICAL", Meaning: "The user process cap is saturated by a runaway child-process fleet."},
+				},
+			},
+			{
+				ID:      "fd-breakdown",
+				Title:   "Find descriptor holders",
+				Purpose: "Rank live processes by descriptor type and identify pty-heavy helpers.",
+				Commands: []Command{
+					{Args: []string{"process", "--deep", "--fd-breakdown", "--sort", "rss"}, Description: "Show per-process pty, socket, file, pipe, char, and kqueue counts"},
+					{Args: []string{"process", "--deep", "--json"}, Description: "Emit process rows with fd_breakdown for jq filtering"},
+				},
+				Signals: []Signal{
+					{Name: "High PTY count outside terminal app", Meaning: "The terminal is likely the victim; inspect the pty holder."},
+					{Name: "High FD count with low PTY count", Meaning: "The incident may be file/socket exhaustion rather than pty exhaustion."},
+				},
+			},
+			{
+				ID:      "suspect-app",
+				Title:   "Inspect the suspect app",
+				Purpose: "Confirm helper sprawl, uptime, and app-scoped process ownership.",
+				Commands: []Command{
+					{Args: []string{"-v", "<suspect-app-path>"}, Description: "Inspect the suspect app with helper count, running processes, and storage context"},
+					{Args: []string{"connect", "local", "process-tree", "<suspect-app-path>"}, Description: "Show the app-scoped process tree"},
+					{Args: []string{"snapshot", "--baseline", "terminal-spawning-before"}, Description: "Capture the current state before remediation"},
+				},
+				Signals: []Signal{
+					{Name: "Unexpected helper count", Meaning: "An Electron, Chromium, or IDE helper may be leaking resources."},
+					{Name: "Long uptime plus high descriptor count", Meaning: "Restarting the app is a useful confirmation step."},
+				},
+			},
+			{
+				ID:      "confirm-recovery",
+				Title:   "Confirm recovery",
+				Purpose: "Verify resource pressure drops and preserve a before/after record.",
+				Commands: []Command{
+					{Args: []string{"system", "limits"}, Description: "Recheck resource usage after quitting or restarting the suspect app"},
+					{Args: []string{"diff", "baseline", "terminal-spawning-before", "live"}, Description: "Compare the before snapshot with live state"},
+				},
+				Signals: []Signal{
+					{Name: "Usage drops below WARN", Meaning: "The restarted app was holding the exhausted resource."},
+					{Name: "Usage remains CRITICAL", Meaning: "Continue down the top-holder list or check another user/system process."},
+				},
+			},
+		},
+		References: []Reference{
+			{Title: "System limits", Path: "docs/inspection/system-limits.md"},
+			{Title: "Process profiling", Path: "docs/inspection/process-profiling.md"},
+			{Title: "Helpers and XPC", Path: "docs/inspection/helpers-and-xpc.md"},
 		},
 	}
 }

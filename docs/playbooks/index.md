@@ -12,6 +12,7 @@ Use them when the question is operational:
 | Java app is slow or memory-heavy | [JVM memory](jvm-memory.md) |
 | App cannot reach a service or endpoint | [Network failure](network-failure.md) |
 | Disk is filling up or an app is unexpectedly large | [Storage bloat](storage-bloat.md) |
+| Terminal sessions die immediately at launch | [Terminal spawning](terminal-spawning.md) |
 | Another Mac is behaving differently | [Remote triage](remote-triage.md) |
 | Builds or tools differ across machines | [Toolchain drift](toolchain-drift.md) |
 
