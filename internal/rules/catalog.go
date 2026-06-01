@@ -20,6 +20,7 @@ func V1Catalog() []Rule {
 		ruleMemoryCompressorExcess(),
 		ruleMemorySwapExcess(),
 		ruleMemorySustainedPressure(),
+		ruleStorageStagedMajorUpdate(),
 		ruleJVMGCPressure(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),

@@ -13,6 +13,7 @@ devfs                                  386       386         0   100% /dev
 /dev/disk3s2                     971309944  13285364 444843444     3% /System/Volumes/Preboot
 /dev/disk3s4                     971309944   1107516 444843444     1% /System/Volumes/Recovery
 /dev/disk3s5                     971309944   5312168 444843444     2% /data
+map auto_home                            0         0         0   100% /System/Volumes/Data/home
 `
 
 const mountOutput = `/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
@@ -38,6 +39,9 @@ func TestParseDF(t *testing.T) {
 	}
 	if _, ok := mounts["/dev"]; ok {
 		t.Error("/dev (devfs) should be excluded")
+	}
+	if mounts["/"].Device != "/dev/disk3s1s1" {
+		t.Errorf("root device = %q, want /dev/disk3s1s1", mounts["/"].Device)
 	}
 }
 
@@ -70,6 +74,9 @@ func TestApplyFSTypes(t *testing.T) {
 				t.Fatalf("%s fs type = %q, want apfs", v.MountPoint, v.FSType)
 			}
 		}
+	}
+	if got := parseMountInfos(mountOutput)["/"].readOnly; !got {
+		t.Fatal("root should be read-only")
 	}
 }
 
@@ -163,5 +170,45 @@ func TestCollect(t *testing.T) {
 	}
 	if s.UserLibraryBytes == 0 {
 		t.Error("UserLibraryBytes should be > 0")
+	}
+}
+
+func TestCollectSnapshots(t *testing.T) {
+	home := t.TempDir()
+	fixture, err := os.ReadFile("testdata/apfs-snapshots.plist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := func(name string, args ...string) ([]byte, error) {
+		switch name {
+		case "df":
+			return []byte(dfOutput), nil
+		case "mount":
+			return []byte(mountOutput), nil
+		case "diskutil":
+			if len(args) >= 4 && args[2] == "/" {
+				return fixture, nil
+			}
+			return []byte(`<?xml version="1.0"?><plist version="1.0"><dict><key>Snapshots</key><array/></dict></plist>`), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	s := Collect(CollectOptions{
+		Home:             home,
+		CmdRunner:        stub,
+		IncludeSnapshots: true,
+	})
+	var root Volume
+	for _, v := range s.Volumes {
+		if v.MountPoint == "/" {
+			root = v
+		}
+	}
+	if len(root.Snapshots) != 2 {
+		t.Fatalf("root snapshots = %d, want 2", len(root.Snapshots))
+	}
+	if root.Snapshots[1].Kind != SnapshotMSUPrepare {
+		t.Fatalf("second snapshot kind = %s, want %s", root.Snapshots[1].Kind, SnapshotMSUPrepare)
 	}
 }
