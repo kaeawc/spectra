@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -82,6 +83,8 @@ func storageCacheKey(opts storagestate.CollectOptions) []byte {
 		"storage",
 		opts.Home,
 		strings.Join(opts.AppPaths, "|"),
+		fmt.Sprint(opts.LargestAppsN),
+		fmt.Sprint(opts.IncludeSnapshots),
 	}
 	h := sha256.New()
 	h.Write([]byte(strings.Join(parts, "\x00")))

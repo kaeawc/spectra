@@ -22,11 +22,14 @@ type State struct {
 
 // Volume is one mounted filesystem.
 type Volume struct {
-	MountPoint string `json:"mount_point"`
-	FSType     string `json:"fs_type,omitempty"`
-	TotalBytes int64  `json:"total_bytes"`
-	UsedBytes  int64  `json:"used_bytes"`
-	AvailBytes int64  `json:"avail_bytes"`
+	Device     string         `json:"device,omitempty"`
+	MountPoint string         `json:"mount_point"`
+	FSType     string         `json:"fs_type,omitempty"`
+	ReadOnly   bool           `json:"read_only,omitempty"`
+	TotalBytes int64          `json:"total_bytes"`
+	UsedBytes  int64          `json:"used_bytes"`
+	AvailBytes int64          `json:"avail_bytes"`
+	Snapshots  []APFSSnapshot `json:"snapshots,omitempty"`
 }
 
 // AppSize is one app bundle's on-disk footprint.
@@ -54,6 +57,8 @@ type CollectOptions struct {
 	LargestAppsN int
 	// CmdRunner overrides exec.Command for testing.
 	CmdRunner CmdRunner
+	// IncludeSnapshots runs diskutil APFS snapshot collection for APFS volumes.
+	IncludeSnapshots bool
 }
 
 // Collect gathers StorageState.
@@ -75,8 +80,11 @@ func Collect(opts CollectOptions) State {
 	}
 	if len(s.Volumes) > 0 {
 		if out, err := run("mount"); err == nil {
-			applyFSTypes(s.Volumes, parseMountFSTypes(string(out)))
+			applyMountInfo(s.Volumes, parseMountInfos(string(out)))
 		}
+	}
+	if opts.IncludeSnapshots {
+		applyAPFSSnapshots(s.Volumes, run)
 	}
 	s.UserLibraryBytes = dirBytes(filepath.Join(opts.Home, "Library"))
 	s.AppCachesBytes = dirBytes(filepath.Join(opts.Home, "Library", "Caches"))
@@ -99,7 +107,7 @@ func parseDF(out string) []Volume {
 		mount := fields[5]
 		// Skip pseudo filesystems.
 		if strings.HasPrefix(fields[0], "devfs") ||
-			strings.HasPrefix(fields[0], "map ") ||
+			fields[0] == "map" ||
 			strings.HasPrefix(mount, "/dev") ||
 			strings.HasPrefix(mount, "/System/Volumes/Preboot") ||
 			strings.HasPrefix(mount, "/System/Volumes/Recovery") ||
@@ -111,6 +119,7 @@ func parseDF(out string) []Volume {
 		used := parseInt64(fields[2]) * 1024
 		avail := parseInt64(fields[3]) * 1024
 		volumes = append(volumes, Volume{
+			Device:     fields[0],
 			MountPoint: mount,
 			TotalBytes: total,
 			UsedBytes:  used,
@@ -128,36 +137,63 @@ func applyFSTypes(volumes []Volume, fsTypes map[string]string) {
 	}
 }
 
+func applyMountInfo(volumes []Volume, infos map[string]mountInfo) {
+	for i := range volumes {
+		if info, ok := infos[volumes[i].MountPoint]; ok {
+			volumes[i].FSType = info.fsType
+			volumes[i].ReadOnly = info.readOnly
+		}
+	}
+}
+
 func parseMountFSTypes(out string) map[string]string {
 	fsTypes := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		mountPoint, fsType, ok := parseMountLine(line)
-		if ok {
-			fsTypes[mountPoint] = fsType
-		}
+	for mountPoint, info := range parseMountInfos(out) {
+		fsTypes[mountPoint] = info.fsType
 	}
 	return fsTypes
 }
 
-func parseMountLine(line string) (mountPoint string, fsType string, ok bool) {
+type mountInfo struct {
+	fsType   string
+	readOnly bool
+}
+
+func parseMountInfos(out string) map[string]mountInfo {
+	infos := map[string]mountInfo{}
+	for _, line := range strings.Split(out, "\n") {
+		mountPoint, info, ok := parseMountLine(line)
+		if ok {
+			infos[mountPoint] = info
+		}
+	}
+	return infos
+}
+
+func parseMountLine(line string) (mountPoint string, info mountInfo, ok bool) {
 	_, rest, ok := strings.Cut(line, " on ")
 	if !ok {
-		return "", "", false
+		return "", mountInfo{}, false
 	}
 	mountPoint, options, ok := strings.Cut(rest, " (")
 	if !ok {
-		return "", "", false
+		return "", mountInfo{}, false
 	}
 	fields := strings.Split(options, ",")
 	if len(fields) == 0 {
-		return "", "", false
+		return "", mountInfo{}, false
 	}
-	fsType = strings.TrimSpace(strings.TrimSuffix(fields[0], ")"))
+	info.fsType = strings.TrimSpace(strings.TrimSuffix(fields[0], ")"))
+	for _, field := range fields[1:] {
+		if strings.TrimSpace(strings.TrimSuffix(field, ")")) == "read-only" {
+			info.readOnly = true
+		}
+	}
 	mountPoint = strings.TrimSpace(mountPoint)
-	if mountPoint == "" || fsType == "" {
-		return "", "", false
+	if mountPoint == "" || info.fsType == "" {
+		return "", mountInfo{}, false
 	}
-	return mountPoint, fsType, true
+	return mountPoint, info, true
 }
 
 // dirBytes returns the total on-disk size of all files under dir using

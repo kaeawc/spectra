@@ -14,11 +14,12 @@ func runStorage(args []string) int {
 	fs := flag.NewFlagSet("spectra storage", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	includeSnapshots := fs.Bool("snapshots", false, "Include APFS snapshots")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	state := storagestate.Collect(storagestate.CollectOptions{})
+	state := storagestate.Collect(storagestate.CollectOptions{IncludeSnapshots: *includeSnapshots})
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -27,11 +28,11 @@ func runStorage(args []string) int {
 		return 0
 	}
 
-	printStorageState(state)
+	printStorageState(state, *includeSnapshots)
 	return 0
 }
 
-func printStorageState(s storagestate.State) {
+func printStorageState(s storagestate.State, includeSnapshots bool) {
 	fmt.Println("=== Storage state ===")
 
 	if len(s.Volumes) > 0 {
@@ -50,6 +51,9 @@ func printStorageState(s storagestate.State) {
 				humanSize(v.AvailBytes),
 				pct,
 			)
+			if includeSnapshots {
+				printVolumeSnapshots(v)
+			}
 		}
 	}
 
@@ -65,5 +69,22 @@ func printStorageState(s storagestate.State) {
 		for _, a := range s.LargestApps {
 			fmt.Printf("  %10s  %s\n", humanSize(a.OnDiskBytes), a.Path)
 		}
+	}
+}
+
+func printVolumeSnapshots(v storagestate.Volume) {
+	if len(v.Snapshots) == 0 {
+		if strings.EqualFold(v.FSType, "apfs") {
+			fmt.Println("    snapshots: none")
+		}
+		return
+	}
+	fmt.Printf("    snapshots (%d):\n", len(v.Snapshots))
+	for _, snap := range v.Snapshots {
+		created := ""
+		if !snap.CreatedAt.IsZero() {
+			created = " " + snap.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		fmt.Printf("      %-12s  %s%s\n", snap.Kind.String(), snap.Name, created)
 	}
 }

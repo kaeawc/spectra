@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
+	"github.com/kaeawc/spectra/internal/timemachine"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -483,6 +484,67 @@ func TestStorageFootprintNoFire(t *testing.T) {
 	}
 }
 
+func TestStorageStagedMajorUpdateFiresWithoutLatestBackup(t *testing.T) {
+	s := baseSnap()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s.Storage = storagestate.State{
+		Volumes: []storagestate.Volume{{
+			MountPoint: "/",
+			FSType:     "apfs",
+			Snapshots: []storagestate.APFSSnapshot{{
+				Name:      "com.apple.os.update-MSUPrepareUpdate",
+				Kind:      storagestate.SnapshotMSUPrepare,
+				CreatedAt: now.Add(-8 * 24 * time.Hour),
+			}},
+		}},
+	}
+	findings := stagedMajorUpdateFindings(s, now)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "storage.staged_major_update" || !strings.Contains(findings[0].Fix, "spectra storage --snapshots") {
+		t.Fatalf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestStorageStagedMajorUpdateNoFireWithLatestBackup(t *testing.T) {
+	s := baseSnap()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s.Host.TimeMachine.Destinations = []timemachine.TMDestination{{
+		Name:       "Backup",
+		LastBackup: now.Add(-2 * time.Hour),
+	}}
+	s.Storage = storagestate.State{
+		Volumes: []storagestate.Volume{{
+			MountPoint: "/",
+			Snapshots: []storagestate.APFSSnapshot{{
+				Kind:      storagestate.SnapshotMSUPrepare,
+				CreatedAt: now.Add(-8 * 24 * time.Hour),
+			}},
+		}},
+	}
+	if findings := stagedMajorUpdateFindings(s, now); len(findings) != 0 {
+		t.Fatalf("expected 0 findings, got %d", len(findings))
+	}
+}
+
+func TestStorageStagedMajorUpdateNoFireForFreshOrUndatedSnapshot(t *testing.T) {
+	s := baseSnap()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s.Storage = storagestate.State{
+		Volumes: []storagestate.Volume{{
+			MountPoint: "/",
+			Snapshots: []storagestate.APFSSnapshot{
+				{Kind: storagestate.SnapshotMSUPrepare, CreatedAt: now.Add(-2 * 24 * time.Hour)},
+				{Kind: storagestate.SnapshotMSUPrepare},
+			},
+		}},
+	}
+	if findings := stagedMajorUpdateFindings(s, now); len(findings) != 0 {
+		t.Fatalf("expected 0 findings, got %d", len(findings))
+	}
+}
+
 // --- app-no-hardened-runtime ---
 
 func TestAppNoHardenedRuntimeFires(t *testing.T) {
@@ -871,6 +933,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"memory.compressor_excess",
 		"memory.swap_excess",
 		"memory.sustained_pressure",
+		"storage.staged_major_update",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)
