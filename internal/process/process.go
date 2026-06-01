@@ -19,19 +19,24 @@ import (
 
 // Info is one running process at snapshot time.
 type Info struct {
-	PID             int       `json:"pid"`
-	PPID            int       `json:"ppid"`
-	UID             int       `json:"uid"`
-	User            string    `json:"user,omitempty"`
-	Command         string    `json:"command"`            // short (comm) — just the exe name
-	BSDName         string    `json:"bsd_name,omitempty"` // p_comm from libproc when available
-	ExecutablePath  string    `json:"executable_path,omitempty"`
-	FullCommandLine string    `json:"full_command_line"` // full argv[0...] string
-	RSSKiB          int64     `json:"rss_kib"`
-	VSizeKiB        int64     `json:"vsize_kib"`
-	ThreadCount     int       `json:"thread_count"`         // number of process threads
-	CPUPct          float64   `json:"cpu_pct"`              // CPU % at sample time (pcpu)
-	StartTime       time.Time `json:"start_time,omitempty"` // process start time (lstart)
+	PID             int           `json:"pid"`
+	PPID            int           `json:"ppid"`
+	UID             int           `json:"uid"`
+	User            string        `json:"user,omitempty"`
+	Command         string        `json:"command"`            // short (comm) — just the exe name
+	BSDName         string        `json:"bsd_name,omitempty"` // p_comm from libproc when available
+	ExecutablePath  string        `json:"executable_path,omitempty"`
+	FullCommandLine string        `json:"full_command_line"` // full argv[0...] string
+	RSSKiB          int64         `json:"rss_kib"`
+	VSizeKiB        int64         `json:"vsize_kib"`
+	VSZBytes        uint64        `json:"vsz_bytes,omitempty"`
+	ThreadCount     int           `json:"thread_count"`         // number of process threads
+	CPUPct          float64       `json:"cpu_pct"`              // CPU % at sample time (pcpu)
+	CPUPercent      float64       `json:"cpu_percent"`          // alias for CPU percent in new process views
+	MemPercent      float64       `json:"mem_percent"`          // RSS / physical memory * 100
+	StartTime       time.Time     `json:"start_time,omitempty"` // process start time (lstart)
+	StartedAt       time.Time     `json:"started_at,omitempty"` // alias for StartTime
+	Elapsed         time.Duration `json:"elapsed,omitempty"`
 
 	// Deep fields — populated only when CollectOptions.Deep is true.
 	OpenFDs             int          `json:"open_fds,omitempty"`             // open file descriptor count
@@ -85,6 +90,12 @@ type CollectOptions struct {
 	// ThreadCounter overrides the platform thread-count collector for testing.
 	// Deprecated: use DetailCollector for new tests.
 	ThreadCounter func([]Info) map[int]int
+
+	// Now overrides the sample time for elapsed-duration derivation.
+	Now func() time.Time
+
+	// MemoryBytes overrides physical memory size for MemPercent tests.
+	MemoryBytes func() uint64
 }
 
 // Details contains direct per-process metadata collected without spawning
@@ -119,6 +130,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		return nil
 	}
 	procs := parsePS(string(out))
+	applyDerivedFields(procs, collectNow(opts), collectMemoryBytes(opts))
 	applyProcessDetails(procs, opts.DetailCollector)
 	threadCounter := opts.ThreadCounter
 	if threadCounter == nil && opts.DetailCollector == nil {
@@ -132,6 +144,43 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		enrichDeep(procs, run)
 	}
 	return procs
+}
+
+func collectNow(opts CollectOptions) time.Time {
+	if opts.Now != nil {
+		return opts.Now()
+	}
+	return time.Now()
+}
+
+func collectMemoryBytes(opts CollectOptions) uint64 {
+	if opts.MemoryBytes != nil {
+		return opts.MemoryBytes()
+	}
+	return systemMemoryBytes()
+}
+
+func applyDerivedFields(procs []Info, now time.Time, memBytes uint64) {
+	for i := range procs {
+		if procs[i].VSizeKiB > 0 {
+			procs[i].VSZBytes = kibToBytes(procs[i].VSizeKiB)
+		}
+		procs[i].CPUPercent = procs[i].CPUPct
+		procs[i].StartedAt = procs[i].StartTime
+		if !procs[i].StartedAt.IsZero() && now.After(procs[i].StartedAt) {
+			procs[i].Elapsed = now.Sub(procs[i].StartedAt).Round(time.Second)
+		}
+		if memBytes > 0 && procs[i].RSSKiB > 0 {
+			procs[i].MemPercent = float64(kibToBytes(procs[i].RSSKiB)) / float64(memBytes) * 100
+		}
+	}
+}
+
+func kibToBytes(kib int64) uint64 {
+	if kib <= 0 {
+		return 0
+	}
+	return uint64(kib) * 1024
 }
 
 func applyProcessDetails(procs []Info, collector func([]Info) map[int]Details) {
@@ -225,13 +274,16 @@ func parseRow(line string) Info {
 		PID:             pid,
 		PPID:            ppid,
 		CPUPct:          cpu,
+		CPUPercent:      cpu,
 		RSSKiB:          rss,
 		VSizeKiB:        vsz,
+		VSZBytes:        kibToBytes(vsz),
 		UID:             uid,
 		User:            fields[6],
 		Command:         shortName(full),
 		FullCommandLine: full,
 		StartTime:       startTime,
+		StartedAt:       startTime,
 	}
 }
 
