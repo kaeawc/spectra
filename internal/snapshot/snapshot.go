@@ -22,6 +22,7 @@ import (
 	"github.com/kaeawc/spectra/internal/syslimits"
 	"github.com/kaeawc/spectra/internal/telemetry"
 	"github.com/kaeawc/spectra/internal/toolchain"
+	"github.com/kaeawc/spectra/internal/updates"
 )
 
 // Kind distinguishes a live snapshot from an immutable baseline.
@@ -47,6 +48,7 @@ type Snapshot struct {
 	Network      netstate.State           `json:"network"`
 	Storage      storagestate.State       `json:"storage"`
 	Services     services.LaunchInventory `json:"services,omitempty"`
+	Updates      updates.Result           `json:"updates,omitempty"`
 
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
@@ -116,6 +118,9 @@ type Options struct {
 	// Zero value collects system LaunchDaemons.
 	ServicesOpts services.Options
 
+	// UpdatesOpts are forwarded to the install.log collector.
+	UpdatesOpts updates.Query
+
 	// JVMOpts are forwarded to the JVM collector.
 	// Zero value uses the real jps/jcmd commands.
 	JVMOpts jvm.CollectOptions
@@ -140,6 +145,9 @@ type Options struct {
 
 	// SkipServices disables launchd services collection.
 	SkipServices bool
+
+	// SkipUpdates disables macOS install/update log collection.
+	SkipUpdates bool
 
 	// DetectStore is the sharded cache for detect.Result JSON. When non-nil,
 	// collectApps serves cached results keyed by Info.plist + main-exe hash and
@@ -236,6 +244,14 @@ func Build(ctx context.Context, opts Options) Snapshot {
 			}
 		}()
 	}
+	if !opts.SkipUpdates {
+		go func() {
+			defer wg.Done()
+			if result, err := updates.QueryInstallLog(opts.UpdatesOpts); err == nil {
+				s.Updates = result
+			}
+		}()
+	}
 
 	if !opts.SkipProcesses {
 		go func() {
@@ -281,6 +297,9 @@ func snapshotCollectorCount(opts Options) int {
 		collectors++
 	}
 	if !opts.SkipServices {
+		collectors++
+	}
+	if !opts.SkipUpdates {
 		collectors++
 	}
 	if !opts.SkipJVMs {
