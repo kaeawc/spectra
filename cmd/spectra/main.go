@@ -46,6 +46,7 @@ func subcommandList() []subcommand {
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
 		{"timemachine", "Show Time Machine status, destinations, and local snapshots", runTimeMachine},
 		{"services", "Show launchd jobs and plist schedules", runServices},
+		{"logs", "Run bounded unified log queries", runLogs},
 		{"system", "Show system resource limits and saturation", runSystem},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
 		{"playbook", "Show diagnostic playbooks and command plans", runPlaybook},
