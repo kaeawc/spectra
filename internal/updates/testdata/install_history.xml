@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<array>
+  <dict>
+    <key>_dataType</key>
+    <string>SPInstallHistoryDataType</string>
+    <key>_items</key>
+    <array>
+      <dict>
+        <key>_name</key><string>XProtectPlistConfigData</string>
+        <key>install_date</key><date>2026-05-18T14:12:01Z</date>
+        <key>install_version</key><string>5278</string>
+        <key>package_source</key><string>package_source_apple</string>
+        <key>package_ids</key>
+        <array><string>com.apple.pkg.XProtectPlistConfigData_10_15.16U5278</string></array>
+      </dict>
+      <dict>
+        <key>_name</key><string>ExampleTool</string>
+        <key>install_date</key><date>2026-05-20T10:00:00Z</date>
+        <key>install_version</key><string>1.2.3</string>
+        <key>package_source</key><string>package_source_other</string>
+        <key>package_ids</key>
+        <array><string>com.example.tool.pkg</string></array>
+      </dict>
+    </array>
+  </dict>
+</array>
+</plist>
