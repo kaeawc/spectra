@@ -101,6 +101,36 @@ func TestRunPlaybookUnknown(t *testing.T) {
 	}
 }
 
+func TestRunPlaybookAutoFixNonInteractiveRequiresYes(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runPlaybookWith([]string{"fseventsd-leak", "--auto-fix", "--non-interactive"}, &stdout, &stderr, fakePlaybookCatalog{rows: []playbook.Playbook{
+		{ID: "fseventsd-leak", Title: "fseventsd", Symptom: "memory", Steps: []playbook.Step{{ID: "s", Title: "s", Commands: []playbook.Command{{Args: []string{"memory"}}}}}},
+	}})
+	if code != 2 {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--auto-fix cannot be combined") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunPlaybookCommandsOnlyFSEventsdDoesNotExecute(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	pb := playbook.MustDefaultCatalog().List()[0]
+	if pb.ID != "fseventsd-leak" {
+		t.Fatalf("first default playbook = %s", pb.ID)
+	}
+	code := runPlaybookWith([]string{"--commands", "fseventsd-leak"}, &stdout, &stderr, fakePlaybookCatalog{rows: []playbook.Playbook{pb}})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "spectra memory --json") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestSubcommandListIncludesPlaybook(t *testing.T) {
 	for _, sc := range subcommandList() {
 		if sc.name == "playbook" {

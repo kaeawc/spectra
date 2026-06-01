@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/playbook"
+	"github.com/kaeawc/spectra/internal/snapshot"
+	"github.com/kaeawc/spectra/internal/storagestate"
 )
 
 type playbookCatalog interface {
@@ -21,11 +27,16 @@ func runPlaybook(args []string) int {
 }
 
 func runPlaybookWith(args []string, stdout io.Writer, stderr io.Writer, catalog playbookCatalog) int {
+	args, runFlags := extractPlaybookRunFlags(args)
 	fs := flag.NewFlagSet("spectra playbook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of human output")
 	commandsOnly := fs.Bool("commands", false, "Show only command plan for a playbook")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if runFlags.autoFix && runFlags.nonInteractive && !runFlags.yes {
+		fmt.Fprintln(stderr, "--auto-fix cannot be combined with --non-interactive unless --yes is also passed")
 		return 2
 	}
 
@@ -39,6 +50,9 @@ func runPlaybookWith(args []string, stdout io.Writer, stderr io.Writer, catalog 
 		fmt.Fprintf(stderr, "unknown playbook %q\n", id)
 		printPlaybookUsage(stderr)
 		return 2
+	}
+	if id == "fseventsd-leak" && !*commandsOnly {
+		return runFSEventsdLeakPlaybook(stdout, stderr, *asJSON, runFlags)
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -55,6 +69,116 @@ func runPlaybookWith(args []string, stdout io.Writer, stderr io.Writer, catalog 
 	}
 	printPlaybook(stdout, pb)
 	return 0
+}
+
+type playbookRunFlags struct {
+	autoFix        bool
+	nonInteractive bool
+	yes            bool
+}
+
+func extractPlaybookRunFlags(args []string) ([]string, playbookRunFlags) {
+	out := make([]string, 0, len(args))
+	var flags playbookRunFlags
+	for _, arg := range args {
+		switch arg {
+		case "--auto-fix":
+			flags.autoFix = true
+		case "--non-interactive":
+			flags.nonInteractive = true
+		case "--yes", "-y":
+			flags.yes = true
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out, flags
+}
+
+func runFSEventsdLeakPlaybook(stdout io.Writer, stderr io.Writer, asJSON bool, flags playbookRunFlags) int {
+	ctx := context.Background()
+	snap := snapshot.Build(ctx, snapshot.Options{
+		SpectraVersion: version,
+		SkipApps:       true,
+		SkipJVMs:       true,
+		SkipUpdates:    true,
+		StorageOpts: storagestate.CollectOptions{
+			IncludeSnapshots: true,
+		},
+	})
+	logs, err := logquery.Run(ctx, logquery.Query{
+		Process:  "backupd",
+		MinLevel: "Error",
+		Last:     24 * time.Hour,
+		MaxRows:  50,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: backupd log query failed: %v\n", err)
+	}
+	report := playbook.AnalyzeFSEventsdLeak(snap, logs)
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+		return 0
+	}
+	printFSEventsdLeakReport(stdout, report)
+	if flags.autoFix {
+		return handleFSEventsdAutoFix(stdout, flags, report)
+	}
+	return 0
+}
+
+func printFSEventsdLeakReport(w io.Writer, report playbook.FSEventsdLeakReport) {
+	if report.ExitReason != "" {
+		fmt.Fprintln(w, report.ExitReason)
+		return
+	}
+	if report.Matched {
+		fmt.Fprintf(w, "=> Match: %s\n", report.RuleID)
+	} else {
+		fmt.Fprintf(w, "=> No match: %s\n", report.RuleID)
+	}
+	s := report.Signals
+	fmt.Fprintf(w, "   - fseventsd RSS: %s\n", playbook.FormatBytes(s.FSEventsdRSSBytes))
+	fmt.Fprintf(w, "   - swap used: %.1f%% of physical memory\n", s.SwapRatio*100)
+	fmt.Fprintf(w, "   - TM destinations: %d\n", s.TMDestinationCount)
+	fmt.Fprintf(w, "   - backupd-auto: %s\n", loadedString(s.BackupdAutoLoaded))
+	fmt.Fprintf(w, "   - MSUPrepareUpdate snapshot: %s\n", yesNo(s.MSUPrepareSnapshot))
+	fmt.Fprintf(w, "   - backupd error rate: %s\n", playbook.FormatBackupdErrorRate(s.BackupdErrorCount, 24*time.Hour))
+	if len(report.Remediation) > 0 {
+		fmt.Fprintln(w, "Remediation:")
+		for _, cmd := range report.Remediation {
+			fmt.Fprintf(w, "   %s\n", cmd)
+		}
+	}
+}
+
+func handleFSEventsdAutoFix(stdout io.Writer, flags playbookRunFlags, report playbook.FSEventsdLeakReport) int {
+	if !report.Matched {
+		fmt.Fprintln(stdout, "auto-fix skipped: playbook did not match")
+		return 0
+	}
+	if !flags.yes {
+		fmt.Fprint(stdout, "Apply remediation through spectra-helper? [y/N] ")
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if !strings.EqualFold(strings.TrimSpace(answer), "y") && !strings.EqualFold(strings.TrimSpace(answer), "yes") {
+			fmt.Fprintln(stdout, "auto-fix cancelled")
+			return 0
+		}
+	}
+	fmt.Fprintln(stdout, "confirmed remediation commands:")
+	for _, cmd := range report.Remediation {
+		fmt.Fprintf(stdout, "   %s\n", cmd)
+	}
+	return 0
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 func runPlaybookList(stdout io.Writer, stderr io.Writer, catalog playbookCatalog, asJSON bool) int {
@@ -128,4 +252,5 @@ func printPlaybookCommands(w io.Writer, pb playbook.Playbook) {
 func printPlaybookUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: spectra playbook [--json] [list|<id>]")
 	fmt.Fprintln(w, "   or: spectra playbook --commands <id>")
+	fmt.Fprintln(w, "   or: spectra playbook fseventsd-leak [--auto-fix] [--non-interactive --yes]")
 }

@@ -2,12 +2,95 @@ package playbook
 
 func defaultPlaybooks() []Playbook {
 	return []Playbook{
+		fseventsdLeak(),
 		jvmMemory(),
 		networkFailure(),
 		storageBloat(),
 		terminalSpawning(),
 		remoteTriage(),
 		toolchainDrift(),
+	}
+}
+
+func fseventsdLeak() Playbook {
+	return Playbook{
+		ID:          "fseventsd-leak",
+		Title:       "fseventsd backup leak",
+		Symptom:     "Memory pressure, large fseventsd RSS, backupd errors, and Time Machine scheduling with no destination.",
+		Description: "Correlate memory, process RSS, Time Machine state, APFS snapshots, launchd services, and backupd unified logs into the backup.destinationless_scheduler_leak finding.",
+		Steps: []Step{
+			{
+				ID:      "memory",
+				Title:   "Confirm memory pressure",
+				Purpose: "Exit early unless compressor or swap pressure is high enough to make a leak diagnosis meaningful.",
+				Commands: []Command{
+					{Args: []string{"memory", "--json"}, Description: "Check physical memory, compressor occupancy, and swap use"},
+				},
+				Signals: []Signal{
+					{Name: "Compressor >25% or swap >10%", Meaning: "Continue to process attribution."},
+					{Name: "No memory pressure", Meaning: "Exit cleanly with no fseventsd leak finding."},
+				},
+			},
+			{
+				ID:      "process",
+				Title:   "Rank resident processes",
+				Purpose: "Confirm whether fseventsd is one of the largest resident processes.",
+				Commands: []Command{
+					{Args: []string{"process", "--min-rss=1GB", "--sort=rss", "--json"}, Description: "List large resident processes with PPID, started time, elapsed, RSS, VSZ, CPU, and memory percent"},
+				},
+				Signals: []Signal{
+					{Name: "fseventsd in top 3", Meaning: "The backup/log signals should be checked next."},
+				},
+			},
+			{
+				ID:      "backup-state",
+				Title:   "Check backup scheduler and destinations",
+				Purpose: "Find the destinationless Time Machine scheduler pattern.",
+				Commands: []Command{
+					{Args: []string{"timemachine", "--json"}, Description: "Check Time Machine destinations and scheduler state"},
+					{Args: []string{"services", "--label", "com.apple.backupd-auto", "--json"}, Description: "Confirm the launchd scheduler job is loaded"},
+				},
+				Signals: []Signal{
+					{Name: "No destinations + backupd-auto loaded", Meaning: "A scheduled backup loop may be running without a destination."},
+				},
+			},
+			{
+				ID:      "snapshot-state",
+				Title:   "Check APFS update snapshots",
+				Purpose: "Find staged major update snapshots that correlate with the incident.",
+				Commands: []Command{
+					{Args: []string{"storage", "--snapshots", "--json"}, Description: "List APFS snapshots and classify MSUPrepareUpdate snapshots"},
+				},
+				Signals: []Signal{
+					{Name: "MSUPrepare snapshot", Meaning: "A staged update is present on the system volume."},
+				},
+			},
+			{
+				ID:      "backup-logs",
+				Title:   "Count backupd errors",
+				Purpose: "Quantify recent backupd errors and fs_snapshot_list failures.",
+				Commands: []Command{
+					{Args: []string{"logs", "--process", "backupd", "--level", "Error", "--last", "24h", "--top", "50", "--json"}, Description: "Read bounded backupd error logs"},
+				},
+				Signals: []Signal{
+					{Name: "fs_snapshot_list failed", Meaning: "backupd is failing while enumerating snapshots."},
+				},
+			},
+			{
+				ID:      "remediate",
+				Title:   "Remediate with explicit approval",
+				Purpose: "Disable the destinationless scheduler and restart affected daemons only after confirmation.",
+				Commands: []Command{
+					{Args: []string{"playbook", "fseventsd-leak", "--auto-fix"}, Description: "Prompt before routing remediation through the helper", Destructive: true},
+				},
+			},
+		},
+		References: []Reference{
+			{Title: "FSEvents leak playbook", Path: "docs/playbooks/fseventsd-leak.md"},
+			{Title: "Running processes", Path: "docs/inspection/running-processes.md"},
+			{Title: "Snapshots and hosts", Path: "docs/operations/snapshots-and-hosts.md"},
+			{Title: "CLI commands", Path: "docs/operations/cli.md"},
+		},
 	}
 }
 
