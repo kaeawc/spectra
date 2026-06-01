@@ -14,6 +14,7 @@ import (
 // State is the StorageState slice of a Spectra snapshot.
 type State struct {
 	Volumes          []Volume  `json:"volumes,omitempty"`
+	Mounts           []Mount   `json:"mounts,omitempty"`
 	UserLibraryBytes int64     `json:"user_library_bytes"`
 	AppCachesBytes   int64     `json:"app_caches_bytes"`
 	LargestApps      []AppSize `json:"largest_apps,omitempty"`
@@ -30,6 +31,29 @@ type Volume struct {
 	UsedBytes  int64          `json:"used_bytes"`
 	AvailBytes int64          `json:"avail_bytes"`
 	Snapshots  []APFSSnapshot `json:"snapshots,omitempty"`
+}
+
+// Mount is one currently mounted filesystem from getfsstat.
+type Mount struct {
+	Device     string   `json:"device,omitempty"`
+	MountPoint string   `json:"mount_point"`
+	FSType     string   `json:"fs_type,omitempty"`
+	Flags      []string `json:"flags,omitempty"`
+	Sealed     bool     `json:"sealed,omitempty"`
+	ReadOnly   bool     `json:"read_only,omitempty"`
+	APFSRole   string   `json:"apfs_role,omitempty"`
+	BlockSize  uint32   `json:"block_size,omitempty"`
+	Capacity   Capacity `json:"capacity"`
+}
+
+// Capacity is per-mount capacity from statfs.
+type Capacity struct {
+	Total       uint64  `json:"total"`
+	Used        uint64  `json:"used"`
+	Available   uint64  `json:"available"`
+	UsedPercent float64 `json:"used_percent"`
+	Inodes      uint64  `json:"inodes,omitempty"`
+	InodesFree  uint64  `json:"inodes_free,omitempty"`
 }
 
 // AppSize is one app bundle's on-disk footprint.
@@ -75,6 +99,9 @@ func Collect(opts CollectOptions) State {
 	}
 
 	var s State
+	if mounts, err := collectMounts(run); err == nil {
+		s.Mounts = mounts
+	}
 	if out, err := run("df", "-Pk"); err == nil {
 		s.Volumes = parseDF(string(out))
 	}

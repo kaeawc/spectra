@@ -545,6 +545,53 @@ func TestStorageStagedMajorUpdateNoFireForFreshOrUndatedSnapshot(t *testing.T) {
 	}
 }
 
+func TestStorageDataVolumeNearFullFires(t *testing.T) {
+	s := baseSnap()
+	s.Storage.Mounts = []storagestate.Mount{{
+		MountPoint: "/System/Volumes/Data",
+		APFSRole:   "data",
+		Capacity:   storagestate.Capacity{UsedPercent: 95},
+	}}
+	findings := ruleStorageDataVolumeNearFull().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "storage.data_volume_near_full" || findings[0].Severity != SeverityMedium {
+		t.Fatalf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestStorageSystemVolumeNearFullFires(t *testing.T) {
+	s := baseSnap()
+	s.Storage.Mounts = []storagestate.Mount{{
+		MountPoint: "/",
+		APFSRole:   "system",
+		Capacity:   storagestate.Capacity{UsedPercent: 96},
+	}}
+	findings := ruleStorageSystemVolumeNearFull().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "storage.system_volume_near_full" || findings[0].Severity != SeverityHigh {
+		t.Fatalf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestStorageCapacityRulesSkipSimulator(t *testing.T) {
+	s := baseSnap()
+	s.Storage.Mounts = []storagestate.Mount{{
+		MountPoint: "/Library/Developer/CoreSimulator/Volumes/iOS",
+		APFSRole:   "simulator",
+		Capacity:   storagestate.Capacity{UsedPercent: 98},
+	}}
+	if findings := ruleStorageDataVolumeNearFull().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("data volume rule should skip simulator, got %v", findings)
+	}
+	if findings := ruleStorageSystemVolumeNearFull().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("system volume rule should skip simulator, got %v", findings)
+	}
+}
+
 // --- app-no-hardened-runtime ---
 
 func TestAppNoHardenedRuntimeFires(t *testing.T) {
@@ -934,6 +981,8 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"memory.swap_excess",
 		"memory.sustained_pressure",
 		"storage.staged_major_update",
+		"storage.data_volume_near_full",
+		"storage.system_volume_near_full",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)

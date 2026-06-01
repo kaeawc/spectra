@@ -21,6 +21,64 @@ func ruleStorageStagedMajorUpdate() Rule {
 	}
 }
 
+func ruleStorageDataVolumeNearFull() Rule {
+	return Rule{
+		ID:       "storage.data_volume_near_full",
+		Severity: SeverityMedium,
+		Message:  "APFS data volume is more than 90% full.",
+		Fix:      "Run `spectra storage` and free space on the Data volume.",
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, mount := range s.Storage.Mounts {
+				if mount.APFSRole != "data" || mount.Capacity.UsedPercent <= 90 {
+					continue
+				}
+				findings = append(findings, storageCapacityFinding(
+					"storage.data_volume_near_full",
+					SeverityMedium,
+					mount,
+					"APFS Data volume is more than 90% full.",
+				))
+			}
+			return findings
+		},
+	}
+}
+
+func ruleStorageSystemVolumeNearFull() Rule {
+	return Rule{
+		ID:       "storage.system_volume_near_full",
+		Severity: SeverityHigh,
+		Message:  "APFS system volume is more than 95% full.",
+		Fix:      "Run `spectra storage`; verify staged macOS updates and system volume snapshots.",
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, mount := range s.Storage.Mounts {
+				if mount.APFSRole != "system" || mount.Capacity.UsedPercent <= 95 {
+					continue
+				}
+				findings = append(findings, storageCapacityFinding(
+					"storage.system_volume_near_full",
+					SeverityHigh,
+					mount,
+					"APFS system volume is more than 95% full.",
+				))
+			}
+			return findings
+		},
+	}
+}
+
+func storageCapacityFinding(ruleID string, severity Severity, mount storagestate.Mount, message string) Finding {
+	return Finding{
+		RuleID:   ruleID,
+		Severity: severity,
+		Subject:  mount.MountPoint,
+		Message:  message,
+		Fix:      "Run `spectra storage` to inspect mount capacity, flags, and APFS role.",
+	}
+}
+
 func stagedMajorUpdateFindings(s snapshot.Snapshot, now time.Time) []Finding {
 	if hasLatestTimeMachineBackup(s) {
 		return nil
