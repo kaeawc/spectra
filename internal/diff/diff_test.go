@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/syslimits"
@@ -58,6 +59,36 @@ func TestDiffHostChanged(t *testing.T) {
 	}
 	if hasChange(sec.Changes, Changed, "hostname") {
 		t.Error("unexpected hostname change")
+	}
+}
+
+func TestDiffHostMemoryChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.Host.Memory = memstate.MemoryState{
+		CompressorOccupied: 1024,
+		CompressorStored:   2048,
+		PressureLevel:      memstate.PressureNormal,
+		Swap:               memstate.SwapUsage{UsedBytes: 0},
+	}
+	b.Host.Memory = memstate.MemoryState{
+		CompressorOccupied: 4096,
+		CompressorStored:   8192,
+		PressureLevel:      memstate.PressureWarning,
+		Swap:               memstate.SwapUsage{UsedBytes: 1024},
+	}
+
+	r := Compare(a, b)
+	sec := findSection(r, "host")
+	for _, key := range []string{
+		"memory.compressor_occupied",
+		"memory.compressor_stored",
+		"memory.swap_used",
+		"memory.pressure_level",
+	} {
+		if !hasChange(sec.Changes, Changed, key) {
+			t.Fatalf("expected %s change, got %+v", key, sec.Changes)
+		}
 	}
 }
 

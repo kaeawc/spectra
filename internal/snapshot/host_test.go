@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/memstate"
 )
 
 // TestCollectHostMinimallyPopulated runs against the live machine; we
@@ -73,9 +75,10 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 		"ioreg\x00-d2\x00-c\x00IOPlatformExpertDevice": `"IOPlatformUUID" = "ABCDEF12-3456-7890-ABCD-EF1234567890"`,
 	}}
 	collector := LiveHostCollector{Options: HostCollectOptions{
-		Hostname: func() (string, error) { return "test-host", nil },
-		Runner:   runner,
-		Now:      func() time.Time { return time.Unix(4600, 0) },
+		Hostname:      func() (string, error) { return "test-host", nil },
+		Runner:        runner,
+		Now:           func() time.Time { return time.Unix(4600, 0) },
+		MemoryCollect: func() (memstate.MemoryState, error) { return memstate.MemoryState{PhysicalBytes: 99}, nil },
 	}}
 
 	got := collector.CollectHost("test-version")
@@ -99,6 +102,9 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 	}
 	if got.SpectraVersion != "test-version" {
 		t.Errorf("SpectraVersion = %q", got.SpectraVersion)
+	}
+	if got.Memory.PhysicalBytes != 99 {
+		t.Errorf("Memory.PhysicalBytes = %d, want injected value", got.Memory.PhysicalBytes)
 	}
 }
 

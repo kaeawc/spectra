@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/memstate"
 )
 
 // CommandRunner runs a system command and returns stdout.
@@ -31,9 +33,10 @@ type HostCollector interface {
 
 // HostCollectOptions configures host collection.
 type HostCollectOptions struct {
-	Hostname func() (string, error)
-	Runner   CommandRunner
-	Now      func() time.Time
+	Hostname      func() (string, error)
+	Runner        CommandRunner
+	Now           func() time.Time
+	MemoryCollect func() (memstate.MemoryState, error)
 }
 
 // LiveHostCollector gathers HostInfo from the current machine.
@@ -56,17 +59,18 @@ func (execCommandRunner) Run(name string, args ...string) (string, error) {
 // time. Every field is best-effort; any collector failure leaves the
 // field empty / zero rather than failing the snapshot.
 type HostInfo struct {
-	Hostname       string `json:"hostname"`
-	MachineUUID    string `json:"machine_uuid,omitempty"`
-	OSName         string `json:"os_name"`            // "macOS"
-	OSVersion      string `json:"os_version"`         // "15.6.1"
-	OSBuild        string `json:"os_build,omitempty"` // "24G90"
-	CPUBrand       string `json:"cpu_brand,omitempty"`
-	CPUCores       int    `json:"cpu_cores"`
-	RAMBytes       uint64 `json:"ram_bytes"`
-	Architecture   string `json:"architecture"` // arm64 | amd64
-	UptimeSeconds  int64  `json:"uptime_seconds"`
-	SpectraVersion string `json:"spectra_version,omitempty"`
+	Hostname       string               `json:"hostname"`
+	MachineUUID    string               `json:"machine_uuid,omitempty"`
+	OSName         string               `json:"os_name"`            // "macOS"
+	OSVersion      string               `json:"os_version"`         // "15.6.1"
+	OSBuild        string               `json:"os_build,omitempty"` // "24G90"
+	CPUBrand       string               `json:"cpu_brand,omitempty"`
+	CPUCores       int                  `json:"cpu_cores"`
+	RAMBytes       uint64               `json:"ram_bytes"`
+	Architecture   string               `json:"architecture"` // arm64 | amd64
+	UptimeSeconds  int64                `json:"uptime_seconds"`
+	SpectraVersion string               `json:"spectra_version,omitempty"`
+	Memory         memstate.MemoryState `json:"memory,omitempty"`
 }
 
 // CollectHost gathers HostInfo from the local machine. Spectra version
@@ -89,6 +93,10 @@ func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
+	}
+	memoryCollect := opts.MemoryCollect
+	if memoryCollect == nil {
+		memoryCollect = memstate.Collect
 	}
 
 	h := HostInfo{
@@ -125,7 +133,16 @@ func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
 	if uuid := readMachineUUID(runner); uuid != "" {
 		h.MachineUUID = uuid
 	}
+	h.Memory = collectHostMemory(memoryCollect)
 	return h
+}
+
+func collectHostMemory(collect func() (memstate.MemoryState, error)) memstate.MemoryState {
+	memory, err := collect()
+	if err != nil {
+		return memstate.MemoryState{}
+	}
+	return memory
 }
 
 // readUptime parses kern.boottime and returns seconds since boot.
