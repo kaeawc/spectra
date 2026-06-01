@@ -57,6 +57,10 @@ func printStorageState(s storagestate.State, includeSnapshots bool) {
 		}
 	}
 
+	if len(s.Mounts) > 0 {
+		printMounts(s.Mounts)
+	}
+
 	if s.UserLibraryBytes > 0 {
 		fmt.Printf("\n~/Library:       %s total\n", humanSize(s.UserLibraryBytes))
 		if s.AppCachesBytes > 0 {
@@ -69,6 +73,22 @@ func printStorageState(s storagestate.State, includeSnapshots bool) {
 		for _, a := range s.LargestApps {
 			fmt.Printf("  %10s  %s\n", humanSize(a.OnDiskBytes), a.Path)
 		}
+	}
+}
+
+func printMounts(mounts []storagestate.Mount) {
+	fmt.Printf("\nmounts (%d):\n", len(mounts))
+	fmt.Printf("  %-28s  %-6s  %-9s  %10s  %6s  %s\n", "MOUNT", "FS", "ROLE", "USED", "PCT", "FLAGS")
+	fmt.Println("  " + strings.Repeat("-", 82))
+	for _, m := range mounts {
+		fmt.Printf("  %-28s  %-6s  %-9s  %10s  %5.0f%%  %s\n",
+			truncate(m.MountPoint, 28),
+			m.FSType,
+			m.APFSRole,
+			humanSizeUint(m.Capacity.Used),
+			m.Capacity.UsedPercent,
+			strings.Join(m.Flags, ","),
+		)
 	}
 }
 
@@ -87,4 +107,17 @@ func printVolumeSnapshots(v storagestate.Volume) {
 		}
 		fmt.Printf("      %-12s  %s%s\n", snap.Kind.String(), snap.Name, created)
 	}
+}
+
+func humanSizeUint(n uint64) string {
+	const k = 1024
+	switch {
+	case n >= k*k*k:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(k*k*k))
+	case n >= k*k:
+		return fmt.Sprintf("%.0f MB", float64(n)/float64(k*k))
+	case n >= k:
+		return fmt.Sprintf("%.0f KB", float64(n)/float64(k))
+	}
+	return fmt.Sprintf("%d B", n)
 }
