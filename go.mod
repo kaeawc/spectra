@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	github.com/google/cel-go v0.28.1
 	gopkg.in/yaml.v3 v3.0.1
+	howett.net/plist v1.0.0
 	modernc.org/sqlite v1.50.1
 	tailscale.com v1.98.2
 )
