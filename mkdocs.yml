@@ -102,6 +102,7 @@ nav:
   - Playbooks:
       - Overview: playbooks/index.md
       - JVM memory: playbooks/jvm-memory.md
+      - fseventsd backup leak: playbooks/fseventsd-leak.md
       - Network failure: playbooks/network-failure.md
       - Storage bloat: playbooks/storage-bloat.md
       - Terminal spawning: playbooks/terminal-spawning.md
