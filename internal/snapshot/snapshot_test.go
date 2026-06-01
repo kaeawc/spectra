@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/idgen"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/telemetry"
 )
@@ -126,11 +128,16 @@ func TestBuildSkipAppsProducesNoApps(t *testing.T) {
 }
 
 func TestBuildUsesInjectedHostCollector(t *testing.T) {
+	collectedAt := time.Date(2026, 5, 28, 13, 38, 24, 0, time.UTC)
 	snap := Build(context.Background(), Options{
 		HostCollector: fakeHostCollector{host: HostInfo{
 			Hostname:    "fake-host",
 			MachineUUID: "FAKE-UUID",
 			OSName:      "macOS",
+			Memory: memstate.MemoryState{
+				PhysicalBytes: 1024,
+				CollectedAt:   collectedAt,
+			},
 		}},
 		SkipApps:      true,
 		SkipProcesses: true,
@@ -143,6 +150,13 @@ func TestBuildUsesInjectedHostCollector(t *testing.T) {
 	}
 	if snap.Host.MachineUUID != "FAKE-UUID" {
 		t.Fatalf("MachineUUID = %q, want FAKE-UUID", snap.Host.MachineUUID)
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"memory"`) || !strings.Contains(string(data), `"physical_bytes":1024`) {
+		t.Fatalf("snapshot JSON missing host.memory: %s", data)
 	}
 }
 

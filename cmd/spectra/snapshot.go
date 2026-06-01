@@ -12,6 +12,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -303,6 +304,10 @@ func printSnapshot(s snapshot.Snapshot) {
 	fmt.Printf("taken-at:       %s\n", s.TakenAt.Format("2006-01-02T15:04:05Z07:00"))
 	fmt.Println()
 	fmt.Print(s.Host.String())
+	if !s.Host.Memory.CollectedAt.IsZero() {
+		fmt.Print("memory:         ")
+		printMemoryState(s.Host.Memory, memstate.MemoryState{})
+	}
 
 	if len(s.Apps) > 0 {
 		fmt.Println()

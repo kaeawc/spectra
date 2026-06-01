@@ -42,6 +42,7 @@ func subcommandList() []subcommand {
 		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"power", "Show current battery and thermal state", runPower},
 		{"impact", "Compute the documented per-pid energy impact score from delta records", runImpact},
+		{"memory", "Show VM compressor, swap, and pressure state", runMemory},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
 		{"system", "Show system resource limits and saturation", runSystem},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},

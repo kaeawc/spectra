@@ -85,6 +85,10 @@ func diffHost(a, b snapshot.Snapshot) Section {
 		{"cpu_brand", a.Host.CPUBrand, b.Host.CPUBrand},
 		{"cpu_cores", fmt.Sprint(a.Host.CPUCores), fmt.Sprint(b.Host.CPUCores)},
 		{"ram_bytes", fmt.Sprint(a.Host.RAMBytes), fmt.Sprint(b.Host.RAMBytes)},
+		{"memory.compressor_occupied", fmt.Sprint(a.Host.Memory.CompressorOccupied), fmt.Sprint(b.Host.Memory.CompressorOccupied)},
+		{"memory.compressor_stored", fmt.Sprint(a.Host.Memory.CompressorStored), fmt.Sprint(b.Host.Memory.CompressorStored)},
+		{"memory.swap_used", fmt.Sprint(a.Host.Memory.Swap.UsedBytes), fmt.Sprint(b.Host.Memory.Swap.UsedBytes)},
+		{"memory.pressure_level", string(a.Host.Memory.PressureLevel), string(b.Host.Memory.PressureLevel)},
 		{"arch", a.Host.Architecture, b.Host.Architecture},
 		{"spectra_version", a.Host.SpectraVersion, b.Host.SpectraVersion},
 	}
