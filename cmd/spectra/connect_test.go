@@ -129,6 +129,8 @@ func TestParseConnectTypedCalls(t *testing.T) {
 		{name: "metrics", args: []string{"metrics"}, wantMethod: "process.live"},
 		{name: "metrics pid", args: []string{"metrics", "4012"}, wantMethod: "process.history", wantParams: `{"pid":4012}`},
 		{name: "metrics pid and limit", args: []string{"metrics", "4012", "30"}, wantMethod: "process.history", wantParams: `{"pid":4012,"limit":30}`},
+		{name: "metrics churn", args: []string{"metrics", "churn", "--top", "10", "--json"}, wantMethod: "process.churn", wantParams: `{"top":10}`},
+		{name: "metrics churn app", args: []string{"metrics", "churn", "/Applications/Slack.app"}, wantMethod: "process.churn", wantParams: `{"app_path":"/Applications/Slack.app"}`},
 		{name: "network", args: []string{"network"}, wantMethod: "network.state"},
 		{name: "network state", args: []string{"network", "state"}, wantMethod: "network.state"},
 		{name: "firewall", args: []string{"firewall"}, wantMethod: "network.firewall"},

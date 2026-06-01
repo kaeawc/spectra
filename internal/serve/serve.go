@@ -58,26 +58,27 @@ func DefaultSockPath() (string, error) {
 
 // Options configures the daemon.
 type Options struct {
-	SockPath         string
-	TCPAddr          string
-	TsnetEnabled     bool
-	TsnetAddr        string
-	TsnetHostname    string
-	TsnetStateDir    string
-	TsnetEphemeral   bool
-	TsnetTags        []string
-	TsnetAllowLogins []string
-	TsnetAllowNodes  []string
-	TsnetFactory     TsnetFactory
-	SpectraVersion   string
-	DBPath           string              // empty = store.DefaultPath()
-	CacheRegistry    *cache.Registry     // nil = cache.Default
-	DetectStore      *cache.ShardedStore // nil = no detect caching
-	DetectWriter     *cache.AsyncWriter  // nil = sync writes or daemon-created writer
-	ArtifactRecorder artifact.Recorder   // nil = default per-user manifest
-	ArtifactPolicy   artifact.Policy     // empty = confirm per sensitive artifact
-	Logger           logger.Logger       // nil = discard
-	AutoSnap         AutoSnapConfig
+	SockPath           string
+	TCPAddr            string
+	TsnetEnabled       bool
+	TsnetAddr          string
+	TsnetHostname      string
+	TsnetStateDir      string
+	TsnetEphemeral     bool
+	TsnetTags          []string
+	TsnetAllowLogins   []string
+	TsnetAllowNodes    []string
+	TsnetFactory       TsnetFactory
+	SpectraVersion     string
+	DBPath             string              // empty = store.DefaultPath()
+	CacheRegistry      *cache.Registry     // nil = cache.Default
+	DetectStore        *cache.ShardedStore // nil = no detect caching
+	DetectWriter       *cache.AsyncWriter  // nil = sync writes or daemon-created writer
+	ArtifactRecorder   artifact.Recorder   // nil = default per-user manifest
+	ArtifactPolicy     artifact.Policy     // empty = confirm per sensitive artifact
+	Logger             logger.Logger       // nil = discard
+	AutoSnap           AutoSnapConfig
+	TrackSpawnFailures bool
 }
 
 const DefaultTsnetAddr = ":7878"
@@ -210,13 +211,21 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	log.Info("daemon storage ready", "db", dbPath)
 
 	collector := metrics.NewCollector()
+	var failures *spawnFailureWatcher
+	if opts.TrackSpawnFailures {
+		failures = newSpawnFailureWatcher()
+		go failures.Start(ctx)
+		log.Info("daemon spawn failure watcher enabled", "source", "log stream")
+	}
+	churn := newChurnTracker(failures)
 	liveTelemetry := telemetry.NewLiveCollector()
 	history := livehistory.NewRing(livehistory.DefaultCapacity)
 	sampler := metrics.NewSampler(collector, time.Second, nil)
 	jvmSampler := jvm.NewTelemetrySampler(liveTelemetry, 5*time.Second, daemonJVMOptions(), nil)
 	go sampler.Run(ctx)
 	go jvmSampler.Run(ctx)
-	go flushMetricsLoop(ctx, collector, db)
+	go churnLoop(ctx, churn, time.Second, nil)
+	go flushMetricsLoop(ctx, collector, churn, db)
 	autoSnap := opts.AutoSnap.normalized()
 	if !autoSnap.Disabled {
 		go snapshotLoop(ctx, opts.SpectraVersion, db, history, autoSnap)
@@ -248,7 +257,7 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlers(d, opts.SpectraVersion, db, collector, liveTelemetry, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
+	registerHandlersWithChurn(d, opts.SpectraVersion, db, collector, churn, liveTelemetry, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners), "artifact_policy", artifactPolicy.Mode)
 
 	go func() {
@@ -426,7 +435,7 @@ func samplesForRuntime(samples []telemetry.LiveSample, runtimeName string) []tel
 
 // flushMetricsLoop writes 1-minute aggregates from the ring buffer to SQLite
 // on a 1-minute tick until ctx is cancelled.
-func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
+func flushMetricsLoop(ctx context.Context, c *metrics.Collector, churn *churnTracker, db *store.DB) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -435,24 +444,40 @@ func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
 			return
 		case <-ticker.C:
 			aggs := c.FlushAggregates(metrics.DefaultRetainWindow)
-			if len(aggs) == 0 {
-				continue
-			}
-			rows := make([]store.ProcessMetricRow, len(aggs))
-			for i, a := range aggs {
-				rows[i] = store.ProcessMetricRow{
-					PID:         a.PID,
-					MinuteAt:    a.MinuteAt,
-					AvgRSSKiB:   a.AvgRSSKiB,
-					MaxRSSKiB:   a.MaxRSSKiB,
-					AvgCPUPct:   a.AvgCPUPct,
-					MaxCPUPct:   a.MaxCPUPct,
-					SampleCount: a.SampleCount,
+			if len(aggs) > 0 {
+				rows := make([]store.ProcessMetricRow, len(aggs))
+				for i, a := range aggs {
+					rows[i] = store.ProcessMetricRow{
+						PID:         a.PID,
+						MinuteAt:    a.MinuteAt,
+						AvgRSSKiB:   a.AvgRSSKiB,
+						MaxRSSKiB:   a.MaxRSSKiB,
+						AvgCPUPct:   a.AvgCPUPct,
+						MaxCPUPct:   a.MaxCPUPct,
+						SampleCount: a.SampleCount,
+					}
 				}
+				_ = db.SaveProcessMetrics(ctx, rows)
 			}
-			_ = db.SaveProcessMetrics(ctx, rows)
+			if churn != nil {
+				_ = db.SaveAppChurn(ctx, appChurnRowsFromAggregates(churn.flushAggregates(metrics.DefaultRetainWindow)))
+			}
 		}
 	}
+}
+
+func appChurnRowsFromAggregates(aggs []appChurnAggregate) []store.AppChurnRow {
+	rows := make([]store.AppChurnRow, len(aggs))
+	for i, a := range aggs {
+		rows[i] = store.AppChurnRow{
+			MinuteAt:     a.MinuteAt,
+			AppPath:      a.AppPath,
+			Spawns:       a.Spawns,
+			Exits:        a.Exits,
+			FailedSpawns: a.FailedSpawns,
+		}
+	}
+	return rows
 }
 
 // snapshotLoop captures lightweight auto snapshots and prunes only the
@@ -488,6 +513,11 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 //
 //gocyclo:ignore
 func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+	registerHandlersWithChurn(d, version, db, collector, nil, liveTelemetry, history, cacheReg, detectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsnetNode)
+}
+
+//gocyclo:ignore
+func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, churn *churnTracker, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
 	if history == nil {
 		history = livehistory.NewRing(livehistory.DefaultCapacity)
 	}
@@ -589,6 +619,26 @@ func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector
 			return nil, fmt.Errorf("process.history requires {\"pid\": <pid>}")
 		}
 		return db.GetProcessMetrics(context.Background(), p.PID, p.Limit)
+	})
+
+	d.Register("process.churn", func(params json.RawMessage) (any, error) {
+		var p struct {
+			AppPath string `json:"app_path"`
+			Limit   int    `json:"limit"`
+			Top     int    `json:"top"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if churn == nil {
+			return []AppChurnSample{}, nil
+		}
+		if p.AppPath != "" {
+			return churn.recent(p.AppPath, p.Limit), nil
+		}
+		limit := p.Top
+		if limit <= 0 {
+			limit = p.Limit
+		}
+		return churn.current(limit), nil
 	})
 
 	d.Register("live.current", func(_ json.RawMessage) (any, error) {

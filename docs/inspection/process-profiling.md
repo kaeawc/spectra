@@ -8,6 +8,7 @@ This page covers four related workflows:
 
 - point-in-time samples with `sample`
 - process trees and app-scoped child process attribution
+- per-app child-process churn
 - daemon-backed process history
 - CPU and RSS trend interpretation
 
@@ -18,6 +19,7 @@ Start with the cheapest view and escalate only when the question needs it:
 ```bash
 spectra process --deep
 spectra connect local process-tree /Applications/Slack.app
+spectra connect local metrics churn --top 10
 spectra connect local metrics
 spectra connect local metrics 4012 120
 spectra connect local sample 4012 5 1
@@ -39,6 +41,39 @@ This keeps the same process inventory but splits open descriptors into ptys,
 sockets, regular files, pipes, character devices, kqueues, and other handles.
 The JSON output includes `fd_breakdown` automatically whenever `--deep`
 populates descriptor data.
+
+## Process churn
+
+The daemon tracks per-app child process churn alongside process metrics. Every
+tick compares the current `process.CollectAll` table with the previous one,
+using PID plus process start time to avoid hiding PID reuse. The current churn
+view is exposed over RPC:
+
+```bash
+spectra connect local metrics churn --top 10
+spectra connect local metrics churn /Applications/Claude.app
+```
+
+The local stored view reads the one-minute SQLite aggregates flushed by the
+daemon:
+
+```bash
+spectra metrics churn --top 10
+spectra metrics churn /Applications/Claude.app
+```
+
+Use churn when an app is suspected of a respawn loop: high `spawns_1m` and
+matching `exits_1m` mean helpers are cycling even if RSS and CPU look normal in
+any single sample. The daemon also has an opt-in failed-spawn proxy:
+
+```bash
+spectra serve --track-spawn-failures
+```
+
+That watcher tails unified logs for `posix_spawn` failures and attributes
+events to an app path when the log entry includes one. Some macOS log entries
+only name a process or subsystem, so failed-spawn attribution is best-effort
+and may undercount or omit the originating app.
 
 ## Samples
 

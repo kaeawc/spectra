@@ -645,6 +645,9 @@ func parseConnectCache(args []string) (string, json.RawMessage, bool, error) {
 }
 
 func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) >= 2 && args[1] == "churn" {
+		return parseConnectMetricsChurn(args[2:])
+	}
 	switch len(args) {
 	case 1:
 		return "process.live", nil, true, nil
@@ -667,6 +670,44 @@ func parseConnectMetrics(args []string) (string, json.RawMessage, bool, error) {
 	default:
 		return "", nil, true, fmt.Errorf("connect metrics accepts optional pid and limit only")
 	}
+}
+
+func parseConnectMetricsChurn(args []string) (string, json.RawMessage, bool, error) {
+	params := map[string]any{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--json":
+			continue
+		case arg == "--top":
+			if i+1 >= len(args) {
+				return "", nil, true, fmt.Errorf("connect metrics churn --top requires a value")
+			}
+			top, err := parseConnectPositiveInt(args[i+1], "top")
+			if err != nil {
+				return "", nil, true, err
+			}
+			params["top"] = top
+			i++
+		case strings.HasPrefix(arg, "--top="):
+			top, err := parseConnectPositiveInt(strings.TrimPrefix(arg, "--top="), "top")
+			if err != nil {
+				return "", nil, true, err
+			}
+			params["top"] = top
+		case strings.HasPrefix(arg, "-"):
+			return "", nil, true, fmt.Errorf("unknown metrics churn flag %q", arg)
+		default:
+			if _, exists := params["app_path"]; exists {
+				return "", nil, true, fmt.Errorf("connect metrics churn accepts at most one app path")
+			}
+			params["app_path"] = arg
+		}
+	}
+	if len(params) == 0 {
+		return "process.churn", nil, true, nil
+	}
+	return "process.churn", connectParams(params), true, nil
 }
 
 func parseConnectNetworkCaptureStart(args []string) (string, json.RawMessage, bool, error) {
