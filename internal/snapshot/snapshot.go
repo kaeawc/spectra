@@ -39,6 +39,7 @@ type Snapshot struct {
 	TakenAt      time.Time                `json:"taken_at"`
 	Kind         Kind                     `json:"kind"`
 	Host         HostInfo                 `json:"host"`
+	HostFacts    HostFacts                `json:"host_facts"`
 	Apps         []detect.Result          `json:"apps"`
 	Processes    []process.Info           `json:"processes,omitempty"`
 	Toolchains   toolchain.Toolchains     `json:"toolchains"`
@@ -201,6 +202,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	go func() {
 		defer wg.Done()
 		s.Host = hostCollectorFor(opts).CollectHost(opts.SpectraVersion)
+		s.HostFacts = s.Host.Facts
 	}()
 	if !opts.SkipApps {
 		go func() {

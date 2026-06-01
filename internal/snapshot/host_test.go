@@ -67,18 +67,25 @@ func TestHostInfoString(t *testing.T) {
 
 func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 	runner := fakeHostRunner{responses: map[string]string{
-		"sw_vers\x00-productVersion":                   "15.6.1",
-		"sw_vers\x00-buildVersion":                     "24G90",
-		"sysctl\x00-n\x00machdep.cpu.brand_string":     "Apple M99",
-		"sysctl\x00-n\x00hw.ncpu":                      "12",
-		"sysctl\x00-n\x00hw.memsize":                   "68719476736",
-		"sysctl\x00-n\x00kern.boottime":                "{ sec = 1000, usec = 0 }",
-		"ioreg\x00-d2\x00-c\x00IOPlatformExpertDevice": `"IOPlatformUUID" = "ABCDEF12-3456-7890-ABCD-EF1234567890"`,
+		"uname\x00-v":                                   "Darwin Kernel Version 24.6.0",
+		"uname\x00-m":                                   "arm64",
+		"sw_vers\x00-productName":                       "macOS",
+		"sw_vers\x00-productVersion":                    "15.6.1",
+		"sw_vers\x00-buildVersion":                      "24G90",
+		"system_profiler\x00-xml\x00SPHardwareDataType": testHardwareProfilerXML,
+		"log\x00show\x00--predicate\x00eventMessage CONTAINS \"=== system boot\"\x00--last\x007d\x00--style\x00ndjson": `{"eventMessage":"=== system boot: abcdef12-3456-7890-abcd-ef1234567890"}`,
+		"last\x00reboot": "reboot time                                Sun May 17 08:34\n",
 	}}
 	collector := LiveHostCollector{Options: HostCollectOptions{
-		Hostname:      func() (string, error) { return "test-host", nil },
-		Runner:        runner,
-		Now:           func() time.Time { return time.Unix(4600, 0) },
+		Hostname: func() (string, error) { return "test-host", nil },
+		Runner:   runner,
+		Now:      func() time.Time { return time.Unix(4600, 0) },
+		BootTime: func() (time.Time, error) {
+			return time.Unix(1000, 0), nil
+		},
+		LoadAverages: func(at time.Time) (LoadAverages, error) {
+			return LoadAverages{OneMinute: 1.25, FiveMinute: 2.5, FifteenMinute: 3.75, At: at}, nil
+		},
 		MemoryCollect: func() (memstate.MemoryState, error) { return memstate.MemoryState{PhysicalBytes: 99}, nil },
 		TMCollect: func() (timemachine.TimeMachineState, error) {
 			return timemachine.TimeMachineState{SchedulerLoaded: true}, nil
@@ -113,6 +120,18 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 	if !got.TimeMachine.SchedulerLoaded {
 		t.Error("TimeMachine.SchedulerLoaded = false, want injected true")
 	}
+	if got.Facts.BootUUID != "ABCDEF12-3456-7890-ABCD-EF1234567890" {
+		t.Errorf("BootUUID = %q", got.Facts.BootUUID)
+	}
+	if got.Facts.Hardware.PerformanceCores != 8 || got.Facts.Hardware.EfficiencyCores != 4 {
+		t.Errorf("hardware cores = %d/%d", got.Facts.Hardware.PerformanceCores, got.Facts.Hardware.EfficiencyCores)
+	}
+	if got.Facts.LoadAverages.OneMinute != 1.25 {
+		t.Errorf("load average = %.2f", got.Facts.LoadAverages.OneMinute)
+	}
+	if len(got.Facts.RecentReboots) != 1 {
+		t.Fatalf("RecentReboots len = %d, want 1", len(got.Facts.RecentReboots))
+	}
 }
 
 func TestLiveHostCollectorToleratesMissingMachineUUID(t *testing.T) {
@@ -144,6 +163,43 @@ func (f fakeHostRunner) Run(name string, args ...string) (string, error) {
 	}
 	return "", fmt.Errorf("unexpected command %s", key)
 }
+
+func TestHostFactsParsers(t *testing.T) {
+	total, perf, eff := parseProcessorCounts("proc 16:12:4")
+	if total != 16 || perf != 12 || eff != 4 {
+		t.Fatalf("parseProcessorCounts = %d/%d/%d", total, perf, eff)
+	}
+	if got := parseMemoryBytes("128 GB"); got != 128*1024*1024*1024 {
+		t.Fatalf("parseMemoryBytes = %d", got)
+	}
+	if got := parseBootUUID(`{"eventMessage":"=== system boot: abcdef12-3456-7890-abcd-ef1234567890"}`); got != "ABCDEF12-3456-7890-ABCD-EF1234567890" {
+		t.Fatalf("parseBootUUID = %q", got)
+	}
+	events := parseRecentReboots("reboot time                                Sun May 17 08:34\nshutdown time Sun May 17 08:34\n", time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
+	if len(events) != 1 || events[0].At.Month() != time.May || events[0].At.Day() != 17 {
+		t.Fatalf("parseRecentReboots = %#v", events)
+	}
+}
+
+const testHardwareProfilerXML = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<array>
+  <dict>
+    <key>_items</key>
+    <array>
+      <dict>
+        <key>machine_name</key><string>MacBook Pro</string>
+        <key>machine_model</key><string>Mac99,1</string>
+        <key>chip_type</key><string>Apple M99</string>
+        <key>number_processors</key><string>proc 12:8:4</string>
+        <key>physical_memory</key><string>64 GB</string>
+        <key>platform_UUID</key><string>ABCDEF12-3456-7890-ABCD-EF1234567890</string>
+        <key>serial_number</key><string>SERIAL123</string>
+      </dict>
+    </array>
+  </dict>
+</array>
+</plist>`
 
 func TestHumanBytes(t *testing.T) {
 	cases := map[uint64]string{

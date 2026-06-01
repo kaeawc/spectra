@@ -304,6 +304,7 @@ func printSnapshot(s snapshot.Snapshot) {
 	fmt.Printf("taken-at:       %s\n", s.TakenAt.Format("2006-01-02T15:04:05Z07:00"))
 	fmt.Println()
 	fmt.Print(s.Host.String())
+	printSnapshotHostFacts(s.HostFacts)
 	if !s.Host.Memory.CollectedAt.IsZero() {
 		fmt.Print("memory:         ")
 		printMemoryState(s.Host.Memory, memstate.MemoryState{})
@@ -338,6 +339,31 @@ func printSnapshot(s snapshot.Snapshot) {
 	printSnapshotToolchains(s)
 	printSnapshotNetwork(s)
 	printSnapshotPower(s)
+}
+
+func printSnapshotHostFacts(f snapshot.HostFacts) {
+	if f.Hostname == "" && f.KernelVersion == "" && f.BootUUID == "" && f.LoadAverages.At.IsZero() {
+		return
+	}
+	if f.KernelVersion != "" {
+		fmt.Printf("kernel:         %s\n", f.KernelVersion)
+	}
+	if !f.BootTime.IsZero() {
+		fmt.Printf("boot-time:      %s\n", f.BootTime.Format(time.RFC3339))
+	}
+	if f.BootUUID != "" {
+		fmt.Printf("boot-uuid:      %s\n", f.BootUUID)
+	}
+	if !f.LoadAverages.At.IsZero() {
+		fmt.Printf("load-average:   %.2f %.2f %.2f\n",
+			f.LoadAverages.OneMinute,
+			f.LoadAverages.FiveMinute,
+			f.LoadAverages.FifteenMinute,
+		)
+	}
+	if len(f.RecentReboots) > 0 {
+		fmt.Printf("recent-reboots: %d\n", len(f.RecentReboots))
+	}
 }
 
 func printSnapshotToolchains(s snapshot.Snapshot) {

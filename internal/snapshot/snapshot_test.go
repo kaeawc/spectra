@@ -135,6 +135,12 @@ func TestBuildUsesInjectedHostCollector(t *testing.T) {
 			Hostname:    "fake-host",
 			MachineUUID: "FAKE-UUID",
 			OSName:      "macOS",
+			Facts: HostFacts{
+				Hostname:         "fake-host",
+				OSProductName:    "macOS",
+				OSProductVersion: "15.6.1",
+				BootUUID:         "BOOT-UUID",
+			},
 			Memory: memstate.MemoryState{
 				PhysicalBytes: 1024,
 				CollectedAt:   collectedAt,
@@ -165,6 +171,9 @@ func TestBuildUsesInjectedHostCollector(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"time_machine"`) || !strings.Contains(string(data), `"scheduler_loaded":true`) {
 		t.Fatalf("snapshot JSON missing host.time_machine: %s", data)
+	}
+	if !strings.Contains(string(data), `"host_facts"`) || !strings.Contains(string(data), `"boot_uuid":"BOOT-UUID"`) {
+		t.Fatalf("snapshot JSON missing host_facts: %s", data)
 	}
 }
 
