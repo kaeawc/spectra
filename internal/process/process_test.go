@@ -96,10 +96,30 @@ func TestParsePSStartTime(t *testing.T) {
 }
 
 func TestCollectAll(t *testing.T) {
-	opts := CollectOptions{CmdRunner: fakePS(psFixture)}
+	opts := CollectOptions{
+		CmdRunner:   fakePS(psFixture),
+		Now:         func() time.Time { return time.Date(2026, 5, 3, 22, 40, 0, 0, time.Local) },
+		MemoryBytes: func() uint64 { return 1024 * 1024 * 1024 },
+	}
 	procs := CollectAll(context.Background(), opts)
 	if len(procs) != 4 {
 		t.Errorf("CollectAll: got %d procs, want 4", len(procs))
+	}
+	slack := procs[1]
+	if slack.VSZBytes != 409600*1024 {
+		t.Errorf("VSZBytes = %d, want %d", slack.VSZBytes, uint64(409600*1024))
+	}
+	if slack.CPUPercent != slack.CPUPct {
+		t.Errorf("CPUPercent = %v, CPUPct = %v", slack.CPUPercent, slack.CPUPct)
+	}
+	if slack.MemPercent < 17.5 || slack.MemPercent > 17.6 {
+		t.Errorf("MemPercent = %.3f, want about 17.578", slack.MemPercent)
+	}
+	if slack.Elapsed != 24*time.Hour {
+		t.Errorf("Elapsed = %s, want 24h", slack.Elapsed)
+	}
+	if !slack.StartedAt.Equal(slack.StartTime) {
+		t.Errorf("StartedAt = %v, StartTime = %v", slack.StartedAt, slack.StartTime)
 	}
 }
 
