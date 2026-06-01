@@ -10,6 +10,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/memstate"
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/timemachine"
@@ -592,6 +593,46 @@ func TestStorageCapacityRulesSkipSimulator(t *testing.T) {
 	}
 }
 
+func TestSpotlightLargeResidentIndexerFires(t *testing.T) {
+	s := baseSnap()
+	s.Host.UptimeSeconds = int64((7 * time.Hour).Seconds())
+	s.Storage.Spotlight = []storagestate.SpotlightVolume{{
+		MountPoint: "/System/Volumes/Data",
+		Status:     storagestate.SpotlightEnabled,
+	}}
+	s.Processes = []process.Info{{
+		PID:     42,
+		Command: "mds_stores",
+		RSSKiB:  2 * 1024 * 1024,
+	}}
+	findings := ruleSpotlightLargeResidentIndexer().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "spotlight.large_resident_indexer" || !strings.Contains(findings[0].Fix, "spectra storage --spotlight") {
+		t.Fatalf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestSpotlightLargeResidentIndexerNoFireWhenDisabledOrFreshBoot(t *testing.T) {
+	s := baseSnap()
+	s.Host.UptimeSeconds = int64((7 * time.Hour).Seconds())
+	s.Storage.Spotlight = []storagestate.SpotlightVolume{{
+		MountPoint: "/System/Volumes/Data",
+		Status:     storagestate.SpotlightDisabled,
+	}}
+	s.Processes = []process.Info{{Command: "mds_stores", RSSKiB: 2 * 1024 * 1024}}
+	if findings := ruleSpotlightLargeResidentIndexer().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("disabled Spotlight should not fire, got %v", findings)
+	}
+
+	s.Storage.Spotlight[0].Status = storagestate.SpotlightEnabled
+	s.Host.UptimeSeconds = int64((2 * time.Hour).Seconds())
+	if findings := ruleSpotlightLargeResidentIndexer().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("fresh boot should not fire, got %v", findings)
+	}
+}
+
 // --- app-no-hardened-runtime ---
 
 func TestAppNoHardenedRuntimeFires(t *testing.T) {
@@ -983,6 +1024,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"storage.staged_major_update",
 		"storage.data_volume_near_full",
 		"storage.system_volume_near_full",
+		"spotlight.large_resident_indexer",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)

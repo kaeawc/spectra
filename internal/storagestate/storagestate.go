@@ -13,12 +13,13 @@ import (
 
 // State is the StorageState slice of a Spectra snapshot.
 type State struct {
-	Volumes          []Volume  `json:"volumes,omitempty"`
-	Mounts           []Mount   `json:"mounts,omitempty"`
-	UserLibraryBytes int64     `json:"user_library_bytes"`
-	AppCachesBytes   int64     `json:"app_caches_bytes"`
-	LargestApps      []AppSize `json:"largest_apps,omitempty"`
-	LogFiles         []LogFile `json:"log_files,omitempty"`
+	Volumes          []Volume          `json:"volumes,omitempty"`
+	Mounts           []Mount           `json:"mounts,omitempty"`
+	Spotlight        []SpotlightVolume `json:"spotlight,omitempty"`
+	UserLibraryBytes int64             `json:"user_library_bytes"`
+	AppCachesBytes   int64             `json:"app_caches_bytes"`
+	LargestApps      []AppSize         `json:"largest_apps,omitempty"`
+	LogFiles         []LogFile         `json:"log_files,omitempty"`
 }
 
 // Volume is one mounted filesystem.
@@ -83,6 +84,8 @@ type CollectOptions struct {
 	CmdRunner CmdRunner
 	// IncludeSnapshots runs diskutil APFS snapshot collection for APFS volumes.
 	IncludeSnapshots bool
+	// IncludeSpotlight runs read-only mdutil Spotlight status collection.
+	IncludeSpotlight bool
 }
 
 // Collect gathers StorageState.
@@ -112,6 +115,9 @@ func Collect(opts CollectOptions) State {
 	}
 	if opts.IncludeSnapshots {
 		applyAPFSSnapshots(s.Volumes, run)
+	}
+	if opts.IncludeSpotlight {
+		s.Spotlight = collectSpotlight(run, s.Mounts)
 	}
 	s.UserLibraryBytes = dirBytes(filepath.Join(opts.Home, "Library"))
 	s.AppCachesBytes = dirBytes(filepath.Join(opts.Home, "Library", "Caches"))

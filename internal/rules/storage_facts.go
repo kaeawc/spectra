@@ -1,13 +1,17 @@
 package rules
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
 )
 
 const stagedMajorUpdateAge = 7 * 24 * time.Hour
+const largeSpotlightRSSKiB = 1024 * 1024
 
 func ruleStorageStagedMajorUpdate() Rule {
 	return Rule{
@@ -69,6 +73,31 @@ func ruleStorageSystemVolumeNearFull() Rule {
 	}
 }
 
+func ruleSpotlightLargeResidentIndexer() Rule {
+	return Rule{
+		ID:       "spotlight.large_resident_indexer",
+		Severity: SeverityMedium,
+		Message:  "Spotlight indexer RSS exceeds 1 GiB after 6h uptime while indexing is enabled.",
+		Fix:      "Run `spectra storage --spotlight`; if indexing remains stuck, consider `sudo mdutil -E <volume>`.",
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			if float64(s.Host.UptimeSeconds)/3600 <= 6 || !spotlightEnabled(s.Storage.Spotlight) {
+				return nil
+			}
+			proc, ok := largestMDSStores(s.Processes)
+			if !ok || proc.RSSKiB <= largeSpotlightRSSKiB {
+				return nil
+			}
+			return []Finding{{
+				RuleID:   "spotlight.large_resident_indexer",
+				Severity: SeverityMedium,
+				Subject:  fmt.Sprintf("PID %d (mds_stores)", proc.PID),
+				Message:  fmt.Sprintf("Spotlight indexer has accumulated %.1f GiB RSS after %.1fh uptime; index may be corrupt.", float64(proc.RSSKiB)/(1024*1024), float64(s.Host.UptimeSeconds)/3600),
+				Fix:      "Run `spectra storage --spotlight`; if indexing remains stuck, consider `sudo mdutil -E <volume>`.",
+			}}
+		},
+	}
+}
+
 func storageCapacityFinding(ruleID string, severity Severity, mount storagestate.Mount, message string) Finding {
 	return Finding{
 		RuleID:   ruleID,
@@ -77,6 +106,34 @@ func storageCapacityFinding(ruleID string, severity Severity, mount storagestate
 		Message:  message,
 		Fix:      "Run `spectra storage` to inspect mount capacity, flags, and APFS role.",
 	}
+}
+
+func spotlightEnabled(volumes []storagestate.SpotlightVolume) bool {
+	for _, volume := range volumes {
+		if volume.Status == storagestate.SpotlightEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+func largestMDSStores(processes []process.Info) (process.Info, bool) {
+	var largest process.Info
+	var ok bool
+	for _, proc := range processes {
+		if !isMDSStores(proc) || proc.RSSKiB <= largest.RSSKiB {
+			continue
+		}
+		largest = proc
+		ok = true
+	}
+	return largest, ok
+}
+
+func isMDSStores(proc process.Info) bool {
+	return proc.Command == "mds_stores" ||
+		proc.BSDName == "mds_stores" ||
+		strings.Contains(proc.FullCommandLine, "mds_stores")
 }
 
 func stagedMajorUpdateFindings(s snapshot.Snapshot, now time.Time) []Finding {
