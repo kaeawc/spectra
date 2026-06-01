@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/telemetry"
+	"github.com/kaeawc/spectra/internal/timemachine"
 )
 
 func TestBuildHostOnly(t *testing.T) {
@@ -138,6 +139,10 @@ func TestBuildUsesInjectedHostCollector(t *testing.T) {
 				PhysicalBytes: 1024,
 				CollectedAt:   collectedAt,
 			},
+			TimeMachine: timemachine.TimeMachineState{
+				SchedulerLoaded: true,
+				CollectedAt:     collectedAt,
+			},
 		}},
 		SkipApps:      true,
 		SkipProcesses: true,
@@ -157,6 +162,9 @@ func TestBuildUsesInjectedHostCollector(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"memory"`) || !strings.Contains(string(data), `"physical_bytes":1024`) {
 		t.Fatalf("snapshot JSON missing host.memory: %s", data)
+	}
+	if !strings.Contains(string(data), `"time_machine"`) || !strings.Contains(string(data), `"scheduler_loaded":true`) {
+		t.Fatalf("snapshot JSON missing host.time_machine: %s", data)
 	}
 }
 

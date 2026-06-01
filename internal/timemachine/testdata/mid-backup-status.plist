@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Running</key><true/>
+  <key>Percent</key><real>42.5</real>
+  <key>ClientID</key><string>com.apple.backupd</string>
+  <key>BackupPhase</key><string>Copying</string>
+  <key>DestinationID</key><string>LOCAL-UUID</string>
+  <key>DestinationMountPoint</key><string>/Volumes/Backup</string>
+  <key>FirstBackup</key><false/>
+</dict>
+</plist>

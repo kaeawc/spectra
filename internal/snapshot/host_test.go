@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/memstate"
+	"github.com/kaeawc/spectra/internal/timemachine"
 )
 
 // TestCollectHostMinimallyPopulated runs against the live machine; we
@@ -79,6 +80,9 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 		Runner:        runner,
 		Now:           func() time.Time { return time.Unix(4600, 0) },
 		MemoryCollect: func() (memstate.MemoryState, error) { return memstate.MemoryState{PhysicalBytes: 99}, nil },
+		TMCollect: func() (timemachine.TimeMachineState, error) {
+			return timemachine.TimeMachineState{SchedulerLoaded: true}, nil
+		},
 	}}
 
 	got := collector.CollectHost("test-version")
@@ -105,6 +109,9 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 	}
 	if got.Memory.PhysicalBytes != 99 {
 		t.Errorf("Memory.PhysicalBytes = %d, want injected value", got.Memory.PhysicalBytes)
+	}
+	if !got.TimeMachine.SchedulerLoaded {
+		t.Error("TimeMachine.SchedulerLoaded = false, want injected true")
 	}
 }
 

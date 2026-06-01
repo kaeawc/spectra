@@ -44,6 +44,7 @@ func subcommandList() []subcommand {
 		{"impact", "Compute the documented per-pid energy impact score from delta records", runImpact},
 		{"memory", "Show VM compressor, swap, and pressure state", runMemory},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
+		{"timemachine", "Show Time Machine status, destinations, and local snapshots", runTimeMachine},
 		{"system", "Show system resource limits and saturation", runSystem},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
 		{"playbook", "Show diagnostic playbooks and command plans", runPlaybook},
