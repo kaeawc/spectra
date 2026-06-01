@@ -36,6 +36,7 @@ type Query struct {
 
 type Result struct {
 	Entries   []InstallLogEntry `json:"entries"`
+	History   InstallHistory    `json:"history,omitempty"`
 	FilesRead []string          `json:"files_read"`
 	Truncated bool              `json:"truncated,omitempty"`
 }

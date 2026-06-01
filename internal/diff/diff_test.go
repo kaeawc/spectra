@@ -2,6 +2,7 @@ package diff
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/memstate"
@@ -10,6 +11,7 @@ import (
 	"github.com/kaeawc/spectra/internal/syslimits"
 	"github.com/kaeawc/spectra/internal/timemachine"
 	"github.com/kaeawc/spectra/internal/toolchain"
+	"github.com/kaeawc/spectra/internal/updates"
 )
 
 // base returns a minimal snapshot for tests.
@@ -245,6 +247,38 @@ func TestDiffBrewFormulae(t *testing.T) {
 	}
 	if !hasChange(sec.Changes, Added, "jq") {
 		t.Error("expected jq added")
+	}
+}
+
+func TestDiffInstallHistoryAdded(t *testing.T) {
+	a := base()
+	b := base()
+	oldEntry := updates.InstallEntry{
+		Name:        "XProtectPlistConfigData",
+		Version:     "5278",
+		Source:      "Apple",
+		InstallDate: time.Date(2026, 5, 18, 14, 12, 1, 0, time.UTC),
+	}
+	newEntry := updates.InstallEntry{
+		Name:        "ExampleTool",
+		Version:     "1.2.3",
+		Source:      "3rd Party",
+		InstallDate: time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC),
+		PackageIDs:  []string{"com.example.tool.pkg"},
+	}
+	a.Updates.History.Entries = []updates.InstallEntry{oldEntry}
+	b.Updates.History.Entries = []updates.InstallEntry{oldEntry, newEntry}
+
+	r := Compare(a, b)
+	sec := findSection(r, "install_history")
+	if sec == nil {
+		t.Fatal("install_history section missing")
+	}
+	if !hasChange(sec.Changes, Added, "ExampleTool") {
+		t.Fatalf("expected ExampleTool install added, got %+v", sec.Changes)
+	}
+	if hasChange(sec.Changes, Added, "XProtectPlistConfigData") {
+		t.Fatalf("old entry should not be added: %+v", sec.Changes)
 	}
 }
 

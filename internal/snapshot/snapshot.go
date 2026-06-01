@@ -249,9 +249,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipUpdates {
 		go func() {
 			defer wg.Done()
-			if result, err := updates.QueryInstallLog(opts.UpdatesOpts); err == nil {
-				s.Updates = result
-			}
+			s.Updates = collectUpdates(ctx, opts.UpdatesOpts)
 		}()
 	}
 
@@ -311,6 +309,17 @@ func snapshotCollectorCount(opts Options) int {
 		collectors++
 	}
 	return collectors
+}
+
+func collectUpdates(ctx context.Context, query updates.Query) updates.Result {
+	var result updates.Result
+	if logs, err := updates.QueryInstallLog(query); err == nil {
+		result = logs
+	}
+	if history, err := updates.Collect(ctx); err == nil {
+		result.History = history
+	}
+	return result
 }
 
 func hostCollectorFor(opts Options) HostCollector {

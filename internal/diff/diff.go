@@ -10,6 +10,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
+	"github.com/kaeawc/spectra/internal/updates"
 )
 
 // ChangeKind classifies one diff entry.
@@ -69,6 +70,7 @@ func Compare(a, b snapshot.Snapshot) Result {
 			diffPathDirs(a, b),
 			diffSystemLimits(a, b),
 			diffSysctls(a, b),
+			diffInstallHistory(a, b),
 		},
 	}
 }
@@ -404,6 +406,48 @@ func diffSystemLimits(a, b snapshot.Snapshot) Section {
 	}
 	return Section{Name: "system_limits", Changes: changes}
 }
+
+func diffInstallHistory(a, b snapshot.Snapshot) Section {
+	seen := make(map[string]bool, len(a.Updates.History.Entries))
+	for _, entry := range a.Updates.History.Entries {
+		seen[installEntryKey(entry)] = true
+	}
+	var changes []Change
+	for _, entry := range b.Updates.History.Entries {
+		if seen[installEntryKey(entry)] {
+			continue
+		}
+		changes = append(changes, Change{
+			Kind:  Added,
+			Key:   entry.Name,
+			After: installEntryLabel(entry),
+		})
+	}
+	return Section{Name: "install_history", Changes: changes}
+}
+
+func installEntryKey(entry updates.InstallEntry) string {
+	return strings.Join([]string{
+		entry.Name,
+		entry.Version,
+		entry.Source,
+		entry.InstallDate.UTC().Format(timeKeyLayout),
+		strings.Join(entry.PackageIDs, ","),
+	}, "\x00")
+}
+
+func installEntryLabel(entry updates.InstallEntry) string {
+	parts := []string{entry.InstallDate.Format("2006-01-02 15:04:05")}
+	if entry.Version != "" {
+		parts = append(parts, "version "+entry.Version)
+	}
+	if entry.Source != "" {
+		parts = append(parts, entry.Source)
+	}
+	return strings.Join(parts, " · ")
+}
+
+const timeKeyLayout = "2006-01-02T15:04:05.999999999Z07:00"
 
 // diffActiveRuntimes compares the active version for each language runtime
 // (node, python, go, ruby). A change fires when the active version differs
