@@ -308,6 +308,13 @@ func printSnapshot(s snapshot.Snapshot) {
 		fmt.Print("memory:         ")
 		printMemoryState(s.Host.Memory, memstate.MemoryState{})
 	}
+	if !s.Host.TimeMachine.IsZero() {
+		fmt.Printf("time-machine:   destinations=%d local-snapshots=%d scheduler=%s\n",
+			len(s.Host.TimeMachine.Destinations),
+			len(s.Host.TimeMachine.LocalSnapshots),
+			loadedString(s.Host.TimeMachine.SchedulerLoaded),
+		)
+	}
 
 	if len(s.Apps) > 0 {
 		fmt.Println()

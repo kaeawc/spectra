@@ -5,6 +5,8 @@ package diff
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -89,6 +91,8 @@ func diffHost(a, b snapshot.Snapshot) Section {
 		{"memory.compressor_stored", fmt.Sprint(a.Host.Memory.CompressorStored), fmt.Sprint(b.Host.Memory.CompressorStored)},
 		{"memory.swap_used", fmt.Sprint(a.Host.Memory.Swap.UsedBytes), fmt.Sprint(b.Host.Memory.Swap.UsedBytes)},
 		{"memory.pressure_level", string(a.Host.Memory.PressureLevel), string(b.Host.Memory.PressureLevel)},
+		{"time_machine.destinations", strings.Join(tmDestinationKeys(a), ","), strings.Join(tmDestinationKeys(b), ",")},
+		{"time_machine.local_snapshots", strings.Join(tmSnapshotKeys(a), ","), strings.Join(tmSnapshotKeys(b), ",")},
 		{"arch", a.Host.Architecture, b.Host.Architecture},
 		{"spectra_version", a.Host.SpectraVersion, b.Host.SpectraVersion},
 	}
@@ -99,6 +103,35 @@ func diffHost(a, b snapshot.Snapshot) Section {
 		}
 	}
 	return Section{Name: "host", Changes: changes}
+}
+
+func tmDestinationKeys(s snapshot.Snapshot) []string {
+	keys := make([]string, 0, len(s.Host.TimeMachine.Destinations))
+	for _, d := range s.Host.TimeMachine.Destinations {
+		key := d.ID
+		if key == "" {
+			key = d.Name
+		}
+		if key == "" {
+			key = d.MountPoint
+		}
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func tmSnapshotKeys(s snapshot.Snapshot) []string {
+	keys := make([]string, 0, len(s.Host.TimeMachine.LocalSnapshots))
+	for _, snap := range s.Host.TimeMachine.LocalSnapshots {
+		if snap.Name != "" {
+			keys = append(keys, snap.Name)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 type appInfo struct {

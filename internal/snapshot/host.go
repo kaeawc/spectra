@@ -9,6 +9,7 @@ package snapshot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/memstate"
+	"github.com/kaeawc/spectra/internal/timemachine"
 )
 
 // CommandRunner runs a system command and returns stdout.
@@ -37,6 +39,7 @@ type HostCollectOptions struct {
 	Runner        CommandRunner
 	Now           func() time.Time
 	MemoryCollect func() (memstate.MemoryState, error)
+	TMCollect     func() (timemachine.TimeMachineState, error)
 }
 
 // LiveHostCollector gathers HostInfo from the current machine.
@@ -59,18 +62,19 @@ func (execCommandRunner) Run(name string, args ...string) (string, error) {
 // time. Every field is best-effort; any collector failure leaves the
 // field empty / zero rather than failing the snapshot.
 type HostInfo struct {
-	Hostname       string               `json:"hostname"`
-	MachineUUID    string               `json:"machine_uuid,omitempty"`
-	OSName         string               `json:"os_name"`            // "macOS"
-	OSVersion      string               `json:"os_version"`         // "15.6.1"
-	OSBuild        string               `json:"os_build,omitempty"` // "24G90"
-	CPUBrand       string               `json:"cpu_brand,omitempty"`
-	CPUCores       int                  `json:"cpu_cores"`
-	RAMBytes       uint64               `json:"ram_bytes"`
-	Architecture   string               `json:"architecture"` // arm64 | amd64
-	UptimeSeconds  int64                `json:"uptime_seconds"`
-	SpectraVersion string               `json:"spectra_version,omitempty"`
-	Memory         memstate.MemoryState `json:"memory,omitempty"`
+	Hostname       string                       `json:"hostname"`
+	MachineUUID    string                       `json:"machine_uuid,omitempty"`
+	OSName         string                       `json:"os_name"`            // "macOS"
+	OSVersion      string                       `json:"os_version"`         // "15.6.1"
+	OSBuild        string                       `json:"os_build,omitempty"` // "24G90"
+	CPUBrand       string                       `json:"cpu_brand,omitempty"`
+	CPUCores       int                          `json:"cpu_cores"`
+	RAMBytes       uint64                       `json:"ram_bytes"`
+	Architecture   string                       `json:"architecture"` // arm64 | amd64
+	UptimeSeconds  int64                        `json:"uptime_seconds"`
+	SpectraVersion string                       `json:"spectra_version,omitempty"`
+	Memory         memstate.MemoryState         `json:"memory,omitempty"`
+	TimeMachine    timemachine.TimeMachineState `json:"time_machine,omitempty"`
 }
 
 // CollectHost gathers HostInfo from the local machine. Spectra version
@@ -81,23 +85,7 @@ func CollectHost(spectraVersion string) HostInfo {
 }
 
 func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
-	opts := c.Options
-	hostname := opts.Hostname
-	if hostname == nil {
-		hostname = os.Hostname
-	}
-	runner := opts.Runner
-	if runner == nil {
-		runner = execCommandRunner{}
-	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
-	}
-	memoryCollect := opts.MemoryCollect
-	if memoryCollect == nil {
-		memoryCollect = memstate.Collect
-	}
+	deps := hostDepsFromOptions(c.Options)
 
 	h := HostInfo{
 		OSName:         "macOS",
@@ -105,36 +93,73 @@ func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
 		SpectraVersion: spectraVersion,
 	}
 
-	if name, err := hostname(); err == nil {
+	if name, err := deps.hostname(); err == nil {
 		h.Hostname = name
 	}
-	if v, err := runner.Run("sw_vers", "-productVersion"); err == nil {
+	if v, err := deps.runner.Run("sw_vers", "-productVersion"); err == nil {
 		h.OSVersion = v
 	}
-	if v, err := runner.Run("sw_vers", "-buildVersion"); err == nil {
+	if v, err := deps.runner.Run("sw_vers", "-buildVersion"); err == nil {
 		h.OSBuild = v
 	}
-	if v, err := runner.Run("sysctl", "-n", "machdep.cpu.brand_string"); err == nil {
+	if v, err := deps.runner.Run("sysctl", "-n", "machdep.cpu.brand_string"); err == nil {
 		h.CPUBrand = v
 	}
-	if v, err := runner.Run("sysctl", "-n", "hw.ncpu"); err == nil {
+	if v, err := deps.runner.Run("sysctl", "-n", "hw.ncpu"); err == nil {
 		if n, err := strconv.Atoi(v); err == nil {
 			h.CPUCores = n
 		}
 	}
-	if v, err := runner.Run("sysctl", "-n", "hw.memsize"); err == nil {
+	if v, err := deps.runner.Run("sysctl", "-n", "hw.memsize"); err == nil {
 		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
 			h.RAMBytes = n
 		}
 	}
-	if uptime := readUptime(runner, now); uptime > 0 {
+	if uptime := readUptime(deps.runner, deps.now); uptime > 0 {
 		h.UptimeSeconds = uptime
 	}
-	if uuid := readMachineUUID(runner); uuid != "" {
+	if uuid := readMachineUUID(deps.runner); uuid != "" {
 		h.MachineUUID = uuid
 	}
-	h.Memory = collectHostMemory(memoryCollect)
+	h.Memory = collectHostMemory(deps.memoryCollect)
+	h.TimeMachine = collectHostTimeMachine(deps.tmCollect)
 	return h
+}
+
+type hostDeps struct {
+	hostname      func() (string, error)
+	runner        CommandRunner
+	now           func() time.Time
+	memoryCollect func() (memstate.MemoryState, error)
+	tmCollect     func() (timemachine.TimeMachineState, error)
+}
+
+func hostDepsFromOptions(opts HostCollectOptions) hostDeps {
+	deps := hostDeps{
+		hostname:      opts.Hostname,
+		runner:        opts.Runner,
+		now:           opts.Now,
+		memoryCollect: opts.MemoryCollect,
+		tmCollect:     opts.TMCollect,
+	}
+	if deps.hostname == nil {
+		deps.hostname = os.Hostname
+	}
+	if deps.runner == nil {
+		deps.runner = execCommandRunner{}
+	}
+	if deps.now == nil {
+		deps.now = time.Now
+	}
+	if deps.memoryCollect == nil {
+		deps.memoryCollect = memstate.Collect
+	}
+	if deps.tmCollect == nil {
+		deps.tmCollect = func() (timemachine.TimeMachineState, error) {
+			return timemachine.Collect(context.Background())
+		}
+	}
+	return deps
 }
 
 func collectHostMemory(collect func() (memstate.MemoryState, error)) memstate.MemoryState {
@@ -143,6 +168,14 @@ func collectHostMemory(collect func() (memstate.MemoryState, error)) memstate.Me
 		return memstate.MemoryState{}
 	}
 	return memory
+}
+
+func collectHostTimeMachine(collect func() (timemachine.TimeMachineState, error)) timemachine.TimeMachineState {
+	state, err := collect()
+	if err != nil {
+		return timemachine.TimeMachineState{}
+	}
+	return state
 }
 
 // readUptime parses kern.boottime and returns seconds since boot.

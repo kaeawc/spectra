@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Destinations</key>
+  <array>
+    <dict>
+      <key>ID</key><string>LOCAL-UUID</string>
+      <key>Name</key><string>Backup SSD</string>
+      <key>Kind</key><string>Local</string>
+      <key>Mount Point</key><string>/Volumes/Backup</string>
+      <key>Bytes Available</key><integer>1000</integer>
+      <key>Bytes Used</key><integer>2000</integer>
+      <key>Last Backup</key><date>2026-05-28T13:38:24Z</date>
+      <key>Next Backup</key><date>2026-05-28T14:38:24Z</date>
+      <key>Quota GB</key><integer>500</integer>
+      <key>Encrypted</key><true/>
+    </dict>
+  </array>
+</dict>
+</plist>

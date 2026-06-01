@@ -8,6 +8,7 @@ import (
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/syslimits"
+	"github.com/kaeawc/spectra/internal/timemachine"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -86,6 +87,27 @@ func TestDiffHostMemoryChanged(t *testing.T) {
 		"memory.swap_used",
 		"memory.pressure_level",
 	} {
+		if !hasChange(sec.Changes, Changed, key) {
+			t.Fatalf("expected %s change, got %+v", key, sec.Changes)
+		}
+	}
+}
+
+func TestDiffHostTimeMachineChanged(t *testing.T) {
+	a := base()
+	b := base()
+	a.Host.TimeMachine = timemachine.TimeMachineState{
+		Destinations:   []timemachine.TMDestination{{ID: "old"}},
+		LocalSnapshots: []timemachine.TMLocalSnapshot{{Name: "snap-a"}},
+	}
+	b.Host.TimeMachine = timemachine.TimeMachineState{
+		Destinations:   []timemachine.TMDestination{{ID: "new"}},
+		LocalSnapshots: []timemachine.TMLocalSnapshot{{Name: "snap-b"}},
+	}
+
+	r := Compare(a, b)
+	sec := findSection(r, "host")
+	for _, key := range []string{"time_machine.destinations", "time_machine.local_snapshots"} {
 		if !hasChange(sec.Changes, Changed, key) {
 			t.Fatalf("expected %s change, got %+v", key, sec.Changes)
 		}
