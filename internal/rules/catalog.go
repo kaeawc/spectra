@@ -17,6 +17,9 @@ func V1Catalog() []Rule {
 	return []Rule{
 		ruleJVMEOLVersion(),
 		ruleJVMHeapVsSystemRAM(),
+		ruleMemoryCompressorExcess(),
+		ruleMemorySwapExcess(),
+		ruleMemorySustainedPressure(),
 		ruleJVMGCPressure(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
