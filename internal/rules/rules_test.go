@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/services"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/timemachine"
@@ -633,6 +635,98 @@ func TestSpotlightLargeResidentIndexerNoFireWhenDisabledOrFreshBoot(t *testing.T
 	}
 }
 
+func TestBackupDestinationlessSchedulerLeakIncidentFixture(t *testing.T) {
+	data, err := os.ReadFile("testdata/incident-2026-05-fseventsd.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s snapshot.Snapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	findings := ruleBackupDestinationlessSchedulerLeak().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Severity != SeverityHigh {
+		t.Fatalf("severity = %s, want high", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "2.4 GiB") || !strings.Contains(findings[0].Fix, "sudo killall -HUP fseventsd") {
+		t.Fatalf("finding missing RSS/remediation: %+v", findings[0])
+	}
+}
+
+func TestBackupDestinationlessSchedulerLeakRequiresAllFacts(t *testing.T) {
+	base := backupLeakSnapshot()
+	tests := []struct {
+		name   string
+		mutate func(*snapshot.Snapshot)
+	}{
+		{
+			name: "has destination",
+			mutate: func(s *snapshot.Snapshot) {
+				s.Host.TimeMachine.Destinations = []timemachine.TMDestination{{Name: "Backup"}}
+			},
+		},
+		{
+			name: "scheduler missing",
+			mutate: func(s *snapshot.Snapshot) {
+				s.Services.Jobs = nil
+			},
+		},
+		{
+			name: "snapshot missing",
+			mutate: func(s *snapshot.Snapshot) {
+				s.Storage.Volumes[0].Snapshots = nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := base
+			tt.mutate(&s)
+			if findings := ruleBackupDestinationlessSchedulerLeak().MatchFn(s); len(findings) != 0 {
+				t.Fatalf("expected no finding, got %v", findings)
+			}
+		})
+	}
+}
+
+func TestBackupDestinationlessSchedulerLeakMediumBelowTwoGiB(t *testing.T) {
+	s := backupLeakSnapshot()
+	s.Processes[0].RSSKiB = 1500 * 1024
+	findings := ruleBackupDestinationlessSchedulerLeak().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Fatalf("severity = %s, want medium", findings[0].Severity)
+	}
+}
+
+func backupLeakSnapshot() snapshot.Snapshot {
+	s := baseSnap()
+	s.Host.UptimeSeconds = int64((24 * time.Hour).Seconds())
+	s.Services.Jobs = []services.LaunchJob{{
+		Label:     "com.apple.backupd-auto",
+		Domain:    "system",
+		PlistPath: "/System/Library/LaunchDaemons/com.apple.backupd-auto.plist",
+	}}
+	s.Storage.Volumes = []storagestate.Volume{{
+		MountPoint: "/",
+		Snapshots: []storagestate.APFSSnapshot{{
+			Name: "com.apple.os.update-MSUPrepareUpdate",
+			Kind: storagestate.SnapshotMSUPrepare,
+		}},
+	}}
+	s.Processes = []process.Info{{
+		PID:     88,
+		Command: "fseventsd",
+		RSSKiB:  2500000,
+	}}
+	return s
+}
+
 // --- app-no-hardened-runtime ---
 
 func TestAppNoHardenedRuntimeFires(t *testing.T) {
@@ -1025,6 +1119,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"storage.data_volume_near_full",
 		"storage.system_volume_near_full",
 		"spotlight.large_resident_indexer",
+		"backup.destinationless_scheduler_leak",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)

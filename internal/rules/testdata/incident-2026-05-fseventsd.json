@@ -1,0 +1,41 @@
+{
+  "id": "incident-2026-05-fseventsd",
+  "kind": "live",
+  "host": {
+    "hostname": "incident-mac",
+    "os_name": "macOS",
+    "uptime_seconds": 86400,
+    "time_machine": {
+      "destinations": []
+    }
+  },
+  "processes": [
+    {
+      "pid": 321,
+      "command": "fseventsd",
+      "full_command_line": "/System/Library/PrivateFrameworks/FSEvents.framework/Versions/A/Support/fseventsd",
+      "rss_kib": 2500000
+    }
+  ],
+  "storage": {
+    "volumes": [
+      {
+        "mount_point": "/",
+        "snapshots": [
+          {
+            "name": "com.apple.os.update-MSUPrepareUpdate"
+          }
+        ]
+      }
+    ]
+  },
+  "services": {
+    "jobs": [
+      {
+        "label": "com.apple.backupd-auto",
+        "domain": "system",
+        "plist_path": "/System/Library/LaunchDaemons/com.apple.backupd-auto.plist"
+      }
+    ]
+  }
+}
