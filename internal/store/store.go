@@ -112,6 +112,7 @@ func (s *DB) migrate() error {
 		return err
 	}
 	// Add snapshot_json column if this is an existing DB without it.
+	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN tag TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN snapshot_json TEXT`)
 	return nil
 }
@@ -159,6 +160,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     machine_uuid  TEXT NOT NULL,
     taken_at      DATETIME NOT NULL,
     kind          TEXT NOT NULL DEFAULT 'live',
+    tag           TEXT NOT NULL DEFAULT '',
     name          TEXT,
     spectra_ver   TEXT,
     app_count     INTEGER NOT NULL DEFAULT 0,
@@ -292,6 +294,7 @@ type SnapshotRow struct {
 	MachineUUID string
 	TakenAt     time.Time
 	Kind        string
+	Tag         string
 	Name        string // optional human label, used for baselines
 	SpectraVer  string
 	AppCount    int
@@ -361,9 +364,9 @@ func upsertHost(tx *sql.Tx, s SnapshotInput) error {
 func insertSnapshot(tx *sql.Tx, s SnapshotInput) error {
 	name := sql.NullString{String: s.Name, Valid: s.Name != ""}
 	_, err := tx.Exec(`
-		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, name, spectra_ver, app_count, snapshot_json)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		s.ID, s.MachineUUID, s.TakenAt, s.Kind, name, s.SpectraVer, len(s.Apps), nullableJSON(s.SnapshotJSON),
+		INSERT OR IGNORE INTO snapshots (id, machine_uuid, taken_at, kind, tag, name, spectra_ver, app_count, snapshot_json)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		s.ID, s.MachineUUID, s.TakenAt, s.Kind, s.Tag, name, s.SpectraVer, len(s.Apps), nullableJSON(s.SnapshotJSON),
 	)
 	return err
 }
@@ -440,11 +443,11 @@ func (s *DB) ListHosts(ctx context.Context) ([]HostRow, error) {
 // ListSnapshots returns summary rows ordered newest-first.
 // Pass machine_uuid="" to list all hosts. Pass kind="" to list all kinds.
 func (s *DB) ListSnapshots(ctx context.Context, machineUUID string) ([]SnapshotRow, error) {
-	q := `SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
+	q := `SELECT id, machine_uuid, taken_at, kind, COALESCE(tag,''), COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 	      FROM snapshots ORDER BY taken_at DESC LIMIT 100`
 	args := []any{}
 	if machineUUID != "" {
-		q = `SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
+		q = `SELECT id, machine_uuid, taken_at, kind, COALESCE(tag,''), COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 		     FROM snapshots WHERE machine_uuid=? ORDER BY taken_at DESC LIMIT 100`
 		args = append(args, machineUUID)
 	}
@@ -457,7 +460,7 @@ func (s *DB) ListSnapshots(ctx context.Context, machineUUID string) ([]SnapshotR
 	for rows.Next() {
 		var r SnapshotRow
 		var takenAt string
-		if err := rows.Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Name, &r.SpectraVer, &r.AppCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Tag, &r.Name, &r.SpectraVer, &r.AppCount); err != nil {
 			return nil, err
 		}
 		r.TakenAt, _ = time.Parse(time.RFC3339, takenAt)
@@ -471,9 +474,9 @@ func (s *DB) GetSnapshot(ctx context.Context, id string) (SnapshotRow, error) {
 	var r SnapshotRow
 	var takenAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, machine_uuid, taken_at, kind, COALESCE(name,''), COALESCE(spectra_ver,''), app_count
+		`SELECT id, machine_uuid, taken_at, kind, COALESCE(tag,''), COALESCE(name,''), COALESCE(spectra_ver,''), app_count
 		 FROM snapshots WHERE id=?`, id,
-	).Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Name, &r.SpectraVer, &r.AppCount)
+	).Scan(&r.ID, &r.MachineUUID, &takenAt, &r.Kind, &r.Tag, &r.Name, &r.SpectraVer, &r.AppCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -502,6 +505,30 @@ func (s *DB) GetSnapshotJSON(ctx context.Context, id string) ([]byte, error) {
 		return nil, nil
 	}
 	return []byte(raw.String), nil
+}
+
+// MostRecentSnapshotOlderThan returns the newest stored snapshot at or before
+// cutoff that has a full JSON blob suitable for diffing.
+func (s *DB) MostRecentSnapshotOlderThan(ctx context.Context, cutoff time.Time) (*snapshot.Snapshot, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT snapshot_json
+		FROM snapshots
+		WHERE taken_at <= ? AND snapshot_json IS NOT NULL AND snapshot_json != ''
+		ORDER BY taken_at DESC
+		LIMIT 1`, cutoff.UTC(),
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		return nil, fmt.Errorf("store: decode snapshot: %w", err)
+	}
+	return &snap, nil
 }
 
 // DeleteSnapshot deletes a snapshot and all its child rows by ID.
@@ -950,16 +977,25 @@ func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
 	return res.RowsAffected()
 }
 
-// PruneSnapshots deletes live snapshots beyond the retention limit for each
-// machine. Baselines (kind != "live") are never deleted. The default limit
-// is 100 live snapshots per machine UUID.
+// PruneSnapshots deletes untagged live snapshots beyond the retention limit
+// for each machine. Baselines and tagged live snapshots are never deleted by
+// this path. The default limit is 100 live snapshots per machine UUID.
 func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
+	return s.pruneSnapshots(ctx, keepN, `kind='live' AND COALESCE(tag,'')=''`)
+}
+
+// PruneAutoSnapshots deletes auto-tagged snapshots beyond the retention limit
+// for each machine. Baseline and manual live snapshots are left untouched.
+func (s *DB) PruneAutoSnapshots(ctx context.Context, keepN int) (int64, error) {
+	return s.pruneSnapshots(ctx, keepN, `tag='auto'`)
+}
+
+func (s *DB) pruneSnapshots(ctx context.Context, keepN int, where string) (int64, error) {
 	if keepN <= 0 {
 		keepN = 100
 	}
-	// Find all machine UUIDs that have live snapshots.
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT machine_uuid FROM snapshots WHERE kind='live'`)
+		`SELECT DISTINCT machine_uuid FROM snapshots WHERE `+where) // #nosec G202 -- where is an internal literal.
 	if err != nil {
 		return 0, err
 	}
@@ -980,8 +1016,8 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 	var total int64
 	for _, m := range machines {
 		// Delete child rows for to-be-pruned snapshots first (FK constraints).
-		pruneSubquery := `SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=?
-				AND id NOT IN (SELECT id FROM snapshots WHERE kind='live' AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
+		pruneSubquery := `SELECT id FROM snapshots WHERE ` + where + ` AND machine_uuid=?
+				AND id NOT IN (SELECT id FROM snapshots WHERE ` + where + ` AND machine_uuid=? ORDER BY taken_at DESC LIMIT ?)`
 		for _, table := range []string{"snapshot_processes", "login_items", "granted_perms", "snapshot_apps"} {
 			// #nosec G202 -- table is selected from hardcoded literals, not user input.
 			if _, err := s.db.ExecContext(ctx,
@@ -992,13 +1028,13 @@ func (s *DB) PruneSnapshots(ctx context.Context, keepN int) (int64, error) {
 		}
 		res, err := s.db.ExecContext(ctx, `
 			DELETE FROM snapshots
-			WHERE kind='live' AND machine_uuid=?
+			WHERE `+where+` AND machine_uuid=?
 			  AND id NOT IN (
 			    SELECT id FROM snapshots
-			    WHERE kind='live' AND machine_uuid=?
+			    WHERE `+where+` AND machine_uuid=?
 			    ORDER BY taken_at DESC
 			    LIMIT ?
-			  )`, m, m, keepN)
+			  )`, m, m, keepN) // #nosec G202 -- where is an internal literal.
 		if err != nil {
 			return total, fmt.Errorf("store: prune %s: %w", m, err)
 		}
@@ -1017,6 +1053,7 @@ type SnapshotInput struct {
 	MachineUUID  string
 	TakenAt      time.Time
 	Kind         string
+	Tag          string
 	Name         string // optional label for baselines
 	SpectraVer   string
 	Hostname     string

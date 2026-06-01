@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -93,6 +94,32 @@ func TestSaveAndListSnapshot(t *testing.T) {
 	}
 	if r.Kind != "live" {
 		t.Errorf("Kind = %q, want live", r.Kind)
+	}
+}
+
+func TestSnapshotTagRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	in := sampleInput()
+	in.Tag = "auto"
+	if err := db.SaveSnapshot(ctx, in); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	row, err := db.GetSnapshot(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+	if row.Tag != "auto" {
+		t.Fatalf("tag = %q, want auto", row.Tag)
+	}
+	rows, err := db.ListSnapshots(ctx, "")
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if rows[0].Tag != "auto" {
+		t.Fatalf("list tag = %q, want auto", rows[0].Tag)
 	}
 }
 
@@ -297,6 +324,122 @@ func TestPruneSnapshotsKeepsBaselines(t *testing.T) {
 	}
 	if row.Kind != "baseline" {
 		t.Errorf("kind = %q, want baseline", row.Kind)
+	}
+}
+
+func TestPruneSnapshotsKeepsAutoTaggedLiveSnapshots(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	for i := 1; i <= 3; i++ {
+		in := sampleInput()
+		in.ID = fmt.Sprintf("snap-live-%02d", i)
+		in.TakenAt = time.Date(2026, 5, 3, 12, i, 0, 0, time.UTC)
+		if err := db.SaveSnapshot(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auto := sampleInput()
+	auto.ID = "snap-auto"
+	auto.Tag = "auto"
+	if err := db.SaveSnapshot(ctx, auto); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := db.PruneSnapshots(ctx, 2)
+	if err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if _, err := db.GetSnapshot(ctx, "snap-auto"); err != nil {
+		t.Fatalf("auto snapshot was pruned by live retention: %v", err)
+	}
+}
+
+func TestPruneAutoSnapshotsKeepsManualLiveAndBaselines(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	for i := 1; i <= 3; i++ {
+		in := sampleInput()
+		in.ID = fmt.Sprintf("snap-auto-%02d", i)
+		in.Tag = "auto"
+		in.TakenAt = time.Date(2026, 5, 3, 12, i, 0, 0, time.UTC)
+		if err := db.SaveSnapshot(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manual := sampleInput()
+	manual.ID = "snap-manual"
+	if err := db.SaveSnapshot(ctx, manual); err != nil {
+		t.Fatal(err)
+	}
+	baseline := sampleInput()
+	baseline.ID = "snap-baseline"
+	baseline.Kind = "baseline"
+	if err := db.SaveSnapshot(ctx, baseline); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := db.PruneAutoSnapshots(ctx, 2)
+	if err != nil {
+		t.Fatalf("PruneAutoSnapshots: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if _, err := db.GetSnapshot(ctx, "snap-auto-01"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("oldest auto err = %v, want ErrNotFound", err)
+	}
+	for _, id := range []string{"snap-auto-02", "snap-auto-03", "snap-manual", "snap-baseline"} {
+		if _, err := db.GetSnapshot(ctx, id); err != nil {
+			t.Fatalf("%s missing after auto prune: %v", id, err)
+		}
+	}
+}
+
+func TestMostRecentSnapshotOlderThan(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		id string
+		at time.Time
+	}{
+		{"snap-old", time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)},
+		{"snap-want", time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)},
+		{"snap-new", time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)},
+	} {
+		in := sampleInput()
+		in.ID = tc.id
+		in.TakenAt = tc.at
+		raw, err := json.Marshal(snapshot.Snapshot{
+			ID:      tc.id,
+			TakenAt: tc.at,
+			Kind:    snapshot.KindLive,
+			Host:    snapshot.HostInfo{Hostname: "test.local", MachineUUID: in.MachineUUID, OSName: "macOS"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.SnapshotJSON = raw
+		if err := db.SaveSnapshot(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := db.MostRecentSnapshotOlderThan(ctx, time.Date(2026, 5, 2, 12, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("MostRecentSnapshotOlderThan: %v", err)
+	}
+	if got.ID != "snap-want" {
+		t.Fatalf("ID = %q, want snap-want", got.ID)
+	}
+	_, err = db.MostRecentSnapshotOlderThan(ctx, time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC))
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 

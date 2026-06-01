@@ -77,9 +77,37 @@ type Options struct {
 	ArtifactRecorder artifact.Recorder   // nil = default per-user manifest
 	ArtifactPolicy   artifact.Policy     // empty = confirm per sensitive artifact
 	Logger           logger.Logger       // nil = discard
+	AutoSnap         AutoSnapConfig
 }
 
 const DefaultTsnetAddr = ":7878"
+
+const (
+	DefaultAutoSnapInterval = 5 * time.Minute
+	DefaultAutoSnapRetain   = 24
+)
+
+// AutoSnapConfig controls the daemon's rolling lightweight snapshot loop.
+type AutoSnapConfig struct {
+	Disabled bool
+	Interval time.Duration
+	Retain   int
+}
+
+func (c AutoSnapConfig) normalized() AutoSnapConfig {
+	if c.Interval <= 0 {
+		c.Interval = DefaultAutoSnapInterval
+	}
+	if c.Retain <= 0 {
+		c.Retain = DefaultAutoSnapRetain
+	}
+	return c
+}
+
+// Normalize returns c with default interval and retention values filled in.
+func (c AutoSnapConfig) Normalize() AutoSnapConfig {
+	return c.normalized()
+}
 
 // Run starts the daemon: listens on the Unix socket and serves requests until
 // ctx is cancelled. Run blocks until the listener is shut down.
@@ -189,7 +217,13 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	go sampler.Run(ctx)
 	go jvmSampler.Run(ctx)
 	go flushMetricsLoop(ctx, collector, db)
-	go snapshotLoop(ctx, opts.SpectraVersion, db, history)
+	autoSnap := opts.AutoSnap.normalized()
+	if !autoSnap.Disabled {
+		go snapshotLoop(ctx, opts.SpectraVersion, db, history, autoSnap)
+		log.Info("daemon autosnapshot enabled", "interval", autoSnap.Interval.String(), "retain", autoSnap.Retain)
+	} else {
+		log.Info("daemon autosnapshot disabled")
+	}
 
 	cacheReg := opts.CacheRegistry
 	if cacheReg == nil {
@@ -421,11 +455,11 @@ func flushMetricsLoop(ctx context.Context, c *metrics.Collector, db *store.DB) {
 	}
 }
 
-// snapshotLoop captures a live host-only snapshot every minute and prunes the
-// live snapshot history to the last 100 entries. Apps, storage, and JVMs are
-// skipped to keep the per-tick cost low (~50ms vs seconds for a full snapshot).
-func snapshotLoop(ctx context.Context, version string, db *store.DB, history *livehistory.Ring) {
-	ticker := time.NewTicker(time.Minute)
+// snapshotLoop captures lightweight auto snapshots and prunes only the
+// auto-tagged history. Apps, storage, and JVMs are skipped to keep tick cost low.
+func snapshotLoop(ctx context.Context, version string, db *store.DB, history *livehistory.Ring, cfg AutoSnapConfig) {
+	cfg = cfg.normalized()
+	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -438,12 +472,13 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 				SkipStorage:    true,
 				SkipJVMs:       true,
 			})
+			snap.Tag = "auto"
 			history.Add(snap)
 			_ = db.SaveSnapshot(ctx, store.FromSnapshot(snap))
 			_ = db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap))
 			_ = db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap))
 			_ = db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap))
-			_, _ = db.PruneSnapshots(ctx, 100)
+			_, _ = db.PruneAutoSnapshots(ctx, cfg.Retain)
 			_, _ = db.PruneJVMSamples(ctx, 7)
 		}
 	}
