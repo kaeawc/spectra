@@ -41,6 +41,7 @@ func runServe(args []string) int {
 	autoSnapMode := fs.String("autosnap", "on", "Rolling auto snapshots: on or off")
 	autoSnapInterval := fs.Duration("autosnap-interval", serve.DefaultAutoSnapInterval, "Interval for rolling auto snapshots")
 	autoSnapRetain := fs.Int("autosnap-retain", serve.DefaultAutoSnapRetain, "Number of auto snapshots to retain per host")
+	trackSpawnFailures := fs.Bool("track-spawn-failures", false, "Track posix_spawn/fork failures with log stream")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -90,14 +91,15 @@ func runServe(args []string) int {
 		defer closeLog()
 	}
 	printServeStartup(os.Stderr, serveStartupStatus{
-		Sock:           sock,
-		LogPath:        resolvedLogPath,
-		TCPAddr:        *tcpAddr,
-		AllowRemote:    *allowRemote,
-		TsnetEnabled:   *tsnetEnabled,
-		TsnetAddr:      *tsnetAddr,
-		ArtifactPolicy: policy,
-		AutoSnap:       autoSnap,
+		Sock:               sock,
+		LogPath:            resolvedLogPath,
+		TCPAddr:            *tcpAddr,
+		AllowRemote:        *allowRemote,
+		TsnetEnabled:       *tsnetEnabled,
+		TsnetAddr:          *tsnetAddr,
+		ArtifactPolicy:     policy,
+		AutoSnap:           autoSnap,
+		TrackSpawnFailures: *trackSpawnFailures,
 	})
 
 	var detectStore *cache.ShardedStore
@@ -105,21 +107,22 @@ func runServe(args []string) int {
 		detectStore = cacheStores.Detect
 	}
 	if err := serve.Run(ctx, serve.Options{
-		SockPath:         sock,
-		TCPAddr:          *tcpAddr,
-		TsnetEnabled:     *tsnetEnabled,
-		TsnetAddr:        *tsnetAddr,
-		TsnetHostname:    *tsnetHostname,
-		TsnetStateDir:    *tsnetStateDir,
-		TsnetEphemeral:   *tsnetEphemeral,
-		TsnetTags:        splitCommaList(*tsnetTags),
-		TsnetAllowLogins: splitCommaList(*tsnetAllowLogins),
-		TsnetAllowNodes:  splitCommaList(*tsnetAllowNodes),
-		SpectraVersion:   version,
-		DetectStore:      detectStore,
-		ArtifactPolicy:   policy,
-		Logger:           daemonLog,
-		AutoSnap:         autoSnap,
+		SockPath:           sock,
+		TCPAddr:            *tcpAddr,
+		TsnetEnabled:       *tsnetEnabled,
+		TsnetAddr:          *tsnetAddr,
+		TsnetHostname:      *tsnetHostname,
+		TsnetStateDir:      *tsnetStateDir,
+		TsnetEphemeral:     *tsnetEphemeral,
+		TsnetTags:          splitCommaList(*tsnetTags),
+		TsnetAllowLogins:   splitCommaList(*tsnetAllowLogins),
+		TsnetAllowNodes:    splitCommaList(*tsnetAllowNodes),
+		SpectraVersion:     version,
+		DetectStore:        detectStore,
+		ArtifactPolicy:     policy,
+		Logger:             daemonLog,
+		AutoSnap:           autoSnap,
+		TrackSpawnFailures: *trackSpawnFailures,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -128,14 +131,15 @@ func runServe(args []string) int {
 }
 
 type serveStartupStatus struct {
-	Sock           string
-	LogPath        string
-	TCPAddr        string
-	AllowRemote    bool
-	TsnetEnabled   bool
-	TsnetAddr      string
-	ArtifactPolicy artifact.Policy
-	AutoSnap       serve.AutoSnapConfig
+	Sock               string
+	LogPath            string
+	TCPAddr            string
+	AllowRemote        bool
+	TsnetEnabled       bool
+	TsnetAddr          string
+	ArtifactPolicy     artifact.Policy
+	AutoSnap           serve.AutoSnapConfig
+	TrackSpawnFailures bool
 }
 
 func printServeStartup(w io.Writer, status serveStartupStatus) {
@@ -158,6 +162,9 @@ func printServeStartup(w io.Writer, status serveStartupStatus) {
 		fmt.Fprintln(w, "spectra serve: autosnap off")
 	} else {
 		fmt.Fprintf(w, "spectra serve: autosnap every %s, retain %d\n", autoSnap.Interval, autoSnap.Retain)
+	}
+	if status.TrackSpawnFailures {
+		fmt.Fprintln(w, "spectra serve: spawn failure watcher on")
 	}
 	fmt.Fprintf(w, "spectra serve: artifact policy %s\n", status.ArtifactPolicy.Normalize().Mode)
 }

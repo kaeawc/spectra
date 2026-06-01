@@ -824,6 +824,51 @@ func TestSaveProcessMetricsUpsertsDuplicateMinute(t *testing.T) {
 	}
 }
 
+func TestSaveAndReadAppChurn(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	minute := time.Date(2026, 5, 6, 15, 4, 0, 0, time.UTC)
+	rows := []AppChurnRow{
+		{MinuteAt: minute, AppPath: "/Applications/Foo.app", Spawns: 3, Exits: 1},
+		{MinuteAt: minute.Add(time.Minute), AppPath: "/Applications/Foo.app", Spawns: 1, Exits: 2, FailedSpawns: 1},
+		{MinuteAt: minute, AppPath: "/Applications/Bar.app", Spawns: 5, Exits: 4, FailedSpawns: 2},
+	}
+	if err := db.SaveAppChurn(ctx, rows); err != nil {
+		t.Fatalf("SaveAppChurn: %v", err)
+	}
+
+	got, err := db.GetAppChurn(ctx, "/Applications/Foo.app", 10)
+	if err != nil {
+		t.Fatalf("GetAppChurn: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetAppChurn rows = %d, want 2", len(got))
+	}
+	if got[0].Spawns != 1 || got[0].FailedSpawns != 1 {
+		t.Fatalf("newest Foo row = %+v", got[0])
+	}
+
+	all, err := db.GetAllAppChurn(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetAllAppChurn: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("GetAllAppChurn rows = %d, want 3", len(all))
+	}
+
+	rows[0].Spawns = 7
+	if err := db.SaveAppChurn(ctx, rows[:1]); err != nil {
+		t.Fatalf("SaveAppChurn upsert: %v", err)
+	}
+	got, err = db.GetAppChurn(ctx, "/Applications/Foo.app", 10)
+	if err != nil {
+		t.Fatalf("GetAppChurn after upsert: %v", err)
+	}
+	if got[1].Spawns != 7 {
+		t.Fatalf("upserted row = %+v, want spawns 7", got[1])
+	}
+}
+
 func TestSaveAndGetLoginItems(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -243,6 +243,17 @@ CREATE TABLE IF NOT EXISTS process_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_process_metrics_pid ON process_metrics(pid, minute_at DESC);
 
+CREATE TABLE IF NOT EXISTS app_churn (
+    ts            DATETIME NOT NULL,
+    app_path      TEXT NOT NULL,
+    spawns        INTEGER NOT NULL DEFAULT 0,
+    exits         INTEGER NOT NULL DEFAULT 0,
+    failed_spawns INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ts, app_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_churn_app ON app_churn(app_path, ts DESC);
+
 CREATE TABLE IF NOT EXISTS jvm_samples (
     pid          INTEGER NOT NULL,
     at_nano      INTEGER NOT NULL,
@@ -857,6 +868,90 @@ type ProcessMetricRow struct {
 	AvgCPUPct   float64
 	MaxCPUPct   float64
 	SampleCount int
+}
+
+// AppChurnRow is a 1-minute per-app process churn aggregate.
+type AppChurnRow struct {
+	MinuteAt     time.Time `json:"minute_at"`
+	AppPath      string    `json:"app_path"`
+	Spawns       int       `json:"spawns"`
+	Exits        int       `json:"exits"`
+	FailedSpawns int       `json:"failed_spawns"`
+}
+
+// SaveAppChurn upserts 1-minute app churn aggregates.
+func (s *DB) SaveAppChurn(ctx context.Context, rows []AppChurnRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, r := range rows {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO app_churn (ts, app_path, spawns, exits, failed_spawns)
+			VALUES (?,?,?,?,?)
+			ON CONFLICT(ts, app_path) DO UPDATE SET
+			    spawns=excluded.spawns,
+			    exits=excluded.exits,
+			    failed_spawns=excluded.failed_spawns`,
+			r.MinuteAt.UTC().Format(time.RFC3339), r.AppPath, r.Spawns, r.Exits, r.FailedSpawns,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetAppChurn returns newest app churn aggregate rows for appPath.
+func (s *DB) GetAppChurn(ctx context.Context, appPath string, limit int) ([]AppChurnRow, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ts, app_path, spawns, exits, failed_spawns
+		FROM app_churn WHERE app_path=?
+		ORDER BY ts DESC LIMIT ?`, appPath, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAppChurnRows(rows)
+}
+
+// GetAllAppChurn returns newest app churn aggregate rows across apps.
+func (s *DB) GetAllAppChurn(ctx context.Context, limit int) ([]AppChurnRow, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ts, app_path, spawns, exits, failed_spawns
+		FROM app_churn
+		ORDER BY ts DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAppChurnRows(rows)
+}
+
+func scanAppChurnRows(rows *sql.Rows) ([]AppChurnRow, error) {
+	var out []AppChurnRow
+	for rows.Next() {
+		var r AppChurnRow
+		var minuteAt string
+		if err := rows.Scan(&minuteAt, &r.AppPath, &r.Spawns, &r.Exits, &r.FailedSpawns); err != nil {
+			return nil, err
+		}
+		r.MinuteAt, _ = time.Parse(time.RFC3339, minuteAt)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // SaveJVMSamples upserts compact per-PID JVM samples used by trend-aware
