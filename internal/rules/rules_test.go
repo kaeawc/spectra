@@ -17,6 +17,7 @@ import (
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/timemachine"
 	"github.com/kaeawc/spectra/internal/toolchain"
+	"github.com/kaeawc/spectra/internal/updates"
 )
 
 func baseSnap() snapshot.Snapshot {
@@ -704,6 +705,42 @@ func TestBackupDestinationlessSchedulerLeakMediumBelowTwoGiB(t *testing.T) {
 	}
 }
 
+func TestUpdatesStaleMajorPreparedFires(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s := baseSnap()
+	s.TakenAt = now
+	s.Updates.Entries = []updates.InstallLogEntry{{
+		Timestamp: now.Add(-31 * 24 * time.Hour),
+		Message:   `SUOSUBackgroundDownloadEvaluator: <SUOSUMajorProduct: MSU_UPDATE_25F71_patch_26.5_major>(Title:macOS Tahoe 26.5 Version:26.5, Identifier:(null), Size:123, Deferred:0) is already prepared`,
+	}}
+	findings := ruleUpdatesStaleMajorPrepared().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].RuleID != "updates.stale_major_prepared" || !strings.Contains(findings[0].Message, "macOS Tahoe 26.5") {
+		t.Fatalf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestUpdatesStaleMajorPreparedNoFireAfterTransition(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s := baseSnap()
+	s.TakenAt = now
+	s.Updates.Entries = []updates.InstallLogEntry{
+		{
+			Timestamp: now.Add(-31 * 24 * time.Hour),
+			Message:   `SUOSUBackgroundDownloadEvaluator: <SUOSUMajorProduct: MSU_UPDATE_25F71_patch_26.5_major>(Title:macOS Tahoe 26.5 Version:26.5, Identifier:(null), Deferred:0) is already prepared`,
+		},
+		{
+			Timestamp: now.Add(-2 * 24 * time.Hour),
+			Message:   `Current: SUMacControllerDescriptor(UUID:7B97 SU:macOS Tahoe 26.5 25F71 (Customer)(SU) SFR:macOS Tahoe 26.5 25F71 (Customer) BRAIN:25F71)`,
+		},
+	}
+	if findings := ruleUpdatesStaleMajorPrepared().MatchFn(s); len(findings) != 0 {
+		t.Fatalf("expected 0 findings, got %v", findings)
+	}
+}
+
 func backupLeakSnapshot() snapshot.Snapshot {
 	s := baseSnap()
 	s.Host.UptimeSeconds = int64((24 * time.Hour).Seconds())
@@ -1120,6 +1157,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"storage.system_volume_near_full",
 		"spotlight.large_resident_indexer",
 		"backup.destinationless_scheduler_leak",
+		"updates.stale_major_prepared",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)
