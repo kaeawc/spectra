@@ -38,6 +38,7 @@ type Snapshot struct {
 	ID           string                   `json:"id"`
 	TakenAt      time.Time                `json:"taken_at"`
 	Kind         Kind                     `json:"kind"`
+	Tag          string                   `json:"tag,omitempty"`
 	Host         HostInfo                 `json:"host"`
 	HostFacts    HostFacts                `json:"host_facts"`
 	Apps         []detect.Result          `json:"apps"`

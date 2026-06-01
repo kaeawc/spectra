@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -37,6 +38,9 @@ func runServe(args []string) int {
 	artifactPolicy := fs.String("artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
+	autoSnapMode := fs.String("autosnap", "on", "Rolling auto snapshots: on or off")
+	autoSnapInterval := fs.Duration("autosnap-interval", serve.DefaultAutoSnapInterval, "Interval for rolling auto snapshots")
+	autoSnapRetain := fs.Int("autosnap-retain", serve.DefaultAutoSnapRetain, "Number of auto snapshots to retain per host")
 	daemon := fs.Bool("daemon", false, "Start spectra serve in the background and return")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -46,6 +50,11 @@ func runServe(args []string) int {
 		return 2
 	}
 	policy, err := parseArtifactPolicy(*artifactPolicy)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	autoSnap, err := parseAutoSnapConfig(*autoSnapMode, *autoSnapInterval, *autoSnapRetain)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -88,6 +97,7 @@ func runServe(args []string) int {
 		TsnetEnabled:   *tsnetEnabled,
 		TsnetAddr:      *tsnetAddr,
 		ArtifactPolicy: policy,
+		AutoSnap:       autoSnap,
 	})
 
 	var detectStore *cache.ShardedStore
@@ -109,6 +119,7 @@ func runServe(args []string) int {
 		DetectStore:      detectStore,
 		ArtifactPolicy:   policy,
 		Logger:           daemonLog,
+		AutoSnap:         autoSnap,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -124,6 +135,7 @@ type serveStartupStatus struct {
 	TsnetEnabled   bool
 	TsnetAddr      string
 	ArtifactPolicy artifact.Policy
+	AutoSnap       serve.AutoSnapConfig
 }
 
 func printServeStartup(w io.Writer, status serveStartupStatus) {
@@ -141,7 +153,31 @@ func printServeStartup(w io.Writer, status serveStartupStatus) {
 		fmt.Fprintf(w, "spectra serve: joining tailnet via tsnet on %s\n", status.TsnetAddr)
 		fmt.Fprintln(w, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
 	}
+	autoSnap := status.AutoSnap.Normalize()
+	if autoSnap.Disabled {
+		fmt.Fprintln(w, "spectra serve: autosnap off")
+	} else {
+		fmt.Fprintf(w, "spectra serve: autosnap every %s, retain %d\n", autoSnap.Interval, autoSnap.Retain)
+	}
 	fmt.Fprintf(w, "spectra serve: artifact policy %s\n", status.ArtifactPolicy.Normalize().Mode)
+}
+
+func parseAutoSnapConfig(mode string, interval time.Duration, retain int) (serve.AutoSnapConfig, error) {
+	disabled := false
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "on":
+	case "off":
+		disabled = true
+	default:
+		return serve.AutoSnapConfig{}, fmt.Errorf("spectra serve: --autosnap must be on or off")
+	}
+	if interval <= 0 {
+		return serve.AutoSnapConfig{}, fmt.Errorf("spectra serve: --autosnap-interval must be positive")
+	}
+	if retain <= 0 {
+		return serve.AutoSnapConfig{}, fmt.Errorf("spectra serve: --autosnap-retain must be positive")
+	}
+	return serve.AutoSnapConfig{Disabled: disabled, Interval: interval, Retain: retain}, nil
 }
 
 func parseArtifactPolicy(mode string) (artifact.Policy, error) {

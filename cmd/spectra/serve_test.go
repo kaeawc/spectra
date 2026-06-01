@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/kaeawc/spectra/internal/serve"
 )
 
 func TestOpenDaemonLoggerDisabled(t *testing.T) {
@@ -43,6 +46,34 @@ func TestServeChildArgsDropsDaemonFlag(t *testing.T) {
 	want := []string{"serve", "--sock", "/tmp/spectra.sock", "--tsnet", "--tsnet-hostname", "work-mac", "--no-log-file"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("serveChildArgs = %v, want %v", got, want)
+	}
+}
+
+func TestParseAutoSnapConfig(t *testing.T) {
+	cfg, err := parseAutoSnapConfig("on", time.Minute, 12)
+	if err != nil {
+		t.Fatalf("parseAutoSnapConfig on: %v", err)
+	}
+	if cfg.Disabled || cfg.Interval != time.Minute || cfg.Retain != 12 {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+
+	cfg, err = parseAutoSnapConfig("off", serve.DefaultAutoSnapInterval, serve.DefaultAutoSnapRetain)
+	if err != nil {
+		t.Fatalf("parseAutoSnapConfig off: %v", err)
+	}
+	if !cfg.Disabled {
+		t.Fatalf("Disabled = false, want true")
+	}
+
+	if _, err := parseAutoSnapConfig("maybe", time.Minute, 1); err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+	if _, err := parseAutoSnapConfig("on", 0, 1); err == nil {
+		t.Fatal("expected invalid interval error")
+	}
+	if _, err := parseAutoSnapConfig("on", time.Minute, 0); err == nil {
+		t.Fatal("expected invalid retain error")
 	}
 }
 

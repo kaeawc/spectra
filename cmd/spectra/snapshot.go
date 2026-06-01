@@ -189,11 +189,16 @@ func runSnapshotList(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("%-32s  %-8s  %-20s  %-20s  %s\n", "ID", "KIND", "TAKEN AT", "NAME", "APPS")
-	fmt.Println(strings.Repeat("-", 90))
+	fmt.Printf("%-32s  %-8s  %-8s  %-20s  %-20s  %s\n", "ID", "KIND", "TAG", "TAKEN AT", "NAME", "APPS")
+	fmt.Println(strings.Repeat("-", 100))
 	for _, r := range rows {
-		fmt.Printf("%-32s  %-8s  %-20s  %-20s  %d\n",
+		tag := r.Tag
+		if tag == "" {
+			tag = "-"
+		}
+		fmt.Printf("%-32s  %-8s  %-8s  %-20s  %-20s  %d\n",
 			r.ID, r.Kind,
+			tag,
 			r.TakenAt.Format("2006-01-02 15:04:05Z"),
 			truncate(r.Name, 20),
 			r.AppCount,
@@ -275,6 +280,9 @@ func runSnapshotShowFallback(ctx context.Context, db *store.DB, row store.Snapsh
 
 	fmt.Printf("id:         %s\n", row.ID)
 	fmt.Printf("kind:       %s\n", row.Kind)
+	if row.Tag != "" {
+		fmt.Printf("tag:        %s\n", row.Tag)
+	}
 	if row.Name != "" {
 		fmt.Printf("name:       %s\n", row.Name)
 	}
@@ -301,6 +309,9 @@ func printSnapshot(s snapshot.Snapshot) {
 	fmt.Println("=== Spectra snapshot ===")
 	fmt.Printf("id:             %s\n", s.ID)
 	fmt.Printf("kind:           %s\n", s.Kind)
+	if s.Tag != "" {
+		fmt.Printf("tag:            %s\n", s.Tag)
+	}
 	fmt.Printf("taken-at:       %s\n", s.TakenAt.Format("2006-01-02T15:04:05Z07:00"))
 	fmt.Println()
 	fmt.Print(s.Host.String())
@@ -456,16 +467,28 @@ func runSnapshotDiff(args []string) int {
 	fs := flag.NewFlagSet("spectra snapshot diff", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
+	since := fs.Duration("since", 0, "Diff the most recent stored snapshot older than this duration against live")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() < 1 || fs.NArg() > 3 {
-		printDiffUsage()
+	if *since < 0 {
+		fmt.Fprintln(os.Stderr, "spectra snapshot diff: --since must be positive")
 		return 2
 	}
-	if fs.Arg(0) != "baseline" && fs.NArg() != 2 {
-		printDiffUsage()
-		return 2
+	if *since > 0 {
+		if fs.NArg() != 0 {
+			fmt.Fprintln(os.Stderr, "spectra snapshot diff: --since cannot be combined with explicit snapshot IDs")
+			return 2
+		}
+	} else {
+		if fs.NArg() < 1 || fs.NArg() > 3 {
+			printDiffUsage()
+			return 2
+		}
+		if fs.Arg(0) != "baseline" && fs.NArg() != 2 {
+			printDiffUsage()
+			return 2
+		}
 	}
 
 	dbPath, err := store.DefaultPath()
@@ -481,7 +504,12 @@ func runSnapshotDiff(args []string) int {
 	defer db.Close()
 
 	ctx := context.Background()
-	snapA, snapB, err := resolveDiffOperands(ctx, db, fs.Args())
+	var snapA, snapB *snapshot.Snapshot
+	if *since > 0 {
+		snapA, snapB, err = resolveSinceDiffOperands(ctx, db, *since, time.Now())
+	} else {
+		snapA, snapB, err = resolveDiffOperands(ctx, db, fs.Args())
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -502,6 +530,7 @@ func runSnapshotDiff(args []string) int {
 
 func printDiffUsage() {
 	fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
+	fmt.Fprintln(os.Stderr, "   or: spectra snapshot diff --since <duration>")
 	fmt.Fprintln(os.Stderr, "   or: spectra diff <host-a> <host-b|live>")
 	fmt.Fprintln(os.Stderr, "   or: spectra diff baseline [name|id] [live|id]")
 }
@@ -509,6 +538,11 @@ func printDiffUsage() {
 type remoteSnapshotLoader func(ctx context.Context, host string, snapshotID string) (*snapshot.Snapshot, error)
 
 var loadRemoteSnapshot remoteSnapshotLoader = resolveRemoteSnapshot
+
+var collectLiveSnapshot = func(ctx context.Context) *snapshot.Snapshot {
+	snap := snapshot.Build(ctx, snapshot.Options{SpectraVersion: version})
+	return &snap
+}
 
 type snapshotRegistry interface {
 	SaveSnapshot(context.Context, store.SnapshotInput) error
@@ -518,6 +552,7 @@ type snapshotRegistry interface {
 	ListSnapshots(context.Context, string) ([]store.SnapshotRow, error)
 	GetSnapshot(context.Context, string) (store.SnapshotRow, error)
 	GetSnapshotJSON(context.Context, string) ([]byte, error)
+	MostRecentSnapshotOlderThan(context.Context, time.Time) (*snapshot.Snapshot, error)
 	GetSnapshotApps(context.Context, string) ([]store.AppRow, error)
 	DeleteSnapshot(context.Context, string) error
 	PruneSnapshots(context.Context, int) (int64, error)
@@ -541,6 +576,22 @@ func resolveDiffOperands(ctx context.Context, db snapshotRegistry, args []string
 		return nil, nil, fmt.Errorf("snapshot %q: %w", idB, err)
 	}
 	return snapA, snapB, nil
+}
+
+func resolveSinceDiffOperands(ctx context.Context, db snapshotRegistry, since time.Duration, now time.Time) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
+	if since <= 0 {
+		return nil, nil, fmt.Errorf("--since must be positive")
+	}
+	cutoff := now.UTC().Add(-since)
+	base, err := db.MostRecentSnapshotOlderThan(ctx, cutoff)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, fmt.Errorf("no stored snapshot older than %s exists; run `spectra snapshot create` or start the daemon", since)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	live := collectLiveSnapshot(ctx)
+	return base, live, nil
 }
 
 func resolveBaselineDiffOperands(ctx context.Context, db snapshotRegistry, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
@@ -573,8 +624,7 @@ func resolveBaselineDiffOperands(ctx context.Context, db snapshotRegistry, args 
 // live snapshot when id is the sentinel "live".
 func resolveSnapshot(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
 	if id == "live" {
-		snap := snapshot.Build(ctx, snapshot.Options{SpectraVersion: version})
-		return &snap, nil
+		return collectLiveSnapshot(ctx), nil
 	}
 	return loadSnapshotFromDB(ctx, db, id)
 }

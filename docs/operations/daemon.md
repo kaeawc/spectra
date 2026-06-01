@@ -32,6 +32,8 @@ spectra serve --tcp 127.0.0.1:7878
 spectra serve --tsnet --tsnet-hostname work-mac
 spectra serve --log-file /tmp/spectra-daemon.jsonl
 spectra serve --no-log-file
+spectra serve --autosnap-interval 5m --autosnap-retain 24
+spectra serve --autosnap=off
 spectra serve --daemon       # start detached and return
 spectra install-daemon       # install and load the per-user LaunchAgent
 ```
@@ -127,12 +129,25 @@ stored rows; the `process.live` RPC returns recent in-memory samples.
 Broader live collector replay is kept as a second in-memory ring of daemon
 snapshot captures. `live.current` returns the newest broad live snapshot and
 `live.history` returns recent captures across the host, process, toolchain,
-power, sysctl, and network collectors. At the default 1-minute daemon cadence,
-the in-memory replay window keeps the last 30 captures.
+power, sysctl, and network collectors. At the default 5-minute autosnapshot
+cadence, the in-memory replay window keeps the last 30 captures.
 
-The daemon also captures a host-focused live snapshot every minute and prunes
-live snapshots to the last 100 rows. Apps, storage, and JVMs are skipped in
-that loop to keep the tick cheap.
+The daemon also captures a lightweight host-focused auto snapshot on a rolling
+cadence. By default this runs every 5 minutes and retains the newest 24
+auto-tagged snapshots per host. Apps, storage, and JVMs are skipped in that
+loop to keep the tick cheap. Auto snapshots are tagged separately in SQLite, so
+their retention does not prune manually captured live snapshots or baselines.
+
+Use `spectra serve --autosnap-interval 10m --autosnap-retain 48` to tune the
+window, or `spectra serve --autosnap=off` to disable daemon auto snapshots.
+Stored auto snapshots can be used with the duration shortcut:
+
+```bash
+spectra snapshot diff --since 30m
+```
+
+`--since` resolves to the most recent stored snapshot older than the requested
+duration and compares it with a fresh live snapshot.
 
 ## Privileged helper
 

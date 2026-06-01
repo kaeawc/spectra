@@ -29,6 +29,7 @@ func FromSnapshot(s snapshot.Snapshot) SnapshotInput {
 		MachineUUID:  uuid,
 		TakenAt:      s.TakenAt,
 		Kind:         string(s.Kind),
+		Tag:          s.Tag,
 		SpectraVer:   s.Host.SpectraVersion,
 		Hostname:     s.Host.Hostname,
 		OSName:       s.Host.OSName,

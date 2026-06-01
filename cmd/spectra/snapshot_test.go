@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,6 +321,48 @@ func TestResolveBaselineSnapshotWithFakeRegistry(t *testing.T) {
 	}
 }
 
+func TestResolveSinceDiffOperandsUsesNewestSnapshotOlderThanCutoff(t *testing.T) {
+	ctx := context.Background()
+	reg := newFakeSnapshotRegistry()
+	old := testSnapshot("snap-old", snapshot.KindLive, time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC))
+	newer := testSnapshot("snap-newer", snapshot.KindLive, time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC))
+	tooNew := testSnapshot("snap-too-new", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
+	reg.putSnapshot(old, "")
+	reg.putSnapshot(newer, "")
+	reg.putSnapshot(tooNew, "")
+
+	oldCollect := collectLiveSnapshot
+	t.Cleanup(func() { collectLiveSnapshot = oldCollect })
+	collectLiveSnapshot = func(context.Context) *snapshot.Snapshot {
+		live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 13, 0, 0, 0, time.UTC))
+		return &live
+	}
+
+	base, live, err := resolveSinceDiffOperands(ctx, reg, 24*time.Hour, time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("resolveSinceDiffOperands: %v", err)
+	}
+	if base.ID != "snap-newer" {
+		t.Fatalf("base ID = %q, want snap-newer", base.ID)
+	}
+	if live.ID != "snap-live" {
+		t.Fatalf("live ID = %q, want snap-live", live.ID)
+	}
+}
+
+func TestResolveSinceDiffOperandsNoOldEnoughSnapshot(t *testing.T) {
+	reg := newFakeSnapshotRegistry()
+	reg.putSnapshot(testSnapshot("snap-new", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)), "")
+
+	_, _, err := resolveSinceDiffOperands(context.Background(), reg, 24*time.Hour, time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC))
+	if !errors.Is(err, store.ErrNotFound) && err == nil {
+		t.Fatal("expected no old-enough snapshot error")
+	}
+	if err == nil || !strings.Contains(err.Error(), "no stored snapshot older than 24h0m0s") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func testSnapshot(id string, kind snapshot.Kind, takenAt time.Time) snapshot.Snapshot {
 	return snapshot.Snapshot{
 		ID:      id,
@@ -419,6 +463,30 @@ func (f *fakeSnapshotRegistry) GetSnapshotJSON(_ context.Context, id string) ([]
 		return nil, store.ErrNotFound
 	}
 	return raw, nil
+}
+
+func (f *fakeSnapshotRegistry) MostRecentSnapshotOlderThan(_ context.Context, cutoff time.Time) (*snapshot.Snapshot, error) {
+	var best *snapshot.Snapshot
+	for _, row := range f.rows {
+		if row.TakenAt.After(cutoff) {
+			continue
+		}
+		raw, ok := f.jsonByID[row.ID]
+		if !ok {
+			continue
+		}
+		var snap snapshot.Snapshot
+		if err := json.Unmarshal(raw, &snap); err != nil {
+			return nil, err
+		}
+		if best == nil || snap.TakenAt.After(best.TakenAt) {
+			best = &snap
+		}
+	}
+	if best == nil {
+		return nil, store.ErrNotFound
+	}
+	return best, nil
 }
 
 func (f *fakeSnapshotRegistry) GetSnapshotApps(_ context.Context, id string) ([]store.AppRow, error) {
