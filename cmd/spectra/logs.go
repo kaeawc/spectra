@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"regexp"
 	"time"
 
@@ -23,13 +24,14 @@ func runLogs(args []string) int {
 	grep := fs.String("grep", "", "Filter messages by regexp after query")
 	top := fs.Int("top", 5000, "Maximum rows")
 	asJSON := fs.Bool("json", false, "Emit JSON")
+	stream := fs.Bool("stream", false, "Stream live logs")
 	predicate := fs.String("predicate", "", "Raw NSPredicate")
 	unsafePredicate := fs.Bool("unsafe-predicate", false, "Allow raw NSPredicate")
 	allowLongWindow := fs.Bool("allow-long-window", false, "Allow windows over 24h")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	result, err := logquery.Run(context.Background(), logquery.Query{
+	q := logquery.Query{
 		Process:              *processName,
 		Subsystem:            *subsystem,
 		MinLevel:             *level,
@@ -38,7 +40,11 @@ func runLogs(args []string) int {
 		Predicate:            *predicate,
 		AllowUnsafePredicate: *unsafePredicate,
 		AllowLongWindow:      *allowLongWindow,
-	})
+	}
+	if *stream {
+		return runLogStream(q, *grep, *asJSON)
+	}
+	result, err := logquery.Run(context.Background(), q)
 	if err != nil {
 		if errors.Is(err, logquery.ErrWindowTooLarge) || errors.Is(err, logquery.ErrUnsafePredicate) {
 			fmt.Fprintln(os.Stderr, err)
@@ -62,6 +68,43 @@ func runLogs(args []string) int {
 		return 0
 	}
 	printLogs(result)
+	return 0
+}
+
+func runLogStream(q logquery.Query, grep string, asJSON bool) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	entries, errs, err := logquery.Stream(ctx, q)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	var re *regexp.Regexp
+	if grep != "" {
+		compiled, err := regexp.Compile(grep)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		re = compiled
+	}
+	enc := json.NewEncoder(os.Stdout)
+	for entry := range entries {
+		if re != nil && !re.MatchString(entry.EventMessage) && !re.MatchString(entry.FormatString) {
+			continue
+		}
+		if asJSON {
+			_ = enc.Encode(entry)
+			continue
+		}
+		printLogEntry(entry)
+	}
+	for err := range errs {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
 	return 0
 }
 
@@ -89,12 +132,16 @@ func printLogs(result logquery.Result) {
 	}
 	fmt.Println()
 	for _, entry := range result.Entries {
-		fmt.Printf("%s  pid=%d  %-7s  %-18s  %s\n",
-			entry.Timestamp.Format(time.RFC3339),
-			entry.PID,
-			entry.LogType,
-			truncate(entry.Process, 18),
-			entry.EventMessage,
-		)
+		printLogEntry(entry)
 	}
+}
+
+func printLogEntry(entry logquery.LogEntry) {
+	fmt.Printf("%s  pid=%d  %-7s  %-18s  %s\n",
+		entry.Timestamp.Format(time.RFC3339),
+		entry.PID,
+		entry.LogType,
+		truncate(entry.Process, 18),
+		entry.EventMessage,
+	)
 }
