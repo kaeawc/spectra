@@ -24,6 +24,7 @@ func V1Catalog() []Rule {
 		ruleStorageDataVolumeNearFull(),
 		ruleStorageSystemVolumeNearFull(),
 		ruleSpotlightLargeResidentIndexer(),
+		ruleBackupDestinationlessSchedulerLeak(),
 		ruleJVMGCPressure(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),

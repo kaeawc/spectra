@@ -16,6 +16,7 @@ import (
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/services"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/syslimits"
@@ -33,18 +34,19 @@ const (
 
 // Snapshot is the structured capture of one host at one point in time.
 type Snapshot struct {
-	ID           string                 `json:"id"`
-	TakenAt      time.Time              `json:"taken_at"`
-	Kind         Kind                   `json:"kind"`
-	Host         HostInfo               `json:"host"`
-	Apps         []detect.Result        `json:"apps"`
-	Processes    []process.Info         `json:"processes,omitempty"`
-	Toolchains   toolchain.Toolchains   `json:"toolchains"`
-	Power        sysinfo.PowerState     `json:"power"`
-	SystemLimits syslimits.SystemLimits `json:"system_limits"`
-	Sysctls      map[string]string      `json:"sysctls,omitempty"`
-	Network      netstate.State         `json:"network"`
-	Storage      storagestate.State     `json:"storage"`
+	ID           string                   `json:"id"`
+	TakenAt      time.Time                `json:"taken_at"`
+	Kind         Kind                     `json:"kind"`
+	Host         HostInfo                 `json:"host"`
+	Apps         []detect.Result          `json:"apps"`
+	Processes    []process.Info           `json:"processes,omitempty"`
+	Toolchains   toolchain.Toolchains     `json:"toolchains"`
+	Power        sysinfo.PowerState       `json:"power"`
+	SystemLimits syslimits.SystemLimits   `json:"system_limits"`
+	Sysctls      map[string]string        `json:"sysctls,omitempty"`
+	Network      netstate.State           `json:"network"`
+	Storage      storagestate.State       `json:"storage"`
+	Services     services.LaunchInventory `json:"services,omitempty"`
 
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
@@ -110,6 +112,10 @@ type Options struct {
 	// Zero value uses live filesystem paths.
 	StorageOpts storagestate.CollectOptions
 
+	// ServicesOpts are forwarded to the launchd services collector.
+	// Zero value collects system LaunchDaemons.
+	ServicesOpts services.Options
+
 	// JVMOpts are forwarded to the JVM collector.
 	// Zero value uses the real jps/jcmd commands.
 	JVMOpts jvm.CollectOptions
@@ -131,6 +137,9 @@ type Options struct {
 	// host-only snapshots where app data is not needed (e.g. daemon
 	// periodic captures).
 	SkipApps bool
+
+	// SkipServices disables launchd services collection.
+	SkipServices bool
 
 	// DetectStore is the sharded cache for detect.Result JSON. When non-nil,
 	// collectApps serves cached results keyed by Info.plist + main-exe hash and
@@ -219,6 +228,14 @@ func Build(ctx context.Context, opts Options) Snapshot {
 			s.Storage = collectStorageCached(opts.StorageOpts, opts.StorageCache)
 		}()
 	}
+	if !opts.SkipServices {
+		go func() {
+			defer wg.Done()
+			if inv, err := services.List(ctx, opts.ServicesOpts); err == nil {
+				s.Services = inv
+			}
+		}()
+	}
 
 	if !opts.SkipProcesses {
 		go func() {
@@ -261,6 +278,9 @@ func snapshotCollectorCount(opts Options) int {
 		collectors++
 	}
 	if !opts.SkipStorage {
+		collectors++
+	}
+	if !opts.SkipServices {
 		collectors++
 	}
 	if !opts.SkipJVMs {
