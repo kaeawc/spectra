@@ -9,6 +9,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -139,6 +140,98 @@ func TestJVMHeapVsSystemDemotedForIDE(t *testing.T) {
 	}
 	if !strings.Contains(findings[0].Message, "expected for this app") {
 		t.Errorf("message should be recalibrated, got %q", findings[0].Message)
+	}
+}
+
+// --- memory pressure ---
+
+func TestMemoryFactsFor(t *testing.T) {
+	s := baseSnap()
+	s.Host.UptimeSeconds = 36 * 3600
+	s.Host.Memory = memstate.MemoryState{
+		PhysicalBytes:      1000,
+		CompressorOccupied: 300,
+		Swap:               memstate.SwapUsage{UsedBytes: 125},
+		PressureLevel:      memstate.PressureWarning,
+	}
+	got := MemoryFactsFor(s)
+	if got.CompressorOccupiedFraction != 0.3 {
+		t.Fatalf("CompressorOccupiedFraction = %.2f", got.CompressorOccupiedFraction)
+	}
+	if got.SwapUsedFraction != 0.125 {
+		t.Fatalf("SwapUsedFraction = %.3f", got.SwapUsedFraction)
+	}
+	if got.PressureLevel != "Warning" || got.UptimeHours != 36 {
+		t.Fatalf("facts = %+v", got)
+	}
+}
+
+func TestMemoryCompressorExcessFires(t *testing.T) {
+	s := baseSnap()
+	s.Host.UptimeSeconds = 25 * 3600
+	s.Host.Memory = memstate.MemoryState{
+		PhysicalBytes:      100,
+		CompressorOccupied: 26,
+	}
+	findings := ruleMemoryCompressorExcess().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected compressor finding, got %v", findings)
+	}
+	if findings[0].RuleID != "memory.compressor_excess" || !strings.Contains(findings[0].Fix, "spectra memory") {
+		t.Fatalf("finding = %+v", findings[0])
+	}
+}
+
+func TestMemorySwapExcessFires(t *testing.T) {
+	s := baseSnap()
+	s.Host.Memory = memstate.MemoryState{
+		PhysicalBytes: 100,
+		Swap:          memstate.SwapUsage{UsedBytes: 11},
+	}
+	findings := ruleMemorySwapExcess().MatchFn(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected swap finding, got %v", findings)
+	}
+	if findings[0].RuleID != "memory.swap_excess" || !strings.Contains(findings[0].Message, "11%") {
+		t.Fatalf("finding = %+v", findings[0])
+	}
+}
+
+func TestMemorySustainedPressureFires(t *testing.T) {
+	s := baseSnap()
+	s.Host.UptimeSeconds = 2 * 3600
+	s.Host.Memory = memstate.MemoryState{PressureLevel: memstate.PressureWarning}
+	findings := ruleMemorySustainedPressure().MatchFn(s)
+	if len(findings) != 1 || findings[0].Severity != SeverityInfo {
+		t.Fatalf("warning pressure findings = %+v", findings)
+	}
+
+	s.Host.UptimeSeconds = 10
+	s.Host.Memory = memstate.MemoryState{PressureLevel: memstate.PressureCritical}
+	findings = ruleMemorySustainedPressure().MatchFn(s)
+	if len(findings) != 1 || findings[0].Severity != SeverityMedium {
+		t.Fatalf("critical pressure findings = %+v", findings)
+	}
+}
+
+func TestMemoryRulesNoFalsePositiveOnFreshBoot(t *testing.T) {
+	s := baseSnap()
+	s.Host.RAMBytes = 128 * 1024 * 1024 * 1024
+	s.Host.UptimeSeconds = 4 * 3600
+	s.Host.Memory = memstate.MemoryState{
+		PhysicalBytes:      s.Host.RAMBytes,
+		CompressorOccupied: 10 * 1024 * 1024 * 1024,
+		Swap:               memstate.SwapUsage{UsedBytes: 0},
+		PressureLevel:      memstate.PressureNormal,
+	}
+	for _, rule := range []Rule{
+		ruleMemoryCompressorExcess(),
+		ruleMemorySwapExcess(),
+		ruleMemorySustainedPressure(),
+	} {
+		if findings := rule.MatchFn(s); len(findings) != 0 {
+			t.Fatalf("%s fired unexpectedly: %+v", rule.ID, findings)
+		}
 	}
 }
 
@@ -766,13 +859,19 @@ func TestBrewStalePinnedMultiple(t *testing.T) {
 	}
 }
 
-func TestV1CatalogContainsBrewRules(t *testing.T) {
+func TestV1CatalogContainsExpectedRules(t *testing.T) {
 	catalog := V1Catalog()
 	ruleIDs := make(map[string]bool)
 	for _, r := range catalog {
 		ruleIDs[r.ID] = true
 	}
-	for _, want := range []string{"brew-deprecated-formula", "brew-stale-pinned"} {
+	for _, want := range []string{
+		"brew-deprecated-formula",
+		"brew-stale-pinned",
+		"memory.compressor_excess",
+		"memory.swap_excess",
+		"memory.sustained_pressure",
+	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)
 		}
