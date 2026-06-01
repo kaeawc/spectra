@@ -85,6 +85,7 @@ func storageCacheKey(opts storagestate.CollectOptions) []byte {
 		strings.Join(opts.AppPaths, "|"),
 		fmt.Sprint(opts.LargestAppsN),
 		fmt.Sprint(opts.IncludeSnapshots),
+		fmt.Sprint(opts.IncludeSpotlight),
 	}
 	h := sha256.New()
 	h.Write([]byte(strings.Join(parts, "\x00")))

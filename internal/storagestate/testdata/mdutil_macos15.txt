@@ -1,0 +1,6 @@
+/:
+	Error: datastore publishing not implemented.
+/System/Volumes/Data:
+	No index.
+/Volumes/Unknown:
+	Indexing status unknown.

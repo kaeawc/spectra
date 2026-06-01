@@ -15,11 +15,15 @@ func runStorage(args []string) int {
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	includeSnapshots := fs.Bool("snapshots", false, "Include APFS snapshots")
+	includeSpotlight := fs.Bool("spotlight", false, "Include Spotlight indexing status")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	state := storagestate.Collect(storagestate.CollectOptions{IncludeSnapshots: *includeSnapshots})
+	state := storagestate.Collect(storagestate.CollectOptions{
+		IncludeSnapshots: *includeSnapshots,
+		IncludeSpotlight: *includeSpotlight,
+	})
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -28,11 +32,11 @@ func runStorage(args []string) int {
 		return 0
 	}
 
-	printStorageState(state, *includeSnapshots)
+	printStorageState(state, *includeSnapshots, *includeSpotlight)
 	return 0
 }
 
-func printStorageState(s storagestate.State, includeSnapshots bool) {
+func printStorageState(s storagestate.State, includeSnapshots, includeSpotlight bool) {
 	fmt.Println("=== Storage state ===")
 
 	if len(s.Volumes) > 0 {
@@ -61,6 +65,10 @@ func printStorageState(s storagestate.State, includeSnapshots bool) {
 		printMounts(s.Mounts)
 	}
 
+	if includeSpotlight {
+		printSpotlight(s.Spotlight)
+	}
+
 	if s.UserLibraryBytes > 0 {
 		fmt.Printf("\n~/Library:       %s total\n", humanSize(s.UserLibraryBytes))
 		if s.AppCachesBytes > 0 {
@@ -73,6 +81,22 @@ func printStorageState(s storagestate.State, includeSnapshots bool) {
 		for _, a := range s.LargestApps {
 			fmt.Printf("  %10s  %s\n", humanSize(a.OnDiskBytes), a.Path)
 		}
+	}
+}
+
+func printSpotlight(volumes []storagestate.SpotlightVolume) {
+	fmt.Printf("\nspotlight (%d):\n", len(volumes))
+	for _, volume := range volumes {
+		progress := ""
+		if volume.Progress != nil {
+			progress = fmt.Sprintf(" %s %.0f%%", volume.Progress.Phase, volume.Progress.Percent)
+		}
+		fmt.Printf("  %-28s  %-10s  %s%s\n",
+			truncate(volume.MountPoint, 28),
+			volume.Status.String(),
+			volume.Detail,
+			progress,
+		)
 	}
 }
 

@@ -1,0 +1,8 @@
+/:
+	Indexing enabled. 
+/System/Volumes/Data:
+	Indexing enabled. 
+/Volumes/Disabled:
+	Indexing disabled.
+/Volumes/SearchDisabled:
+	Indexing and searching disabled.
