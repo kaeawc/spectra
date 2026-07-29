@@ -45,7 +45,154 @@ func toolDefinitions() []ToolDefinition {
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
 		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
-		operationToolDef("remote", "Call a Spectra daemon. Ops: health, rpc, fanout. Ask: \"Check host health.\" \"Run snapshot.create remotely.\"", []string{"health", "rpc", "triage", "fanout"}),
+		operationToolDef("remote", "Call a Spectra daemon or list known hosts. Ops: health, hosts, rpc, fanout. Ask: \"Check host health.\" \"What hosts do we know about?\"", []string{"health", "hosts", "rpc", "triage", "fanout"}),
+		powerToolDef(),
+		memoryToolDef(),
+		storageToolDef(),
+		systemToolDef(),
+		servicesToolDef(),
+		logsToolDef(),
+		updatesToolDef(),
+		timeMachineToolDef(),
+		playbookToolDef(),
+		cacheToolDef(),
+		coreToolDef(),
+		metricsToolDef(),
+	}
+}
+
+func powerToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "power",
+		Description: "Battery, thermal, and energy impact. Ops: state, impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation":        enumProp([]string{"state", "impact"}, "state"),
+			"pids":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "integer"}, "description": "PIDs to score (impact). Defaults to all processes."},
+			"duration_seconds": integerProp("Energy sampling window for impact (default 1)."),
+			"limit":            integerProp("Max ranked rows for impact."),
+		}, nil),
+	}
+}
+
+func memoryToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "memory",
+		Description: "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+		InputSchema: objectSchema(map[string]interface{}{}, nil),
+	}
+}
+
+func storageToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "storage",
+		Description: "Disk volumes and ~/Library storage footprint. Ask: \"What is using all my disk?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"paths": arrayStringProp(".app paths to size for the largest-apps list."),
+			"limit": integerProp("How many top apps to report (default 10)."),
+		}, nil),
+	}
+}
+
+func systemToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "system",
+		Description: "Kernel resource limits and saturation. Ops: limits, top. Ask: \"Are we running out of file descriptors or PTYs?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation": enumProp([]string{"limits", "top"}, "limits"),
+			"limit":     integerProp("Top-holder rows per saturated resource (default 10)."),
+		}, nil),
+	}
+}
+
+func servicesToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "services",
+		Description: "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+		InputSchema: objectSchema(map[string]interface{}{}, nil),
+	}
+}
+
+func logsToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "logs",
+		Description: "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"process":                stringProp("Process name filter."),
+			"subsystem":              stringProp("Subsystem filter."),
+			"predicate":              stringProp("Raw log predicate."),
+			"min_level":              stringProp("Minimum level (default, info, debug)."),
+			"last_seconds":           integerProp("Look back this many seconds."),
+			"max_rows":               integerProp("Max rows to return."),
+			"allow_long_window":      boolProp("Permit a longer-than-default time window."),
+			"allow_unsafe_predicate": boolProp("Permit an unsanitized predicate."),
+		}, nil),
+	}
+}
+
+func updatesToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "updates",
+		Description: "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation": enumProp([]string{"history", "log"}, "history"),
+			"process":   stringProp("Process filter (log)."),
+			"grep":      stringProp("Substring filter (log)."),
+			"max_lines": integerProp("Max install.log lines (log)."),
+		}, nil),
+	}
+}
+
+func timeMachineToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "timemachine",
+		Description: "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+		InputSchema: objectSchema(map[string]interface{}{}, nil),
+	}
+}
+
+func playbookToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "playbook",
+		Description: "Built-in diagnostic playbooks and command plans. Ops: list, get. Ask: \"How do I triage an fseventsd leak?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation": enumProp([]string{"list", "get"}, "list"),
+			"id":        stringProp("Playbook id (get)."),
+		}, nil),
+	}
+}
+
+func cacheToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "cache",
+		Description: "Local blob cache. Ops: stats, clear. Ask: \"How big is the cache?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation": enumProp([]string{"stats", "clear"}, "stats"),
+			"kind":      stringProp("Cache kind to clear; empty clears all."),
+		}, nil),
+	}
+}
+
+func coreToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "core",
+		Description: "Inspect a crashed-process core file and suggest offline analyzers. Ask: \"What crashed in this core dump?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"path":       stringProp("Path to the core file."),
+			"executable": stringProp("Optional path to the crashed executable."),
+		}, []string{"path"}),
+	}
+}
+
+func metricsToolDef() ToolDefinition {
+	return ToolDefinition{
+		Name:        "metrics",
+		Description: "Stored process metrics and app churn from a running spectra daemon. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
+		InputSchema: objectSchema(map[string]interface{}{
+			"operation": enumProp([]string{"process", "churn"}, "process"),
+			"pid":       integerProp("PID filter (process)."),
+			"app_path":  stringProp("App path filter (churn)."),
+			"limit":     integerProp("Max rows (default 60)."),
+		}, nil),
 	}
 }
 
@@ -70,11 +217,12 @@ func inspectAppToolDef() ToolDefinition {
 		Name:        "inspect_app",
 		Description: "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
 		InputSchema: objectSchema(map[string]interface{}{
-			"paths":       arrayStringProp(".app paths."),
+			"paths":       arrayStringProp(".app paths. Optional when scan_all=true."),
+			"scan_all":    boolProp("Inspect every .app under /Applications instead of listing paths."),
 			"network":     boolProp("Scan app URLs."),
 			"deep":        boolProp("Join live process, open-FD/listening-port, and connection state for each app."),
 			"include_raw": boolProp("Return raw data."),
-		}, []string{"paths"}),
+		}, nil),
 	}
 }
 
@@ -406,6 +554,7 @@ func filterFindingsForTarget(findings []rules.Finding, t triageTargetInfo) []rul
 func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 	var p struct {
 		Paths      []string `json:"paths"`
+		ScanAll    bool     `json:"scan_all"`
 		Network    bool     `json:"network"`
 		Deep       bool     `json:"deep"`
 		IncludeRaw bool     `json:"include_raw"`
@@ -413,7 +562,14 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
+	if p.ScanAll {
+		p.Paths = append(p.Paths, scanAppDir("/Applications")...)
+		p.Paths = append(p.Paths, scanAppDir("/Applications/Utilities")...)
+	}
 	if len(p.Paths) == 0 {
+		if p.ScanAll {
+			return toolError("scan_all found no .app bundles under /Applications")
+		}
 		return toolError("paths is required")
 	}
 	results := make([]inspectResult, 0, len(p.Paths))
@@ -1084,6 +1240,8 @@ func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
 	switch p.Operation {
 	case "health", "":
 		return s.toolRemoteHealth(p)
+	case "hosts":
+		return s.toolRemoteHosts()
 	case "rpc":
 		return s.toolRemoteRPC(p)
 	case "triage":
@@ -1311,6 +1469,22 @@ func optionalRaw(include bool, value interface{}) interface{} {
 		return value
 	}
 	return nil
+}
+
+// scanAppDir returns the .app bundle paths directly under dir. A missing or
+// unreadable directory yields no paths rather than an error, mirroring the CLI.
+func scanAppDir(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".app") {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
 }
 
 func openStore() (*store.DB, error) {
