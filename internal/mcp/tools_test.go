@@ -94,6 +94,18 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 		"toolchain",
 		"issues",
 		"remote",
+		"power",
+		"memory",
+		"storage",
+		"system",
+		"services",
+		"logs",
+		"updates",
+		"timemachine",
+		"playbook",
+		"cache",
+		"core",
+		"metrics",
 	} {
 		if !got[name] {
 			t.Fatalf("missing tool definition %q", name)

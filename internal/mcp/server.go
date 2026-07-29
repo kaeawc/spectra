@@ -44,6 +44,17 @@ func (s *Server) SetLogger(l logger.Logger) { s.log = l }
 // Zero fields keep their default implementation.
 func (s *Server) SetCollectors(c Collectors) {
 	defaults := defaultCollectors()
+	c = mergeInspectionCollectors(c, defaults)
+	c = mergeHostStateCollectors(c, defaults)
+	if c.Clock == nil {
+		c.Clock = defaults.Clock
+	}
+	s.collect = c
+}
+
+// mergeInspectionCollectors fills the app/process/JVM inspection collectors
+// from defaults where the caller left them nil.
+func mergeInspectionCollectors(c, defaults Collectors) Collectors {
 	if c.Apps == nil {
 		c.Apps = defaults.Apps
 	}
@@ -62,10 +73,43 @@ func (s *Server) SetCollectors(c Collectors) {
 	if c.Toolchain == nil {
 		c.Toolchain = defaults.Toolchain
 	}
-	if c.Clock == nil {
-		c.Clock = defaults.Clock
+	return c
+}
+
+// mergeHostStateCollectors fills the host-state collectors from defaults where
+// the caller left them nil.
+func mergeHostStateCollectors(c, defaults Collectors) Collectors {
+	if c.Power == nil {
+		c.Power = defaults.Power
 	}
-	s.collect = c
+	if c.Memory == nil {
+		c.Memory = defaults.Memory
+	}
+	if c.Storage == nil {
+		c.Storage = defaults.Storage
+	}
+	if c.System == nil {
+		c.System = defaults.System
+	}
+	if c.Services == nil {
+		c.Services = defaults.Services
+	}
+	if c.Logs == nil {
+		c.Logs = defaults.Logs
+	}
+	if c.Updates == nil {
+		c.Updates = defaults.Updates
+	}
+	if c.TimeMachine == nil {
+		c.TimeMachine = defaults.TimeMachine
+	}
+	if c.CoreFiles == nil {
+		c.CoreFiles = defaults.CoreFiles
+	}
+	if c.Playbooks == nil {
+		c.Playbooks = defaults.Playbooks
+	}
+	return c
 }
 
 // Run reads framed messages and processes them until EOF.
@@ -167,35 +211,45 @@ func (s *Server) handleToolsCall(req Request) {
 		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
 		return
 	}
-	var result ToolResult
-	switch params.Name {
-	case "triage":
-		result = s.toolTriage(params.Arguments)
-	case "inspect_app":
-		result = s.toolInspectApp(params.Arguments)
-	case "snapshot":
-		result = s.toolSnapshot(params.Arguments)
-	case "diagnose":
-		result = s.toolDiagnose(params.Arguments)
-	case "process":
-		result = s.toolProcess(params.Arguments)
-	case "jvm":
-		result = s.toolJVM(params.Arguments)
-	case "network":
-		result = s.toolNetwork(params.Arguments)
-	case "toolchain":
-		result = s.toolToolchain(params.Arguments)
-	case "issues":
-		result = s.toolIssues(params.Arguments)
-	case "remote":
-		result = s.toolRemote(params.Arguments)
-	default:
-		result = ToolResult{
+	handler, ok := s.toolHandlers()[params.Name]
+	if !ok {
+		s.sendResponse(req.ID, nil, ToolResult{
 			Content: []ContentBlock{{Type: "text", Text: "unknown tool: " + params.Name}},
 			IsError: true,
-		}
+		})
+		return
 	}
-	s.sendResponse(req.ID, nil, result)
+	s.sendResponse(req.ID, nil, handler(params.Arguments))
+}
+
+// toolHandlers maps each tool name to its handler. The table keeps
+// handleToolsCall flat and makes the exposed surface easy to audit against
+// toolDefinitions.
+func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
+	return map[string]func(json.RawMessage) ToolResult{
+		"triage":      s.toolTriage,
+		"inspect_app": s.toolInspectApp,
+		"snapshot":    s.toolSnapshot,
+		"diagnose":    s.toolDiagnose,
+		"process":     s.toolProcess,
+		"jvm":         s.toolJVM,
+		"network":     s.toolNetwork,
+		"toolchain":   s.toolToolchain,
+		"issues":      s.toolIssues,
+		"remote":      s.toolRemote,
+		"power":       s.toolPower,
+		"memory":      s.toolMemory,
+		"storage":     s.toolStorage,
+		"system":      s.toolSystem,
+		"services":    s.toolServices,
+		"logs":        s.toolLogs,
+		"updates":     s.toolUpdates,
+		"timemachine": s.toolTimeMachine,
+		"playbook":    s.toolPlaybook,
+		"cache":       s.toolCache,
+		"core":        s.toolCore,
+		"metrics":     s.toolMetrics,
+	}
 }
 
 func (s *Server) handleResourcesList(req Request) {
