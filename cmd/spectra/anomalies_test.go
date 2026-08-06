@@ -71,6 +71,17 @@ func TestRunAnomaliesEmpty(t *testing.T) {
 	}
 }
 
+func TestRunAnomaliesRejectsBadParams(t *testing.T) {
+	load := func() ([]store.ProcessMetricRow, error) { return metricRows(), nil }
+	names := func() map[int]string { return nil }
+	for _, args := range [][]string{{"-z", "0"}, {"-z", "-2"}, {"--min-samples", "1"}} {
+		var out, errBuf bytes.Buffer
+		if code := runAnomaliesWithIO(args, &out, &errBuf, load, names); code != 2 {
+			t.Errorf("args %v: exit = %d, want 2", args, code)
+		}
+	}
+}
+
 func TestRunAnomaliesLoadError(t *testing.T) {
 	load := func() ([]store.ProcessMetricRow, error) { return nil, errors.New("db locked") }
 	names := func() map[int]string { return nil }

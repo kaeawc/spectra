@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 
@@ -27,6 +28,14 @@ func runAnomaliesWithIO(args []string, stdout, stderr io.Writer, loadMetrics met
 	z := fs.Float64("z", 3.0, "z-score threshold")
 	minSamples := fs.Int("min-samples", 5, "baseline points required before flagging")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *z <= 0 || math.IsNaN(*z) {
+		fmt.Fprintln(stderr, "-z must be a positive number")
+		return 2
+	}
+	if *minSamples < 2 {
+		fmt.Fprintln(stderr, "--min-samples must be >= 2 (a baseline needs at least two points for variance)")
 		return 2
 	}
 	rows, err := loadMetrics()
@@ -69,7 +78,11 @@ func defaultMetricsLoader() ([]store.ProcessMetricRow, error) {
 		return nil, fmt.Errorf("open store %s: %w", dbPath, err)
 	}
 	defer db.Close()
-	return db.GetAllProcessMetrics(context.Background(), 20000)
+	rows, err := db.GetAllProcessMetrics(context.Background(), 20000)
+	if err != nil {
+		return nil, fmt.Errorf("query process metrics: %w", err)
+	}
+	return rows, nil
 }
 
 func defaultNameResolver() map[int]string {

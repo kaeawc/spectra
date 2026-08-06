@@ -516,10 +516,12 @@ spectra web symbolicate --json app.js.map 1:284620 1:9931
 
 ## `spectra anomalies`
 
-Flags processes whose latest RSS deviates from their own rolling baseline,
+Flags processes whose latest RSS sits well above their own recent baseline,
 using an EWMA mean+variance / z-score detector over the metrics the daemon
-samples. It catches a slow leak days before a static ceiling would — "pid
-8123 (com.corp.helper) RSS 2.1 GB is +4.3σ vs baseline (~600 MB)".
+samples — a sudden jump or step change, e.g. "pid 8123 (com.corp.helper)
+RSS 2.1 GB is +4.3σ vs baseline (~600 MB)". (It compares the latest point to
+the baseline, so a gradual creep the baseline follows won't trip it — that's
+a job for a dedicated trend detector.)
 
 Series are keyed on **PID** (the metrics ring is PID-keyed); the current
 process name is attached best-effort and exited PIDs are labeled as such.

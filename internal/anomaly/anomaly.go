@@ -1,8 +1,10 @@
 // Package anomaly is a small, dependency-free rolling-baseline detector. It
 // builds an exponentially-weighted (EWMA) mean and variance for each series and
-// flags the latest point when it deviates from that baseline by more than a
-// z-score threshold. It generalizes the rising-trend logic that today only the
-// jvm-gc-pressure rule has, so slow leaks are caught before a static ceiling.
+// flags the *latest* point when it sits more than a z-score threshold away from
+// that baseline — i.e. a sudden jump or step change relative to the recent
+// history. It does not track a gradual trend: a slow creep that the EWMA
+// baseline follows will not be flagged; that is what a dedicated trend detector
+// would add.
 package anomaly
 
 import (
@@ -30,7 +32,7 @@ type Finding struct {
 	Mean    float64 `json:"baseline_mean"`
 	StdDev  float64 `json:"baseline_stddev"`
 	Z       float64 `json:"z"`
-	Samples int     `json:"samples"`
+	Samples int     `json:"samples"` // baseline sample count (excludes the latest point)
 }
 
 // defaultAlpha is the EWMA smoothing factor: higher weights recent points more.
@@ -75,5 +77,5 @@ func detectOne(s Series, minSamples int, zThreshold float64) (Finding, bool) {
 	if math.Abs(z) < zThreshold {
 		return Finding{}, false
 	}
-	return Finding{Key: s.Key, Latest: latest, Mean: mean, StdDev: std, Z: z, Samples: len(pts)}, true
+	return Finding{Key: s.Key, Latest: latest, Mean: mean, StdDev: std, Z: z, Samples: len(pts) - 1}, true
 }
