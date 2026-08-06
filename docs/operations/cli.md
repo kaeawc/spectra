@@ -438,6 +438,24 @@ spectra web asar-diff /Volumes/backup/Slack.app /Applications/Slack.app
 spectra web asar-diff --json ./old/App.app ./new/App.app
 ```
 
+## `spectra web fuses`
+
+Audits an Electron app's build-time security **fuses** — toggles baked into
+the framework binary. An app that ships with `RunAsNode` or
+`EnableNodeCliInspectArguments` enabled, or `EnableEmbeddedAsarIntegrityValidation`
+disabled, is a local code-injection surface: any process can relaunch the
+signed app as an arbitrary Node interpreter or attach a debugger. The command
+decodes the fuse wire and reports a security posture (`critical` / `warn` /
+`info`) per dangerous setting. `--json` emits the structured config. Reads
+binary bytes only; runs nothing.
+
+### Examples
+
+```bash
+spectra web fuses /Applications/SomeChatApp.app
+spectra web fuses --json /Applications/SomeChatApp.app
+```
+
 ## `spectra playbook`
 
 Shows problem-first diagnostic workflows over existing collectors. Use it
