@@ -1159,6 +1159,8 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"backup.destinationless_scheduler_leak",
 		"updates.stale_major_prepared",
 		"process-memory-hog",
+		"network.proxy_configured",
+		"network.hosts_override",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)
