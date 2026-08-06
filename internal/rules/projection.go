@@ -131,9 +131,41 @@ func projectJVMs(jvms []jvm.Info) []any {
 			"vm_flags":       info.VMFlags,
 			"thread_count":   info.ThreadCount,
 			"sys_props":      info.SysProps,
+			"gc_count":       gcCount(info.GC),
+			"gc":             projectGC(info.GC),
 		})
 	}
 	return out
+}
+
+// gcCount is the total GC event count (young + full) documented as
+// jvm.gc_count, or 0 when GC stats were not collected.
+func gcCount(gc *jvm.GCStats) int64 {
+	if gc == nil {
+		return 0
+	}
+	return gc.YGC + gc.FGC
+}
+
+// projectGC exposes the one-shot jstat GC counters to external rules, or nil
+// when GC stats were not collected.
+func projectGC(gc *jvm.GCStats) any {
+	if gc == nil {
+		return nil
+	}
+	return map[string]any{
+		"ygc":  gc.YGC,
+		"ygct": gc.YGCT,
+		"fgc":  gc.FGC,
+		"fgct": gc.FGCT,
+		"gct":  gc.GCT,
+		"ec":   gc.EC,
+		"eu":   gc.EU,
+		"oc":   gc.OC,
+		"ou":   gc.OU,
+		"mc":   gc.MC,
+		"mu":   gc.MU,
+	}
 }
 
 func projectToolchains(t toolchain.Toolchains) map[string]any {

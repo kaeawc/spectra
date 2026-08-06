@@ -178,8 +178,13 @@ app.bundle_id, app.version, app.runtime, app.architectures, app.entitlements,
 process.pid, process.rss_kib, process.cpu_pct, process.command
 jvm.version, jvm.vendor, jvm.max_heap_mb, jvm.gc_count, jvm.thread_count
 toolchain.brew_formulae[], toolchain.jdks[], toolchain.node_versions[]
-diff.added_apps[], diff.removed_apps[], diff.changed_versions[]   # vs baseline
 ```
+
+Baseline-diff inputs (`diff.added_apps[]`, `diff.removed_apps[]`,
+`diff.changed_versions[]`) are **not** part of the single-snapshot projection
+`SnapshotActivation` produces — a single snapshot carries no baseline to diff
+against. Change-based rules require the diff-aware evaluation path, which is
+future work; they are intentionally absent from the projection today.
 
 The current Go catalog can inspect the complete `snapshot.Snapshot`
 structure. The data model in [storage.md](storage.md) is the source of
