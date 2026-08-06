@@ -298,7 +298,7 @@ spectra jvm --json
 spectra jvm 4012
 spectra jvm explain --samples 6 --interval 10s 4012
 spectra jvm thread-dump --summary 4012
-spectra jvm heap-histogram 4012
+spectra jvm heap-histogram --suspects 20 4012
 spectra jvm heap-dump --out /tmp/app.hprof 4012
 spectra jvm gc-stats --json 4012
 spectra jvm vm-memory --json 4012

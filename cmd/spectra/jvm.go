@@ -16,6 +16,7 @@ import (
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/diag"
+	"github.com/kaeawc/spectra/internal/heap"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -214,19 +215,47 @@ func printThreadSummary(w io.Writer, pid int, sum jvm.ThreadSummary, deadlocks [
 }
 
 func runJVMHeapHistogram(args []string) int {
+	if len(args) > 0 && args[0] == "compare" {
+		return runJVMHeapHistogramCompare(args[1:])
+	}
+
 	fs := flag.NewFlagSet("spectra jvm heap-histogram", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the parsed histogram and ranked suspects as JSON")
+	suspects := fs.Int("suspects", 0, "Print the top-N largest classes (leak suspects); 0 disables")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-histogram <pid>")
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-histogram [--json] [--suspects N] <pid>")
+		fmt.Fprintln(os.Stderr, "       spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
+	}
+
+	if *asJSON || *suspects > 0 {
+		hist, err := jvm.HeapHistogramSnapshot(pid, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "heap-histogram failed for PID %d: %v\n", pid, err)
+			return 1
+		}
+		limit := *suspects
+		if limit <= 0 {
+			limit = 20
+		}
+		ranked := heap.RankHistogramSuspects(hist, limit)
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(heapHistogramReport{Histogram: hist, Suspects: ranked})
+			return 0
+		}
+		printHeapSuspects(os.Stdout, pid, ranked, hist.Total)
+		return 0
 	}
 
 	data, err := jvm.HeapHistogram(pid, nil)
@@ -237,6 +266,81 @@ func runJVMHeapHistogram(args []string) int {
 
 	os.Stdout.Write(data)
 	return 0
+}
+
+// runJVMHeapHistogramCompare diffs two saved `jcmd GC.class_histogram` captures
+// and ranks the classes that grew the most between them.
+func runJVMHeapHistogramCompare(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm heap-histogram compare", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit deltas and growth suspects as JSON")
+	limit := fs.Int("suspects", 20, "Number of growth suspects to rank")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>")
+		return 2
+	}
+	before, err := readHistogramFile(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading %q: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	after, err := readHistogramFile(fs.Arg(1))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading %q: %v\n", fs.Arg(1), err)
+		return 1
+	}
+
+	growth := heap.RankGrowthSuspects(before, after, *limit)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(heapCompareReport{Deltas: heap.CompareHistograms(before, after), Growth: growth})
+		return 0
+	}
+	printGrowthSuspects(os.Stdout, growth)
+	return 0
+}
+
+func readHistogramFile(path string) (heap.Histogram, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return heap.Histogram{}, err
+	}
+	return heap.ParseHistogram(string(data))
+}
+
+// heapHistogramReport is the JSON shape emitted by `heap-histogram --json`.
+type heapHistogramReport struct {
+	Histogram heap.Histogram `json:"histogram"`
+	Suspects  []heap.Suspect `json:"suspects,omitempty"`
+}
+
+// heapCompareReport is the JSON shape emitted by `heap-histogram compare --json`.
+type heapCompareReport struct {
+	Deltas []heap.HistogramDelta `json:"deltas"`
+	Growth []heap.Suspect        `json:"growth_suspects"`
+}
+
+func printHeapSuspects(w io.Writer, pid int, suspects []heap.Suspect, total heap.ClassEntry) {
+	fmt.Fprintf(w, "Heap histogram for PID %d — %d classes, %d bytes total live\n", pid, total.Instances, total.Bytes)
+	fmt.Fprintf(w, "Top %d largest classes:\n", len(suspects))
+	for i, s := range suspects {
+		fmt.Fprintf(w, "  %2d. %-50s %12d bytes  %10d instances\n", i+1, s.ClassName, s.Bytes, s.Instances)
+	}
+}
+
+func printGrowthSuspects(w io.Writer, suspects []heap.Suspect) {
+	if len(suspects) == 0 {
+		fmt.Fprintln(w, "No positive class growth between the two histograms.")
+		return
+	}
+	fmt.Fprintf(w, "Top %d growth suspects (before -> after):\n", len(suspects))
+	for i, s := range suspects {
+		fmt.Fprintf(w, "  %2d. %-50s +%d bytes  (+%d instances)\n", i+1, s.ClassName, s.DeltaBytes, s.DeltaCount)
+	}
 }
 
 func runJVMHeapDump(args []string) int {
