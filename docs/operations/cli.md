@@ -334,6 +334,21 @@ spectra fan --hosts work-mac,alice-laptop power
 
 See [../inspection/power-thermal.md](../inspection/power-thermal.md).
 
+### `spectra power log`
+
+Where `spectra power` shows the instantaneous state, `spectra power log`
+shows power *history*: recent sleep / wake / dark-wake events (with the
+wake reason) from `pmset -g log`, and which process is currently holding a
+sleep-preventing assertion (`pmset -g assertions`) — the answer to "what
+kept my Mac awake / drained it overnight?". Both reads are unprivileged.
+`-n` caps the number of events shown; `--json` emits the structured report.
+
+```bash
+spectra power log
+spectra power log -n 40
+spectra power log --json
+```
+
 ## `spectra network`
 
 Shows unprivileged network state by default, including current routes,
