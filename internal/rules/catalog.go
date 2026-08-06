@@ -40,6 +40,7 @@ func V1Catalog() []Rule {
 		rulePermissionMismatch(),
 		ruleSparseFileInflation(),
 		ruleGatekeeperRejected(),
+		ruleFDPressure(),
 	}
 }
 
