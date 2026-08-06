@@ -259,7 +259,11 @@ var (
 // limit/observed/window numbers out of the human strings best-effort, so it is
 // robust to per-flavor schema drift across macOS releases.
 func decodeResource(exc ipsException, term ipsTerm) *ResourceKill {
-	flavor := resourceFlavor(exc.Subtype)
+	flavorSrc := exc.Subtype
+	if strings.TrimSpace(flavorSrc) == "" {
+		flavorSrc = term.Indicator
+	}
+	flavor := resourceFlavor(flavorSrc)
 	detail := strings.TrimSpace(exc.Subtype)
 	if detail == "" {
 		detail = strings.TrimSpace(term.Indicator)
