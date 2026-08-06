@@ -31,8 +31,8 @@ func TestProcessMemoryHogFiresAboveThreshold(t *testing.T) {
 func TestProcessMemoryHogRespectsFloorAndShare(t *testing.T) {
 	const ram = 64 * 1024 * 1024 * 1024 // 64 GiB
 	s := memSnap(ram,
-		process.Info{PID: 1, Command: "small", RSSKiB: 500 * 1024},           // below 2 GiB floor
-		process.Info{PID: 2, Command: "modest", RSSKiB: 3 * 1024 * 1024},     // above floor but ~4.7% of RAM
+		process.Info{PID: 1, Command: "small", RSSKiB: 500 * 1024},       // below 2 GiB floor
+		process.Info{PID: 2, Command: "modest", RSSKiB: 3 * 1024 * 1024}, // above floor but ~4.7% of RAM
 	)
 	if f := matchProcessMemoryHog(s); len(f) != 0 {
 		t.Fatalf("expected no findings, got %+v", f)
