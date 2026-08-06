@@ -301,6 +301,20 @@ sysctls {
 A small allowlist. Adding to this is a deliberate decision; we don't
 dump the entire `sysctl -a` because it's massive and noisy.
 
+## fd_limit
+
+The per-process file-descriptor limit processes actually launch under,
+read from `launchctl limit maxfiles`. Complements the system-wide
+`kern.maxfiles` sysctl and per-process `open_fds` counts.
+
+```
+fd_limit {
+  soft            # current per-process limit
+  hard            # ceiling (0 when unlimited)
+  hard_unlimited  # true when the hard limit is "unlimited"
+}
+```
+
 ## Diff semantics
 
 `spectra diff <a> <b>` computes a structural diff. Per category, the
