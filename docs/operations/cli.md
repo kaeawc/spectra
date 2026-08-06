@@ -36,6 +36,7 @@ run in-process on the local machine.
 | `storage` | Show disk volumes and `~/Library` footprint |
 | `process` | List running processes sorted by memory |
 | `crash` | Audit post-mortem readiness before a crash happens |
+| `web` | Diff an Electron app's `app.asar` payload between versions |
 | `playbook` | Show diagnostic playbooks and command plans |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
@@ -418,6 +419,23 @@ structured report.
 ```bash
 spectra crash resource ~/Library/Logs/DiagnosticReports/Helper-2026-08-05.cpu_resource.ips
 spectra crash resource --json report.ips
+```
+
+## `spectra web asar-diff`
+
+Diffs two Electron apps' `app.asar` payloads to answer "what changed in
+this app's JavaScript when it auto-updated?" — a question Activity Monitor
+and the extract-only `asar` CLI cannot. It parses each archive's header
+(read-only; no extraction) into a file inventory with per-file SHA256, then
+reports added/removed/changed files plus the capability drift that matters:
+new npm packages, new native `.node` add-ons, and new embedded endpoint
+hosts introduced by the update. `--json` emits the structured diff.
+
+### Examples
+
+```bash
+spectra web asar-diff /Volumes/backup/Slack.app /Applications/Slack.app
+spectra web asar-diff --json ./old/App.app ./new/App.app
 ```
 
 ## `spectra playbook`
