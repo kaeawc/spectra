@@ -507,6 +507,7 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 			_ = db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap))
 			_, _ = db.PruneAutoSnapshots(ctx, cfg.Retain)
 			_, _ = db.PruneJVMSamples(ctx, 7)
+			_, _ = db.PruneFDSamples(ctx, 7)
 		}
 	}
 }

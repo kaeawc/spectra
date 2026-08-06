@@ -77,3 +77,72 @@ func TestHasTrendFor(t *testing.T) {
 		t.Error("3 samples → enough")
 	}
 }
+
+// helper: build fd samples for one PID from an explicit sequence of counts.
+func fdSamples(pid int, counts ...int) snapshot.FDHistory {
+	out := make(snapshot.FDHistory, len(counts))
+	now := time.Now()
+	for i, c := range counts {
+		out[i] = snapshot.FDSample{
+			PID:     pid,
+			At:      now.Add(time.Duration(i-len(counts)) * time.Minute),
+			OpenFDs: c,
+		}
+	}
+	return out
+}
+
+func TestRisingFDsFor_NoHistory(t *testing.T) {
+	if RisingFDsFor(nil, 10) {
+		t.Error("nil history should not report rising")
+	}
+}
+
+func TestRisingFDsFor_TooFewSamples(t *testing.T) {
+	if RisingFDsFor(fdSamples(10, 100, 500), 10) { // big jump but only 2 samples
+		t.Error("only 2 samples should not be enough for trend")
+	}
+}
+
+func TestRisingFDsFor_RisingTrend(t *testing.T) {
+	if !RisingFDsFor(fdSamples(10, 100, 150, 220), 10) {
+		t.Error("100 -> 150 -> 220 should be rising")
+	}
+}
+
+func TestRisingFDsFor_FlatTrend(t *testing.T) {
+	if RisingFDsFor(fdSamples(10, 200, 200, 200), 10) {
+		t.Error("flat window should not be rising (no net climb)")
+	}
+}
+
+func TestRisingFDsFor_NonMonotonicNotRising(t *testing.T) {
+	// Net climb from first to last, but a mid-window dip disqualifies it.
+	if RisingFDsFor(fdSamples(10, 100, 90, 130), 10) {
+		t.Error("a mid-window dip should disqualify the rising trend")
+	}
+}
+
+func TestRisingFDsFor_FallingTrend(t *testing.T) {
+	if RisingFDsFor(fdSamples(10, 300, 200, 100), 10) {
+		t.Error("300 -> 100 should not be rising")
+	}
+}
+
+func TestRisingFDsFor_OtherPID(t *testing.T) {
+	if RisingFDsFor(fdSamples(10, 100, 150, 220), 99) {
+		t.Error("trend for another PID should not match")
+	}
+}
+
+func TestHasFDTrendFor(t *testing.T) {
+	if HasFDTrendFor(nil, 10) {
+		t.Error("nil history → no trend")
+	}
+	if HasFDTrendFor(fdSamples(10, 100, 200), 10) {
+		t.Error("2 samples → not enough")
+	}
+	if !HasFDTrendFor(fdSamples(10, 100, 150, 200), 10) {
+		t.Error("3 samples → enough")
+	}
+}

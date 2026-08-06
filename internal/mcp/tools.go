@@ -1575,11 +1575,11 @@ func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []
 	return snap, rules.Evaluate(snap, catalog), nil
 }
 
-// attachJVMHistory opens the local samples store, calls AttachJVMHistory,
-// and closes the connection. Failure is silent — history is an enhancement,
-// not a contract.
+// attachJVMHistory opens the local samples store, calls AttachJVMHistory and
+// AttachFDHistory, and closes the connection. Failure is silent — history is
+// an enhancement, not a contract.
 func attachJVMHistory(snap *snapshot.Snapshot) {
-	if len(snap.JVMs) == 0 {
+	if len(snap.JVMs) == 0 && !snapHasOpenFDs(snap) {
 		return
 	}
 	db, err := openStore()
@@ -1588,6 +1588,18 @@ func attachJVMHistory(snap *snapshot.Snapshot) {
 	}
 	defer db.Close()
 	db.AttachJVMHistory(context.Background(), snap)
+	db.AttachFDHistory(context.Background(), snap)
+}
+
+// snapHasOpenFDs reports whether any process in the snapshot has a positive
+// open-fd count, i.e. deep-mode data that fd trend history can use.
+func snapHasOpenFDs(snap *snapshot.Snapshot) bool {
+	for _, p := range snap.Processes {
+		if p.OpenFDs > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func persistFindings(snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {

@@ -60,6 +60,11 @@ type Snapshot struct {
 	// callers that have access to a snapshot store. Optional: rules that
 	// don't see history fall back to point-in-time checks.
 	JVMHistory JVMHistory `json:"jvm_history,omitempty"`
+
+	// FDHistory is recent per-PID file-descriptor samples (oldest first)
+	// populated by callers that have access to a snapshot store. Optional:
+	// rules that don't see history fall back to point-in-time checks.
+	FDHistory FDHistory `json:"fd_history,omitempty"`
 }
 
 // Options configure a snapshot Build.
