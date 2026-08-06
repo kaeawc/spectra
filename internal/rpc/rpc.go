@@ -47,6 +47,25 @@ const (
 	CodeInternalError  = -32603
 )
 
+// invalidParamsError marks a handler error as a client-side request-shape
+// violation. The dispatcher reports it as CodeInvalidParams rather than
+// CodeInternalError, while preserving the handler's original message.
+type invalidParamsError struct{ msg string }
+
+func (e *invalidParamsError) Error() string { return e.msg }
+
+// InvalidParams builds a handler error reported to the client as
+// CodeInvalidParams (-32602). Use it for invalid or missing request params
+// rather than fmt.Errorf, which is reported as an internal error.
+func InvalidParams(format string, args ...any) error {
+	return &invalidParamsError{msg: fmt.Sprintf(format, args...)}
+}
+
+func isInvalidParams(err error) bool {
+	var ip *invalidParamsError
+	return errors.As(err, &ip)
+}
+
 // HandlerFunc is the type of a registered method handler.
 // params is the raw JSON params value (may be nil). The handler returns
 // any JSON-serializable result or an error.
@@ -122,10 +141,14 @@ func (d *Dispatcher) handle(raw []byte) Response {
 
 	result, err := fn(req.Params)
 	if err != nil {
+		code := CodeInternalError
+		if isInvalidParams(err) {
+			code = CodeInvalidParams
+		}
 		return Response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Error:   &RPCError{Code: CodeInternalError, Message: err.Error()},
+			Error:   &RPCError{Code: code, Message: err.Error()},
 		}
 	}
 	return Response{JSONRPC: "2.0", ID: req.ID, Result: result}
