@@ -186,6 +186,18 @@ func TestFDPressureBelowThresholdSteadyNoFinding(t *testing.T) {
 	}
 }
 
+// TestFDPressureRisingUnknownLimitNoFinding: a rising fd trend must NOT emit an
+// early-leak finding when the soft limit is unknown (soft <= 0). "Below the
+// limit" is meaningless without a limit, and the rule reports nothing when the
+// fd limit could not be collected.
+func TestFDPressureRisingUnknownLimitNoFinding(t *testing.T) {
+	s := fdSnap(0, "", fdProc(42, "leaky", 400)) // soft limit unknown
+	s.FDHistory = fdHist(42, 100, 250, 400)      // rising
+	if findings := findingsFor(s); len(findings) != 0 {
+		t.Fatalf("expected no findings when soft limit is unknown, got %+v", findings)
+	}
+}
+
 // TestFDPressureNoHistoryUnchanged: with empty history, an at-threshold process
 // produces exactly the point-in-time finding (byte-for-byte behavior).
 func TestFDPressureNoHistoryUnchanged(t *testing.T) {

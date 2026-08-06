@@ -94,20 +94,20 @@ func escalateFDLeak(base Finding, proc process.Info, soft int) Finding {
 // is climbing across the sample window but has not yet reached fdWarnPct. It
 // catches a leak early — before descriptor exhaustion — and is only ever
 // reached behind HasFDTrendFor, so no-history snapshots never see it.
+//
+// Like fdProcessFinding, it stays silent when the soft limit is unknown
+// (soft <= 0): "below the limit" is meaningless without a limit, and the rule
+// as a whole reports nothing when the fd limit could not be collected.
 func fdEarlyLeakFinding(proc process.Info, soft int) (Finding, bool) {
-	if proc.OpenFDs <= 0 {
+	if proc.OpenFDs <= 0 || soft <= 0 {
 		return Finding{}, false
-	}
-	limitClause := "the fd soft limit"
-	if soft > 0 {
-		limitClause = fmt.Sprintf("the fd soft limit (%d)", soft)
 	}
 	return Finding{
 		RuleID:   "fd-pressure",
 		Severity: SeverityMedium,
 		Subject:  fmt.Sprintf("PID %d (%s)", proc.PID, fdProcessName(proc)),
-		Message: fmt.Sprintf("open_fds=%d is rising across recent samples while still below %s; this looks like an early file-descriptor leak.",
-			proc.OpenFDs, limitClause),
+		Message: fmt.Sprintf("open_fds=%d is rising across recent samples while still below the fd soft limit (%d); this looks like an early file-descriptor leak.",
+			proc.OpenFDs, soft),
 		Fix: "Investigate a possible file-descriptor leak before the process approaches its limit (`lsof -p <pid>` to see what is accumulating).",
 	}, true
 }
