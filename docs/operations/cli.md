@@ -514,6 +514,26 @@ spectra web symbolicate app.js.map 1:284620
 spectra web symbolicate --json app.js.map 1:284620 1:9931
 ```
 
+## `spectra anomalies`
+
+Flags processes whose latest RSS deviates from their own rolling baseline,
+using an EWMA mean+variance / z-score detector over the metrics the daemon
+samples. It catches a slow leak days before a static ceiling would — "pid
+8123 (com.corp.helper) RSS 2.1 GB is +4.3σ vs baseline (~600 MB)".
+
+Series are keyed on **PID** (the metrics ring is PID-keyed); the current
+process name is attached best-effort and exited PIDs are labeled as such.
+A series needs a few baseline points before it can flag (no cold-start
+false positives). `-z` and `--min-samples` tune sensitivity; `--json`
+emits the structured findings.
+
+### Examples
+
+```bash
+spectra anomalies
+spectra anomalies -z 4 --min-samples 10 --json
+```
+
 ## `spectra whatswrong`
 
 A single whole-system triage: samples memory pressure and swap
