@@ -30,10 +30,96 @@ func runCrashWithIO(args []string, stdout, stderr io.Writer, inspect func(string
 		return runCrashReadiness(rest, stdout, stderr, inspect)
 	case "inspect":
 		return runCrashInspect(rest, stdout, stderr)
+	case "resource":
+		return runCrashResource(rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "unknown crash subcommand %q (want: readiness, inspect)\n", sub)
+		fmt.Fprintf(stderr, "unknown crash subcommand %q (want: readiness, inspect, resource)\n", sub)
 		return 2
 	}
+}
+
+func runCrashResource(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("crash resource", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "output JSON")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: spectra crash resource [--json] <report.ips>")
+		fmt.Fprintln(stderr, "Decode an EXC_RESOURCE / watchdog resource-limit kill (CPU, wakeups, I/O, memory).")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path := fs.Arg(0)
+	if path == "" {
+		fs.Usage()
+		return 2
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
+		return 1
+	}
+	report, err := crashreport.Parse(data)
+	if err != nil {
+		if errors.Is(err, crashreport.ErrLegacyFormat) {
+			fmt.Fprintf(stderr, "%s is a legacy plain-text report; spectra decodes modern .ips reports.\n", path)
+			return 1
+		}
+		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
+	renderCrashResource(stdout, report)
+	return 0
+}
+
+func renderCrashResource(w io.Writer, r *crashreport.Report) {
+	if r.Resource == nil {
+		fmt.Fprintf(w, "%s is not a resource-limit kill", r.Process)
+		if r.Exception != "" {
+			fmt.Fprintf(w, " (exception %s)", r.Exception)
+		}
+		fmt.Fprintln(w, ".")
+		fmt.Fprintln(w, "Use `spectra crash inspect` for a full decode.")
+		return
+	}
+	res := r.Resource
+	fmt.Fprintf(w, "%s — resource-limit kill: %s\n", r.Process, res.Flavor)
+	fmt.Fprintf(w, "  %s\n", res.Explanation)
+	if res.Limit != "" || res.Observed != "" || res.Window != "" {
+		fmt.Fprintf(w, "  limit=%s  observed=%s  window=%s\n", orDash(res.Limit), orDash(res.Observed), orDash(res.Window))
+	}
+	if res.Detail != "" {
+		fmt.Fprintf(w, "  detail: %s\n", res.Detail)
+	}
+	for _, t := range r.Threads {
+		if !t.Triggered {
+			continue
+		}
+		fmt.Fprintf(w, "\noffending thread %d", t.Index)
+		if t.Queue != "" {
+			fmt.Fprintf(w, " (%s)", t.Queue)
+		}
+		fmt.Fprintln(w)
+		for i, f := range t.Frames {
+			fmt.Fprintf(w, "  %2d  %s\n", i, f)
+		}
+	}
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func runCrashInspect(args []string, stdout, stderr io.Writer) int {
