@@ -402,6 +402,24 @@ spectra crash inspect --all report.ips
 spectra crash inspect --json report.ips
 ```
 
+## `spectra crash resource`
+
+Decodes an `EXC_RESOURCE` / watchdog-class kill — a `.cpu_resource` /
+`.wakeups_resource` report, or an `EXC_RESOURCE` termination inside an
+ordinary crash report. These read like mystery crashes but are the OS
+killing the process for exceeding a CPU-time, wakeups, I/O, or memory
+ledger limit. The command names the resource flavor, explains the cause in
+plain language, surfaces the limit/observed/window when the report carries
+them, and prints the offending thread's stack. `--json` emits the
+structured report.
+
+### Examples
+
+```bash
+spectra crash resource ~/Library/Logs/DiagnosticReports/Helper-2026-08-05.cpu_resource.ips
+spectra crash resource --json report.ips
+```
+
 ## `spectra playbook`
 
 Shows problem-first diagnostic workflows over existing collectors. Use it

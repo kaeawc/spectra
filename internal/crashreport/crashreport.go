@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/kaeawc/spectra/internal/threadinspect"
 )
@@ -21,23 +23,36 @@ var ErrLegacyFormat = errors.New("legacy plain-text crash report (not .ips JSON)
 
 // Report is a decoded crash report.
 type Report struct {
-	Process         string   `json:"process"`
-	Version         string   `json:"version,omitempty"`
-	BundleID        string   `json:"bundle_id,omitempty"`
-	Path            string   `json:"path,omitempty"`
-	OSVersion       string   `json:"os_version,omitempty"`
-	Time            string   `json:"time,omitempty"`
-	IncidentID      string   `json:"incident_id,omitempty"`
-	PID             int      `json:"pid,omitempty"`
-	Kind            string   `json:"kind"`
-	BugType         string   `json:"bug_type,omitempty"`
-	Exception       string   `json:"exception,omitempty"`
-	ExceptionDetail string   `json:"exception_detail,omitempty"`
-	Signal          string   `json:"signal,omitempty"`
-	Codes           string   `json:"codes,omitempty"`
-	Termination     string   `json:"termination,omitempty"`
-	FaultingThread  int      `json:"faulting_thread"`
-	Threads         []Thread `json:"threads"`
+	Process         string        `json:"process"`
+	Version         string        `json:"version,omitempty"`
+	BundleID        string        `json:"bundle_id,omitempty"`
+	Path            string        `json:"path,omitempty"`
+	OSVersion       string        `json:"os_version,omitempty"`
+	Time            string        `json:"time,omitempty"`
+	IncidentID      string        `json:"incident_id,omitempty"`
+	PID             int           `json:"pid,omitempty"`
+	Kind            string        `json:"kind"`
+	BugType         string        `json:"bug_type,omitempty"`
+	Exception       string        `json:"exception,omitempty"`
+	ExceptionDetail string        `json:"exception_detail,omitempty"`
+	Signal          string        `json:"signal,omitempty"`
+	Codes           string        `json:"codes,omitempty"`
+	Termination     string        `json:"termination,omitempty"`
+	Resource        *ResourceKill `json:"resource,omitempty"`
+	FaultingThread  int           `json:"faulting_thread"`
+	Threads         []Thread      `json:"threads"`
+}
+
+// ResourceKill describes an EXC_RESOURCE / watchdog-class termination: the OS
+// killed the process for exceeding a CPU-time, wakeups, memory, or I/O ledger
+// limit rather than for a fault. These read like mystery crashes but aren't.
+type ResourceKill struct {
+	Flavor      string `json:"flavor"`      // CPU, CPU_FATAL, WAKEUPS, IO, MEMORY, PORTS, THREADS, ...
+	Explanation string `json:"explanation"` // plain-language cause
+	Limit       string `json:"limit,omitempty"`
+	Observed    string `json:"observed,omitempty"`
+	Window      string `json:"window,omitempty"`
+	Detail      string `json:"detail,omitempty"` // raw subtype/indicator text
 }
 
 // Thread is one thread's decoded frames.
@@ -161,6 +176,9 @@ func build(h ipsHeader, b ipsBody) *Report {
 		}
 		r.ExceptionDetail = explainException(b.Exception.Type)
 	}
+	if b.Exception.Type == "EXC_RESOURCE" {
+		r.Resource = decodeResource(b.Exception, b.Termination)
+	}
 	for i, t := range b.Threads {
 		th := Thread{
 			Index:     i,
@@ -227,6 +245,72 @@ func crashKind(bugType string) string {
 		return "crash report"
 	default:
 		return "crash report (bug_type " + bugType + ")"
+	}
+}
+
+var (
+	reResourceWindow   = regexp.MustCompile(`(\d+)\s*s\b`)
+	reResourceLimit    = regexp.MustCompile(`(?i)limit[:\s]*([0-9]+%?)`)
+	reResourceObserved = regexp.MustCompile(`(?i)(?:was|observed|used)[:\s]*([0-9]+%?)`)
+)
+
+// decodeResource turns an EXC_RESOURCE exception into a plain-language kill
+// description. It reads the flavor from the exception subtype and pulls any
+// limit/observed/window numbers out of the human strings best-effort, so it is
+// robust to per-flavor schema drift across macOS releases.
+func decodeResource(exc ipsException, term ipsTerm) *ResourceKill {
+	flavor := resourceFlavor(exc.Subtype)
+	detail := strings.TrimSpace(exc.Subtype)
+	if detail == "" {
+		detail = strings.TrimSpace(term.Indicator)
+	}
+	rk := &ResourceKill{
+		Flavor:      flavor,
+		Explanation: explainResource(flavor),
+		Detail:      detail,
+	}
+	blob := exc.Subtype + " " + term.Indicator + " " + exc.Codes
+	if m := reResourceWindow.FindStringSubmatch(blob); m != nil {
+		rk.Window = m[1] + "s"
+	}
+	if m := reResourceLimit.FindStringSubmatch(blob); m != nil {
+		rk.Limit = m[1]
+	}
+	if m := reResourceObserved.FindStringSubmatch(blob); m != nil {
+		rk.Observed = m[1]
+	}
+	return rk
+}
+
+// resourceFlavor extracts the leading resource-type word from an EXC_RESOURCE
+// subtype (e.g. "WAKEUPS (Value=...)" -> "WAKEUPS").
+func resourceFlavor(subtype string) string {
+	f := strings.ToUpper(strings.TrimSpace(subtype))
+	if f == "" {
+		return "UNKNOWN"
+	}
+	if i := strings.IndexAny(f, " ("); i > 0 {
+		f = f[:i]
+	}
+	return f
+}
+
+func explainResource(flavor string) string {
+	switch flavor {
+	case "CPU", "CPU_FATAL":
+		return "sustained CPU use tripped the OS CPU-time watchdog over a rolling window (a busy loop or runaway thread), not a fault"
+	case "WAKEUPS":
+		return "excessive timer/interrupt wakeups tripped the power watchdog (typically a tight polling loop)"
+	case "IO":
+		return "sustained disk I/O exceeded the process I/O ledger limit"
+	case "MEMORY":
+		return "resident memory crossed a high-watermark limit"
+	case "PORTS":
+		return "the process exhausted its Mach port allocation"
+	case "THREADS":
+		return "the process exceeded its thread-count limit"
+	default:
+		return "a resource ledger limit was exceeded"
 	}
 }
 
