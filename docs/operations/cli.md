@@ -50,6 +50,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
 | `fan` | Run one daemon RPC call against multiple explicit targets |
 | `hosts` | List hosts known from stored snapshots |
+| `fleet` | Cross-host symptom rollups and version-drift matrices |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -757,6 +758,28 @@ spectra hosts --probe --json
 spectra hosts --discover
 spectra hosts --discover-daemons
 ``` 
+
+## `spectra fleet`
+
+Aggregates the snapshots already in the local store (keyed by machine UUID,
+so it can hold multiple hosts from `snapshot` + fan-out) into cross-host
+answers — the grouped result fan-out set up but never closed.
+
+- `spectra fleet symptom <rule-id>` groups hosts by whether that rule fires
+  against their latest snapshot ("which Macs trip `app-no-hardened-runtime`?").
+- `spectra fleet drift --jdk` / `--app <bundleID>` prints a per-host version
+  matrix ("why does it repro on CI only?" — `laptop=21.0.6, ci-mac=17.0.10`).
+
+A host with no usable snapshot shows as `unknown` for a dimension rather
+than a false "missing". `--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra fleet symptom app-no-hardened-runtime
+spectra fleet drift --jdk
+spectra fleet drift --app com.tinyapp.jvm --json
+```
 
 ## `spectra fan`
 
