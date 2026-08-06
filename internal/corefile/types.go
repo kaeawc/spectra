@@ -12,9 +12,12 @@ import "context"
 type Artifact struct {
 	Path           string `json:"path"`
 	ExecutablePath string `json:"executable_path,omitempty"`
-	Format         string `json:"format,omitempty"`
-	Architecture   string `json:"architecture,omitempty"`
-	SizeBytes      int64  `json:"size_bytes,omitempty"`
+	// ExecutableResolved is true when ExecutablePath was auto-resolved from the
+	// core image rather than supplied by the caller (via --exe).
+	ExecutableResolved bool   `json:"executable_resolved,omitempty"`
+	Format             string `json:"format,omitempty"`
+	Architecture       string `json:"architecture,omitempty"`
+	SizeBytes          int64  `json:"size_bytes,omitempty"`
 }
 
 // Command is a suggested offline inspection command for an artifact.

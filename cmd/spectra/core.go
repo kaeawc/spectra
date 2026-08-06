@@ -54,7 +54,11 @@ func runCoreInspect(args []string) int {
 func printCoreReport(report corefile.Report) {
 	fmt.Printf("core:          %s\n", report.Artifact.Path)
 	if report.Artifact.ExecutablePath != "" {
-		fmt.Printf("executable:    %s\n", report.Artifact.ExecutablePath)
+		suffix := ""
+		if report.Artifact.ExecutableResolved {
+			suffix = " (auto-resolved from core image; override with --exe)"
+		}
+		fmt.Printf("executable:    %s%s\n", report.Artifact.ExecutablePath, suffix)
 	}
 	fmt.Printf("format:        %s\n", valueOrUnknown(report.Artifact.Format))
 	if report.Artifact.Architecture != "" {
