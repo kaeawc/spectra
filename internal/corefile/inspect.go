@@ -68,7 +68,74 @@ func (i Inspector) describe(path, executablePath string) (Artifact, []byte, erro
 	if artifact.Format == "" {
 		artifact.Format = identifyProbe(probe)
 	}
+	if artifact.ExecutablePath == "" {
+		if resolved := resolveExecutableFromProbe(probe, statExecutable); resolved != "" {
+			artifact.ExecutablePath = resolved
+			artifact.ExecutableResolved = true
+		}
+	}
 	return artifact, probe, nil
+}
+
+// statExecutable reports whether path is a regular file with an executable bit.
+// It is the default on-disk check used to validate an auto-resolved executable.
+func statExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
+// resolveExecutableFromProbe scans a core's readable prefix for an absolute
+// executable path embedded in the image (typically argv[0] or a dyld image
+// path) and returns the first candidate that exists on disk as an executable.
+//
+// This is best-effort: a core does not guarantee the main executable's path is
+// present in the probed prefix, and shared libraries are deliberately excluded
+// so the result is biased toward the crashed program rather than a loaded dylib.
+// Callers must treat the result as a suggestion the user can override with --exe.
+func resolveExecutableFromProbe(probe []byte, exists func(string) bool) string {
+	for _, cand := range absolutePathTokens(probe) {
+		if isSharedLibraryPath(cand) {
+			continue
+		}
+		if exists(cand) {
+			return cand
+		}
+	}
+	return ""
+}
+
+// absolutePathTokens extracts NUL/whitespace-delimited absolute paths ("/...")
+// made of printable, non-space bytes from a byte buffer.
+func absolutePathTokens(buf []byte) []string {
+	var tokens []string
+	start := -1
+	flush := func(end int) {
+		if start >= 0 && buf[start] == '/' && end-start > 1 && end-start < 4096 {
+			tokens = append(tokens, string(buf[start:end]))
+		}
+		start = -1
+	}
+	for i, b := range buf {
+		if b > 0x20 && b < 0x7f {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		flush(i)
+	}
+	flush(len(buf))
+	return tokens
+}
+
+func isSharedLibraryPath(path string) bool {
+	if strings.HasSuffix(path, ".dylib") || strings.HasSuffix(path, ".so") {
+		return true
+	}
+	return strings.HasPrefix(path, "/usr/lib/") || strings.HasPrefix(path, "/System/")
 }
 
 func readPrefix(path string, limit int64) ([]byte, error) {
