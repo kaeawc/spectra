@@ -205,6 +205,7 @@ Implemented rules:
 - `permission-mismatch`
 - `sparse-file-inflation`
 - `app-gatekeeper-rejected`
+- `fd-pressure`
 
 ## Out of scope for v1
 
