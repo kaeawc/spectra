@@ -61,6 +61,7 @@ func subcommandList() []subcommand {
 		{"hosts", "List hosts known from stored snapshots", runHosts},
 		{"fleet", "Cross-host rollups: which hosts trip a rule, and version-drift matrices", runFleet},
 		{"bisect", "Find the snapshot where a rule started firing, and what changed alongside it", runBisect},
+		{"reconcile", "Print an advisory plan to make one host's toolchain match another's", runReconcile},
 		{"status", "Check whether the local daemon is running", runStatus},
 		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},
 		{"anomalies", "Flag processes deviating from their rolling RSS baseline", runAnomalies},
