@@ -27,6 +27,11 @@ func SnapshotActivation(s snapshot.Snapshot) map[string]any {
 		"storage":    s.Storage,
 		"power":      s.Power,
 		"sysctls":    s.Sysctls,
+		"fd_limit": map[string]any{
+			"soft":           s.FDLimit.Soft,
+			"hard":           s.FDLimit.Hard,
+			"hard_unlimited": s.FDLimit.HardUnlimited,
+		},
 	}
 }
 

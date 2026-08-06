@@ -166,6 +166,7 @@ inspection. All preinstalled — no install-time dependencies.
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
 | `sysctl -n <key>` | single tunable | user | <10ms | `sysctls` map (allowlisted keys) |
+| `launchctl limit maxfiles` | per-process fd limit (soft/hard) | user | <10ms | `fd_limit` (soft, hard, hard_unlimited) |
 | `system_profiler SPHardwareDataType` | hardware specs | user | ~500ms | `HostInfo.cpu_brand`, `ram_bytes` |
 | `sw_vers` | macOS version + build | user | <10ms | `HostInfo.os_*` |
 

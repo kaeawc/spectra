@@ -47,6 +47,7 @@ type Snapshot struct {
 	Power        sysinfo.PowerState       `json:"power"`
 	SystemLimits syslimits.SystemLimits   `json:"system_limits"`
 	Sysctls      map[string]string        `json:"sysctls,omitempty"`
+	FDLimit      sysinfo.FDLimit          `json:"fd_limit,omitempty"`
 	Network      netstate.State           `json:"network"`
 	Storage      storagestate.State       `json:"storage"`
 	Services     services.LaunchInventory `json:"services,omitempty"`
@@ -231,6 +232,10 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}()
 	go func() {
 		defer wg.Done()
+		s.FDLimit = sysinfo.CollectFDLimit(siRun)
+	}()
+	go func() {
+		defer wg.Done()
 		s.Network = netstate.Collect(netRun)
 	}()
 	if !opts.SkipStorage {
@@ -287,7 +292,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 }
 
 func snapshotCollectorCount(opts Options) int {
-	collectors := 6 // host, toolchains, power, system limits, sysctls, network
+	collectors := 7 // host, toolchains, power, system limits, sysctls, fd limit, network
 	if !opts.SkipApps {
 		collectors++
 	}
