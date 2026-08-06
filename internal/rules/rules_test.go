@@ -1158,6 +1158,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"spotlight.large_resident_indexer",
 		"backup.destinationless_scheduler_leak",
 		"updates.stale_major_prepared",
+		"process-memory-hog",
 	} {
 		if !ruleIDs[want] {
 			t.Errorf("V1Catalog missing rule %q", want)
