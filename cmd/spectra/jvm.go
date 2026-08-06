@@ -808,14 +808,123 @@ func runJVMExplain(args []string) int {
 }
 
 func runJVMJFR(args []string) int {
-	if len(args) > 0 && args[0] == "summary" {
-		return runJFRSummary(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "summary":
+			return runJFRSummary(args[1:])
+		case "analyze":
+			return runJFRAnalyze(args[1:])
+		case "view":
+			return runJFRView(args[1:])
+		}
 	}
 	sub, pid, name, outPath, code := parseJFRArgs(args)
 	if code != 0 {
 		return code
 	}
 	return executeJFR(sub, pid, name, outPath)
+}
+
+// runJFRAnalyze runs the full JFR incident analysis (summary + event views +
+// derived narrative findings) over a recording on disk.
+func runJFRAnalyze(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm jfr analyze", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the full analysis as JSON")
+	var views stringListFlag
+	fs.Var(&views, "view", "Restrict to a specific jfr view (repeatable); default is the standard incident set")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm jfr analyze [--json] [--view <name>]... <recording.jfr>")
+		return 2
+	}
+	analysis, err := jvm.AnalyzeJFR(fs.Arg(0), jvm.JFRAnalysisOptions{Views: views}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jfr analyze failed for %s: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(analysis)
+		return 0
+	}
+	printJFRAnalysis(os.Stdout, analysis)
+	return 0
+}
+
+// runJFRView runs one `jfr view <view> <recording>` and renders the parsed table.
+func runJFRView(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm jfr view", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the parsed view as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm jfr view [--json] <view> <recording.jfr>")
+		return 2
+	}
+	result, err := jvm.ViewJFR(fs.Arg(1), fs.Arg(0), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jfr view %s failed for %s: %v\n", fs.Arg(0), fs.Arg(1), err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		return 0
+	}
+	printJFRView(os.Stdout, result)
+	return 0
+}
+
+func printJFRAnalysis(w io.Writer, a jvm.JFRAnalysis) {
+	fmt.Fprintf(w, "JFR analysis: %s\n", a.Artifact.Path)
+	if len(a.Narrative) == 0 {
+		fmt.Fprintln(w, "  No incident findings.")
+	} else {
+		fmt.Fprintf(w, "  Findings (%d):\n", len(a.Narrative))
+		for _, f := range a.Narrative {
+			fmt.Fprintf(w, "    [%s] %s: %s\n", f.Severity, f.Area, f.Summary)
+			if f.Detail != "" {
+				fmt.Fprintf(w, "      %s\n", f.Detail)
+			}
+		}
+	}
+	if len(a.Views) > 0 {
+		names := make([]string, 0, len(a.Views))
+		for _, v := range a.Views {
+			names = append(names, v.View)
+		}
+		fmt.Fprintf(w, "  Views: %s\n", strings.Join(names, ", "))
+	}
+}
+
+func printJFRView(w io.Writer, v jvm.JFRViewResult) {
+	fmt.Fprintf(w, "JFR view %q (%s)\n", v.View, v.Path)
+	if len(v.Tables) == 0 {
+		fmt.Fprintln(w, "  (no tables parsed)")
+		return
+	}
+	for _, tbl := range v.Tables {
+		if tbl.Title != "" {
+			fmt.Fprintf(w, "  %s\n", tbl.Title)
+		}
+		if len(tbl.Columns) > 0 {
+			fmt.Fprintf(w, "    %s\n", strings.Join(tbl.Columns, " | "))
+		}
+		for _, row := range tbl.Rows {
+			vals := make([]string, 0, len(tbl.Columns))
+			for _, c := range tbl.Columns {
+				vals = append(vals, row[c])
+			}
+			fmt.Fprintf(w, "    %s\n", strings.Join(vals, " | "))
+		}
+	}
 }
 
 func runJFRSummary(args []string) int {

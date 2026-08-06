@@ -50,6 +50,8 @@ spectra jvm jfr start <pid> [--name spectra]
 spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
 spectra jvm jfr stop <pid> [--name spectra] [--out <path>]
 spectra jvm jfr summary [--json] <recording.jfr>
+spectra jvm jfr view [--json] <view> <recording.jfr>
+spectra jvm jfr analyze [--json] [--view <name>]... <recording.jfr>
 ```
 
 Daemon methods:
