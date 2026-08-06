@@ -12,6 +12,8 @@ import (
 	"io"
 	"net"
 	"sync"
+
+	"github.com/kaeawc/spectra/internal/jsonrpc"
 )
 
 // Request is a JSON-RPC 2.0 request object.
@@ -71,12 +73,20 @@ func (d *Dispatcher) Register(method string, fn HandlerFunc) {
 // Serve handles one connection. Each newline-delimited JSON request on
 // the connection produces a newline-delimited JSON response.
 // The function returns when the connection is closed.
+//
+// Requests are read with jsonrpc.ReadMessage, which grows its buffer to the
+// line length rather than capping it at bufio.Scanner's default 64 KiB. Large
+// debug requests (e.g. inspect.app.batch or jvm.mbean.invoke argument payloads)
+// would otherwise be silently dropped when the connection exceeded that limit.
 func (d *Dispatcher) Serve(conn net.Conn) {
 	defer conn.Close()
-	scanner := bufio.NewScanner(conn)
+	reader := bufio.NewReader(conn)
 	enc := json.NewEncoder(conn)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		line, err := jsonrpc.ReadMessage(reader)
+		if err != nil {
+			return
+		}
 		resp := d.handle(line)
 		_ = enc.Encode(resp)
 	}
