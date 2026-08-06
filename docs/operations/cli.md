@@ -308,6 +308,8 @@ spectra jvm flamegraph --event wall --duration 30 --out /tmp/app.html 4012
 spectra jvm jfr start 4012 --name spectra
 spectra jvm jfr dump 4012 --name spectra --out /tmp/app.jfr
 spectra jvm jfr summary --json /tmp/app.jfr
+spectra jvm jfr analyze /tmp/app.jfr
+spectra jvm jfr view gc-pauses /tmp/app.jfr
 spectra jvm jfr stop 4012 --name spectra
 ```
 
