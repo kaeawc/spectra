@@ -14,11 +14,15 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/powerlog"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
 
 func runPower(args []string) int {
+	if len(args) > 0 && args[0] == "log" {
+		return runPowerLog(args[1:], os.Stdout, os.Stderr, powerlog.DefaultRunner)
+	}
 	return runPowerWithIO(args, os.Stdout, os.Stderr, defaultPowerDeps())
 }
 
