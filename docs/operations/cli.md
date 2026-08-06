@@ -473,6 +473,22 @@ spectra web processes /Applications/Slack.app
 spectra web processes --json /Applications/Slack.app
 ```
 
+## `spectra web symbolicate`
+
+Resolves minified generated positions back to their original source
+locations using a Source Map v3 file — the primitive that turns
+`app.js:1:284620` in a crash report or JS stack into
+`src/sync/engine.ts:214:9 (flush)`. Pass the `.js.map` and one or more
+`line:col` positions (1-based line, 0-based column). `--json` emits
+structured results.
+
+### Examples
+
+```bash
+spectra web symbolicate app.js.map 1:284620
+spectra web symbolicate --json app.js.map 1:284620 1:9931
+```
+
 ## `spectra playbook`
 
 Shows problem-first diagnostic workflows over existing collectors. Use it

@@ -35,8 +35,10 @@ func runWebWithIO(args []string, stdout, stderr io.Writer, inspect detectFunc) i
 		return runWebFuses(rest, stdout, stderr, os.ReadFile)
 	case "processes":
 		return runWebProcesses(rest, stdout, stderr, defaultProcessCollector)
+	case "symbolicate":
+		return runWebSymbolicate(rest, stdout, stderr, os.ReadFile)
 	default:
-		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses, processes)\n", sub)
+		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses, processes, symbolicate)\n", sub)
 		return 2
 	}
 }
