@@ -65,6 +65,11 @@ type Snapshot struct {
 	// populated by callers that have access to a snapshot store. Optional:
 	// rules that don't see history fall back to point-in-time checks.
 	FDHistory FDHistory `json:"fd_history,omitempty"`
+
+	// Warnings records collectors that could not run (e.g. a required tool was
+	// missing), so a partial snapshot is not mistaken for a clean machine.
+	// Empty when every requested collector produced trustworthy data.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Options configure a snapshot Build.
@@ -203,6 +208,16 @@ func Build(ctx context.Context, opts Options) Snapshot {
 		netRun = netstate.DefaultRunner
 	}
 
+	// Collectors run concurrently; warnings about degraded collection are
+	// appended under this mutex and attached to the snapshot after Wait.
+	var warnMu sync.Mutex
+	var warnings []string
+	addWarning := func(w string) {
+		warnMu.Lock()
+		warnings = append(warnings, w)
+		warnMu.Unlock()
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(snapshotCollectorCount(opts))
 
@@ -277,7 +292,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipJVMs {
 		go func() {
 			defer wg.Done()
-			s.JVMs = jvm.CollectAll(ctx, opts.JVMOpts)
+			infos, jpsAvailable := jvm.CollectAllStatus(ctx, opts.JVMOpts)
+			s.JVMs = infos
+			if !jpsAvailable {
+				addWarning("jvm: jps not found in PATH — JVM discovery unavailable; JVM findings may be incomplete")
+			}
 		}()
 	}
 	if len(opts.RuntimeTelemetryCollectors) > 0 {
@@ -288,6 +307,7 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	}
 
 	wg.Wait()
+	s.Warnings = warnings
 	jvm.AttributeJDKs(s.JVMs, s.Toolchains.JDKs)
 	if !opts.SkipJVMs {
 		s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
