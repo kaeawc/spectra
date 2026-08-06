@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -114,11 +115,13 @@ func jvmOptions(ctx context.Context) jvm.CollectOptions {
 func runJVMThreadDump(args []string) int {
 	fs := flag.NewFlagSet("spectra jvm thread-dump", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the parsed dump and triage summary as JSON")
+	summary := fs.Bool("summary", false, "Print a triage summary (states, categories, deadlocks) instead of the raw dump")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm thread-dump <pid>")
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm thread-dump [--json] [--summary] <pid>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
@@ -149,8 +152,65 @@ func runJVMThreadDump(args []string) int {
 		SizeBytes:   int64(len(data)),
 	})
 
+	if *asJSON || *summary {
+		dump := jvm.ParseThreadDump(string(data), time.Now())
+		sum := jvm.SummarizeThreads(dump)
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(threadDumpReport{Summary: sum, Dump: dump})
+			return 0
+		}
+		printThreadSummary(os.Stdout, pid, sum, dump.Deadlocks)
+		return 0
+	}
+
 	os.Stdout.Write(data)
 	return 0
+}
+
+// threadDumpReport is the JSON shape emitted by `spectra jvm thread-dump --json`.
+type threadDumpReport struct {
+	Summary jvm.ThreadSummary    `json:"summary"`
+	Dump    jvm.ParsedThreadDump `json:"dump"`
+}
+
+func printThreadSummary(w io.Writer, pid int, sum jvm.ThreadSummary, deadlocks []jvm.DeadlockCycle) {
+	fmt.Fprintf(w, "Thread dump for PID %d\n", pid)
+	fmt.Fprintf(w, "  Total:    %d threads (%d daemon, %d virtual)\n", sum.Total, sum.Daemon, sum.Virtual)
+	if len(sum.ByState) > 0 {
+		fmt.Fprintln(w, "  By state:")
+		states := make([]string, 0, len(sum.ByState))
+		for st := range sum.ByState {
+			states = append(states, string(st))
+		}
+		sort.Strings(states)
+		for _, st := range states {
+			fmt.Fprintf(w, "    %-14s %d\n", st, sum.ByState[jvm.ThreadState(st)])
+		}
+	}
+	if len(sum.ByCategory) > 0 {
+		fmt.Fprintln(w, "  By category:")
+		cats := make([]string, 0, len(sum.ByCategory))
+		for c := range sum.ByCategory {
+			cats = append(cats, string(c))
+		}
+		sort.Strings(cats)
+		for _, c := range cats {
+			fmt.Fprintf(w, "    %-14s %d\n", c, sum.ByCategory[jvm.WaitCategory(c)])
+		}
+	}
+	if len(deadlocks) > 0 {
+		fmt.Fprintf(w, "  DEADLOCKS: %d cycle(s) detected\n", len(deadlocks))
+		for i, dc := range deadlocks {
+			fmt.Fprintf(w, "    cycle %d: %s\n", i+1, strings.Join(dc.Threads, " -> "))
+			if len(dc.Locks) > 0 {
+				fmt.Fprintf(w, "      locks: %s\n", strings.Join(dc.Locks, ", "))
+			}
+		}
+	} else {
+		fmt.Fprintln(w, "  Deadlocks: none")
+	}
 }
 
 func runJVMHeapHistogram(args []string) int {
