@@ -51,6 +51,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `fan` | Run one daemon RPC call against multiple explicit targets |
 | `hosts` | List hosts known from stored snapshots |
 | `fleet` | Cross-host symptom rollups and version-drift matrices |
+| `bisect` | Find the snapshot where a rule started firing, and what changed alongside it |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -758,6 +759,23 @@ spectra hosts --probe --json
 spectra hosts --discover
 spectra hosts --discover-daemons
 ``` 
+
+## `spectra bisect`
+
+Bisects one host's stored snapshot series to find the first snapshot where a
+rule started firing, then diffs it against its predecessor to surface the
+changes that co-occurred (an app version bump, a new login item, a JDK
+swap). Because snapshots are periodic, the timing is bounded by capture
+cadence, and the co-occurring changes are reported as **correlated, not
+the cause**. `--host` selects the host (defaults to the only stored one);
+`--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra bisect app-no-hardened-runtime
+spectra bisect app-no-hardened-runtime --host work-mac --json
+```
 
 ## `spectra fleet`
 
