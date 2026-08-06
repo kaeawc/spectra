@@ -558,7 +558,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 	d.Register("snapshot.get", func(params json.RawMessage) (any, error) {
 		var p struct{ ID string }
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("snapshot.get requires {\"ID\":\"<id>\"}")
+			return nil, rpc.InvalidParams("snapshot.get requires {\"ID\":\"<id>\"}")
 		}
 		raw, err := db.GetSnapshotJSON(context.Background(), p.ID)
 		if err != nil {
@@ -616,7 +616,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Limit int `json:"limit"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("process.history requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("process.history requires {\"pid\": <pid>}")
 		}
 		return db.GetProcessMetrics(context.Background(), p.PID, p.Limit)
 	})
@@ -666,7 +666,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Options detect.Options `json:"options"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
-			return nil, fmt.Errorf("inspect.app requires {\"path\": \"<app-path>\"}")
+			return nil, rpc.InvalidParams("inspect.app requires {\"path\": \"<app-path>\"}")
 		}
 		return detect.DetectWith(p.Path, p.Options)
 	})
@@ -677,7 +677,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Options detect.Options `json:"options"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || len(p.Paths) == 0 {
-			return nil, fmt.Errorf("inspect.app.batch requires {\"paths\": [...]}")
+			return nil, rpc.InvalidParams("inspect.app.batch requires {\"paths\": [...]}")
 		}
 		results := make([]detect.Result, 0, len(p.Paths))
 		for _, path := range p.Paths {
@@ -700,7 +700,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			IDB string `json:"id_b"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.IDA == "" || p.IDB == "" {
-			return nil, fmt.Errorf("snapshot.diff requires {\"id_a\": \"...\", \"id_b\": \"...\"}")
+			return nil, rpc.InvalidParams("snapshot.diff requires {\"id_a\": \"...\", \"id_b\": \"...\"}")
 		}
 		ctx := context.Background()
 		loadSnap := func(id string) (*snapshot.Snapshot, error) {
@@ -730,7 +730,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("snapshot.processes requires {\"id\":\"<snapshot-id>\"}")
+			return nil, rpc.InvalidParams("snapshot.processes requires {\"id\":\"<snapshot-id>\"}")
 		}
 		return db.GetSnapshotProcesses(context.Background(), p.ID)
 	})
@@ -740,7 +740,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("snapshot.login_items requires {\"id\":\"<snapshot-id>\"}")
+			return nil, rpc.InvalidParams("snapshot.login_items requires {\"id\":\"<snapshot-id>\"}")
 		}
 		return db.GetLoginItems(context.Background(), p.ID)
 	})
@@ -750,7 +750,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("snapshot.granted_perms requires {\"id\":\"<snapshot-id>\"}")
+			return nil, rpc.InvalidParams("snapshot.granted_perms requires {\"id\":\"<snapshot-id>\"}")
 		}
 		return db.GetGrantedPerms(context.Background(), p.ID)
 	})
@@ -872,7 +872,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Status      string `json:"status"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.MachineUUID == "" {
-			return nil, fmt.Errorf("issues.list requires {\"machine_uuid\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.list requires {\"machine_uuid\": \"...\"}")
 		}
 		return db.ListIssues(context.Background(), p.MachineUUID, store.IssueStatus(p.Status))
 	})
@@ -886,7 +886,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Findings    []store.FindingInput `json:"findings"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.MachineUUID == "" || p.SnapshotID == "" {
-			return nil, fmt.Errorf("issues.record requires {\"machine_uuid\": \"...\", \"snapshot_id\": \"...\", \"findings\": [...]}")
+			return nil, rpc.InvalidParams("issues.record requires {\"machine_uuid\": \"...\", \"snapshot_id\": \"...\", \"findings\": [...]}")
 		}
 		ids, err := db.UpsertIssues(context.Background(), p.MachineUUID, p.SnapshotID, p.Findings)
 		if err != nil {
@@ -903,7 +903,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Status string `json:"status"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Status == "" {
-			return nil, fmt.Errorf("issues.update requires {\"id\": \"...\", \"status\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.update requires {\"id\": \"...\", \"status\": \"...\"}")
 		}
 		if err := issueSvc.Update(context.Background(), p.ID, store.IssueStatus(p.Status)); err != nil {
 			return nil, err
@@ -918,7 +918,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("issues.acknowledge requires {\"id\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.acknowledge requires {\"id\": \"...\"}")
 		}
 		if err := issueSvc.Acknowledge(context.Background(), p.ID); err != nil {
 			return nil, err
@@ -933,7 +933,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.ID == "" {
-			return nil, fmt.Errorf("issues.dismiss requires {\"id\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.dismiss requires {\"id\": \"...\"}")
 		}
 		if err := issueSvc.Dismiss(context.Background(), p.ID); err != nil {
 			return nil, err
@@ -946,7 +946,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 	d.Register("issues.fix.record", func(params json.RawMessage) (any, error) {
 		var p store.AppliedFixInput
 		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
-			return nil, fmt.Errorf("issues.fix.record requires {\"issue_id\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.fix.record requires {\"issue_id\": \"...\"}")
 		}
 		id, err := issueSvc.RecordFix(context.Background(), p)
 		if err != nil {
@@ -962,7 +962,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			IssueID string `json:"issue_id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.IssueID == "" {
-			return nil, fmt.Errorf("issues.fix.list requires {\"issue_id\": \"...\"}")
+			return nil, rpc.InvalidParams("issues.fix.list requires {\"issue_id\": \"...\"}")
 		}
 		return issueSvc.FixHistory(context.Background(), p.IssueID)
 	})
@@ -1025,7 +1025,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.telemetry.sample requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.telemetry.sample requires {\"pid\": <pid>}")
 		}
 		info := jvm.InspectPID(context.Background(), p.PID, daemonJVMOptions())
 		if info == nil {
@@ -1042,7 +1042,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.thread_dump requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.thread_dump requires {\"pid\": <pid>}")
 		}
 		rec := artifact.Record{
 			Kind:        artifact.KindThreadDump,
@@ -1071,7 +1071,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.heap_histogram requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.heap_histogram requires {\"pid\": <pid>}")
 		}
 		out, err := jvm.HeapHistogram(p.PID, nil)
 		if err != nil {
@@ -1088,7 +1088,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.gc_stats requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.gc_stats requires {\"pid\": <pid>}")
 		}
 		stats, err := jvm.CollectGCStats(p.PID, nil)
 		if err != nil {
@@ -1106,7 +1106,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.vm_memory requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.vm_memory requires {\"pid\": <pid>}")
 		}
 		return jvm.CollectVMMemoryDiagnostics(p.PID, nil), nil
 	}
@@ -1119,7 +1119,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.jmx.status requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.jmx.status requires {\"pid\": <pid>}")
 		}
 		out, err := jvm.JMXStatus(p.PID, nil)
 		if err != nil {
@@ -1134,7 +1134,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.jmx.start_local requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.jmx.start_local requires {\"pid\": <pid>}")
 		}
 		out, err := jvm.JMXStartLocal(p.PID, nil)
 		if err != nil {
@@ -1152,7 +1152,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Agent string `json:"agent"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.attach requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.attach requires {\"pid\": <pid>}")
 		}
 		status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
 		if err != nil {
@@ -1167,7 +1167,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.mbeans requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.mbeans requires {\"pid\": <pid>}")
 		}
 		return jvm.FetchMBeans(p.PID, nil)
 	})
@@ -1180,7 +1180,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Attribute string `json:"attribute"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 || p.Name == "" || p.Attribute == "" {
-			return nil, fmt.Errorf("jvm.mbean.read requires {\"pid\": <pid>, \"name\": \"...\", \"attribute\": \"...\"}")
+			return nil, rpc.InvalidParams("jvm.mbean.read requires {\"pid\": <pid>, \"name\": \"...\", \"attribute\": \"...\"}")
 		}
 		return jvm.ReadMBeanAttribute(p.PID, p.Name, p.Attribute, nil)
 	})
@@ -1193,7 +1193,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Operation string `json:"operation"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 || p.Name == "" || p.Operation == "" {
-			return nil, fmt.Errorf("jvm.mbean.invoke requires {\"pid\": <pid>, \"name\": \"...\", \"operation\": \"...\"}")
+			return nil, rpc.InvalidParams("jvm.mbean.invoke requires {\"pid\": <pid>, \"name\": \"...\", \"operation\": \"...\"}")
 		}
 		return jvm.InvokeMBeanOperation(p.PID, p.Name, p.Operation, nil)
 	})
@@ -1204,7 +1204,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.probe requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.probe requires {\"pid\": <pid>}")
 		}
 		return jvm.FetchAgentProbes(p.PID, nil)
 	})
@@ -1218,7 +1218,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			SoftRefs       *bool `json:"soft_refs"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.explain requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.explain requires {\"pid\": <pid>}")
 		}
 		softRefs := true
 		if p.SoftRefs != nil {
@@ -1246,10 +1246,10 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ConfirmSensitive bool   `json:"confirm_sensitive"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.flamegraph requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.flamegraph requires {\"pid\": <pid>}")
 		}
 		if !p.ConfirmSensitive {
-			return nil, fmt.Errorf("jvm.flamegraph requires {\"confirm_sensitive\": true} because profiling artifacts may contain package, class, and method names")
+			return nil, rpc.InvalidParams("jvm.flamegraph requires {\"confirm_sensitive\": true} because profiling artifacts may contain package, class, and method names")
 		}
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
@@ -1287,7 +1287,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.jfr.start requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.jfr.start requires {\"pid\": <pid>}")
 		}
 		name := p.Name
 		if name == "" {
@@ -1308,13 +1308,13 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ConfirmSensitive bool   `json:"confirm_sensitive"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.jfr.dump requires {\"pid\": <pid>, \"dest\": \"...\"}")
+			return nil, rpc.InvalidParams("jvm.jfr.dump requires {\"pid\": <pid>, \"dest\": \"...\"}")
 		}
 		if p.Dest == "" {
-			return nil, fmt.Errorf("jvm.jfr.dump requires {\"dest\": \"...\"}")
+			return nil, rpc.InvalidParams("jvm.jfr.dump requires {\"dest\": \"...\"}")
 		}
 		if !p.ConfirmSensitive {
-			return nil, fmt.Errorf("jvm.jfr.dump requires {\"confirm_sensitive\": true} because JFR artifacts may contain sensitive process data")
+			return nil, rpc.InvalidParams("jvm.jfr.dump requires {\"confirm_sensitive\": true} because JFR artifacts may contain sensitive process data")
 		}
 		name := p.Name
 		if name == "" {
@@ -1349,7 +1349,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Dest string `json:"dest"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.jfr.stop requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.jfr.stop requires {\"pid\": <pid>}")
 		}
 		name := p.Name
 		if name == "" {
@@ -1389,7 +1389,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
-			return nil, fmt.Errorf("jvm.jfr.summary requires {\"path\": \"...\"}")
+			return nil, rpc.InvalidParams("jvm.jfr.summary requires {\"path\": \"...\"}")
 		}
 		summary, err := runJFRSummary(p.Path, nil)
 		if err != nil {
@@ -1405,7 +1405,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			PID int `json:"pid"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.inspect requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.inspect requires {\"pid\": <pid>}")
 		}
 		info := jvm.InspectPID(context.Background(), p.PID, daemonJVMOptions())
 		if info == nil {
@@ -1423,10 +1423,10 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			ConfirmSensitive bool   `json:"confirm_sensitive"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("jvm.heap_dump requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("jvm.heap_dump requires {\"pid\": <pid>}")
 		}
 		if !p.ConfirmSensitive {
-			return nil, fmt.Errorf("jvm.heap_dump requires {\"confirm_sensitive\": true} because heap dumps may contain secrets and PII")
+			return nil, rpc.InvalidParams("jvm.heap_dump requires {\"confirm_sensitive\": true} because heap dumps may contain secrets and PII")
 		}
 		if p.Dest == "" {
 			p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
@@ -1570,7 +1570,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Interval int `json:"interval"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID == 0 {
-			return nil, fmt.Errorf("process.sample requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("process.sample requires {\"pid\": <pid>}")
 		}
 		if p.Duration == 0 {
 			p.Duration = 1
@@ -1622,7 +1622,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Paths []string `json:"paths"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || len(p.Paths) == 0 {
-			return nil, fmt.Errorf("storage.byApp requires {\"paths\": [...]}")
+			return nil, rpc.InvalidParams("storage.byApp requires {\"paths\": [...]}")
 		}
 		return storagestate.Collect(storagestate.CollectOptions{
 			AppPaths: p.Paths,
@@ -1701,7 +1701,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			DurationMS int    `json:"duration_ms"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.PID <= 0 {
-			return nil, fmt.Errorf("helper.fs_usage.start requires {\"pid\": <pid>}")
+			return nil, rpc.InvalidParams("helper.fs_usage.start requires {\"pid\": <pid>}")
 		}
 		result, err := hc.FSUsageStart(p.PID, p.Mode, p.DurationMS)
 		if err != nil {
@@ -1718,7 +1718,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Handle string `json:"handle"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.Handle == "" {
-			return nil, fmt.Errorf("helper.fs_usage.stop requires {\"handle\": \"...\"}")
+			return nil, rpc.InvalidParams("helper.fs_usage.stop requires {\"handle\": \"...\"}")
 		}
 		result, err := hc.FSUsageStop(p.Handle)
 		if err != nil {
@@ -1740,7 +1740,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Port       int    `json:"port"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.Interface == "" {
-			return nil, fmt.Errorf("helper.net_capture.start requires {\"interface\": \"...\"}")
+			return nil, rpc.InvalidParams("helper.net_capture.start requires {\"interface\": \"...\"}")
 		}
 		rec := artifact.Record{
 			Kind:        artifact.KindPacketCapture,
@@ -1777,7 +1777,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			Handle string `json:"handle"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.Handle == "" {
-			return nil, fmt.Errorf("helper.net_capture.stop requires {\"handle\": \"...\"}")
+			return nil, rpc.InvalidParams("helper.net_capture.stop requires {\"handle\": \"...\"}")
 		}
 		rec := artifact.Record{
 			Kind:        artifact.KindPacketCapture,
@@ -1809,7 +1809,7 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			BundleID string `json:"bundle_id"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil || p.BundleID == "" {
-			return nil, fmt.Errorf("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
+			return nil, rpc.InvalidParams("helper.tcc.system.query requires {\"bundle_id\":\"...\"}")
 		}
 		if !bundleid.Valid(p.BundleID) {
 			return nil, fmt.Errorf("helper.tcc.system.query rejects invalid bundle_id %q", p.BundleID)
