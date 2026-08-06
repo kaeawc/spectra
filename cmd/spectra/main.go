@@ -67,6 +67,7 @@ func subcommandList() []subcommand {
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
 		{"crash", "Audit post-mortem readiness (can this machine produce a debuggable crash?)", runCrash},
 		{"web", "Diff an Electron app's app.asar payload between two versions", runWeb},
+		{"whatswrong", "Ranked whole-system triage: why is this Mac slow right now?", runWhatswrong},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},

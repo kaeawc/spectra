@@ -44,6 +44,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `process` | List running processes sorted by memory |
 | `crash` | Audit post-mortem readiness before a crash happens |
 | `web` | Diff an Electron app's `app.asar` payload between versions |
+| `whatswrong` | Ranked whole-system triage: why is this Mac slow right now? |
 | `playbook` | Show diagnostic playbooks and command plans |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
@@ -509,6 +510,22 @@ structured results.
 ```bash
 spectra web symbolicate app.js.map 1:284620
 spectra web symbolicate --json app.js.map 1:284620 1:9931
+```
+
+## `spectra whatswrong`
+
+A single whole-system triage: samples memory pressure and swap
+(`kern.memorystatus_vm_pressure_level`, `vm.swapusage`), thermal state, and
+the top CPU/RSS processes, then returns a **ranked, plain-language** list of
+likely causes instead of a raw table — the whole-machine counterpart to the
+app/PID-scoped `rules`/`issues`. A healthy machine says so. `--json` keeps
+the structured signals alongside the ranking so it's auditable.
+
+### Examples
+
+```bash
+spectra whatswrong
+spectra whatswrong --json
 ```
 
 ## `spectra playbook`
