@@ -33,8 +33,10 @@ func runWebWithIO(args []string, stdout, stderr io.Writer, inspect detectFunc) i
 		return runAsarDiff(rest, stdout, stderr, inspect)
 	case "fuses":
 		return runWebFuses(rest, stdout, stderr, os.ReadFile)
+	case "processes":
+		return runWebProcesses(rest, stdout, stderr, defaultProcessCollector)
 	default:
-		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses)\n", sub)
+		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses, processes)\n", sub)
 		return 2
 	}
 }
