@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,9 +31,10 @@ func TestCoreRunExecutesJstack(t *testing.T) {
 
 	var gotName string
 	var gotArgs []string
-	fake := func(_ context.Context, name string, args ...string) ([]byte, error) {
+	fake := func(_ context.Context, stdout, _ io.Writer, name string, args ...string) error {
 		gotName, gotArgs = name, args
-		return []byte("thread state output\n"), nil
+		_, _ = io.WriteString(stdout, "thread state output\n")
+		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -56,7 +58,7 @@ func TestCoreRunUnsupportedAction(t *testing.T) {
 	corePath, _ := jvmCoreFixture(t)
 	var stdout, stderr bytes.Buffer
 	called := false
-	fake := func(_ context.Context, _ string, _ ...string) ([]byte, error) { called = true; return nil, nil }
+	fake := func(_ context.Context, _, _ io.Writer, _ string, _ ...string) error { called = true; return nil }
 	code := coreRun(context.Background(), &stdout, &stderr, "jstat", corePath, "", fake)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
@@ -74,7 +76,7 @@ func TestCoreRunNoExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := coreRun(context.Background(), &stdout, &stderr, "jstack", corePath, "", func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+	code := coreRun(context.Background(), &stdout, &stderr, "jstack", corePath, "", func(context.Context, io.Writer, io.Writer, string, ...string) error { return nil })
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}

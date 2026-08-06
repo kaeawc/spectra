@@ -28,11 +28,18 @@ func runCore(args []string) int {
 	return 2
 }
 
-// coreRunner executes an external inspection command and returns its combined output.
-type coreRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+// coreRunner executes an external inspection command, streaming its output to
+// the provided writers as it is produced. It stays injectable for testing.
+type coreRunner func(ctx context.Context, stdout, stderr io.Writer, name string, args ...string) error
 
-func defaultCoreRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+func defaultCoreRunner(ctx context.Context, stdout, stderr io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("jhsdb: %w", err)
+	}
+	return nil
 }
 
 // runCoreRun executes a specific jhsdb inspection (jstack or jmap-histo) against
@@ -69,11 +76,7 @@ func coreRun(ctx context.Context, stdout, stderr io.Writer, action, corePath, ex
 		fmt.Fprintf(stderr, "unsupported action %q (want jstack or jmap-histo)\n", action)
 		return 2
 	}
-	out, err := run(ctx, cmd.Tool, cmd.Args...)
-	if len(out) > 0 {
-		_, _ = stdout.Write(out)
-	}
-	if err != nil {
+	if err := run(ctx, stdout, stderr, cmd.Tool, cmd.Args...); err != nil {
 		fmt.Fprintf(stderr, "%s %s failed: %v\n", cmd.Tool, action, err)
 		return 1
 	}
