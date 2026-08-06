@@ -40,17 +40,17 @@ func runFleetWithIO(args []string, stdout, stderr io.Writer, load fleetLoader) i
 func defaultFleetLoader() ([]fleet.HostSnapshot, error) {
 	dbPath, err := store.DefaultPath()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve store path: %w", err)
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open store %s: %w", dbPath, err)
 	}
 	defer db.Close()
 	ctx := context.Background()
 	hostRows, err := db.ListHosts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list hosts: %w", err)
 	}
 	out := make([]fleet.HostSnapshot, 0, len(hostRows))
 	for _, hr := range hostRows {
@@ -91,11 +91,16 @@ func runFleetSymptom(args []string, stdout, stderr io.Writer, load fleetLoader) 
 		fmt.Fprintln(stderr, "usage: spectra fleet symptom [--json] <rule-id>")
 		return 2
 	}
+	ruleID := fs.Arg(0)
+	if !ruleInCatalog(ruleID) {
+		fmt.Fprintf(stderr, "unknown rule id %q — run `spectra rules` to see available rules\n", ruleID)
+		return 2
+	}
 	hosts, code := loadFleet(load, stderr)
 	if code != 0 {
 		return code
 	}
-	rollup := fleet.RollupSymptom(hosts, fs.Arg(0), rules.V1Catalog())
+	rollup := fleet.RollupSymptom(hosts, ruleID, rules.V1Catalog())
 	if *asJSON {
 		return encodeJSON(stdout, stderr, rollup)
 	}
@@ -117,8 +122,16 @@ func runFleetDrift(args []string, stdout, stderr io.Writer, load fleetLoader) in
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *jdk && *app != "" {
+		fmt.Fprintln(stderr, "specify only one of --jdk or --app <bundleID>")
+		return 2
+	}
 	if !*jdk && *app == "" {
 		fmt.Fprintln(stderr, "usage: spectra fleet drift (--jdk | --app <bundleID>) [--json]")
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "unexpected arguments; drift takes only --jdk or --app <bundleID>")
 		return 2
 	}
 	hosts, code := loadFleet(load, stderr)
@@ -164,6 +177,15 @@ func encodeJSON(stdout, stderr io.Writer, v any) int {
 		return 1
 	}
 	return 0
+}
+
+func ruleInCatalog(id string) bool {
+	for _, r := range rules.V1Catalog() {
+		if r.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func joinOrDash(xs []string) string {

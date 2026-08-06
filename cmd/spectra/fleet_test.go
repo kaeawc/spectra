@@ -96,6 +96,30 @@ func TestRunFleetLoadError(t *testing.T) {
 	}
 }
 
+func TestRunFleetSymptomUnknownRule(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	if code := runFleetWithIO([]string{"symptom", "no-such-rule"}, &out, &errBuf, okLoader); code != 2 {
+		t.Fatalf("exit = %d, want 2 for unknown rule id", code)
+	}
+	if !strings.Contains(errBuf.String(), "unknown rule id") {
+		t.Errorf("stderr = %q", errBuf.String())
+	}
+}
+
+func TestRunFleetDriftBothDimensions(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	if code := runFleetWithIO([]string{"drift", "--jdk", "--app", "com.x"}, &out, &errBuf, okLoader); code != 2 {
+		t.Fatalf("exit = %d, want 2 when both dimensions given", code)
+	}
+}
+
+func TestRunFleetDriftStrayArgs(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	if code := runFleetWithIO([]string{"drift", "--jdk", "extra"}, &out, &errBuf, okLoader); code != 2 {
+		t.Fatalf("exit = %d, want 2 for stray operands", code)
+	}
+}
+
 func TestRunFleetUnknownSub(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	if code := runFleetWithIO([]string{"bogus"}, &out, &errBuf, okLoader); code != 2 {

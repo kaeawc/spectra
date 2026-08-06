@@ -64,6 +64,23 @@ func TestDriftJDK(t *testing.T) {
 	}
 }
 
+func TestDuplicateHostnamesDisambiguated(t *testing.T) {
+	// Two machines share a hostname; the labels must stay distinct.
+	hosts := []HostSnapshot{
+		{Hostname: "MacBook-Pro", MachineUUID: "AAAAAAAA-1111", Snap: snapshot.Snapshot{Toolchains: toolchain.Toolchains{JDKs: []toolchain.JDKInstall{{VersionMajor: 21, ReleaseString: "21"}}}}},
+		{Hostname: "MacBook-Pro", MachineUUID: "BBBBBBBB-2222", Snap: snapshot.Snapshot{Toolchains: toolchain.Toolchains{JDKs: []toolchain.JDKInstall{{VersionMajor: 17, ReleaseString: "17"}}}}},
+	}
+	cells := DriftJDK(hosts)
+	if len(cells) != 2 || cells[0].Host == cells[1].Host {
+		t.Fatalf("labels must be distinct for same-hostname machines, got %+v", cells)
+	}
+	for _, c := range cells {
+		if !strings.HasPrefix(c.Host, "MacBook-Pro (") {
+			t.Errorf("expected uuid-disambiguated label, got %q", c.Host)
+		}
+	}
+}
+
 func TestDriftApp(t *testing.T) {
 	hosts := []HostSnapshot{
 		host("laptop", []detect.Result{{BundleID: "com.example.app", AppVersion: "2.1"}}, nil),

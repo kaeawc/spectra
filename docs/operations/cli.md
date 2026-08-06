@@ -763,7 +763,7 @@ spectra hosts --discover-daemons
 
 Aggregates the snapshots already in the local store (keyed by machine UUID,
 so it can hold multiple hosts from `snapshot` + fan-out) into cross-host
-answers — the grouped result fan-out set up but never closed.
+answers — the grouped result that fan-out enabled but never produced.
 
 - `spectra fleet symptom <rule-id>` groups hosts by whether that rule fires
   against their latest snapshot ("which Macs trip `app-no-hardened-runtime`?").

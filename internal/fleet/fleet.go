@@ -23,14 +23,42 @@ type HostSnapshot struct {
 	Empty       bool
 }
 
-func hostLabel(h HostSnapshot) string {
-	if h.Hostname != "" {
-		return h.Hostname
+// displayLabels returns a stable display label per host, keyed on the unique
+// MachineUUID identity but showing the friendlier hostname. When two hosts
+// share a hostname, the label is disambiguated with a short UUID prefix so the
+// rollup and drift matrix never emit an ambiguous identity.
+func displayLabels(hosts []HostSnapshot) []string {
+	counts := map[string]int{}
+	for _, h := range hosts {
+		if h.Hostname != "" {
+			counts[h.Hostname]++
+		}
 	}
-	if h.MachineUUID != "" {
-		return h.MachineUUID
+	labels := make([]string, len(hosts))
+	for i, h := range hosts {
+		labels[i] = hostLabel(h, counts[h.Hostname] > 1)
 	}
-	return "unknown-host"
+	return labels
+}
+
+func hostLabel(h HostSnapshot, ambiguous bool) string {
+	if h.Hostname == "" {
+		if h.MachineUUID != "" {
+			return h.MachineUUID
+		}
+		return "unknown-host"
+	}
+	if ambiguous && h.MachineUUID != "" {
+		return fmt.Sprintf("%s (%s)", h.Hostname, shortUUID(h.MachineUUID))
+	}
+	return h.Hostname
+}
+
+func shortUUID(u string) string {
+	if len(u) > 8 {
+		return u[:8]
+	}
+	return u
 }
 
 // SymptomRollup groups hosts by whether a rule fires against their snapshot.
@@ -45,8 +73,9 @@ type SymptomRollup struct {
 // by whether ruleID fired. Hosts without a usable snapshot are Unknown.
 func RollupSymptom(hosts []HostSnapshot, ruleID string, catalog []rules.Rule) SymptomRollup {
 	r := SymptomRollup{RuleID: ruleID}
-	for _, h := range hosts {
-		name := hostLabel(h)
+	labels := displayLabels(hosts)
+	for i, h := range hosts {
+		name := labels[i]
 		switch {
 		case h.Empty:
 			r.Unknown = append(r.Unknown, name)
@@ -88,9 +117,10 @@ func DriftApp(hosts []HostSnapshot, bundleID string) []DriftCell {
 }
 
 func driftMatrix(hosts []HostSnapshot, value func(HostSnapshot) string) []DriftCell {
+	labels := displayLabels(hosts)
 	cells := make([]DriftCell, 0, len(hosts))
-	for _, h := range hosts {
-		cells = append(cells, DriftCell{Host: hostLabel(h), Value: value(h)})
+	for i, h := range hosts {
+		cells = append(cells, DriftCell{Host: labels[i], Value: value(h)})
 	}
 	sort.Slice(cells, func(i, j int) bool { return cells[i].Host < cells[j].Host })
 	return cells
