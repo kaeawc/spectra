@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -13,11 +15,69 @@ import (
 )
 
 func runCore(args []string) int {
-	if len(args) > 0 && args[0] == "inspect" {
-		return runCoreInspect(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "inspect":
+			return runCoreInspect(args[1:])
+		case "run":
+			return runCoreRun(args[1:])
+		}
 	}
 	fmt.Fprintln(os.Stderr, "usage: spectra core inspect [--json] [--exe <path>] <core-file>")
+	fmt.Fprintln(os.Stderr, "       spectra core run [--exe <path>] <jstack|jmap-histo> <core-file>")
 	return 2
+}
+
+// coreRunner executes an external inspection command and returns its combined output.
+type coreRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+func defaultCoreRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// runCoreRun executes a specific jhsdb inspection (jstack or jmap-histo) against
+// a core, resolving the executable automatically when --exe is not supplied.
+func runCoreRun(args []string) int {
+	fs := flag.NewFlagSet("spectra core run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	exePath := fs.String("exe", "", "Executable path for the crashed process")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: spectra core run [--exe <path>] <jstack|jmap-histo> <core-file>")
+		return 2
+	}
+	return coreRun(context.Background(), os.Stdout, os.Stderr, fs.Arg(0), fs.Arg(1), *exePath, defaultCoreRunner)
+}
+
+// coreRun is the testable core of `spectra core run`: it inspects the core,
+// selects the requested command, and executes it through run.
+func coreRun(ctx context.Context, stdout, stderr io.Writer, action, corePath, exePath string, run coreRunner) int {
+	inspector := corefile.Inspector{Analyzers: []corefile.Analyzer{corefile.JVMAnalyzer{}}}
+	report, err := inspector.Inspect(ctx, corePath, exePath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if report.Artifact.ExecutablePath == "" {
+		fmt.Fprintln(stderr, "no executable resolved from the core; pass --exe <path>")
+		return 1
+	}
+	cmd, ok := corefile.SelectCommand(report, action)
+	if !ok {
+		fmt.Fprintf(stderr, "unsupported action %q (want jstack or jmap-histo)\n", action)
+		return 2
+	}
+	out, err := run(ctx, cmd.Tool, cmd.Args...)
+	if len(out) > 0 {
+		_, _ = stdout.Write(out)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s %s failed: %v\n", cmd.Tool, action, err)
+		return 1
+	}
+	return 0
 }
 
 func runCoreInspect(args []string) int {
