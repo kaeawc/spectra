@@ -55,11 +55,22 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 	causes := rankSlowCauses(sig)
 	if *asJSON {
 		out := struct {
-			Causes           []slowCause  `json:"causes"`
-			Load             sysload.Load `json:"load"`
-			ThermalPressure  string       `json:"thermal_pressure,omitempty"`
-			ThermalThrottled bool         `json:"thermal_throttled"`
-		}{causes, sig.Load, sig.Power.ThermalPressure, sig.Power.ThermalThrottled}
+			Causes  []slowCause `json:"causes"`
+			Signals struct {
+				Load   sysload.Load       `json:"load"`
+				Power  sysinfo.PowerState `json:"power"`
+				TopCPU *process.Info      `json:"top_cpu,omitempty"`
+				TopRSS *process.Info      `json:"top_rss,omitempty"`
+			} `json:"signals"`
+		}{Causes: causes}
+		out.Signals.Load = sig.Load
+		out.Signals.Power = sig.Power
+		if p, ok := topByCPU(sig.Procs); ok {
+			out.Signals.TopCPU = &p
+		}
+		if p, ok := topByRSS(sig.Procs); ok {
+			out.Signals.TopRSS = &p
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(out); err != nil {

@@ -98,7 +98,11 @@ func TestRunWhatswrongJSON(t *testing.T) {
 	}
 	var out, errBuf bytes.Buffer
 	runWhatswrongWithIO([]string{"--json"}, &out, &errBuf, deps)
-	if !strings.Contains(out.String(), `"severity": "medium"`) {
-		t.Errorf("json = %q", out.String())
+	s := out.String()
+	// causes plus the full raw signals (load + power) so the ranking is auditable
+	for _, want := range []string{`"severity": "medium"`, `"signals"`, `"load"`, `"power"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("json missing %q; got:\n%s", want, s)
+		}
 	}
 }
