@@ -60,6 +60,7 @@ func subcommandList() []subcommand {
 		{"fan", "Run one daemon RPC call against multiple targets", runFan},
 		{"hosts", "List hosts known from stored snapshots", runHosts},
 		{"fleet", "Cross-host rollups: which hosts trip a rule, and version-drift matrices", runFleet},
+		{"bisect", "Find the snapshot where a rule started firing, and what changed alongside it", runBisect},
 		{"status", "Check whether the local daemon is running", runStatus},
 		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
