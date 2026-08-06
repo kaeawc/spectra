@@ -266,6 +266,15 @@ CREATE TABLE IF NOT EXISTS jvm_samples (
 
 CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_nano DESC);
 
+CREATE TABLE IF NOT EXISTS fd_samples (
+    pid          INTEGER NOT NULL,
+    at_nano      INTEGER NOT NULL,
+    open_fds     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pid, at_nano)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fd_samples_pid ON fd_samples(pid, at_nano DESC);
+
 CREATE TABLE IF NOT EXISTS issues (
     id                     TEXT PRIMARY KEY,
     rule_id                TEXT NOT NULL,
@@ -1066,6 +1075,127 @@ func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM jvm_samples WHERE at_nano < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SaveFDSamples upserts compact per-PID file-descriptor samples used by
+// trend-aware rules. Timestamps are stored as nanoseconds so two parallel
+// diagnose calls within the same wall-clock second produce distinct rows; the
+// upsert clause keeps reruns at literally the same instant idempotent.
+func (s *DB) SaveFDSamples(ctx context.Context, samples []snapshot.FDSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, sm := range samples {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO fd_samples (pid, at_nano, open_fds)
+			VALUES (?,?,?)
+			ON CONFLICT(pid, at_nano) DO UPDATE SET
+			    open_fds=excluded.open_fds`,
+			sm.PID, sm.At.UTC().UnixNano(), sm.OpenFDs,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetRecentFDSamples returns up to limit fd samples for pid, ordered
+// oldest-first so callers can hand the slice straight to trend predicates.
+// Pass limit=0 for the default cap (60 samples).
+func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot.FDSample, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pid, at_nano, open_fds
+		FROM fd_samples WHERE pid=?
+		ORDER BY at_nano DESC LIMIT ?`, pid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []snapshot.FDSample
+	for rows.Next() {
+		var sm snapshot.FDSample
+		var atNano int64
+		if err := rows.Scan(&sm.PID, &atNano, &sm.OpenFDs); err != nil {
+			return nil, err
+		}
+		sm.At = time.Unix(0, atNano).UTC()
+		out = append(out, sm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reverse to oldest-first.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// AttachFDHistory persists the current snapshot's per-process open-fd counts
+// as samples and loads recent samples per PID into snap.FDHistory so
+// trend-aware rules see a multi-sample window. Errors are accumulated but
+// never abort the caller — history is an enhancement, not a contract; rules
+// degrade to point-in-time checks when nothing is loaded.
+//
+// The snapshot's TakenAt is used as the sample timestamp when set, so
+// historical snapshots replayed against the store don't get a time.Now()
+// stamp that would corrupt trend ordering.
+func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
+	if snap == nil || len(snap.Processes) == 0 {
+		return
+	}
+	now := snap.TakenAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	current := make([]snapshot.FDSample, 0, len(snap.Processes))
+	for _, p := range snap.Processes {
+		if sm, ok := snapshot.FDSampleFrom(p, now); ok {
+			current = append(current, sm)
+		}
+	}
+	if len(current) == 0 {
+		return
+	}
+	_ = s.SaveFDSamples(ctx, current)
+
+	var history snapshot.FDHistory
+	for _, p := range snap.Processes {
+		if p.OpenFDs <= 0 {
+			continue
+		}
+		samples, err := s.GetRecentFDSamples(ctx, p.PID, 0)
+		if err != nil {
+			continue
+		}
+		history = append(history, samples...)
+	}
+	snap.FDHistory = history
+}
+
+// PruneFDSamples deletes fd_samples rows older than keepDays. Returns the
+// number of rows removed. keepDays <= 0 keeps the default of 7 days.
+func (s *DB) PruneFDSamples(ctx context.Context, keepDays int) (int64, error) {
+	if keepDays <= 0 {
+		keepDays = 7
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	res, err := s.db.ExecContext(ctx, `DELETE FROM fd_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}

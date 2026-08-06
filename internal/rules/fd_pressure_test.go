@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/process"
@@ -113,6 +115,99 @@ func TestFDPressureSystemWide(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fdHist builds an FDHistory for one PID from an explicit sequence of counts.
+func fdHist(pid int, counts ...int) snapshot.FDHistory {
+	out := make(snapshot.FDHistory, len(counts))
+	for i, c := range counts {
+		out[i] = snapshot.FDSample{PID: pid, OpenFDs: c}
+	}
+	return out
+}
+
+// TestFDPressureRisingLeak: a process at >=80% whose fd count is rising across
+// the window is escalated to High and re-worded as a probable leak.
+func TestFDPressureRisingLeak(t *testing.T) {
+	s := fdSnap(1000, "", fdProc(42, "leaky", 850)) // 85% → Medium on the point-in-time path
+	s.FDHistory = fdHist(42, 600, 720, 850)         // rising
+	findings := findingsFor(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityHigh {
+		t.Errorf("rising leak should escalate to High, got %q", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "leak") {
+		t.Errorf("expected leak wording, got %q", findings[0].Message)
+	}
+}
+
+// TestFDPressureSteadyState: a process at >=80% with history that is NOT rising
+// keeps the original Medium finding without escalation.
+func TestFDPressureSteadyState(t *testing.T) {
+	s := fdSnap(1000, "", fdProc(42, "steady", 850)) // 85%
+	s.FDHistory = fdHist(42, 850, 850, 850)          // flat high-water mark
+	findings := findingsFor(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Errorf("steady state should NOT escalate, got %q", findings[0].Severity)
+	}
+	if strings.Contains(findings[0].Message, "probable file-descriptor leak") {
+		t.Errorf("steady state should keep the original message, got %q", findings[0].Message)
+	}
+}
+
+// TestFDPressureEarlyLeak: a process below 80% whose fd count is rising still
+// emits a distinct early-leak finding.
+func TestFDPressureEarlyLeak(t *testing.T) {
+	s := fdSnap(1000, "", fdProc(42, "early", 400)) // 40% → no point-in-time finding
+	s.FDHistory = fdHist(42, 100, 250, 400)         // rising
+	findings := findingsFor(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 early-leak finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Errorf("early leak should be Medium, got %q", findings[0].Severity)
+	}
+	if !strings.Contains(findings[0].Message, "early file-descriptor leak") {
+		t.Errorf("expected early-leak wording, got %q", findings[0].Message)
+	}
+}
+
+// TestFDPressureBelowThresholdSteadyNoFinding: below 80% and not rising → silent.
+func TestFDPressureBelowThresholdSteadyNoFinding(t *testing.T) {
+	s := fdSnap(1000, "", fdProc(42, "quiet", 400))
+	s.FDHistory = fdHist(42, 400, 400, 400) // flat, below threshold
+	if findings := findingsFor(s); len(findings) != 0 {
+		t.Fatalf("expected no findings for a flat below-threshold process, got %+v", findings)
+	}
+}
+
+// TestFDPressureNoHistoryUnchanged: with empty history, an at-threshold process
+// produces exactly the point-in-time finding (byte-for-byte behavior).
+func TestFDPressureNoHistoryUnchanged(t *testing.T) {
+	s := fdSnap(1000, "", fdProc(42, "leaky", 850)) // 85%, no FDHistory
+	findings := findingsFor(s)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != SeverityMedium {
+		t.Errorf("no history should stay Medium, got %q", findings[0].Severity)
+	}
+	want := fdProcessFindingMessage(850, 85, 1000)
+	if findings[0].Message != want {
+		t.Errorf("message = %q, want %q", findings[0].Message, want)
+	}
+}
+
+// fdProcessFindingMessage mirrors the point-in-time message format so the
+// no-history test can assert byte-for-byte equality.
+func fdProcessFindingMessage(openFDs, pct, soft int) string {
+	return fmt.Sprintf("open_fds=%d is %d%% of the default fd soft limit (%d); process may be approaching descriptor exhaustion.",
+		openFDs, pct, soft)
 }
 
 // TestFDPressureBothFindings verifies per-process and system findings coexist.

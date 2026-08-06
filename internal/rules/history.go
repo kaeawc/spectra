@@ -42,3 +42,34 @@ func RisingOldGenFor(h snapshot.JVMHistory, pid int) bool {
 func HasTrendFor(h snapshot.JVMHistory, pid int) bool {
 	return len(h.SamplesFor(pid)) >= MinTrendSamples
 }
+
+// HasFDTrendFor reports whether there are enough fd samples for trend
+// predicates to be meaningful. Rules use this to decide whether to apply a
+// trend gate or fall back to point-in-time checks. Mirrors HasTrendFor.
+func HasFDTrendFor(h snapshot.FDHistory, pid int) bool {
+	return len(h.SamplesFor(pid)) >= MinTrendSamples
+}
+
+// RisingFDsFor reports whether open-fd usage is climbing for pid in the given
+// history. Returns false when there is no history or fewer than
+// MinTrendSamples observations.
+//
+// Unlike the coarse first/last old-gen comparison, a descriptor leak shows as
+// a monotone climb: allocation without release. "Rising" therefore requires
+// the samples to be non-decreasing across the window AND the last sample to
+// exceed the first (a net climb, not a flat high-water mark). A single dip —
+// the process closing descriptors — is enough to disqualify the window, which
+// is the conservative choice: the cost of a missed leak is one delayed cycle,
+// the cost of a false leak signal is noise on healthy steady-state processes.
+func RisingFDsFor(h snapshot.FDHistory, pid int) bool {
+	samples := h.SamplesFor(pid)
+	if len(samples) < MinTrendSamples {
+		return false
+	}
+	for i := 1; i < len(samples); i++ {
+		if samples[i].OpenFDs < samples[i-1].OpenFDs {
+			return false
+		}
+	}
+	return samples[len(samples)-1].OpenFDs > samples[0].OpenFDs
+}

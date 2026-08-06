@@ -245,10 +245,11 @@ func resolveRulesConfigPath(configPath string) (path string, explicit bool) {
 }
 
 // attachCLIHistory opens the local samples store, persists the current
-// JVM samples and loads recent history so trend-aware rules engage when
-// `spectra rules` is invoked. Failure is silent: history is an enhancement.
+// JVM and fd samples and loads recent history so trend-aware rules engage
+// when `spectra rules` is invoked. Failure is silent: history is an
+// enhancement.
 func attachCLIHistory(snap *snapshot.Snapshot) {
-	if len(snap.JVMs) == 0 {
+	if len(snap.JVMs) == 0 && !hasOpenFDs(snap) {
 		return
 	}
 	dbPath, err := store.DefaultPath()
@@ -261,6 +262,18 @@ func attachCLIHistory(snap *snapshot.Snapshot) {
 	}
 	defer db.Close()
 	db.AttachJVMHistory(context.Background(), snap)
+	db.AttachFDHistory(context.Background(), snap)
+}
+
+// hasOpenFDs reports whether any process in the snapshot has a positive
+// open-fd count, i.e. deep-mode data that fd trend history can use.
+func hasOpenFDs(snap *snapshot.Snapshot) bool {
+	for _, p := range snap.Processes {
+		if p.OpenFDs > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func loadStoredSnapshot(id string) (*snapshot.Snapshot, error) {
