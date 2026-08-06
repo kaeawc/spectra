@@ -99,7 +99,8 @@ JSON-RPC 2.0 methods, organized by concern:
 - **JDK** — `jdk.list`, `jdk.scan`
 - **Toolchain** — `toolchain.scan`, `toolchain.brew`,
   `toolchain.runtimes`, `toolchain.build_tools`
-- **Network** — `network.state`, `network.connections`, `network.byApp`
+- **Network** — `network.state`, `network.connections`, `network.byApp`,
+  `network.diagnose`, `network.capture.summarize`
 - **Storage** — `storage.byApp`, `storage.system`
 - **Power** — `power.state`
 - **Issues** — `issues.list`, `issues.check`, `issues.record`, `issues.update`,

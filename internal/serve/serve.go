@@ -26,6 +26,8 @@ import (
 	"github.com/kaeawc/spectra/internal/livehistory"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/netcap"
+	"github.com/kaeawc/spectra/internal/netdiag"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/rpc"
@@ -1532,6 +1534,57 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 			BundlePaths: p.Bundles,
 		})
 		return netstate.GroupConnectionsByApp(conns, procs), nil
+	})
+
+	// network.diagnose — app-centric network diagnosis (connections, throughput,
+	// DNS/TCP/TLS endpoint probes, findings). Optional params:
+	// { "app_path": "...", "pid": N, "command": "...", "targets": [...],
+	//   "ports": [...], "timeout_ms": N }.
+	d.Register("network.diagnose", func(params json.RawMessage) (any, error) {
+		var p struct {
+			AppPath   string   `json:"app_path"`
+			PID       int      `json:"pid"`
+			Command   string   `json:"command"`
+			Targets   []string `json:"targets"`
+			Ports     []int    `json:"ports"`
+			TimeoutMS int      `json:"timeout_ms"`
+		}
+		if len(params) > 0 {
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, rpc.InvalidParams("network.diagnose params: %v", err)
+			}
+		}
+		opts := netdiag.Options{
+			AppPath: p.AppPath,
+			PID:     p.PID,
+			Command: p.Command,
+			Targets: p.Targets,
+			Ports:   p.Ports,
+		}
+		if p.TimeoutMS > 0 {
+			opts.Timeout = time.Duration(p.TimeoutMS) * time.Millisecond
+		}
+		return netdiag.Diagnose(context.Background(), opts)
+	})
+
+	// network.capture.summarize — parse a pcap on the daemon host into a
+	// DNS/TLS/HTTP flow summary, so a remote client can read the result of a
+	// capture without transferring the raw .pcap. Params:
+	// { "path": "<pcap-path>", "limit": N }.
+	d.Register("network.capture.summarize", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Path  string `json:"path"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
+			return nil, rpc.InvalidParams("network.capture.summarize requires {\"path\": \"<pcap-path>\"}")
+		}
+		f, err := os.Open(p.Path)
+		if err != nil {
+			return nil, fmt.Errorf("open capture %q: %w", p.Path, err)
+		}
+		defer f.Close()
+		return netcap.SummarizePCAP(f, p.Limit)
 	})
 
 	// process.list — snapshot of all running processes via ps.
