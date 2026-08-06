@@ -385,6 +385,23 @@ spectra crash readiness --json
 spectra crash readiness /Applications/MyApp.app
 ```
 
+## `spectra crash inspect`
+
+Decodes a modern macOS `.ips` crash report (the JSON reports written to
+`~/Library/Logs/DiagnosticReports`) into a readable summary — the decoded
+exception and termination reason, the faulting thread, and its stack with
+frames resolved to image + symbol — without opening Console.app. `--all`
+shows every thread; `--json` emits the structured report. Legacy pre-2020
+plain-text `.crash` reports are detected and reported as such.
+
+### Examples
+
+```bash
+spectra crash inspect ~/Library/Logs/DiagnosticReports/MyApp-2026-08-05-101500.ips
+spectra crash inspect --all report.ips
+spectra crash inspect --json report.ips
+```
+
 ## `spectra playbook`
 
 Shows problem-first diagnostic workflows over existing collectors. Use it
