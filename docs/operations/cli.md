@@ -18,6 +18,13 @@ is present before the subcommand, Spectra translates the command to a daemon
 JSON-RPC call and prints indented JSON. Without one of those flags, commands
 run in-process on the local machine.
 
+`--verbose` (alias `--debug`, or the `SPECTRA_DEBUG` environment variable) is a
+global flag that routes otherwise-silent enhancement and collection failures —
+such as history-attach or cache errors — to stderr. It can appear before or
+after the subcommand and does not affect stdout, so JSON output stays parseable.
+The short `-v` is unaffected: it still means "show detection signals" for
+`inspect`.
+
 ## Subcommands
 
 | Name | Description |

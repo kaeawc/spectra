@@ -84,6 +84,10 @@ func main() {
 // args fall through to `inspect` for backward compatibility with the
 // flag-only CLI shape.
 func dispatch(args []string) int {
+	args, verbose := stripVerboseFlags(args)
+	if verbose {
+		enableVerbose()
+	}
 	if remote, ok, err := parseGlobalRemoteArgs(args); ok {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -228,6 +232,9 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage: spectra <subcommand> [flags] [args]")
 	fmt.Fprintln(w, "       spectra --remote <target> <subcommand> [args]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Global flags:")
+	fmt.Fprintln(w, "  --verbose, --debug   Log enhancement/collection failures to stderr (or set SPECTRA_DEBUG)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {

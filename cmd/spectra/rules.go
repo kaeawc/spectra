@@ -265,10 +265,12 @@ func attachCLIHistory(snap *snapshot.Snapshot) {
 	}
 	dbPath, err := store.DefaultPath()
 	if err != nil {
+		cliLogger.Debug("rules: history unavailable, cannot resolve store path", "error", err)
 		return
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
+		cliLogger.Debug("rules: history unavailable, cannot open store", "path", dbPath, "error", err)
 		return
 	}
 	defer db.Close()
