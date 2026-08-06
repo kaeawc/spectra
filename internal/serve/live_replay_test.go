@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -20,9 +21,13 @@ import (
 )
 
 // seededDaemon starts a daemon whose replay state (ring + collector) is caller
-// supplied, so the live.* / process.* handlers can be exercised against known data.
-func seededDaemon(t *testing.T, ring *livehistory.Ring, collector *metrics.Collector) (*json.Encoder, *json.Decoder) {
+// supplied, so the live.* / process.* handlers can be exercised against known
+// data. It returns the backing DB so process.history seeding is possible.
+func seededDaemon(t *testing.T, ring *livehistory.Ring, collector *metrics.Collector) (*json.Encoder, *json.Decoder, *store.DB) {
 	t.Helper()
+	// Use os.MkdirTemp with a short prefix (not t.TempDir): macOS limits Unix
+	// socket paths to 104 bytes and t.TempDir embeds the full test name, which
+	// exceeds that for these long test names. Mirrors testDaemonWithDB.
 	dir, err := os.MkdirTemp("", "sp")
 	if err != nil {
 		t.Fatal(err)
@@ -54,11 +59,11 @@ func seededDaemon(t *testing.T, ring *livehistory.Ring, collector *metrics.Colle
 	}
 	_ = conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(10 * time.Second))
 	t.Cleanup(func() { conn.Close() })
-	return json.NewEncoder(conn), json.NewDecoder(conn)
+	return json.NewEncoder(conn), json.NewDecoder(conn), db
 }
 
 func TestLiveCurrentEmptyRingErrors(t *testing.T) {
-	enc, dec := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
+	enc, dec, _ := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
 	resp := rpcCall(t, enc, dec, 80, "live.current", `{}`)
 	if resp.Error == nil {
 		t.Fatal("expected an error when the ring has no samples")
@@ -70,7 +75,7 @@ func TestLiveCurrentAndHistoryReplaySeededRing(t *testing.T) {
 	ring.Add(snapshot.Snapshot{ID: "s1"})
 	ring.Add(snapshot.Snapshot{ID: "s2"})
 	ring.Add(snapshot.Snapshot{ID: "s3"})
-	enc, dec := seededDaemon(t, ring, metrics.NewCollector())
+	enc, dec, _ := seededDaemon(t, ring, metrics.NewCollector())
 
 	// live.current returns the most recent snapshot.
 	cur := rpcCall(t, enc, dec, 81, "live.current", `{}`)
@@ -91,9 +96,12 @@ func TestLiveCurrentAndHistoryReplaySeededRing(t *testing.T) {
 	if !ok || len(arr) != 2 {
 		t.Fatalf("live.history len = %v, want 2 (result %T)", len(arr), hist.Result)
 	}
-	last := arr[1].(map[string]any)
-	if last["id"] != "s3" {
-		t.Fatalf("live.history last id = %v, want s3", last["id"])
+	// The last two snapshots (s2, s3) in chronological order — assert both.
+	if first := arr[0].(map[string]any); first["id"] != "s2" {
+		t.Fatalf("live.history[0] id = %v, want s2", first["id"])
+	}
+	if last := arr[1].(map[string]any); last["id"] != "s3" {
+		t.Fatalf("live.history[1] id = %v, want s3", last["id"])
 	}
 }
 
@@ -102,7 +110,7 @@ func TestProcessLiveReplaysSeededCollector(t *testing.T) {
 	now := time.Now()
 	collector.Add(metrics.Sample{PID: 4242, TakenAt: now.Add(-2 * time.Second), RSSKiB: 100})
 	collector.Add(metrics.Sample{PID: 4242, TakenAt: now.Add(-1 * time.Second), RSSKiB: 200})
-	enc, dec := seededDaemon(t, livehistory.NewRing(4), collector)
+	enc, dec, _ := seededDaemon(t, livehistory.NewRing(4), collector)
 
 	resp := rpcCall(t, enc, dec, 83, "process.live", `{"limit":10}`)
 	if resp.Error != nil {
@@ -119,18 +127,36 @@ func TestProcessLiveReplaysSeededCollector(t *testing.T) {
 }
 
 func TestProcessHistoryRequiresPID(t *testing.T) {
-	enc, dec := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
+	enc, dec, _ := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
 	resp := rpcCall(t, enc, dec, 84, "process.history", `{}`)
 	if resp.Error == nil || resp.Error.Code != -32602 {
 		t.Fatalf("expected CodeInvalidParams for missing pid, got %+v", resp.Error)
 	}
 }
 
-func TestProcessHistoryReturnsSliceForKnownPID(t *testing.T) {
-	enc, dec := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
-	// No aggregates written, so the DB returns an empty (but valid) result.
+func TestProcessHistoryReturnsSeededRows(t *testing.T) {
+	enc, dec, db := seededDaemon(t, livehistory.NewRing(4), metrics.NewCollector())
+
+	minute := time.Date(2026, 5, 6, 15, 4, 0, 0, time.UTC)
+	rows := []store.ProcessMetricRow{
+		{PID: 4242, MinuteAt: minute, AvgRSSKiB: 1000, MaxRSSKiB: 1200, AvgCPUPct: 1.5, MaxCPUPct: 2.0, SampleCount: 30},
+		{PID: 4242, MinuteAt: minute.Add(time.Minute), AvgRSSKiB: 2000, MaxRSSKiB: 2400, AvgCPUPct: 2.5, MaxCPUPct: 3.0, SampleCount: 60},
+	}
+	if err := db.SaveProcessMetrics(context.Background(), rows); err != nil {
+		t.Fatalf("seed SaveProcessMetrics: %v", err)
+	}
+
 	resp := rpcCall(t, enc, dec, 85, "process.history", `{"pid":4242,"limit":10}`)
 	if resp.Error != nil {
 		t.Fatalf("process.history: %v", resp.Error)
+	}
+	arr, ok := resp.Result.([]any)
+	if !ok || len(arr) != 2 {
+		t.Fatalf("process.history rows = %v, want 2 (result %T)", len(arr), resp.Result)
+	}
+	// Newest minute is returned first.
+	newest := arr[0].(map[string]any)
+	if newest["SampleCount"].(float64) != 60 || newest["MaxRSSKiB"].(float64) != 2400 {
+		t.Fatalf("newest row = %+v, want SampleCount 60 / MaxRSSKiB 2400", newest)
 	}
 }
