@@ -41,6 +41,7 @@ func V1Catalog() []Rule {
 		ruleSparseFileInflation(),
 		ruleGatekeeperRejected(),
 		ruleFDPressure(),
+		ruleProcessMemoryHog(),
 	}
 }
 

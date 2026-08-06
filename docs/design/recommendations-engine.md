@@ -211,6 +211,7 @@ Implemented rules:
 - `sparse-file-inflation`
 - `app-gatekeeper-rejected`
 - `fd-pressure`
+- `process-memory-hog`
 
 ## Out of scope for v1
 
