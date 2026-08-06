@@ -712,6 +712,7 @@ func (d detector) readEntitlementsDetail(appPath string) (sandboxed bool, notabl
 		"com.apple.security.cs.allow-unsigned-executable-memory": true,
 		"com.apple.security.automation.apple-events":             true,
 		"com.apple.security.virtualization":                      true,
+		"com.apple.security.get-task-allow":                      true,
 	}
 
 	for key := range notableKeys {

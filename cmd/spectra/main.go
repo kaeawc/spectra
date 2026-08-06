@@ -65,6 +65,7 @@ func subcommandList() []subcommand {
 		{"install-daemon", "Install the user LaunchAgent for spectra serve", runInstallDaemonCmd},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
+		{"crash", "Audit post-mortem readiness (can this machine produce a debuggable crash?)", runCrash},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
 		{"help", "Show this help text", runHelpCmd},

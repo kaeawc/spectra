@@ -35,6 +35,7 @@ run in-process on the local machine.
 | `power` | Show current battery and thermal state |
 | `storage` | Show disk volumes and `~/Library` footprint |
 | `process` | List running processes sorted by memory |
+| `crash` | Audit post-mortem readiness before a crash happens |
 | `playbook` | Show diagnostic playbooks and command plans |
 | `serve` | Run the local Unix-socket JSON-RPC daemon |
 | `connect` | Call a Spectra daemon over Unix socket or TCP JSON-RPC |
@@ -362,6 +363,26 @@ spectra network capture stop --summarize netcap-1
 spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
 spectra network firewall
 spectra network firewall --json
+```
+
+## `spectra crash readiness`
+
+Audits whether the machine can produce a debuggable crash *before* one
+happens, so you don't discover an unrecoverable configuration after the
+fact. Checks the host crash-capture prerequisites — `kern.coredump`,
+`kern.corefile`, the `RLIMIT_CORE` soft limit, whether `/cores` exists, and
+`com.apple.CrashReporter` `DialogType` — and, when given an app path, whether
+that app is attachable (hardened runtime plus the
+`com.apple.security.get-task-allow` entitlement). Each finding is `ok`,
+`warn`, or `critical` with a concrete fix. Purely diagnostic; it never
+changes system settings.
+
+### Examples
+
+```bash
+spectra crash readiness
+spectra crash readiness --json
+spectra crash readiness /Applications/MyApp.app
 ```
 
 ## `spectra playbook`
