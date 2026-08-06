@@ -29,16 +29,16 @@ func runCrashWithIO(args []string, stdout, stderr io.Writer, inspect func(string
 	case "", "readiness":
 		return runCrashReadiness(rest, stdout, stderr, inspect)
 	case "inspect":
-		return runCrashInspect(rest, stdout, stderr)
+		return runCrashInspect(rest, stdout, stderr, os.ReadFile)
 	case "resource":
-		return runCrashResource(rest, stdout, stderr)
+		return runCrashResource(rest, stdout, stderr, os.ReadFile)
 	default:
 		fmt.Fprintf(stderr, "unknown crash subcommand %q (want: readiness, inspect, resource)\n", sub)
 		return 2
 	}
 }
 
-func runCrashResource(args []string, stdout, stderr io.Writer) int {
+func runCrashResource(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error)) int {
 	fs := flag.NewFlagSet("crash resource", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
@@ -49,24 +49,14 @@ func runCrashResource(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	path := fs.Arg(0)
-	if path == "" {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
-		return 1
-	}
-	report, err := crashreport.Parse(data)
-	if err != nil {
-		if errors.Is(err, crashreport.ErrLegacyFormat) {
-			fmt.Fprintf(stderr, "%s is a legacy plain-text report; spectra decodes modern .ips reports.\n", path)
-			return 1
-		}
-		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
-		return 1
+	path := fs.Arg(0)
+	report, code := loadCrashReport(path, readFile, stderr)
+	if code != 0 {
+		return code
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -122,7 +112,7 @@ func orDash(s string) string {
 	return s
 }
 
-func runCrashInspect(args []string, stdout, stderr io.Writer) int {
+func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error)) int {
 	fs := flag.NewFlagSet("crash inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
@@ -134,24 +124,13 @@ func runCrashInspect(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	path := fs.Arg(0)
-	if path == "" {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
-		return 1
-	}
-	report, err := crashreport.Parse(data)
-	if err != nil {
-		if errors.Is(err, crashreport.ErrLegacyFormat) {
-			fmt.Fprintf(stderr, "%s is a legacy plain-text crash report; spectra decodes modern .ips JSON reports.\n", path)
-			return 1
-		}
-		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
-		return 1
+	report, code := loadCrashReport(fs.Arg(0), readFile, stderr)
+	if code != 0 {
+		return code
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -164,6 +143,26 @@ func runCrashInspect(args []string, stdout, stderr io.Writer) int {
 	}
 	renderCrashReport(stdout, report, *all)
 	return 0
+}
+
+// loadCrashReport reads and parses one .ips report, mapping failures to a
+// process exit code (0 on success). readFile is injected for testability.
+func loadCrashReport(path string, readFile func(string) ([]byte, error), stderr io.Writer) (*crashreport.Report, int) {
+	data, err := readFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
+		return nil, 1
+	}
+	report, err := crashreport.Parse(data)
+	if err != nil {
+		if errors.Is(err, crashreport.ErrLegacyFormat) {
+			fmt.Fprintf(stderr, "%s is a legacy plain-text crash report; spectra decodes modern .ips JSON reports.\n", path)
+			return nil, 1
+		}
+		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
+		return nil, 1
+	}
+	return report, 0
 }
 
 func renderCrashReport(w io.Writer, r *crashreport.Report, allThreads bool) {

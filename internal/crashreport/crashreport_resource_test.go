@@ -61,6 +61,17 @@ func TestResourceUnknownFlavor(t *testing.T) {
 	}
 }
 
+func TestResourceFlavorFallbackToIndicator(t *testing.T) {
+	// Empty subtype, but the termination indicator names the flavor.
+	r, err := Parse([]byte(resourceIPS("", "CPU")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Resource == nil || r.Resource.Flavor != "CPU" {
+		t.Fatalf("resource = %+v, want flavor CPU derived from the indicator", r.Resource)
+	}
+}
+
 func TestNonResourceHasNoResource(t *testing.T) {
 	r, err := Parse([]byte(sampleIPS)) // EXC_BAD_ACCESS fixture from crashreport_test.go
 	if err != nil {
