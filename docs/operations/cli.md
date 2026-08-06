@@ -52,6 +52,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `hosts` | List hosts known from stored snapshots |
 | `fleet` | Cross-host symptom rollups and version-drift matrices |
 | `bisect` | Find the snapshot where a rule started firing, and what changed alongside it |
+| `reconcile` | Print an advisory plan to make one host's toolchain match another's |
 | `status` | Check whether the local daemon is running |
 | `metrics` | Show stored process metrics from daemon sampling |
 | `sample` | Collect a user-space CPU sample of a process |
@@ -797,6 +798,27 @@ the cause**. `--host` selects the host (defaults to the only stored one);
 ```bash
 spectra bisect app-no-hardened-runtime
 spectra bisect app-no-hardened-runtime --host work-mac --json
+```
+
+## `spectra reconcile`
+
+Turns toolchain drift from a read-only diff into an actionable checklist:
+an **advisory, print-only** plan to make one host's toolchain match
+another's, over the snapshots in the local store. It compares JDKs (by
+major, naming the target's vendor/release), Homebrew formulae (install /
+upgrade to the target version), the language runtimes, and `JAVA_HOME` /
+active-JVM-manager differences.
+
+Every line is a **description, not a runnable command** — install steps
+name the target's vendor/cask/release rather than assert an exact command
+that may not exist on your tap. Nothing is executed. `--from` selects the
+source host (defaults to this machine); `--json` emits the structured plan.
+
+### Examples
+
+```bash
+spectra reconcile ci-mac-1
+spectra reconcile ci-mac-1 --from my-laptop --json
 ```
 
 ## `spectra fleet`
