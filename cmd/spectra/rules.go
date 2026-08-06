@@ -88,6 +88,8 @@ func runRules(args []string) int {
 		return 0
 	}
 
+	printSnapshotWarnings(os.Stderr, snap.Warnings)
+
 	if len(findings) == 0 {
 		fmt.Println("no findings — all rules passed")
 		return 0
@@ -95,6 +97,15 @@ func runRules(args []string) int {
 
 	printFindings(findings)
 	return 0
+}
+
+// printSnapshotWarnings surfaces degraded-collection warnings so a partial
+// snapshot ("no findings — all rules passed") is not mistaken for a clean
+// machine. Warnings go to stderr to keep stdout parseable.
+func printSnapshotWarnings(w io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+	}
 }
 
 func loadRuleCatalog(configPath string, stderr io.Writer) ([]rules.Rule, error) {

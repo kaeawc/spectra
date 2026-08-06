@@ -22,14 +22,23 @@ type CollectOptions struct {
 // metadata via jcmd. Returns nil if jps is not on PATH (no JDK installed).
 // Any per-process collection failure is silently absorbed.
 func CollectAll(ctx context.Context, opts CollectOptions) []Info {
+	infos, _ := CollectAllStatus(ctx, opts)
+	return infos
+}
+
+// CollectAllStatus is CollectAll plus whether jps was available. A false
+// availability means JVM discovery could not run (jps missing), so an empty
+// result does not imply no JVMs are present — callers can surface that as a
+// degraded-collection warning.
+func CollectAllStatus(ctx context.Context, opts CollectOptions) (infos []Info, jpsAvailable bool) {
 	run := opts.CmdRunner
 	if run == nil {
 		run = DefaultRunner
 	}
 
-	pids := discoverPIDs(run)
+	pids, available := discoverPIDs(run)
 	if len(pids) == 0 {
-		return nil
+		return nil, available
 	}
 
 	results := make([]Info, 0, len(pids))
@@ -48,7 +57,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		}()
 	}
 	wg.Wait()
-	return results
+	return results, available
 }
 
 // InspectPID collects Info for a specific PID without running jps.

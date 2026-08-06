@@ -11,14 +11,16 @@ func DefaultRunner(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
 }
 
-// discoverPIDs runs `jps -l` and returns a map of PID → main class.
-// Returns nil if jps is not found or returns an error (no JDK in PATH).
-func discoverPIDs(run CmdRunner) map[int]string {
+// discoverPIDs runs `jps -l` and returns a map of PID → main class, plus
+// whether jps was available (ran without error). available is false when jps
+// is not on PATH or errored, which is distinct from jps running and finding no
+// JVMs (empty map, available true).
+func discoverPIDs(run CmdRunner) (pids map[int]string, available bool) {
 	out, err := run("jps", "-l")
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	return parseJPS(string(out))
+	return parseJPS(string(out)), true
 }
 
 // parseJPS parses `jps -l` output into a PID → main-class map.
