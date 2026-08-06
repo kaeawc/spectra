@@ -456,6 +456,23 @@ spectra web fuses /Applications/SomeChatApp.app
 spectra web fuses --json /Applications/SomeChatApp.app
 ```
 
+## `spectra web processes`
+
+Attributes a running Electron/Chromium app's memory to each helper role.
+Activity Monitor shows a dozen identically named "Helper (Renderer)"
+processes; this decodes each one's Chromium role from its command line
+(`--type=renderer|gpu-process|utility`, `--utility-sub-type`,
+`--renderer-client-id`) and rolls up RSS per role — browser, renderer, GPU,
+utility — flagging the renderer whose memory most exceeds the renderer
+median. `--json` emits the structured topology.
+
+### Examples
+
+```bash
+spectra web processes /Applications/Slack.app
+spectra web processes --json /Applications/Slack.app
+```
+
 ## `spectra playbook`
 
 Shows problem-first diagnostic workflows over existing collectors. Use it
