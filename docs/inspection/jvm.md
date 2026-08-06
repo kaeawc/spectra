@@ -32,7 +32,7 @@ spectra jvm
 spectra jvm --json
 spectra jvm <pid>
 spectra jvm explain [--samples 1] [--interval 1s] <pid>
-spectra jvm thread-dump <pid>
+spectra jvm thread-dump [--json] [--summary] <pid>
 spectra jvm heap-histogram <pid>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
