@@ -42,6 +42,8 @@ func V1Catalog() []Rule {
 		ruleGatekeeperRejected(),
 		ruleFDPressure(),
 		ruleProcessMemoryHog(),
+		ruleNetworkProxyConfigured(),
+		ruleNetworkHostsOverride(),
 	}
 }
 

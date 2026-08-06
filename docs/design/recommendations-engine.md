@@ -212,6 +212,8 @@ Implemented rules:
 - `app-gatekeeper-rejected`
 - `fd-pressure`
 - `process-memory-hog`
+- `network.proxy_configured`
+- `network.hosts_override`
 
 ## Out of scope for v1
 
