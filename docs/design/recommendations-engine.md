@@ -197,6 +197,7 @@ Implemented rules:
 - `library-storage-footprint`
 - `app-no-hardened-runtime`
 - `app-unsigned`
+- `electron-chromium-eol`
 - `login-item-dangling`
 - `brew-deprecated-formula`
 - `brew-stale-pinned`

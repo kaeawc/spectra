@@ -32,6 +32,7 @@ func V1Catalog() []Rule {
 		ruleStorageFootprint(),
 		ruleAppNoHardenedRuntime(),
 		ruleAppUnsigned(),
+		ruleElectronChromiumEOL(),
 		ruleLoginItemDangling(),
 		ruleBrewDeprecatedFormula(),
 		ruleBrewStalePinned(),
