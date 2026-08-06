@@ -519,6 +519,8 @@ or MagicDNS names for daemons started with `--tsnet`.
 | `spectra connect <target> network-by-app [App.app ...]` | Call `network.byApp` |
 | `spectra connect <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp\|udp] [host=HOST] [port=N]` | Call `helper.net_capture.start` |
 | `spectra connect <target> network-capture-stop <handle>` | Call `helper.net_capture.stop` |
+| `spectra connect <target> network-capture-summarize <pcap-path> [limit=N]` | Call `network.capture.summarize` |
+| `spectra connect <target> network-diagnose [app_path=P] [pid=N] [target=HOST] [port=N] [timeout_ms=N]` | Call `network.diagnose` |
 | `spectra connect <target> storage` | Call `storage.system` |
 | `spectra connect <target> storage <App.app> [more.apps]` | Call `storage.byApp` |
 | `spectra connect <target> power` | Call `power.state` |

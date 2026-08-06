@@ -88,6 +88,8 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> metrics [pid] [limit] | telemetry [pid] [limit]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-start <iface> [duration_ms=N] [snap_len=N] [proto=tcp|udp] [host=HOST] [port=N]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-stop <handle>")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-capture-summarize <pcap-path> [limit=N]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> network-diagnose [app_path=P] [pid=N] [target=HOST] [port=N] [timeout_ms=N]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> cache [stats|clear [kind]]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> sample <pid> [duration] [interval]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
@@ -201,30 +203,33 @@ func parseConnectRules(args []string) (string, json.RawMessage, bool, error) {
 
 func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage, bool, error) {
 	return map[string]func([]string) (string, json.RawMessage, bool, error){
-		"diff":                  parseConnectSnapshotDiff,
-		"inspect":               parseConnectInspect,
-		"network":               parseConnectNetwork,
-		"jvm":                   parseConnectJVM,
-		"jvm-jfr-start":         parseConnectJFRStart,
-		"jvm-jfr-stop":          parseConnectJFRStop,
-		"jvm-jfr-dump":          parseConnectJFRDump,
-		"jvm-jfr-summary":       parseConnectJFRSummary,
-		"jvm-flamegraph":        parseConnectJVMFlamegraph,
-		"jvm-telemetry":         parseConnectJVMTelemetry,
-		"jvm-heap-dump":         parseConnectJVMHeapDump,
-		"jvm-mbean-read":        parseConnectJVMMBeanRead,
-		"jvm-mbean-invoke":      parseConnectJVMMBeanInvoke,
-		"telemetry":             parseConnectTelemetry,
-		"metrics":               parseConnectMetrics,
-		"network-capture-start": parseConnectNetworkCaptureStart,
-		"netcap-start":          parseConnectNetworkCaptureStart,
-		"network-capture-stop":  parseConnectNetworkCaptureStop,
-		"netcap-stop":           parseConnectNetworkCaptureStop,
-		"sample":                parseConnectSample,
-		"storage":               parseConnectStorage,
-		"rules":                 parseConnectRules,
-		"issues":                parseConnectIssues,
-		"snapshot":              parseConnectSnapshot,
+		"diff":                      parseConnectSnapshotDiff,
+		"inspect":                   parseConnectInspect,
+		"network":                   parseConnectNetwork,
+		"jvm":                       parseConnectJVM,
+		"jvm-jfr-start":             parseConnectJFRStart,
+		"jvm-jfr-stop":              parseConnectJFRStop,
+		"jvm-jfr-dump":              parseConnectJFRDump,
+		"jvm-jfr-summary":           parseConnectJFRSummary,
+		"jvm-flamegraph":            parseConnectJVMFlamegraph,
+		"jvm-telemetry":             parseConnectJVMTelemetry,
+		"jvm-heap-dump":             parseConnectJVMHeapDump,
+		"jvm-mbean-read":            parseConnectJVMMBeanRead,
+		"jvm-mbean-invoke":          parseConnectJVMMBeanInvoke,
+		"telemetry":                 parseConnectTelemetry,
+		"metrics":                   parseConnectMetrics,
+		"network-capture-start":     parseConnectNetworkCaptureStart,
+		"netcap-start":              parseConnectNetworkCaptureStart,
+		"network-capture-stop":      parseConnectNetworkCaptureStop,
+		"netcap-stop":               parseConnectNetworkCaptureStop,
+		"network-capture-summarize": parseConnectNetworkCaptureSummarize,
+		"netcap-summarize":          parseConnectNetworkCaptureSummarize,
+		"network-diagnose":          parseConnectNetworkDiagnose,
+		"sample":                    parseConnectSample,
+		"storage":                   parseConnectStorage,
+		"rules":                     parseConnectRules,
+		"issues":                    parseConnectIssues,
+		"snapshot":                  parseConnectSnapshot,
 	}
 }
 
@@ -746,6 +751,67 @@ func parseConnectNetworkCaptureStop(args []string) (string, json.RawMessage, boo
 		return "", nil, true, fmt.Errorf("connect %s requires <handle>", args[0])
 	}
 	return "helper.net_capture.stop", connectParams(map[string]string{"handle": args[1]}), true, nil
+}
+
+func parseConnectNetworkCaptureSummarize(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 {
+		return "", nil, true, fmt.Errorf("connect %s requires <pcap-path> [limit=N]", args[0])
+	}
+	params := map[string]any{"path": args[1]}
+	for _, raw := range args[2:] {
+		key, value, ok := strings.Cut(raw, "=")
+		if !ok || value == "" {
+			return "", nil, true, fmt.Errorf("connect %s optional args must be key=value", args[0])
+		}
+		if key != "limit" {
+			return "", nil, true, fmt.Errorf("connect %s unknown option %q", args[0], key)
+		}
+		n, err := parseConnectPositiveInt(value, key)
+		if err != nil {
+			return "", nil, true, err
+		}
+		params[key] = n
+	}
+	return "network.capture.summarize", connectParams(params), true, nil
+}
+
+func parseConnectNetworkDiagnose(args []string) (string, json.RawMessage, bool, error) {
+	params := map[string]any{}
+	var targets []string
+	var ports []int
+	for _, raw := range args[1:] {
+		key, value, ok := strings.Cut(raw, "=")
+		if !ok || value == "" {
+			return "", nil, true, fmt.Errorf("connect %s optional args must be key=value", args[0])
+		}
+		switch key {
+		case "app_path", "command":
+			params[key] = value
+		case "pid", "timeout_ms":
+			n, err := parseConnectPositiveInt(value, key)
+			if err != nil {
+				return "", nil, true, err
+			}
+			params[key] = n
+		case "target":
+			targets = append(targets, value)
+		case "port":
+			n, err := parseConnectPositiveInt(value, key)
+			if err != nil {
+				return "", nil, true, err
+			}
+			ports = append(ports, n)
+		default:
+			return "", nil, true, fmt.Errorf("connect %s unknown option %q", args[0], key)
+		}
+	}
+	if len(targets) > 0 {
+		params["targets"] = targets
+	}
+	if len(ports) > 0 {
+		params["ports"] = ports
+	}
+	return "network.diagnose", connectParams(params), true, nil
 }
 
 func connectPIDShortcuts() map[string]string {
