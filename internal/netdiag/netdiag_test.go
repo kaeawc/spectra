@@ -70,6 +70,51 @@ func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
 	}
 }
 
+func TestDiagnoseProbesEndpointsInOrder(t *testing.T) {
+	// Explicit multi-target diagnosis exercises the concurrent endpoint fan-out;
+	// the result must stay in endpointTargets order regardless of probe timing.
+	// Runners here return errors (never t.Fatalf) since they run off-goroutine.
+	run := func(name string, args ...string) ([]byte, error) {
+		cmd := fakeCommand(name, args...)
+		switch {
+		case cmd == "route -n get default", cmd == "scutil --dns", cmd == "scutil --proxy",
+			cmd == "ifconfig", strings.HasPrefix(cmd, "lsof "), strings.HasPrefix(cmd, "nettop "):
+			return []byte(""), nil
+		case strings.HasPrefix(cmd, "dig "):
+			return []byte(digNOERRORFixture), nil
+		case strings.HasPrefix(cmd, "traceroute "):
+			return []byte("1 192.0.2.1 1.0 ms\n"), nil
+		default:
+			return nil, errors.New("unexpected command: " + cmd)
+		}
+	}
+	opts := Options{
+		Targets:    []string{"c.example", "a.example", "b.example", "d.example"},
+		Ports:      []int{443},
+		NetRunner:  run,
+		ProcRunner: func(context.Context, process.CollectOptions) []process.Info { return nil },
+		Dialer:     fakeDialer{},
+		TLSProbe:   fakeTLS{},
+	}
+	report, err := Diagnose(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	want := endpointTargets(opts.Targets, nil, opts.Ports)
+	if len(want) < 2 {
+		t.Fatalf("test needs multiple targets to exercise fan-out, got %d", len(want))
+	}
+	if len(report.Endpoints) != len(want) {
+		t.Fatalf("endpoints = %d, want %d", len(report.Endpoints), len(want))
+	}
+	for i := range want {
+		if report.Endpoints[i].Host != want[i].host {
+			t.Fatalf("endpoint[%d].Host = %q, want %q (fan-out must preserve target order)",
+				i, report.Endpoints[i].Host, want[i].host)
+		}
+	}
+}
+
 func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 	t.Helper()
 	fixtures := map[string][]byte{

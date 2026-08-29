@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -179,25 +180,10 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 	diagnosticNoEndpoints := len(report.Connections) > 0 &&
 		len(targets) == 0 &&
 		(len(opts.Targets) > 0 || len(opts.Ports) > 0)
-	for _, target := range targets {
-		diag := EndpointDiagnosis{
-			Host:       target.host,
-			DNS:        probeDNS(run, target.host),
-			Traceroute: probeTrace(run, target.host),
-		}
-		for _, port := range target.ports {
-			pd := PortDiagnosis{Port: port, TCP: probeTCP(ctx, dialer, target.host, port)}
-			if port == 443 || port == 8443 {
-				tp, err := tlsProbe.ProbeTLS(ctx, target.host, port, opts.Timeout)
-				if err != nil {
-					tp = TLSProbe{Error: err.Error()}
-				}
-				pd.TLS = &tp
-			}
-			diag.Ports = append(diag.Ports, pd)
-		}
-		report.Endpoints = append(report.Endpoints, diag)
-	}
+	// Each target's probes (DNS, a up-to-12s traceroute, per-port TCP/TLS
+	// dials) are independent and network-I/O-bound, so run them concurrently.
+	// Results are written by index to keep output ordering deterministic.
+	report.Endpoints = diagnoseEndpoints(ctx, run, dialer, tlsProbe, targets, opts.Timeout)
 	report.Findings = findings(report)
 	if diagnosticNoEndpoints {
 		report.Findings = append(report.Findings, Finding{
@@ -404,6 +390,61 @@ func splitHostPortLoose(addr string) (string, int) {
 		return strings.Trim(addr, "[]"), 0
 	}
 	return strings.Trim(addr[:idx], "[]"), port
+}
+
+// maxEndpointConcurrency bounds how many endpoints are probed at once. Probes
+// are network-I/O-bound (and traceroute can block for ~12s), so a small fixed
+// fan-out keeps a many-endpoint diagnosis from serializing into minutes without
+// spawning an unbounded number of traceroutes.
+const maxEndpointConcurrency = 8
+
+// diagnoseEndpoints probes every target concurrently (bounded) and returns the
+// diagnoses in the same order as targets.
+func diagnoseEndpoints(ctx context.Context, run netstate.CmdRunner, dialer Dialer, tlsProbe TLSProber, targets []target, timeout time.Duration) []EndpointDiagnosis {
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]EndpointDiagnosis, len(targets))
+	limit := maxEndpointConcurrency
+	if len(targets) < limit {
+		limit = len(targets)
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i := range targets {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			out[i] = diagnoseEndpoint(ctx, run, dialer, tlsProbe, targets[i], timeout)
+		}(i)
+	}
+	wg.Wait()
+	return out
+}
+
+// diagnoseEndpoint runs the DNS, traceroute, and per-port TCP/TLS probes for a
+// single target. It has no shared mutable state, so callers may run it
+// concurrently across targets.
+func diagnoseEndpoint(ctx context.Context, run netstate.CmdRunner, dialer Dialer, tlsProbe TLSProber, t target, timeout time.Duration) EndpointDiagnosis {
+	diag := EndpointDiagnosis{
+		Host:       t.host,
+		DNS:        probeDNS(run, t.host),
+		Traceroute: probeTrace(run, t.host),
+	}
+	for _, port := range t.ports {
+		pd := PortDiagnosis{Port: port, TCP: probeTCP(ctx, dialer, t.host, port)}
+		if port == 443 || port == 8443 {
+			tp, err := tlsProbe.ProbeTLS(ctx, t.host, port, timeout)
+			if err != nil {
+				tp = TLSProbe{Error: err.Error()}
+			}
+			pd.TLS = &tp
+		}
+		diag.Ports = append(diag.Ports, pd)
+	}
+	return diag
 }
 
 func probeDNS(run netstate.CmdRunner, host string) DNSProbe {
