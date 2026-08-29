@@ -510,7 +510,9 @@ func TestNodeAppInspectorDependenciesWithFakeFS(t *testing.T) {
 	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/a.jar"), "")
 	fsys.addFile(filepath.Join(app, "Contents/lib/runtime/readme.txt"), "")
 
-	deps := (nodeAppInspector{fs: fsys, cmd: fakeNodeCommands{}}).scanDependencies(app)
+	ins := nodeAppInspector{fs: fsys, cmd: fakeNodeCommands{}}
+	jarCount := ins.countJars(filepath.Join(app, "Contents"))
+	deps := ins.scanDependencies(app, jarCount)
 	if deps == nil {
 		t.Fatal("Dependencies nil")
 	}
