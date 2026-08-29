@@ -445,6 +445,22 @@ spectra crash signatures
 spectra crash signatures --json
 ```
 
+## `spectra crash state`
+
+Reconstructs what the machine was doing around a crash. Given a `.ips`
+report, it finds the **nearest stored snapshot by time** (within `--window`,
+default 1h) and shows the machine context at that moment — top processes by
+RSS and thermal state — reported as **correlational, not cause**, and
+bounded by snapshot cadence. `--host` selects the host; `--json` structured.
+A precursor to a unified incident timeline.
+
+### Examples
+
+```bash
+spectra crash state ~/Library/Logs/DiagnosticReports/MyApp-2026.ips
+spectra crash state --window 30m --json report.ips
+```
+
 ## `spectra crash inspect`
 
 Decodes a modern macOS `.ips` crash report (the JSON reports written to
