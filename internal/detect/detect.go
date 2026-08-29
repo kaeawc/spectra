@@ -261,10 +261,61 @@ type Options struct {
 
 type detector struct {
 	opts Options
+	// plists caches parsed plist dictionaries by path so a bundle's
+	// Info.plist is converted by `plutil` once, not once per key. The map
+	// is a reference type, so value copies of detector share it within a
+	// single DetectWith call. Nil-tolerant: plistDict handles an unset map.
+	plists map[string]map[string]any
 }
 
 func newDetector(opts Options) detector {
-	return detector{opts: opts}
+	return detector{opts: opts, plists: map[string]map[string]any{}}
+}
+
+// plistDict parses a plist into a key→value map, converting it via a single
+// `plutil -convert json` exec and caching the result per path. Returns nil
+// (cached) when the file is missing or unparseable, so repeated lookups of a
+// non-existent plist stay cheap. The negative result is memoized too.
+func (d detector) plistDict(path string) map[string]any {
+	if d.plists != nil {
+		if cached, ok := d.plists[path]; ok {
+			return cached
+		}
+	}
+	var dict map[string]any
+	if out, err := d.output("plutil", "-convert", "json", "-o", "-", path); err == nil {
+		_ = json.Unmarshal(out, &dict)
+	}
+	if d.plists != nil {
+		d.plists[path] = dict
+	}
+	return dict
+}
+
+// plistScalar returns the string form of a top-level plist scalar, matching
+// what `plutil -extract <key> raw` would have printed for strings and
+// integral numbers.
+func plistScalar(dict map[string]any, key string) string {
+	v, ok := dict[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'g', -1, 64)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 func (d detector) output(name string, args ...string) ([]byte, error) {
@@ -392,7 +443,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.Rust = inspectRustApp(appPath, exe, &r)
 
 	d.populateMetadata(appPath, exe, &r)
-	r.PrivacyDescriptions = readPrivacyDescriptions(appPath)
+	r.PrivacyDescriptions = d.readPrivacyDescriptions(appPath)
 	r.Dependencies = scanDependencies(appPath)
 	r.PythonApp = scanPythonApp(appPath)
 	r.Helpers = scanHelpers(appPath)
@@ -429,7 +480,7 @@ func (d detector) populateMetadata(appPath, exe string, r *Result) {
 		efw := filepath.Join(appPath, "Contents", "Frameworks", "Electron Framework.framework", "Resources", "Info.plist")
 		r.ElectronVersion = d.readPlistString(efw, "CFBundleVersion")
 	}
-	r.FrameworkVersions = frameworkVersions(appPath, r)
+	r.FrameworkVersions = d.frameworkVersions(appPath, r)
 
 	if exe != "" {
 		r.Architectures = d.readArchitectures(exe)
@@ -443,17 +494,17 @@ func (d detector) populateMetadata(appPath, exe string, r *Result) {
 	r.Swift = inspectSwiftApp(appPath, exe, realSwiftInspectionSource{appGroups: appGroups})
 }
 
-func frameworkVersions(appPath string, r *Result) map[string]string {
+func (d detector) frameworkVersions(appPath string, r *Result) map[string]string {
 	versions := make(map[string]string)
 	if r.ElectronVersion != "" {
 		versions["Electron"] = r.ElectronVersion
 	}
 	flutterPlist := filepath.Join(appPath, "Contents", "Frameworks", "FlutterMacOS.framework", "Resources", "Info.plist")
-	if v := firstPlistString(flutterPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
+	if v := d.firstPlistString(flutterPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
 		versions["Flutter"] = v
 	}
 	qtPlist := filepath.Join(appPath, "Contents", "Frameworks", "QtCore.framework", "Resources", "Info.plist")
-	if v := firstPlistString(qtPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
+	if v := d.firstPlistString(qtPlist, "CFBundleShortVersionString", "CFBundleVersion"); v != "" {
 		versions["Qt"] = v
 	}
 	if v := readTauriVersion(appPath); v != "" {
@@ -465,9 +516,9 @@ func frameworkVersions(appPath string, r *Result) map[string]string {
 	return versions
 }
 
-func firstPlistString(plist string, keys ...string) string {
+func (d detector) firstPlistString(plist string, keys ...string) string {
 	for _, key := range keys {
-		if v := readPlistString(plist, key); v != "" {
+		if v := d.readPlistString(plist, key); v != "" {
 			return v
 		}
 	}
@@ -565,16 +616,8 @@ func scanStorage(appPath, bundleID string) *StorageFootprint {
 	return s
 }
 
-func readPlistString(plist, key string) string {
-	return newDetector(Options{}).readPlistString(plist, key)
-}
-
 func (d detector) readPlistString(plist, key string) string {
-	out, err := d.output("plutil", "-extract", key, "raw", "-o", "-", plist)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return plistScalar(d.plistDict(plist), key)
 }
 
 // readArchitectures inspects the Mach-O header(s) of exe via `file` and
@@ -1007,13 +1050,9 @@ func enrichFromExe(exe string, r *Result) {
 // CFBundleExecutable from Info.plist via plutil.
 func (d detector) mainExecutable(appPath string) (string, error) {
 	plist := filepath.Join(appPath, "Contents", "Info.plist")
-	out, err := d.output("plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", plist)
-	if err != nil {
-		return "", err
-	}
-	name := strings.TrimSpace(string(out))
+	name := plistScalar(d.plistDict(plist), "CFBundleExecutable")
 	if name == "" {
-		return "", fmt.Errorf("CFBundleExecutable empty in %s", plist)
+		return "", fmt.Errorf("CFBundleExecutable empty or unreadable in %s", plist)
 	}
 	exe := filepath.Join(appPath, "Contents", "MacOS", name)
 	if !exists(exe) {
@@ -1061,10 +1100,14 @@ func (ins nodeAppInspector) scanBinaryMarkers(exe string) (m binaryMarkers) {
 	buf := make([]byte, 1<<20) // 1MB chunks
 	overlap := 64
 	tail := make([]byte, 0, overlap)
+	// region is reused across iterations; its backing array is large enough to
+	// hold the carried-over tail plus a full chunk, so no per-read realloc.
+	region := make([]byte, 0, overlap+len(buf))
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
-			region := append(tail, buf[:n]...)
+			region = append(region[:0], tail...)
+			region = append(region, buf[:n]...)
 			for _, needle := range rustNeedles {
 				m.rustHits += bytes.Count(region, needle)
 			}
@@ -1765,23 +1808,26 @@ func appUptime(procs []ProcessInfo, now time.Time) (*time.Time, int64) {
 // readPrivacyDescriptions returns the NS*UsageDescription keys declared
 // in Info.plist along with their human-readable descriptions. These are
 // the strings macOS shows in permission prompts.
-func readPrivacyDescriptions(appPath string) map[string]string {
+func (d detector) readPrivacyDescriptions(appPath string) map[string]string {
 	plist := filepath.Join(appPath, "Contents", "Info.plist")
-	// Convert to xml1 once; cheaper than one plutil exec per key.
-	out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", plist).Output()
-	if err != nil {
+	dict := d.plistDict(plist) // reuses the cached parse from populateMetadata
+	if len(dict) == 0 {
 		return nil
 	}
-	xml := string(out)
-	// Match <key>NS*UsageDescription</key><string>...</string> pairs.
-	re := regexp.MustCompile(`<key>(NS[A-Za-z]+UsageDescription)</key>\s*<string>([^<]*)</string>`)
-	matches := re.FindAllStringSubmatch(xml, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	result := make(map[string]string, len(matches))
-	for _, m := range matches {
-		result[m[1]] = m[2]
+	var result map[string]string
+	for k, v := range dict {
+		// NS*UsageDescription keys hold the strings macOS shows in prompts.
+		if !strings.HasPrefix(k, "NS") || !strings.HasSuffix(k, "UsageDescription") {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]string)
+		}
+		result[k] = s
 	}
 	return result
 }
@@ -1869,9 +1915,12 @@ func scanNetworkEndpoints(appPath, exe string) []string {
 	return defaultNodeAppInspector().scanNetworkEndpoints(appPath, exe)
 }
 
+// urlHostRE extracts the host from http(s) URL literals; compiled once.
+var urlHostRE = regexp.MustCompile(`(?i)https?://([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})`)
+
 func (ins nodeAppInspector) scanNetworkEndpoints(appPath, exe string) []string {
 	hosts := map[string]struct{}{}
-	urlRe := regexp.MustCompile(`(?i)https?://([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})`)
+	urlRe := urlHostRE
 
 	addFrom := func(path string) {
 		if path == "" {
@@ -1887,10 +1936,13 @@ func (ins nodeAppInspector) scanNetworkEndpoints(appPath, exe string) []string {
 		buf := make([]byte, 1<<20)
 		overlap := 256
 		tail := make([]byte, 0, overlap)
+		// Reused across reads so each 1MB chunk doesn't reallocate a region.
+		region := make([]byte, 0, overlap+len(buf))
 		for {
 			n, err := f.Read(buf)
 			if n > 0 {
-				region := append(tail, buf[:n]...)
+				region = append(region[:0], tail...)
+				region = append(region, buf[:n]...)
 				for _, m := range urlRe.FindAllSubmatch(region, -1) {
 					hosts[strings.ToLower(string(m[1]))] = struct{}{}
 				}

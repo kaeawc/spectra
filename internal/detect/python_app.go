@@ -14,6 +14,14 @@ import (
 
 var errStopPythonWalk = errors.New("stop python app walk")
 
+// Compiled once at package load — these were previously rebuilt on every call
+// (some inside directory walks, i.e. per file).
+var (
+	externalPythonInterpreterRE = regexp.MustCompile(`(/(?:opt/homebrew|usr/local|usr|Users/[^[:space:]"']+)/[^[:space:]"']*python[0-9.]*)`)
+	pythonLayoutVersionRE       = regexp.MustCompile(`python([0-9]+\.[0-9]+)`)
+	pythonDottedVersionRE       = regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+)
+
 type pythonAppFS interface {
 	Stat(name string) (fs.FileInfo, error)
 	ReadFile(name string) ([]byte, error)
@@ -73,8 +81,9 @@ func (s pythonAppScanner) Scan(appPath string) *PythonApp {
 	app.RuntimeSource, app.RuntimePath = s.resolvePythonRuntime(appPath)
 	app.Version = s.detectPythonVersion(appPath, app.RuntimePath)
 	app.ModuleRoots = s.pythonModuleRoots(appPath)
-	app.Packages = s.pythonPackages(appPath)
-	app.NativeExtensions = s.pythonNativeExtensions(appPath)
+	// One walk of Contents collects both dist-info packages and .so native
+	// extensions; they used to be two independent full-tree walks.
+	app.Packages, app.NativeExtensions = s.pythonPackagesAndExtensions(appPath)
 	app.RiskHints = s.pythonRiskHints(appPath, app)
 
 	if app.Packaging == "unknown" && app.RuntimePath == "" && len(app.ModuleRoots) == 0 && len(app.Packages) == 0 && len(app.NativeExtensions) == 0 {
@@ -164,8 +173,13 @@ func (s pythonAppScanner) pythonModuleRoots(appPath string) []string {
 	return dedupePythonStrings(roots)
 }
 
-func (s pythonAppScanner) pythonPackages(appPath string) []PythonPackage {
+// pythonPackagesAndExtensions walks Contents once, collecting both installed
+// packages (dist-info/egg-info METADATA) and compiled .so native extensions.
+// Splitting these into two walks doubled the traversal of large bundles for no
+// benefit; the matching and sort order here are identical to the originals.
+func (s pythonAppScanner) pythonPackagesAndExtensions(appPath string) ([]PythonPackage, []PythonNativeExtension) {
 	var packages []PythonPackage
+	var exts []PythonNativeExtension
 	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -174,20 +188,27 @@ func (s pythonAppScanner) pythonPackages(appPath string) []PythonPackage {
 			return nil
 		}
 		name := d.Name()
-		if name != "METADATA" && name != "PKG-INFO" {
-			return nil
-		}
-		parent := filepath.Base(filepath.Dir(path))
-		if !strings.HasSuffix(parent, ".dist-info") && !strings.HasSuffix(parent, ".egg-info") {
-			return nil
-		}
-		data, readErr := s.fs.ReadFile(path)
-		if readErr == nil {
-			pkg := parsePythonPackageMetadata(data)
-			if pkg.Name != "" {
-				pkg.Path = relToApp(appPath, path)
-				packages = append(packages, pkg)
+		switch {
+		case name == "METADATA" || name == "PKG-INFO":
+			parent := filepath.Base(filepath.Dir(path))
+			if !strings.HasSuffix(parent, ".dist-info") && !strings.HasSuffix(parent, ".egg-info") {
+				return nil
 			}
+			if data, readErr := s.fs.ReadFile(path); readErr == nil {
+				pkg := parsePythonPackageMetadata(data)
+				if pkg.Name != "" {
+					pkg.Path = relToApp(appPath, path)
+					packages = append(packages, pkg)
+				}
+			}
+		case strings.HasSuffix(name, ".so"):
+			ext := PythonNativeExtension{Name: name, Path: relToApp(appPath, path)}
+			if libs, err := s.otoolL(path); err == nil {
+				ext.LinkedLibs = libs
+				ext.Hints = pythonNativeExtensionHints(libs)
+				ext.RiskHints = pythonNativeExtensionRiskHints(libs, name)
+			}
+			exts = append(exts, ext)
 		}
 		return nil
 	})
@@ -197,30 +218,8 @@ func (s pythonAppScanner) pythonPackages(appPath string) []PythonPackage {
 		}
 		return strings.ToLower(packages[i].Name) < strings.ToLower(packages[j].Name)
 	})
-	return packages
-}
-
-func (s pythonAppScanner) pythonNativeExtensions(appPath string) []PythonNativeExtension {
-	var exts []PythonNativeExtension
-	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d == nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".so") {
-			return nil
-		}
-		rel := relToApp(appPath, path)
-		ext := PythonNativeExtension{Name: d.Name(), Path: rel}
-		if libs, err := s.otoolL(path); err == nil {
-			ext.LinkedLibs = libs
-			ext.Hints = pythonNativeExtensionHints(libs)
-			ext.RiskHints = pythonNativeExtensionRiskHints(libs, d.Name())
-		}
-		exts = append(exts, ext)
-		return nil
-	})
 	sort.Slice(exts, func(i, j int) bool { return exts[i].Path < exts[j].Path })
-	return exts
+	return packages, exts
 }
 
 func (s pythonAppScanner) pythonRiskHints(appPath string, app *PythonApp) []string {
@@ -362,7 +361,7 @@ func (s pythonAppScanner) launcherContainsAny(appPath string, needles []string) 
 }
 
 func (s pythonAppScanner) externalInterpreterFromLaunchers(appPath string) string {
-	re := regexp.MustCompile(`(/(?:opt/homebrew|usr/local|usr|Users/[^[:space:]"']+)/[^[:space:]"']*python[0-9.]*)`)
+	re := externalPythonInterpreterRE
 	var found string
 	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents", "MacOS"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -384,7 +383,7 @@ func (s pythonAppScanner) externalInterpreterFromLaunchers(appPath string) strin
 }
 
 func (s pythonAppScanner) versionFromLayout(appPath string) string {
-	re := regexp.MustCompile(`python([0-9]+\.[0-9]+)`)
+	re := pythonLayoutVersionRE
 	var version string
 	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -422,8 +421,7 @@ func (s pythonAppScanner) versionFromFile(path string) string {
 			}
 		}
 	}
-	re := regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
-	return re.FindString(string(data))
+	return pythonDottedVersionRE.FindString(string(data))
 }
 
 func parsePythonPackageMetadata(data []byte) PythonPackage {
