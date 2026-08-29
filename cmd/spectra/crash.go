@@ -34,8 +34,10 @@ func runCrashWithIO(args []string, stdout, stderr io.Writer, inspect func(string
 		return runCrashResource(rest, stdout, stderr, os.ReadFile)
 	case "list":
 		return runCrashList(rest, stdout, stderr)
+	case "signatures":
+		return runCrashSignatures(rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "unknown crash subcommand %q (want: readiness, inspect, resource, list)\n", sub)
+		fmt.Fprintf(stderr, "unknown crash subcommand %q (want: readiness, inspect, resource, list, signatures)\n", sub)
 		return 2
 	}
 }
