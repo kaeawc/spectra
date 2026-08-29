@@ -412,6 +412,23 @@ spectra crash readiness --json
 spectra crash readiness /Applications/MyApp.app
 ```
 
+## `spectra crash list`
+
+Sweeps the DiagnosticReports directory macOS writes crash reports into and
+prints a newest-first inventory — the answer to "what has been crashing on
+this Mac lately?" without opening Console. It recursively walks
+`~/Library/Logs/DiagnosticReports/` (including `Retired/` and dotfile
+reports), parses each `.ips` via the crash decoder, and skips legacy /
+unparseable files rather than failing. `--limit` caps the rows, `--dir`
+overrides the directory, and `--json` emits the structured inventory.
+
+### Examples
+
+```bash
+spectra crash list
+spectra crash list --limit 50 --json
+```
+
 ## `spectra crash inspect`
 
 Decodes a modern macOS `.ips` crash report (the JSON reports written to
