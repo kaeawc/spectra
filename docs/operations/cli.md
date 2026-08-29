@@ -429,6 +429,22 @@ spectra crash list
 spectra crash list --limit 50 --json
 ```
 
+## `spectra crash signatures`
+
+Groups the crash reports from `crash list` into recurring **signatures** —
+keyed on process + exception + top faulting frame — and ranks them by
+occurrence, so a flaky app's dozen identical crashes collapse into one line
+with a count and a first-seen/last-seen window. Each signature shows a
+sample report for drill-down. `--json` structured; `--limit`/`--dir` as with
+`crash list`.
+
+### Examples
+
+```bash
+spectra crash signatures
+spectra crash signatures --json
+```
+
 ## `spectra crash inspect`
 
 Decodes a modern macOS `.ips` crash report (the JSON reports written to
