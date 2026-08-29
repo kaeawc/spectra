@@ -418,8 +418,14 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	}
 	exe = followWrapper(exe)
 
+	// Walk the bundle once for sizes and the .jar count; classification, the
+	// size fields, and dependency scanning all consume these instead of each
+	// re-walking the tree.
+	actualSize, apparentSize, jarCount := bundleTreeStats(appPath)
+	r.BundleSizeBytes, r.ApparentSizeBytes = actualSize, apparentSize
+
 	// Layer 1: bundle markers. Decisive for most apps.
-	l1Decided := classifyByBundleMarkers(appPath, &r)
+	l1Decided := classifyByBundleMarkers(appPath, jarCount, &r)
 
 	if !l1Decided {
 		// Browser-style framework shims (Chrome, Edge, Brave) hide their
@@ -444,7 +450,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 
 	d.populateMetadata(appPath, exe, &r)
 	r.PrivacyDescriptions = d.readPrivacyDescriptions(appPath)
-	r.Dependencies = scanDependencies(appPath)
+	r.Dependencies = scanDependencies(appPath, jarCount)
 	r.PythonApp = scanPythonApp(appPath)
 	r.Helpers = scanHelpers(appPath)
 	r.ObjC = scanObjCInspection(appPath, exe, r)
@@ -485,7 +491,8 @@ func (d detector) populateMetadata(appPath, exe string, r *Result) {
 	if exe != "" {
 		r.Architectures = d.readArchitectures(exe)
 	}
-	r.BundleSizeBytes, r.ApparentSizeBytes = bundleSizes(appPath)
+	// r.BundleSizeBytes/ApparentSizeBytes are set by the caller from
+	// bundleTreeStats (one walk shared with jar counting).
 	r.TeamID, r.HardenedRuntime = d.readSigning(appPath)
 	var appGroups []string
 	r.Sandboxed, r.Entitlements, appGroups = d.readEntitlementsDetail(appPath)
@@ -658,6 +665,32 @@ func bundleSizes(appPath string) (actual, apparent int64) {
 	return actual, apparent
 }
 
+// bundleTreeStats walks the bundle exactly once and returns the actual
+// (sparse-aware) and apparent byte totals for all regular files, plus the
+// number of .jar files under Contents/. It replaces three independent
+// full-tree walks that classification, size accounting, and dependency
+// scanning each used to run: bundleSizes(appPath) and two countJars(Contents).
+func bundleTreeStats(appPath string) (actual, apparent int64, jars int) {
+	contents := filepath.Join(appPath, "Contents")
+	_ = filepath.WalkDir(appPath, func(path string, d os.DirEntry, _ error) error {
+		if d == nil || d.IsDir() {
+			return nil
+		}
+		// Match countJars(Contents): any non-dir entry ending .jar under Contents.
+		if strings.HasSuffix(d.Name(), ".jar") && strings.HasPrefix(path, contents) {
+			jars++
+		}
+		fi, _ := d.Info()
+		if fi == nil || !fi.Mode().IsRegular() {
+			return nil
+		}
+		actual += diskBytes(fi)
+		apparent += fi.Size()
+		return nil
+	})
+	return actual, apparent, jars
+}
+
 // bundleSize returns the actual (sparse-aware) disk usage for appPath.
 // Deprecated: prefer bundleSizes when you also need apparent size.
 func bundleSize(appPath string) int64 {
@@ -773,7 +806,7 @@ func (d detector) readEntitlementsDetail(appPath string) (sandboxed bool, notabl
 
 // --- Layer 1 ----------------------------------------------------------------
 
-func classifyByBundleMarkers(appPath string, r *Result) bool {
+func classifyByBundleMarkers(appPath string, jarCount int, r *Result) bool {
 	frameworks := filepath.Join(appPath, "Contents", "Frameworks")
 	resources := filepath.Join(appPath, "Contents", "Resources")
 	contents := filepath.Join(appPath, "Contents")
@@ -812,8 +845,8 @@ func classifyByBundleMarkers(appPath string, r *Result) bool {
 	}
 
 	// JVM-based apps: detect bundled JRE OR jar-heavy bundle.
+	// jarCount is precomputed by the caller's single bundle walk.
 	jvmRoot := findJVMRoot(contents)
-	jarCount := countJars(contents)
 	if jvmRoot != "" || jarCount >= 5 {
 		return classifyJVMMarkers(appPath, contents, jvmRoot, jarCount, r)
 	}
@@ -1475,11 +1508,9 @@ func followWrapper(exe string) string {
 }
 
 // countJars returns the number of .jar files anywhere under root.
-// Bounded by walk; bundles aren't deep.
-func countJars(root string) int {
-	return defaultNodeAppInspector().countJars(root)
-}
-
+// Bounded by walk; bundles aren't deep. Retained for tests that verify the
+// jar-counting logic against an injected filesystem; production counts jars
+// inline via bundleTreeStats.
 func (ins nodeAppInspector) countJars(root string) int {
 	var n int
 	_ = ins.fs.WalkDir(root, func(_ string, d os.DirEntry, _ error) error {
@@ -1834,11 +1865,11 @@ func (d detector) readPrivacyDescriptions(appPath string) map[string]string {
 
 // scanDependencies summarises third-party libraries embedded in the bundle.
 // Apple frameworks and Helper sub-apps are filtered out.
-func scanDependencies(appPath string) *Dependencies {
-	return defaultNodeAppInspector().scanDependencies(appPath)
+func scanDependencies(appPath string, jarCount int) *Dependencies {
+	return defaultNodeAppInspector().scanDependencies(appPath, jarCount)
 }
 
-func (ins nodeAppInspector) scanDependencies(appPath string) *Dependencies {
+func (ins nodeAppInspector) scanDependencies(appPath string, jarCount int) *Dependencies {
 	d := &Dependencies{}
 	frameworks := filepath.Join(appPath, "Contents", "Frameworks")
 	if entries, err := ins.fs.ReadDir(frameworks); err == nil {
@@ -1860,7 +1891,7 @@ func (ins nodeAppInspector) scanDependencies(appPath string) *Dependencies {
 
 	d.NPMPackages = ins.npmPackages(appPath)
 
-	d.JavaJars = ins.countJars(filepath.Join(appPath, "Contents"))
+	d.JavaJars = jarCount
 
 	if len(d.ThirdPartyFrameworks) == 0 && len(d.NPMPackages) == 0 && d.JavaJars == 0 {
 		return nil
