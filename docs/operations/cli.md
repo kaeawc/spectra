@@ -59,6 +59,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `cache` | Manage the local blob cache |
 | `install-helper` | Install the privileged helper daemon |
 | `install-daemon` | Install the user LaunchAgent for `spectra serve` |
+| `schedule` | Schedule periodic snapshot capture via a launchd agent |
 | `version` | Print Spectra version and exit |
 | `help` | Show top-level help |
 
@@ -616,6 +617,26 @@ the structured signals alongside the ranking so it's auditable.
 ```bash
 spectra whatswrong
 spectra whatswrong --json
+```
+
+## `spectra schedule`
+
+Installs a per-user LaunchAgent that runs `spectra snapshot` on an interval,
+so `spectra bisect` and `spectra anomalies` have a dense capture history to
+work over (both are only as good as how often snapshots and metrics were
+taken). Mirrors `install-daemon`: `install --interval <dur>` writes
+`~/Library/LaunchAgents/dev.spectra.snapshot.plist` (with `StartInterval`)
+and bootstraps it with launchd; `uninstall` removes it; `status` reports
+whether it's loaded; `print-plist` prints the plist without writing.
+`--no-load` writes the plist without loading it.
+
+### Examples
+
+```bash
+spectra schedule install --interval 30m
+spectra schedule status
+spectra schedule uninstall
+spectra schedule print-plist --interval 1h
 ```
 
 ## `spectra playbook`
