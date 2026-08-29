@@ -149,12 +149,12 @@ func (c fakeNodeCommands) OtoolL(path string) []string {
 
 // makeBundle creates a synthetic .app skeleton at t.TempDir()/Name.app
 // and returns its path. Subsequent helpers add markers.
-func makeBundle(t *testing.T, name string) string {
-	t.Helper()
-	app := filepath.Join(t.TempDir(), name+".app")
+func makeBundle(tb testing.TB, name string) string {
+	tb.Helper()
+	app := filepath.Join(tb.TempDir(), name+".app")
 	for _, sub := range []string{"Contents/MacOS", "Contents/Resources", "Contents/Frameworks"} {
 		if err := os.MkdirAll(filepath.Join(app, sub), 0o755); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 	}
 	// Minimal Info.plist (XML) pointing CFBundleExecutable at "main".
@@ -164,10 +164,10 @@ func makeBundle(t *testing.T, name string) string {
 <key>CFBundleExecutable</key><string>main</string>
 </dict></plist>`
 	if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(plist), 0o644); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(app, "Contents", "MacOS", "main"), []byte("\x7fELF placeholder"), 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return app
 }
