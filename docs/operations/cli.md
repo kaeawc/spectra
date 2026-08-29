@@ -461,6 +461,22 @@ spectra crash state ~/Library/Logs/DiagnosticReports/MyApp-2026.ips
 spectra crash state --window 30m --json report.ips
 ```
 
+## `spectra crash oom`
+
+Filters the crash inventory to **memory / OOM terminations** and attributes
+each. The reliable path is `EXC_RESOURCE(MEMORY)` — a high-watermark memory
+kill, already decoded — surfaced with the process, the limit/observed, and
+the plain-language reason; jetsam / low-memory bug_types are surfaced
+best-effort. Ordinary segfaults are excluded. `--json` structured;
+`--limit`/`--dir` as with `crash list`.
+
+### Examples
+
+```bash
+spectra crash oom
+spectra crash oom --json
+```
+
 ## `spectra crash inspect`
 
 Decodes a modern macOS `.ips` crash report (the JSON reports written to
