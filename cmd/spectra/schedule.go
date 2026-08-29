@@ -2,15 +2,30 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 const scheduleAgentLabel = "dev.spectra.snapshot"
+
+// validateScheduleInterval rejects intervals that can't be represented exactly
+// as the whole-second StartInterval a LaunchAgent takes, so the plist and the
+// reported value never disagree.
+func validateScheduleInterval(interval time.Duration) error {
+	if interval < time.Minute {
+		return errors.New("--interval must be at least 1m")
+	}
+	if interval%time.Second != 0 {
+		return errors.New("--interval must be a whole number of seconds")
+	}
+	return nil
+}
 
 func runSchedule(args []string) int {
 	return runScheduleWithIO(args, os.Stdout, os.Stderr, defaultDaemonAgentDeps())
@@ -44,8 +59,8 @@ func runScheduleInstall(args []string, stdout, stderr io.Writer, deps daemonAgen
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *interval < time.Minute {
-		fmt.Fprintln(stderr, "--interval must be at least 1m")
+	if err := validateScheduleInterval(*interval); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	plistPath, err := installScheduleAgent(int(interval.Seconds()), *noLoad, deps)
@@ -67,9 +82,13 @@ func runScheduleUninstall(_ []string, stdout, stderr io.Writer, deps daemonAgent
 	return 0
 }
 
-func runScheduleStatus(_ []string, stdout, _ io.Writer, deps daemonAgentDeps) int {
-	out, err := scheduleAgentStatus(deps)
+func runScheduleStatus(_ []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+	out, loaded, err := scheduleAgentStatus(deps)
 	if err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
+	}
+	if !loaded {
 		fmt.Fprintln(stdout, "spectra snapshot LaunchAgent is not loaded")
 		return 0
 	}
@@ -82,6 +101,10 @@ func runSchedulePrintPlist(args []string, stdout, stderr io.Writer, deps daemonA
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", time.Hour, "how often to capture a snapshot")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := validateScheduleInterval(*interval); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	exe, err := deps.executable()
@@ -153,12 +176,23 @@ func uninstallScheduleAgent(deps daemonAgentDeps) (string, error) {
 	return paths.plistPath, nil
 }
 
-func scheduleAgentStatus(deps daemonAgentDeps) ([]byte, error) {
+// scheduleAgentStatus returns the launchctl print output and whether the agent
+// is loaded. A "service not found" result means simply not-loaded (loaded=false,
+// err=nil); any other launchctl failure is a real error.
+func scheduleAgentStatus(deps daemonAgentDeps) ([]byte, bool, error) {
 	out, err := deps.output("print", "gui/"+deps.uid()+"/"+scheduleAgentLabel)
 	if err != nil {
-		return nil, fmt.Errorf("launchctl print: %w", err)
+		if isServiceNotFound(out, err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("launchctl print: %w", err)
 	}
-	return out, nil
+	return out, true, nil
+}
+
+func isServiceNotFound(out []byte, err error) bool {
+	blob := strings.ToLower(string(out) + " " + err.Error())
+	return strings.Contains(blob, "could not find") || strings.Contains(blob, "no such process")
 }
 
 func snapshotLaunchAgentPlist(executable string, intervalSec int, stdoutPath, stderrPath string) string {

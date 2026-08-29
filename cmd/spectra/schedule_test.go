@@ -9,10 +9,11 @@ import (
 )
 
 type fakeAgent struct {
-	written map[string][]byte
-	removed []string
-	runs    [][]string
-	printOK bool
+	written  map[string][]byte
+	removed  []string
+	runs     [][]string
+	printOK  bool
+	printErr bool // simulate a real launchctl failure (not "service not found")
 }
 
 func newFakeAgent() *fakeAgent { return &fakeAgent{written: map[string][]byte{}} }
@@ -27,10 +28,14 @@ func (f *fakeAgent) deps() daemonAgentDeps {
 		remove:     func(p string) error { f.removed = append(f.removed, p); return nil },
 		run:        func(a ...string) error { f.runs = append(f.runs, a); return nil },
 		output: func(a ...string) ([]byte, error) {
-			if f.printOK {
+			switch {
+			case f.printOK:
 				return []byte("dev.spectra.snapshot => loaded"), nil
+			case f.printErr:
+				return []byte("Operation not permitted"), errors.New("exit status 5")
+			default:
+				return []byte(`Could not find service "dev.spectra.snapshot"`), errors.New("exit status 113")
 			}
-			return nil, errors.New("not loaded")
 		},
 	}
 }
@@ -117,6 +122,29 @@ func TestScheduleStatusNotLoaded(t *testing.T) {
 	runScheduleWithIO([]string{"status"}, &out, &errBuf, f.deps())
 	if !strings.Contains(out.String(), "not loaded") {
 		t.Errorf("out = %q", out.String())
+	}
+}
+
+func TestScheduleInstallRejectsFractionalSeconds(t *testing.T) {
+	f := newFakeAgent()
+	var out, errBuf bytes.Buffer
+	if code := runScheduleWithIO([]string{"install", "--interval", "1m500ms"}, &out, &errBuf, f.deps()); code != 2 {
+		t.Fatalf("exit = %d, want 2 for a fractional-second interval", code)
+	}
+	if len(f.written) != 0 {
+		t.Errorf("nothing should be written for an invalid interval; got %v", f.written)
+	}
+}
+
+func TestScheduleStatusRealErrorFails(t *testing.T) {
+	f := newFakeAgent()
+	f.printErr = true
+	var out, errBuf bytes.Buffer
+	if code := runScheduleWithIO([]string{"status"}, &out, &errBuf, f.deps()); code != 1 {
+		t.Fatalf("exit = %d, want 1 for a real launchctl error", code)
+	}
+	if errBuf.Len() == 0 {
+		t.Error("a real launchctl error should be surfaced on stderr")
 	}
 }
 
