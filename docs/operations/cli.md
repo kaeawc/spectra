@@ -915,6 +915,9 @@ answers — the grouped result that fan-out enabled but never produced.
 
 - `spectra fleet symptom <rule-id>` groups hosts by whether that rule fires
   against their latest snapshot ("which Macs trip `app-no-hardened-runtime`?").
+- `spectra fleet issues` rolls every rule finding up across hosts,
+  deduplicated by (rule, subject), into one entry with the member host list
+  ranked most-widespread first ("5 hosts trip app-no-hardened-runtime").
 - `spectra fleet drift --jdk` / `--app <bundleID>` prints a per-host version
   matrix ("why does it repro on CI only?" — `laptop=21.0.6, ci-mac=17.0.10`).
 
@@ -927,6 +930,7 @@ than a false "missing". `--json` emits the structured result.
 spectra fleet symptom app-no-hardened-runtime
 spectra fleet drift --jdk
 spectra fleet drift --app com.tinyapp.jvm --json
+spectra fleet issues
 ```
 
 ## `spectra fan`

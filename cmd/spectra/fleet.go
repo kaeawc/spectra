@@ -22,7 +22,7 @@ func runFleet(args []string) int {
 
 func runFleetWithIO(args []string, stdout, stderr io.Writer, load fleetLoader) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(stderr, "usage: spectra fleet <symptom <rule-id> | drift (--jdk | --app <bundleID>)> [--json]")
+		fmt.Fprintln(stderr, "usage: spectra fleet <symptom <rule-id> | drift (--jdk | --app <bundleID>) | issues> [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -30,10 +30,46 @@ func runFleetWithIO(args []string, stdout, stderr io.Writer, load fleetLoader) i
 		return runFleetSymptom(args[1:], stdout, stderr, load)
 	case "drift":
 		return runFleetDrift(args[1:], stdout, stderr, load)
+	case "issues":
+		return runFleetIssues(args[1:], stdout, stderr, load)
 	default:
-		fmt.Fprintf(stderr, "unknown fleet subcommand %q (want: symptom, drift)\n", args[0])
+		fmt.Fprintf(stderr, "unknown fleet subcommand %q (want: symptom, drift, issues)\n", args[0])
 		return 2
 	}
+}
+
+func runFleetIssues(args []string, stdout, stderr io.Writer, load fleetLoader) int {
+	fs := flag.NewFlagSet("fleet issues", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "output JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: spectra fleet issues [--json]")
+		return 2
+	}
+	hosts, code := loadFleet(load, stderr)
+	if code != 0 {
+		return code
+	}
+	findings := fleet.RollupFindings(hosts, rules.V1Catalog())
+	if *asJSON {
+		return encodeJSON(stdout, stderr, findings)
+	}
+	if len(findings) == 0 {
+		fmt.Fprintf(stdout, "No findings across %d host(s).\n", len(hosts))
+		return 0
+	}
+	fmt.Fprintf(stdout, "Fleet findings across %d host(s):\n", len(hosts))
+	for _, f := range findings {
+		subject := ""
+		if f.Subject != "" {
+			subject = " (" + f.Subject + ")"
+		}
+		fmt.Fprintf(stdout, "  [%s] %s%s — %d host(s): %s\n", f.Severity, f.RuleID, subject, len(f.Hosts), joinOrDash(f.Hosts))
+	}
+	return 0
 }
 
 // defaultFleetLoader loads each host's latest snapshot from the local store.
