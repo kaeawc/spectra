@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/bundleid"
@@ -262,14 +263,21 @@ type Options struct {
 type detector struct {
 	opts Options
 	// plists caches parsed plist dictionaries by path so a bundle's
-	// Info.plist is converted by `plutil` once, not once per key. The map
-	// is a reference type, so value copies of detector share it within a
-	// single DetectWith call. Nil-tolerant: plistDict handles an unset map.
-	plists map[string]map[string]any
+	// Info.plist is converted by `plutil` once, not once per key. It is a
+	// pointer so value copies of detector share one cache — and one mutex —
+	// which lets DetectWith's concurrent sub-detections use the same detector
+	// safely. Nil-tolerant: plistDict handles an unset cache.
+	plists *plistCache
+}
+
+// plistCache is a mutex-guarded memo of parsed plist dictionaries by path.
+type plistCache struct {
+	mu sync.Mutex
+	m  map[string]map[string]any
 }
 
 func newDetector(opts Options) detector {
-	return detector{opts: opts, plists: map[string]map[string]any{}}
+	return detector{opts: opts, plists: &plistCache{m: map[string]map[string]any{}}}
 }
 
 // plistDict parses a plist into a key→value map, converting it via a single
@@ -277,17 +285,30 @@ func newDetector(opts Options) detector {
 // (cached) when the file is missing or unparseable, so repeated lookups of a
 // non-existent plist stay cheap. The negative result is memoized too.
 func (d detector) plistDict(path string) map[string]any {
-	if d.plists != nil {
-		if cached, ok := d.plists[path]; ok {
-			return cached
-		}
+	if d.plists == nil {
+		return d.parsePlist(path)
 	}
+	d.plists.mu.Lock()
+	if cached, ok := d.plists.m[path]; ok {
+		d.plists.mu.Unlock()
+		return cached
+	}
+	d.plists.mu.Unlock()
+
+	// Parse outside the lock (it execs plutil). A concurrent miss on the same
+	// path would parse twice and store identical content — harmless.
+	dict := d.parsePlist(path)
+
+	d.plists.mu.Lock()
+	d.plists.m[path] = dict
+	d.plists.mu.Unlock()
+	return dict
+}
+
+func (d detector) parsePlist(path string) map[string]any {
 	var dict map[string]any
 	if out, err := d.output("plutil", "-convert", "json", "-o", "-", path); err == nil {
 		_ = json.Unmarshal(out, &dict)
-	}
-	if d.plists != nil {
-		d.plists[path] = dict
 	}
 	return dict
 }
@@ -449,19 +470,60 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.Rust = inspectRustApp(appPath, exe, &r)
 
 	d.populateMetadata(appPath, exe, &r)
-	r.PrivacyDescriptions = d.readPrivacyDescriptions(appPath)
-	r.Dependencies = scanDependencies(appPath, jarCount)
-	r.PythonApp = scanPythonApp(appPath)
-	r.Helpers = scanHelpers(appPath)
-	r.ObjC = scanObjCInspection(appPath, exe, r)
-	r.LoginItems = d.scanLoginItems(appPath, r.BundleID)
-	r.RunningProcesses = d.scanRunningProcesses(appPath)
-	r.AppStartedAt, r.AppUptimeSeconds = appUptime(r.RunningProcesses, detectNow(opts))
-	r.GrantedPermissions = d.scanGrantedPermissions(r.BundleID)
-	r.GatekeeperStatus = d.readGatekeeperStatus(appPath)
-	if opts.ScanNetwork {
-		r.NetworkEndpoints = scanNetworkEndpoints(appPath, exe)
+
+	// The remaining sub-detections are independent and dominated by subprocess
+	// spawns and file I/O, so run them concurrently. Each goroutine writes only
+	// its own local and never touches r, so there are no data races; results are
+	// committed to r after the barrier. Inputs later detections need — BundleID
+	// from populateMetadata and a stable r snapshot for ObjC — are captured
+	// first, before any goroutine starts.
+	bundleID := r.BundleID
+	objcInput := r
+	var (
+		privacy    map[string]string
+		deps       *Dependencies
+		pyApp      *PythonApp
+		helpers    *Helpers
+		objc       *ObjCInspection
+		loginItems []LoginItem
+		running    []ProcessInfo
+		granted    []string
+		gatekeeper string
+		endpoints  []string
+	)
+	var wg sync.WaitGroup
+	spawn := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
 	}
+	spawn(func() { privacy = d.readPrivacyDescriptions(appPath) })
+	spawn(func() { deps = scanDependencies(appPath, jarCount) })
+	spawn(func() { pyApp = scanPythonApp(appPath) })
+	spawn(func() { helpers = scanHelpers(appPath) })
+	spawn(func() { objc = scanObjCInspection(appPath, exe, objcInput) })
+	spawn(func() { loginItems = d.scanLoginItems(appPath, bundleID) })
+	spawn(func() { running = d.scanRunningProcesses(appPath) })
+	spawn(func() { granted = d.scanGrantedPermissions(bundleID) })
+	spawn(func() { gatekeeper = d.readGatekeeperStatus(appPath) })
+	if opts.ScanNetwork {
+		spawn(func() { endpoints = scanNetworkEndpoints(appPath, exe) })
+	}
+	wg.Wait()
+
+	r.PrivacyDescriptions = privacy
+	r.Dependencies = deps
+	r.PythonApp = pyApp
+	r.Helpers = helpers
+	r.ObjC = objc
+	r.LoginItems = loginItems
+	r.RunningProcesses = running
+	r.AppStartedAt, r.AppUptimeSeconds = appUptime(running, detectNow(opts))
+	r.GrantedPermissions = granted
+	r.GatekeeperStatus = gatekeeper
+	r.NetworkEndpoints = endpoints
 	return r, nil
 }
 
