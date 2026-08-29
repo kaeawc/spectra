@@ -22,7 +22,7 @@ func runFleet(args []string) int {
 
 func runFleetWithIO(args []string, stdout, stderr io.Writer, load fleetLoader) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(stderr, "usage: spectra fleet <symptom <rule-id> | drift (--jdk | --app <bundleID>) | issues> [--json]")
+		fmt.Fprintln(stderr, "usage:\n  spectra fleet symptom [--json] <rule-id>\n  spectra fleet drift (--jdk | --app <bundleID>) [--json]\n  spectra fleet issues [--json]")
 		return 2
 	}
 	switch args[0] {
