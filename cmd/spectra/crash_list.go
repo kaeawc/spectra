@@ -116,6 +116,10 @@ func runCrashList(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
 	return runCrashListWithDeps(*asJSON, *limit, stdout, stderr, defaultCrashListDeps(*dir))
 }
 
@@ -157,5 +161,24 @@ func renderCrashList(w io.Writer, summaries []crashSummary, total, skipped int) 
 			when = s.at.Format("2006-01-02 15:04")
 		}
 		fmt.Fprintf(w, "  %-16s  %-28s %-8s %s\n", when, truncate(s.Process, 28), s.Kind, s.Exception)
+		if detail := crashListDetail(s); detail != "" {
+			fmt.Fprintf(w, "      %s\n", detail)
+		}
 	}
+}
+
+// crashListDetail is the second line under an entry: the incident id and the
+// source file (which the user can pass to `spectra crash inspect`).
+func crashListDetail(s crashSummary) string {
+	detail := ""
+	if s.Incident != "" {
+		detail = "incident " + s.Incident
+	}
+	if s.File != "" {
+		if detail != "" {
+			detail += " · "
+		}
+		detail += s.File
+	}
+	return detail
 }
