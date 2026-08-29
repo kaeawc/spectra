@@ -67,6 +67,7 @@ func subcommandList() []subcommand {
 		{"anomalies", "Flag processes deviating from their rolling RSS baseline", runAnomalies},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
 		{"install-daemon", "Install the user LaunchAgent for spectra serve", runInstallDaemonCmd},
+		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
 		{"crash", "Audit post-mortem readiness (can this machine produce a debuggable crash?)", runCrash},
