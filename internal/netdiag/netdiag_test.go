@@ -44,6 +44,32 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 	}
 }
 
+func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
+	base := appBehaviorRunner(t)
+	var connLsofCalls int
+	run := func(name string, args ...string) ([]byte, error) {
+		if fakeCommand(name, args...) == "lsof -i -P -n" {
+			connLsofCalls++
+		}
+		return base(name, args...)
+	}
+	procRun := func(context.Context, process.CollectOptions) []process.Info {
+		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
+	}
+	if _, err := Diagnose(context.Background(), Options{
+		AppPath:    "/Applications/Slack.app",
+		NetRunner:  run,
+		ProcRunner: procRun,
+		Dialer:     fakeDialer{},
+		TLSProbe:   fakeTLS{},
+	}); err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if connLsofCalls != 1 {
+		t.Fatalf("`lsof -i -P -n` invoked %d times, want 1 (collect once, share between State count and connection list)", connLsofCalls)
+	}
+}
+
 func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 	t.Helper()
 	fixtures := map[string][]byte{
