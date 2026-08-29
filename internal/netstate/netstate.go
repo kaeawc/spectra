@@ -76,6 +76,15 @@ func DefaultRunner(name string, args ...string) ([]byte, error) {
 // Collect gathers network state. Any sub-command failure is silently
 // absorbed; partial results are still valid.
 func Collect(run CmdRunner) State {
+	return CollectWithConnections(run, collectConnectionRows(run))
+}
+
+// CollectWithConnections is Collect for callers that have already gathered the
+// active socket list (via CollectConnections). It reuses those rows for the
+// established-connection count instead of running `lsof -i -P -n` a second time.
+// netdiag.Diagnose needs both the full connection list and the State, so it
+// collects once and passes the rows here.
+func CollectWithConnections(run CmdRunner, conns []Connection) State {
 	var s State
 	if out, err := run("route", "-n", "get", "default"); err == nil {
 		s.DefaultRouteIface, s.DefaultRouteGW = parseRoute(string(out))
@@ -94,7 +103,7 @@ func Collect(run CmdRunner) State {
 		s.VPNInterfaces = parseVPNInterfaces(string(out))
 		s.VPNActive = len(s.VPNInterfaces) > 0
 	}
-	s.EstablishedConnectionsCount = countEstablishedConnections(collectConnectionRows(run))
+	s.EstablishedConnectionsCount = countEstablishedConnections(conns)
 	s.ProcessThroughput = CollectThroughput(run)
 	return s
 }

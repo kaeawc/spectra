@@ -158,9 +158,12 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 		tlsProbe = realTLSProber{dialer: &net.Dialer{Timeout: opts.Timeout}}
 	}
 
-	state := netstate.Collect(run)
-	procs := procRun(ctx, process.CollectOptions{CmdRunner: run})
+	// Collect the socket list once and reuse it for both the State's
+	// established-connection count and the report's connection list, instead
+	// of running `lsof -i -P -n` twice.
 	conns := netstate.CollectConnections(run)
+	state := netstate.CollectWithConnections(run, conns)
+	procs := procRun(ctx, process.CollectOptions{CmdRunner: run})
 	report := Report{
 		AppPath: opts.AppPath,
 		PID:     opts.PID,
