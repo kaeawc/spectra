@@ -358,7 +358,7 @@ func (s *DB) SaveSnapshot(ctx context.Context, snap SnapshotInput) error {
 			     packaging, confidence, app_version, architectures, result_json)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
-			return err
+			return fmt.Errorf("store: prepare snapshot_apps: %w", err)
 		}
 		defer stmt.Close() //nolint:errcheck
 		for _, app := range snap.Apps {
@@ -622,6 +622,9 @@ type ProcessSnapshotRow struct {
 // SaveSnapshotProcesses inserts process rows for snapID. Uses INSERT OR IGNORE
 // to be idempotent (safe to call multiple times for the same snapshot).
 func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []ProcessSnapshotRow) error {
+	if len(procs) == 0 {
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -632,7 +635,7 @@ func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []P
 		  (snapshot_id, pid, ppid, command, rss_kib, cpu_pct, app_path)
 		VALUES (?,?,?,?,?,?,?)`)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: prepare snapshot_processes: %w", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, p := range procs {
@@ -691,7 +694,7 @@ func (s *DB) SaveLoginItems(ctx context.Context, snapID string, items []LoginIte
 		  (snapshot_id, bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive)
 		VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: prepare login_items: %w", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, it := range items {
@@ -751,7 +754,7 @@ func (s *DB) SaveGrantedPerms(ctx context.Context, snapID string, perms []Grante
 		INSERT OR IGNORE INTO granted_perms (snapshot_id, bundle_id, service)
 		VALUES (?,?,?)`)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: prepare granted_perms: %w", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, p := range perms {
@@ -795,6 +798,9 @@ func boolInt(b bool) int {
 // buffer. Rows are upserted because each flush may include a more complete
 // aggregate for a minute that was already partially written.
 func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) error {
+	if len(aggs) == 0 {
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -811,7 +817,7 @@ func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) er
 		    max_cpu_pct=excluded.max_cpu_pct,
 		    sample_count=excluded.sample_count`)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: prepare process_metrics: %w", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, a := range aggs {
@@ -1002,7 +1008,7 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 		    fgct=excluded.fgct,
 		    heap_mb=excluded.heap_mb`)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: prepare jvm_samples: %w", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {

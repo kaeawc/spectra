@@ -6,15 +6,14 @@ import (
 	"testing"
 )
 
-// benchBundle builds a synthetic .app with a multi-key Info.plist (identity,
-// version, and several NS*UsageDescription privacy strings) plus a nested
-// Frameworks/Resources tree, so the benchmark exercises the plist-parse cache
-// and the bundle walks the way a real inspection does.
+// benchBundle builds on makeBundle, then overwrites Info.plist with a multi-key
+// variant (identity, version, and several NS*UsageDescription privacy strings)
+// and adds a nested Frameworks/Resources tree, so the benchmark exercises the
+// plist-parse cache and the bundle walks the way a real inspection does.
 func benchBundle(b *testing.B) string {
 	b.Helper()
-	app := filepath.Join(b.TempDir(), "BenchApp.app")
+	app := makeBundle(b, "BenchApp")
 	for _, sub := range []string{
-		"Contents/MacOS",
 		"Contents/Resources/app/lib",
 		"Contents/Frameworks/Some.framework/Resources",
 	} {
