@@ -351,9 +351,20 @@ func (s *DB) SaveSnapshot(ctx context.Context, snap SnapshotInput) error {
 	if err := insertSnapshot(tx, snap); err != nil {
 		return err
 	}
-	for _, app := range snap.Apps {
-		if err := insertApp(tx, snap.ID, app); err != nil {
+	if len(snap.Apps) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `
+			INSERT OR IGNORE INTO snapshot_apps
+			    (snapshot_id, bundle_id, app_name, app_path, ui, runtime,
+			     packaging, confidence, app_version, architectures, result_json)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+		if err != nil {
 			return err
+		}
+		defer stmt.Close() //nolint:errcheck
+		for _, app := range snap.Apps {
+			if err := insertApp(ctx, stmt, snap.ID, app); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -398,14 +409,10 @@ func nullableJSON(b []byte) any {
 	return string(b)
 }
 
-func insertApp(tx *sql.Tx, snapID string, a AppInput) error {
+func insertApp(ctx context.Context, stmt *sql.Stmt, snapID string, a AppInput) error {
 	archJSON, _ := json.Marshal(a.Architectures)
 	resultJSON, _ := json.Marshal(a.ResultJSON)
-	_, err := tx.Exec(`
-		INSERT OR IGNORE INTO snapshot_apps
-		    (snapshot_id, bundle_id, app_name, app_path, ui, runtime,
-		     packaging, confidence, app_version, architectures, result_json)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := stmt.ExecContext(ctx,
 		snapID, a.BundleID, a.AppName, a.AppPath,
 		a.UI, a.Runtime, a.Packaging, a.Confidence,
 		a.AppVersion, string(archJSON), string(resultJSON),
@@ -620,14 +627,16 @@ func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []P
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO snapshot_processes
+		  (snapshot_id, pid, ppid, command, rss_kib, cpu_pct, app_path)
+		VALUES (?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close() //nolint:errcheck
 	for _, p := range procs {
-		_, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO snapshot_processes
-			  (snapshot_id, pid, ppid, command, rss_kib, cpu_pct, app_path)
-			VALUES (?,?,?,?,?,?,?)`,
-			snapID, p.PID, p.PPID, p.Command, p.RSSKiB, p.CPUPct, p.AppPath,
-		)
-		if err != nil {
+		if _, err := stmt.ExecContext(ctx, snapID, p.PID, p.PPID, p.Command, p.RSSKiB, p.CPUPct, p.AppPath); err != nil {
 			return err
 		}
 	}
@@ -677,15 +686,17 @@ func (s *DB) SaveLoginItems(ctx context.Context, snapID string, items []LoginIte
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO login_items
+		  (snapshot_id, bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive)
+		VALUES (?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close() //nolint:errcheck
 	for _, it := range items {
-		_, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO login_items
-			  (snapshot_id, bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive)
-			VALUES (?,?,?,?,?,?,?,?)`,
-			snapID, it.BundleID, it.PlistPath, it.Label, it.Scope,
-			boolInt(it.Daemon), boolInt(it.RunAtLoad), boolInt(it.KeepAlive),
-		)
-		if err != nil {
+		if _, err := stmt.ExecContext(ctx, snapID, it.BundleID, it.PlistPath, it.Label, it.Scope,
+			boolInt(it.Daemon), boolInt(it.RunAtLoad), boolInt(it.KeepAlive)); err != nil {
 			return err
 		}
 	}
@@ -736,13 +747,15 @@ func (s *DB) SaveGrantedPerms(ctx context.Context, snapID string, perms []Grante
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO granted_perms (snapshot_id, bundle_id, service)
+		VALUES (?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close() //nolint:errcheck
 	for _, p := range perms {
-		_, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO granted_perms (snapshot_id, bundle_id, service)
-			VALUES (?,?,?)`,
-			snapID, p.BundleID, p.Service,
-		)
-		if err != nil {
+		if _, err := stmt.ExecContext(ctx, snapID, p.BundleID, p.Service); err != nil {
 			return err
 		}
 	}
@@ -787,23 +800,27 @@ func (s *DB) SaveProcessMetrics(ctx context.Context, aggs []ProcessMetricRow) er
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO process_metrics
+		    (pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count)
+		VALUES (?,?,?,?,?,?,?)
+		ON CONFLICT(pid, minute_at) DO UPDATE SET
+		    avg_rss_kib=excluded.avg_rss_kib,
+		    max_rss_kib=excluded.max_rss_kib,
+		    avg_cpu_pct=excluded.avg_cpu_pct,
+		    max_cpu_pct=excluded.max_cpu_pct,
+		    sample_count=excluded.sample_count`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close() //nolint:errcheck
 	for _, a := range aggs {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO process_metrics
-			    (pid, minute_at, avg_rss_kib, max_rss_kib, avg_cpu_pct, max_cpu_pct, sample_count)
-			VALUES (?,?,?,?,?,?,?)
-			ON CONFLICT(pid, minute_at) DO UPDATE SET
-			    avg_rss_kib=excluded.avg_rss_kib,
-			    max_rss_kib=excluded.max_rss_kib,
-			    avg_cpu_pct=excluded.avg_cpu_pct,
-			    max_cpu_pct=excluded.max_cpu_pct,
-			    sample_count=excluded.sample_count`,
+		if _, err := stmt.ExecContext(ctx,
 			a.PID, a.MinuteAt.UTC().Format(time.RFC3339),
 			a.AvgRSSKiB, a.MaxRSSKiB,
 			a.AvgCPUPct, a.MaxCPUPct,
 			a.SampleCount,
-		)
-		if err != nil {
+		); err != nil {
 			return err
 		}
 	}
@@ -976,18 +993,20 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO jvm_samples (pid, at_nano, old_gen_pct, fgc, fgct, heap_mb)
+		VALUES (?,?,?,?,?,?)
+		ON CONFLICT(pid, at_nano) DO UPDATE SET
+		    old_gen_pct=excluded.old_gen_pct,
+		    fgc=excluded.fgc,
+		    fgct=excluded.fgct,
+		    heap_mb=excluded.heap_mb`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO jvm_samples (pid, at_nano, old_gen_pct, fgc, fgct, heap_mb)
-			VALUES (?,?,?,?,?,?)
-			ON CONFLICT(pid, at_nano) DO UPDATE SET
-			    old_gen_pct=excluded.old_gen_pct,
-			    fgc=excluded.fgc,
-			    fgct=excluded.fgct,
-			    heap_mb=excluded.heap_mb`,
-			sm.PID, sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB,
-		)
-		if err != nil {
+		if _, err := stmt.ExecContext(ctx, sm.PID, sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
 			return err
 		}
 	}
