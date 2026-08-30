@@ -20,6 +20,7 @@ func TestClassifyRuntimes(t *testing.T) {
 		{"jdk path", Process{ExecutablePath: "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java"}, noProbes(), RuntimeJVM},
 		{"electron renderer", Process{ExecutablePath: "/Applications/Foo.app/Contents/MacOS/Foo", CommandLine: "Foo --type=renderer"}, noProbes(), RuntimeElectron},
 		{"electron framework", Process{ExecutablePath: "/Applications/Foo.app/Contents/Frameworks/Electron Framework.framework/Electron"}, noProbes(), RuntimeElectron},
+		{"electron utility child", Process{ExecutablePath: "/Applications/Foo.app/Contents/MacOS/Foo Helper", CommandLine: "Foo Helper --type=utility --utility-sub-type=network.mojom.NetworkService"}, noProbes(), RuntimeElectron},
 		{"node exe", Process{ExecutablePath: "/usr/local/bin/node", CommandLine: "node server.js"}, noProbes(), RuntimeNode},
 		{"node inspect", Process{ExecutablePath: "/opt/x", CommandLine: "x --inspect=9229"}, noProbes(), RuntimeNode},
 		{"dotnet exe", Process{ExecutablePath: "/usr/local/share/dotnet/dotnet", CommandLine: "dotnet App.dll"}, noProbes(), RuntimeDotNet},
@@ -61,6 +62,10 @@ func TestCapabilitiesAlwaysIncludeSample(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: capabilities missing the universal sample fallback", r)
+		}
+		// The universal sample fallback is always listed last, per the contract.
+		if caps[len(caps)-1].How != "spectra sample 1234" {
+			t.Errorf("%s: sample fallback should be last, got %q", r, caps[len(caps)-1].How)
 		}
 	}
 }

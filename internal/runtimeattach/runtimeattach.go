@@ -124,7 +124,8 @@ func isJVM(base, hay string) bool {
 
 func isElectron(hay string) bool {
 	return strings.Contains(hay, "electron") ||
-		strings.Contains(hay, "--type=renderer") || strings.Contains(hay, "--type=gpu-process")
+		strings.Contains(hay, "--type=renderer") || strings.Contains(hay, "--type=gpu-process") ||
+		strings.Contains(hay, "--type=utility")
 }
 
 func isNode(base, hay string) bool {
@@ -174,8 +175,8 @@ func capabilities(r Runtime, pid int) []Capability {
 		}
 	default:
 		return []Capability{
-			sample,
 			{"attach a native debugger", fmt.Sprintf("lldb -p %d  (or spindump for a whole-system stack)", pid)},
+			sample,
 		}
 	}
 }
