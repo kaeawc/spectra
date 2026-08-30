@@ -643,11 +643,11 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 	// does not validate (expired, intercepted, self-signed), so the library's
 	// abort-on-failure verification is replaced by VerifyPeerCertificate, which
 	// never aborts; trust is evaluated explicitly by analyzeChain below.
-	cfg := &tls.Config{ // #nosec G402 -- diagnostic captures untrusted chains; trust validated in analyzeChain
+	cfg := &tls.Config{
 		ServerName:         host,
 		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true,
-		VerifyPeerCertificate: func(_ [][]byte, _ [][]*x509.Certificate) error {
+		InsecureSkipVerify: true, // #nosec G402 -- diagnostic captures untrusted chains; trust validated in analyzeChain
+		VerifyConnection: func(tls.ConnectionState) error {
 			return nil // do not abort on an untrusted chain; report it instead
 		},
 	}
