@@ -52,6 +52,9 @@ func runNetwork(args []string) int {
 	if len(args) > 0 && args[0] == "diagnose" {
 		return runNetworkDiagnose(args[1:])
 	}
+	if len(args) > 0 && args[0] == "captive" {
+		return runNetworkCaptive(args[1:])
+	}
 
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
