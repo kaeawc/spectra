@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/cachetriage"
 	"github.com/kaeawc/spectra/internal/dbcheck"
 	"github.com/kaeawc/spectra/internal/storagestate"
 )
@@ -15,6 +17,9 @@ import (
 func runStorage(args []string) int {
 	if len(args) > 0 && args[0] == "db-check" {
 		return runStorageDBCheck(args[1:], os.Stdout, os.Stderr)
+	}
+	if len(args) > 0 && args[0] == "cache-triage" {
+		return runStorageCacheTriage(args[1:], os.Stdout, os.Stderr)
 	}
 	fs := flag.NewFlagSet("spectra storage", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -68,6 +73,55 @@ func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {
 	}
 	printDBCheckReport(stdout, report)
 	return 0
+}
+
+func runStorageCacheTriage(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("spectra storage cache-triage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 1 {
+		fmt.Fprintln(stderr, "usage: spectra storage cache-triage [--json] [<root>]")
+		return 2
+	}
+
+	root := fs.Arg(0)
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "cache-triage: resolve home: %v\n", err)
+			return 1
+		}
+		root = filepath.Join(home, "Library", "Caches")
+	}
+
+	report, err := cachetriage.Triage(root, cachetriage.DefaultDeps())
+	if err != nil {
+		fmt.Fprintf(stderr, "cache-triage: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+		return 0
+	}
+	printCacheTriage(stdout, report)
+	return 0
+}
+
+func printCacheTriage(w io.Writer, report cachetriage.Report) {
+	fmt.Fprintf(w, "=== Cache triage: %s ===\n", report.Root)
+	fmt.Fprintf(w, "total %s | reclaimable %s (safe+regenerable) | risky %s held back\n",
+		humanSize(report.TotalBytes), humanSize(report.ReclaimableBytes), humanSize(report.RiskyBytes))
+	for _, e := range report.Entries {
+		fmt.Fprintf(w, "  %-10s %10s  %s\n", e.Class, humanSize(e.SizeBytes), truncate(e.Name, 44))
+		if e.Class == cachetriage.ClassRisky && e.Reason != "" {
+			fmt.Fprintf(w, "               %s\n", truncate(e.Reason, 64))
+		}
+	}
 }
 
 // resolveDBPaths expands directory arguments into the SQLite files they contain
