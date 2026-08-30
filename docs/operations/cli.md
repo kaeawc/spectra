@@ -384,10 +384,15 @@ type/size and signature algorithm, and whether the chain validates against the
 macOS system trust store (`trust=valid` / `trust=UNTRUSTED` with the reason).
 It flags a leaf `expires_in` within 21 days and marks likely TLS interception
 (`intercepted=…`) when the leaf is issued by a known interception vendor, is
-self-signed, or does not chain to a trusted root. The probe intentionally
-completes the handshake without library-side verification so an untrusted or
-expired chain is still captured and explained rather than hidden behind a
-handshake error.
+self-signed (verified by signature, not just name), or does not chain to a
+trusted root. An interception root that has been installed into the system
+trust store under an unrecognized name validates as trusted and is only caught
+by the vendor-name check — pure Go exposes no per-anchor trust provenance to
+tell a private/enterprise root from a public CA. When library verification
+fails because the chain is untrusted or expired, the presented certificates are
+recovered from the verification error so the chain is still captured and
+explained (`trust=UNTRUSTED trust_error=…`) rather than hidden behind a
+handshake failure.
 
 ### Examples
 

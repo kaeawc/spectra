@@ -716,6 +716,11 @@ func analyzeChain(probe *TLSProbe, host string, certs []*x509.Certificate, roots
 
 // interceptionSignal reports whether the leaf certificate looks like it comes
 // from a TLS-interception proxy, and the signal that matched.
+//
+// Limitation: an interception root installed into the system trust store under
+// an unrecognized name makes the chain validate as trusted, so it is only
+// caught here by the vendor-name check — pure Go exposes no per-anchor trust
+// provenance to distinguish a private/enterprise root from a public CA.
 func interceptionSignal(leaf *x509.Certificate, trustValid bool, trustErr string) (bool, string) {
 	hay := strings.ToLower(leaf.Issuer.String() + " " + leaf.Subject.String())
 	for _, v := range interceptionVendors {
@@ -723,13 +728,20 @@ func interceptionSignal(leaf *x509.Certificate, trustValid bool, trustErr string
 			return true, "issuer matches known interception vendor: " + v
 		}
 	}
-	if leaf.Issuer.String() == leaf.Subject.String() && !leaf.IsCA {
+	if leaf.Issuer.String() == leaf.Subject.String() && !leaf.IsCA && isSelfSigned(leaf) {
 		return true, "leaf certificate is self-signed"
 	}
 	if !trustValid && strings.Contains(strings.ToLower(trustErr), "unknown authority") {
 		return true, "chain does not validate to a trusted root"
 	}
 	return false, ""
+}
+
+// isSelfSigned confirms the certificate signature verifies against its own
+// public key, so a matching issuer/subject name issued by a different key is
+// not mistaken for self-signed.
+func isSelfSigned(cert *x509.Certificate) bool {
+	return cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
 }
 
 func spkiPin(cert *x509.Certificate) string {
