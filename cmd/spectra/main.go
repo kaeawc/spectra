@@ -70,6 +70,7 @@ func subcommandList() []subcommand {
 		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
+		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
 		{"crash", "Audit post-mortem readiness (can this machine produce a debuggable crash?)", runCrash},
 		{"web", "Diff an Electron app's app.asar payload between two versions", runWeb},

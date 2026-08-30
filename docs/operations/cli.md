@@ -351,6 +351,26 @@ spectra runtime attach 4012
 spectra runtime --json 4012
 ```
 
+## `spectra xattr-inspect`
+
+Surfaces the macOS extended attributes that record a file's origin and security
+state — normally invisible without `xattr`/`mdls`. Each argument is a file or a
+directory (directories are walked, bounded). For each file it lists the notable
+extended attributes present, each classified (quarantine / provenance /
+where-froms / security / other), parses the `com.apple.quarantine` record into
+the downloading agent, timestamp, and flags, extracts the `where-froms` source
+URLs from the attribute value, and flags whether an AppleDouble `._` sidecar
+exists. The summary counts files with quarantine, provenance, where-froms, and
+AppleDouble sidecars. It is read-only and never modifies an attribute.
+
+### Examples
+
+```bash
+spectra xattr-inspect ~/Downloads/installer.dmg
+spectra xattr-inspect --json /Applications/Some.app
+spectra xattr-inspect ~/Downloads
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
