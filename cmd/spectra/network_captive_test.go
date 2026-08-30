@@ -14,7 +14,7 @@ func captiveFetcher(resp captiveportal.Response) captiveportal.Fetcher {
 }
 
 func TestRunNetworkCaptiveClearExit0(t *testing.T) {
-	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<TITLE>Success</TITLE>"})
+	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"})
 	var out, errBuf bytes.Buffer
 	if code := runNetworkCaptiveWithIO(nil, &out, &errBuf, fetch); code != 0 {
 		t.Fatalf("exit = %d, want 0 for a clear link", code)
@@ -36,7 +36,7 @@ func TestRunNetworkCaptivePortalExit1(t *testing.T) {
 }
 
 func TestRunNetworkCaptiveRejectsArgs(t *testing.T) {
-	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<TITLE>Success</TITLE>"})
+	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"})
 	var out, errBuf bytes.Buffer
 	if code := runNetworkCaptiveWithIO([]string{"extra"}, &out, &errBuf, fetch); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
@@ -44,7 +44,7 @@ func TestRunNetworkCaptiveRejectsArgs(t *testing.T) {
 }
 
 func TestRunNetworkCaptiveJSON(t *testing.T) {
-	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<TITLE>Success</TITLE>"})
+	fetch := captiveFetcher(captiveportal.Response{StatusCode: 200, Body: "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"})
 	var out, errBuf bytes.Buffer
 	if code := runNetworkCaptiveWithIO([]string{"--json"}, &out, &errBuf, fetch); code != 0 {
 		t.Fatalf("exit = %d", code)

@@ -39,6 +39,27 @@ func TestProbe200WithLoginBody(t *testing.T) {
 	}
 }
 
+func TestProbeMarkerFragmentIsNotSuccess(t *testing.T) {
+	// A portal that embeds the success title in its own login page must not
+	// pass as CLEAR.
+	body := "<html><head><TITLE>Success</TITLE></head><body>Please log in to continue</body></html>"
+	r := Probe(context.Background(), fetcher(Response{StatusCode: 200, Body: body}, nil))
+	if !r.Portal {
+		t.Error("a body containing the marker but not the exact success page must be a portal")
+	}
+}
+
+func TestProbeProxyServerHeader(t *testing.T) {
+	// A clear success page whose Server header names a proxy product is PROXIED.
+	r := Probe(context.Background(), fetcher(Response{StatusCode: 200, Body: successBody, Server: "ZScaler/1.0"}, nil))
+	if r.Portal {
+		t.Error("a success page is not a portal")
+	}
+	if !r.Proxied {
+		t.Error("a proxy-product Server header must mark the link PROXIED even without a Via header")
+	}
+}
+
 func TestProbe511(t *testing.T) {
 	r := Probe(context.Background(), fetcher(Response{StatusCode: 511}, nil))
 	if !r.Portal {

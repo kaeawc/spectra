@@ -13,9 +13,17 @@ import (
 // canonical success page below.
 const ProbeURL = "http://captive.apple.com/hotspot-detect.html"
 
-// successMarker is the distinctive content of Apple's success page
-// (<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>).
-const successMarker = "<TITLE>Success</TITLE>"
+// successPage is the exact body Apple serves for a clear link. A captive portal
+// can embed the <TITLE>Success</TITLE> fragment in its own login page, so the
+// whole normalized body must match — a substring check is not enough.
+const successPage = "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
+
+// proxyServerMarkers are substrings of a Server header that point at a proxy or
+// interception product (matched case-insensitively).
+var proxyServerMarkers = []string{
+	"squid", "proxy", "zscaler", "bluecoat", "blue coat",
+	"forcepoint", "netskope", "mcafee", "fortigate", "fortiproxy",
+}
 
 // Response is the subset of an HTTP response the classifier needs. It is
 // produced by the injected Fetcher so classification can be tested offline.
@@ -66,16 +74,16 @@ func Probe(ctx context.Context, fetch Fetcher) Result {
 // classify decides whether a probe response indicates a captive portal and/or a
 // transparent proxy.
 func classify(resp Response) (portal, proxied bool, reason string) {
-	proxied = resp.Via != ""
+	proxied = resp.Via != "" || serverLooksLikeProxy(resp.Server)
 
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		return true, proxied, "redirected to a portal login page: " + orNone(resp.Location)
 	case resp.StatusCode == 511:
 		return true, proxied, "511 Network Authentication Required — captive portal"
-	case resp.StatusCode == 200 && strings.Contains(resp.Body, successMarker):
+	case resp.StatusCode == 200 && isSuccessPage(resp.Body):
 		if proxied {
-			return false, true, "clear, but the response passed through a proxy (Via: " + resp.Via + ")"
+			return false, true, "clear, but the response passed through a proxy (" + proxyDetail(resp) + ")"
 		}
 		return false, false, "clear — Apple success page returned, no captive portal"
 	case resp.StatusCode == 200:
@@ -83,6 +91,29 @@ func classify(resp Response) (portal, proxied bool, reason string) {
 	default:
 		return true, proxied, "unexpected status; treat the link as captive until it returns the success page"
 	}
+}
+
+// isSuccessPage reports whether the body is exactly Apple's success page once
+// surrounding whitespace is trimmed.
+func isSuccessPage(body string) bool {
+	return strings.TrimSpace(body) == successPage
+}
+
+func serverLooksLikeProxy(server string) bool {
+	s := strings.ToLower(server)
+	for _, m := range proxyServerMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+func proxyDetail(resp Response) string {
+	if resp.Via != "" {
+		return "Via: " + resp.Via
+	}
+	return "Server: " + resp.Server
 }
 
 func orNone(s string) string {

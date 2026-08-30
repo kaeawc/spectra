@@ -102,7 +102,10 @@ func defaultCaptiveFetcher(ctx context.Context, url string) (captiveportal.Respo
 		return captiveportal.Response{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, captiveBodyCap))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, captiveBodyCap))
+	if err != nil {
+		return captiveportal.Response{}, fmt.Errorf("read probe body: %w", err)
+	}
 	return captiveportal.Response{
 		StatusCode: resp.StatusCode,
 		Location:   resp.Header.Get("Location"),
