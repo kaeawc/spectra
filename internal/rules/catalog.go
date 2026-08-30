@@ -32,6 +32,7 @@ func V1Catalog() []Rule {
 		ruleStorageFootprint(),
 		ruleAppNoHardenedRuntime(),
 		ruleAppUnsigned(),
+		ruleAppDebuggablePosture(),
 		ruleElectronChromiumEOL(),
 		ruleLoginItemDangling(),
 		ruleBrewDeprecatedFormula(),
@@ -342,6 +343,45 @@ func ruleAppUnsigned() Rule {
 			return findings
 		},
 	}
+}
+
+// ruleAppDebuggablePosture fires for apps signed with the get-task-allow
+// entitlement. It is a Debug-only entitlement Xcode adds for development
+// signing; shipped in a Release build it defeats the hardened runtime — any
+// process running as the same user can attach a debugger, read the app's
+// memory, or inject code via task_for_pid.
+func ruleAppDebuggablePosture() Rule {
+	return Rule{
+		ID:       "app-debuggable-posture",
+		Severity: SeverityHigh,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, app := range s.Apps {
+				if !hasEntitlement(app.Entitlements, "get-task-allow") {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "app-debuggable-posture",
+					Severity: SeverityHigh,
+					Subject:  appDisplayName(app.Path),
+					Message:  fmt.Sprintf("%s is signed with the get-task-allow entitlement — any process running as this user can attach a debugger, read its memory, or inject code, defeating the hardened runtime. This is a Debug-only entitlement that must not ship.", appDisplayName(app.Path)),
+					Fix:      "Remove com.apple.security.get-task-allow from Release builds; Xcode adds it automatically only for development signing.",
+				})
+			}
+			return findings
+		},
+	}
+}
+
+// hasEntitlement reports whether the notable-entitlement list contains key
+// (stored with the com.apple.security. prefix trimmed).
+func hasEntitlement(entitlements []string, key string) bool {
+	for _, e := range entitlements {
+		if e == key {
+			return true
+		}
+	}
+	return false
 }
 
 // ruleLoginItemDangling fires when a login-item plist exists on disk but the
