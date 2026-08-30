@@ -438,6 +438,18 @@ recovered from the verification error so the chain is still captured and
 explained (`trust=UNTRUSTED trust_error=…`) rather than hidden behind a
 handshake failure.
 
+`spectra network captive` replicates Apple's captive-portal probe: it GETs
+`http://captive.apple.com/hotspot-detect.html` over plain HTTP **without
+following redirects**, with a short timeout and a bounded body read, and
+classifies the link. It reports `CLEAR` only when the response is `200` with
+Apple's canonical success page. It flags a `CAPTIVE PORTAL` when the probe is
+redirected (3xx + Location), returns `511 Network Authentication Required`, or
+returns `200` with a body that isn't the success page — the pattern of a hotel
+or airport login gate that makes a dead link look "up". A `Via` (or proxy
+`Server`) header marks the link as `PROXIED` even when the success page is
+returned, revealing a transparent proxy. The command exits non-zero when a
+portal is detected or the probe fails, so scripts can gate on real connectivity.
+
 ### Examples
 
 ```bash
@@ -447,6 +459,8 @@ spectra network connections --proto tcp --state established
 spectra network diagnose --app /Applications/Slack.app
 spectra network diagnose --pid 412
 spectra network diagnose --app /Applications/Slack.app --ports 443 api.example.com
+spectra network captive
+spectra network captive --json
 spectra network capture start --interface en0 --duration 30s --proto tcp --host api.example.com --port 443
 spectra network capture stop --summarize netcap-1
 spectra network capture summarize --json /var/tmp/spectra-netcap/501/netcap-1.pcap
