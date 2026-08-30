@@ -377,6 +377,23 @@ output. Positional hosts and `--ports` narrow the inferred app endpoints; when
 no app scope is provided, positional hosts can be used as explicit probe
 targets.
 
+For each TLS endpoint the probe reports the full presented certificate chain
+(subject, issuer, validity, days-to-expiry, and the base64 SHA-256 SPKI pin per
+certificate, so pins can be compared against an app's pinned set), the leaf key
+type/size and signature algorithm, and whether the chain validates against the
+macOS system trust store (`trust=valid` / `trust=UNTRUSTED` with the reason).
+It flags a leaf `expires_in` within 21 days and marks likely TLS interception
+(`intercepted=…`) when the leaf is issued by a known interception vendor, is
+self-signed (verified by signature, not just name), or does not chain to a
+trusted root. An interception root that has been installed into the system
+trust store under an unrecognized name validates as trusted and is only caught
+by the vendor-name check — pure Go exposes no per-anchor trust provenance to
+tell a private/enterprise root from a public CA. When library verification
+fails because the chain is untrusted or expired, the presented certificates are
+recovered from the verification error so the chain is still captured and
+explained (`trust=UNTRUSTED trust_error=…`) rather than hidden behind a
+handshake failure.
+
 ### Examples
 
 ```bash

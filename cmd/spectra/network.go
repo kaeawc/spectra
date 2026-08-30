@@ -204,8 +204,27 @@ func printNetworkDiagnosisPort(p netdiag.PortDiagnosis) {
 		if p.TLS.Issuer != "" {
 			fmt.Printf(" issuer=%s", truncate(p.TLS.Issuer, 48))
 		}
+		if p.TLS.OK {
+			fmt.Printf(" trust=%s", trustLabel(p.TLS.TrustValid))
+			if !p.TLS.TrustValid && p.TLS.TrustError != "" {
+				fmt.Printf(" trust_error=%s", truncate(p.TLS.TrustError, 60))
+			}
+		}
+		if p.TLS.ExpiringSoon {
+			fmt.Printf(" expires_in=%dd", p.TLS.LeafExpiresInDays)
+		}
+		if p.TLS.Intercepted {
+			fmt.Printf(" intercepted=%s", truncate(p.TLS.InterceptionReason, 48))
+		}
 	}
 	fmt.Println()
+}
+
+func trustLabel(valid bool) string {
+	if valid {
+		return "valid"
+	}
+	return "UNTRUSTED"
 }
 
 func printNetworkDiagnosisFindings(rows []netdiag.Finding) {
