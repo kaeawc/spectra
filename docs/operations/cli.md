@@ -639,8 +639,8 @@ use.
 ### Examples
 
 ```bash
-spectra web leveldb-health "~/Library/Application Support/MyApp/Local Storage/leveldb"
-spectra web leveldb-health --json "~/Library/Application Support/MyApp/IndexedDB"
+spectra web leveldb-health "$HOME/Library/Application Support/MyApp/Local Storage/leveldb"
+spectra web leveldb-health --json "$HOME/Library/Application Support/MyApp/IndexedDB"
 ```
 
 ## `spectra anomalies`

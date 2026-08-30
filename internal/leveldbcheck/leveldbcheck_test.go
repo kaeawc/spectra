@@ -117,6 +117,38 @@ func TestInspectLogBloat(t *testing.T) {
 	}
 }
 
+func TestInspectAggregateLogsNotBloat(t *testing.T) {
+	half := int64(logBloatThreshold/2 + 1) // two of these exceed the threshold together
+	fs := fakeFS{
+		dirs: map[string][]Entry{"/store": {
+			file("CURRENT", 16), file("MANIFEST-1", 10),
+			file("000009.log", half), file("000010.log", half),
+		}},
+		files: map[string]string{"/store/CURRENT": "MANIFEST-1"},
+	}
+	s := Inspect("/store", fs.deps())
+	if hasProblem(s, "write-ahead log bloat") {
+		t.Errorf("two normal logs summing over the threshold must not be flagged: %v", s.Problems)
+	}
+	if s.LogBytes != 2*half {
+		t.Errorf("aggregate log bytes still reported: got %d", s.LogBytes)
+	}
+}
+
+func TestInspectCurrentNotAManifest(t *testing.T) {
+	fs := fakeFS{
+		dirs:  map[string][]Entry{"/store": {file("CURRENT", 16), file("000003.ldb", 10)}},
+		files: map[string]string{"/store/CURRENT": "000003.ldb"},
+	}
+	s := Inspect("/store", fs.deps())
+	if s.ManifestOK {
+		t.Error("a CURRENT naming a .ldb file must not count as a valid manifest")
+	}
+	if !hasProblem(s, "does not name a manifest") {
+		t.Errorf("expected not-a-manifest problem, got %v", s.Problems)
+	}
+}
+
 func TestInspectUnreadableDir(t *testing.T) {
 	s := Inspect("/missing", fakeFS{dirs: map[string][]Entry{}}.deps())
 	if s.Error == "" {

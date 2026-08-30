@@ -60,11 +60,14 @@ func runWebLevelDBHealth(args []string, stdout, stderr io.Writer, deps leveldbch
 
 	var paths []string
 	for _, arg := range fs.Args() {
-		paths = append(paths, leveldbcheck.Discover(arg, deps)...)
-	}
-	if len(paths) == 0 {
-		fmt.Fprintln(stderr, "no LevelDB stores found in the given paths")
-		return 1
+		// Discover nested stores under a parent; when the argument itself yields
+		// no store (e.g. a store directory whose CURRENT is missing), inspect it
+		// directly so the corruption is reported rather than silently skipped.
+		if found := leveldbcheck.Discover(arg, deps); len(found) > 0 {
+			paths = append(paths, found...)
+		} else {
+			paths = append(paths, arg)
+		}
 	}
 
 	report := leveldbcheck.Check(paths, deps)

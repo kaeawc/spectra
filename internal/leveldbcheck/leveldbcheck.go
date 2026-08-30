@@ -102,6 +102,7 @@ func Inspect(dir string, deps Deps) Store {
 
 	names := make(map[string]bool, len(entries))
 	hasCurrent := false
+	var largestLog int64
 	for _, e := range entries {
 		if e.IsDir {
 			continue
@@ -117,6 +118,9 @@ func Inspect(dir string, deps Deps) Store {
 		case strings.HasSuffix(e.Name, ".log"):
 			s.LogFiles++
 			s.LogBytes += e.Size
+			if e.Size > largestLog {
+				largestLog = e.Size
+			}
 		}
 	}
 
@@ -124,8 +128,10 @@ func Inspect(dir string, deps Deps) Store {
 	if s.TableFiles > compactionBacklogTables {
 		s.Problems = append(s.Problems, fmt.Sprintf("compaction backlog: %d table files", s.TableFiles))
 	}
-	if s.LogBytes > logBloatThreshold {
-		s.Problems = append(s.Problems, fmt.Sprintf("write-ahead log bloat: %d bytes across %d log(s)", s.LogBytes, s.LogFiles))
+	// Flag on the largest single log, not the aggregate: several normal logs can
+	// sum past the threshold without any one being oversized.
+	if largestLog > logBloatThreshold {
+		s.Problems = append(s.Problems, fmt.Sprintf("write-ahead log bloat: a log file is %d bytes (%d total across %d log(s))", largestLog, s.LogBytes, s.LogFiles))
 	}
 	return s
 }
@@ -145,6 +151,10 @@ func (s *Store) resolveManifest(dir string, hasCurrent bool, names map[string]bo
 	s.ManifestFile = name
 	if name == "" {
 		s.Problems = append(s.Problems, "empty CURRENT file")
+		return
+	}
+	if !strings.HasPrefix(name, "MANIFEST-") {
+		s.Problems = append(s.Problems, "CURRENT does not name a manifest: "+name)
 		return
 	}
 	if names[name] {
