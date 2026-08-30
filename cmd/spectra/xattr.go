@@ -92,9 +92,15 @@ func defaultXattrDeps() xattrinspect.Deps {
 				return []string{root}, nil
 			}
 			var files []string
-			_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil || !d.Type().IsRegular() {
-					return nil //nolint:nilerr // tolerate unreadable entries; keep scanning
+			walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, entryErr error) error {
+				if entryErr != nil {
+					if path == root {
+						return entryErr // a root traversal failure is fatal for this argument
+					}
+					return nil //nolint:nilerr // tolerate descendant errors; keep scanning
+				}
+				if !d.Type().IsRegular() {
+					return nil
 				}
 				files = append(files, path)
 				if len(files) >= xattrWalkFileLimit {
@@ -102,6 +108,9 @@ func defaultXattrDeps() xattrinspect.Deps {
 				}
 				return nil
 			})
+			if walkErr != nil {
+				return nil, fmt.Errorf("walk %s: %w", root, walkErr)
+			}
 			return files, nil
 		},
 		Exists: func(path string) bool {

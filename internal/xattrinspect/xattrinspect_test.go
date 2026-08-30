@@ -112,6 +112,29 @@ func TestInspectFileFull(t *testing.T) {
 	}
 }
 
+func TestInspectCountsPresentButUnparseableAttrs(t *testing.T) {
+	// quarantine present with an unparseable value, and where-froms present with
+	// no HTTP URL: both must still count toward the summary.
+	f := fakeXattr{
+		names: "com.apple.quarantine\ncom.apple.metadata:kMDItemWhereFroms\n",
+		values: map[string]string{
+			attrQuarantine: "garbage",
+			attrWhereFroms: "bplist00\x00file:///local/only\x00",
+		},
+	}
+	rep := Inspect([]string{"/dir/file"}, f.deps())
+	fr := rep.Files[0]
+	if fr.Quarantine != nil {
+		t.Errorf("garbage quarantine should not parse into detail, got %+v", fr.Quarantine)
+	}
+	if len(fr.WhereFroms) != 0 {
+		t.Errorf("no http url should be extracted, got %v", fr.WhereFroms)
+	}
+	if rep.Quarantined != 1 || rep.WithWhereFroms != 1 {
+		t.Errorf("present attributes must count in the summary: %+v", rep)
+	}
+}
+
 func TestInspectFileError(t *testing.T) {
 	deps := Deps{
 		Run:   func(args ...string) ([]byte, error) { return nil, errors.New("no xattr") },

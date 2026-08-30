@@ -88,20 +88,22 @@ func Inspect(paths []string, deps Deps) Report {
 	return rep
 }
 
+// tally counts a file by the attributes it carries, not by whether their
+// values parsed: a present-but-unparseable com.apple.quarantine, or a
+// where-froms with no HTTP URL, still counts toward the summary.
 func tally(rep *Report, fr FileReport) {
-	if fr.Quarantine != nil {
-		rep.Quarantined++
+	for _, a := range fr.Attrs {
+		switch a.Class {
+		case "quarantine":
+			rep.Quarantined++
+		case "provenance":
+			rep.Provenanced++
+		case "where-froms":
+			rep.WithWhereFroms++
+		}
 	}
 	if fr.AppleDouble {
 		rep.WithAppleDouble++
-	}
-	if len(fr.WhereFroms) > 0 {
-		rep.WithWhereFroms++
-	}
-	for _, a := range fr.Attrs {
-		if a.Class == "provenance" {
-			rep.Provenanced++
-		}
 	}
 }
 
