@@ -19,7 +19,7 @@ func runStorage(args []string) int {
 		return runStorageDBCheck(args[1:], os.Stdout, os.Stderr)
 	}
 	if len(args) > 0 && args[0] == "cache-triage" {
-		return runStorageCacheTriage(args[1:], os.Stdout, os.Stderr)
+		return runStorageCacheTriage(args[1:], os.Stdout, os.Stderr, os.UserHomeDir)
 	}
 	fs := flag.NewFlagSet("spectra storage", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -75,7 +75,7 @@ func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runStorageCacheTriage(args []string, stdout, stderr io.Writer) int {
+func runStorageCacheTriage(args []string, stdout, stderr io.Writer, homeDir func() (string, error)) int {
 	fs := flag.NewFlagSet("spectra storage cache-triage", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
@@ -89,7 +89,7 @@ func runStorageCacheTriage(args []string, stdout, stderr io.Writer) int {
 
 	root := fs.Arg(0)
 	if root == "" {
-		home, err := os.UserHomeDir()
+		home, err := homeDir()
 		if err != nil {
 			fmt.Fprintf(stderr, "cache-triage: resolve home: %v\n", err)
 			return 1
@@ -117,9 +117,9 @@ func printCacheTriage(w io.Writer, report cachetriage.Report) {
 	fmt.Fprintf(w, "total %s | reclaimable %s (safe+regenerable) | risky %s held back\n",
 		humanSize(report.TotalBytes), humanSize(report.ReclaimableBytes), humanSize(report.RiskyBytes))
 	for _, e := range report.Entries {
-		fmt.Fprintf(w, "  %-10s %10s  %s\n", e.Class, humanSize(e.SizeBytes), truncate(e.Name, 44))
-		if e.Class == cachetriage.ClassRisky && e.Reason != "" {
-			fmt.Fprintf(w, "               %s\n", truncate(e.Reason, 64))
+		fmt.Fprintf(w, "  %-11s %10s  %s\n", e.Class, humanSize(e.SizeBytes), truncate(e.Name, 44))
+		if e.Reason != "" {
+			fmt.Fprintf(w, "                %s\n", truncate(e.Reason, 72))
 		}
 	}
 }

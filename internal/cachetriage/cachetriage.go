@@ -5,6 +5,7 @@
 package cachetriage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,17 +43,30 @@ var safeMarkers = []string{
 // rather than a cache. Matched case-insensitively.
 var riskyNameFragments = []string{
 	"cookie", "credential", "token", "account", "session", "keychain",
-	".sqlite", ".db", ".realm", "leveldb", "indexeddb",
+	".sqlite", ".db", ".ldb", ".realm", "leveldb", "indexeddb",
 }
 
 // Entry is one cache subdirectory's triage result.
 type Entry struct {
-	Path      string `json:"path"`
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"size_bytes"`
-	Class     Class  `json:"class"`
-	Reason    string `json:"reason,omitempty"`
+	Path       string `json:"path"`
+	Name       string `json:"name"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Class      Class  `json:"class"`
+	Reason     string `json:"reason,omitempty"`
+	Incomplete bool   `json:"incomplete,omitempty"`
 }
+
+// ScanResult reports whether a subdirectory scan saw everything. An incomplete
+// or truncated scan cannot prove a directory holds no real data, so triage must
+// not classify it as reclaimable.
+type ScanResult struct {
+	// Truncated is set when the per-directory file limit was reached.
+	Truncated bool
+	// Incomplete is set when one or more entries could not be read.
+	Incomplete bool
+}
+
+func (r ScanResult) partial() bool { return r.Truncated || r.Incomplete }
 
 // Report is the triage of every subdirectory of a cache root.
 type Report struct {
@@ -68,8 +82,10 @@ type Deps struct {
 	// Subdirs returns the immediate child directory names of root.
 	Subdirs func(root string) ([]string, error)
 	// Scan invokes fn for each file under dir (bounded) with its base name and
-	// size, so triage can sum size and detect risky markers.
-	Scan func(dir string, fn func(name string, size int64)) error
+	// size, so triage can sum size and detect risky markers. It returns whether
+	// the scan was complete; a non-nil error means the subtree could not be
+	// walked at all.
+	Scan func(dir string, fn func(name string, size int64)) (ScanResult, error)
 }
 
 // DefaultDeps reads from the real filesystem.
@@ -88,21 +104,36 @@ func DefaultDeps() Deps {
 			}
 			return out, nil
 		},
-		Scan: func(dir string, fn func(name string, size int64)) error {
+		Scan: func(dir string, fn func(name string, size int64)) (ScanResult, error) {
+			var res ScanResult
 			count := 0
-			return filepath.WalkDir(dir, func(_ string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil || d.IsDir() {
-					return nil //nolint:nilerr // tolerate unreadable entries; keep scanning
+			err := filepath.WalkDir(dir, func(_ string, d os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					// Record that the scan missed something and keep going, rather
+					// than aborting; an incomplete scan is held back downstream.
+					res.Incomplete = true
+					return nil //nolint:nilerr // incompleteness recorded in res; keep scanning
+				}
+				if d.IsDir() {
+					return nil
 				}
 				count++
 				if count > scanFileLimit {
+					res.Truncated = true
 					return filepath.SkipAll
 				}
-				if info, err := d.Info(); err == nil {
-					fn(d.Name(), info.Size())
+				info, err := d.Info()
+				if err != nil {
+					res.Incomplete = true
+					return nil //nolint:nilerr // incompleteness recorded in res; keep scanning
 				}
+				fn(d.Name(), info.Size())
 				return nil
 			})
+			if err != nil {
+				return res, fmt.Errorf("scan %s: %w", dir, err)
+			}
+			return res, nil
 		},
 	}
 }
@@ -119,19 +150,22 @@ func Triage(root string, deps Deps) (Report, error) {
 		dir := filepath.Join(root, name)
 		var size int64
 		var markers []string
-		_ = deps.Scan(dir, func(fileName string, sz int64) {
+		res, scanErr := deps.Scan(dir, func(fileName string, sz int64) {
 			size += sz
 			if m := riskyMarker(fileName); m != "" && len(markers) < 5 {
 				markers = append(markers, m)
 			}
 		})
-		class, reason := classify(name, markers)
-		rep.Entries = append(rep.Entries, Entry{Path: dir, Name: name, SizeBytes: size, Class: class, Reason: reason})
+		incomplete := res.partial() || scanErr != nil
+		class, reason := classify(name, markers, incomplete)
+		rep.Entries = append(rep.Entries, Entry{Path: dir, Name: name, SizeBytes: size, Class: class, Reason: reason, Incomplete: incomplete})
 		rep.TotalBytes += size
-		switch class {
-		case ClassRisky:
+		// Only a fully scanned, non-risky directory counts as reclaimable; an
+		// incomplete scan (unreadable entries, truncation, or an error) is held
+		// back so the user never deletes a directory that was not fully inspected.
+		if class == ClassRisky {
 			rep.RiskyBytes += size
-		default:
+		} else {
 			rep.ReclaimableBytes += size
 		}
 	}
@@ -141,11 +175,15 @@ func Triage(root string, deps Deps) (Report, error) {
 	return rep, nil
 }
 
-// classify decides a subdirectory's class from its name and any risky markers
-// found in its subtree. Risky data wins over a safe-looking name.
-func classify(name string, markers []string) (Class, string) {
+// classify decides a subdirectory's class from its name, any risky markers found
+// in its subtree, and whether the scan was complete. Risky data — and an
+// incomplete scan that cannot rule it out — win over a safe-looking name.
+func classify(name string, markers []string, incomplete bool) (Class, string) {
 	if len(markers) > 0 {
 		return ClassRisky, "contains possible non-cache data: " + strings.Join(markers, ", ")
+	}
+	if incomplete {
+		return ClassRisky, "scan incomplete (unreadable or truncated) — held back from reclaimable"
 	}
 	lname := strings.ToLower(name)
 	for _, m := range safeMarkers {

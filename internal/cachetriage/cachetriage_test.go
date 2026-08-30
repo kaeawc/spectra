@@ -8,20 +8,22 @@ import (
 
 func TestClassify(t *testing.T) {
 	cases := []struct {
-		name    string
-		markers []string
-		want    Class
+		name       string
+		markers    []string
+		incomplete bool
+		want       Class
 	}{
-		{"go-build", nil, ClassSafe},
-		{"com.corp.SomeApp", nil, ClassRegenerable},
-		{"com.corp.SomeApp", []string{"cookie"}, ClassRisky},
-		{"go-build", []string{".sqlite"}, ClassRisky}, // risky wins over a safe name
-		{"Homebrew", nil, ClassSafe},
+		{"go-build", nil, false, ClassSafe},
+		{"com.corp.SomeApp", nil, false, ClassRegenerable},
+		{"com.corp.SomeApp", []string{"cookie"}, false, ClassRisky},
+		{"go-build", []string{".sqlite"}, false, ClassRisky}, // risky wins over a safe name
+		{"Homebrew", nil, false, ClassSafe},
+		{"go-build", nil, true, ClassRisky}, // an incomplete scan is held back
 	}
 	for _, c := range cases {
-		got, reason := classify(c.name, c.markers)
+		got, reason := classify(c.name, c.markers, c.incomplete)
 		if got != c.want {
-			t.Errorf("classify(%q, %v) = %s, want %s", c.name, c.markers, got, c.want)
+			t.Errorf("classify(%q, %v, incomplete=%v) = %s, want %s", c.name, c.markers, c.incomplete, got, c.want)
 		}
 		if got != ClassRegenerable && reason == "" {
 			t.Errorf("classify(%q) gave class %s with no reason", c.name, got)
@@ -35,7 +37,7 @@ func TestRiskyMarker(t *testing.T) {
 		"state.sqlite": ".sqlite",
 		"creds.token":  "token",
 		"photo.jpg":    "",
-		"index.ldb":    "", // a bare .ldb is a leveldb table, not itself a marker name here
+		"000003.ldb":   ".ldb", // a LevelDB table means the subtree holds real data
 	}
 	for name, want := range cases {
 		if got := riskyMarker(name); got != want {
@@ -54,12 +56,12 @@ func TestTriageClassifiesAndTotals(t *testing.T) {
 		Subdirs: func(root string) ([]string, error) {
 			return []string{"go-build", "com.corp.big", "com.corp.private"}, nil
 		},
-		Scan: func(dir string, fn func(string, int64)) error {
+		Scan: func(dir string, fn func(string, int64)) (ScanResult, error) {
 			files := layout[filepath.Base(dir)]
 			for name, sz := range files {
 				fn(name, sz)
 			}
-			return nil
+			return ScanResult{}, nil
 		},
 	}
 
@@ -101,5 +103,43 @@ func TestTriageSubdirsError(t *testing.T) {
 	}
 	if _, err := Triage("/nope", deps); err == nil {
 		t.Error("expected error when the root cannot be listed")
+	}
+}
+
+func TestTriageIncompleteScanHeldBack(t *testing.T) {
+	deps := Deps{
+		Subdirs: func(string) ([]string, error) { return []string{"go-build"}, nil },
+		// A build cache that would normally be "safe", but its scan is truncated.
+		Scan: func(dir string, fn func(string, int64)) (ScanResult, error) {
+			fn("a.o", 1000)
+			return ScanResult{Truncated: true}, nil
+		},
+	}
+	rep, err := Triage("/caches", deps)
+	if err != nil {
+		t.Fatalf("Triage: %v", err)
+	}
+	e := rep.Entries[0]
+	if e.Class != ClassRisky || !e.Incomplete {
+		t.Errorf("a truncated scan must be risky/incomplete, got class=%s incomplete=%v", e.Class, e.Incomplete)
+	}
+	if rep.ReclaimableBytes != 0 || rep.RiskyBytes != 1000 {
+		t.Errorf("truncated bytes must be held back: reclaimable=%d risky=%d", rep.ReclaimableBytes, rep.RiskyBytes)
+	}
+}
+
+func TestTriageScanErrorHeldBack(t *testing.T) {
+	deps := Deps{
+		Subdirs: func(string) ([]string, error) { return []string{"com.corp.app"}, nil },
+		Scan: func(dir string, fn func(string, int64)) (ScanResult, error) {
+			return ScanResult{}, errors.New("permission denied")
+		},
+	}
+	rep, err := Triage("/caches", deps)
+	if err != nil {
+		t.Fatalf("Triage: %v", err)
+	}
+	if rep.Entries[0].Class != ClassRisky || rep.ReclaimableBytes != 0 {
+		t.Errorf("a scan error must hold the entry back, got %+v", rep.Entries[0])
 	}
 }
