@@ -130,6 +130,44 @@ func TestCheckFlagsWALBloat(t *testing.T) {
 	}
 }
 
+func TestExactBoundariesAreNotProblems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "boundary.db")
+	makeDB(t, path, nil)
+	deps := DefaultDeps()
+	real := deps.Stat
+	deps.Stat = func(p string) (int64, error) {
+		if p == path+"-wal" {
+			return walBloatThreshold, nil // exactly at the threshold, not over
+		}
+		return real(p)
+	}
+	rep := Check([]string{path}, deps)
+	if rep.Problems != 0 {
+		t.Errorf("WAL exactly at threshold must not be a problem, got %d", rep.Problems)
+	}
+	if isBloated(DB{FragmentationPct: fragmentationProblemPct}) {
+		t.Error("fragmentation exactly at threshold must not be a problem")
+	}
+}
+
+func TestCheckNonDatabaseFileIsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(path, []byte("this is not a database, just some text bytes"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	rep := Check([]string{path}, DefaultDeps())
+	db := rep.Databases[0]
+	if db.Error == "" {
+		t.Errorf("a non-database file must be reported as an error, not integrity: %+v", db)
+	}
+	if len(db.IntegrityErrors) != 0 {
+		t.Errorf("inspection failure must not be recorded as integrity errors: %v", db.IntegrityErrors)
+	}
+	if rep.Problems != 1 {
+		t.Errorf("problems = %d, want 1", rep.Problems)
+	}
+}
+
 func TestDiscover(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "app.db")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	_ "modernc.org/sqlite" // register the pure-Go "sqlite" driver
 )
@@ -72,7 +73,7 @@ type Deps struct {
 func DefaultDeps() Deps {
 	return Deps{
 		Open: func(path string) (*sql.DB, error) {
-			return sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(2000)")
+			return sql.Open("sqlite", "file:"+escapeSQLiteURIPath(path)+"?mode=ro&_pragma=busy_timeout(2000)")
 		},
 		Stat: func(path string) (int64, error) {
 			fi, err := os.Stat(path)
@@ -99,8 +100,16 @@ func Check(paths []string, deps Deps) Report {
 	return rep
 }
 
+// isBloated matches the documented contract: WAL over the threshold, or a
+// freelist above the fragmentation threshold (strict, so exact boundaries pass).
 func isBloated(db DB) bool {
-	return db.WALBytes >= walBloatThreshold || db.FragmentationPct >= fragmentationProblemPct
+	return db.WALBytes > walBloatThreshold || db.FragmentationPct > fragmentationProblemPct
+}
+
+// escapeSQLiteURIPath percent-encodes the URI-reserved characters that would
+// otherwise let a path change the database target or drop the mode=ro query.
+func escapeSQLiteURIPath(path string) string {
+	return strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
 }
 
 func inspect(path string, deps Deps) DB {
@@ -114,13 +123,19 @@ func inspect(path string, deps Deps) DB {
 
 	conn, err := deps.Open(path)
 	if err != nil {
-		out.Error = fmt.Sprintf("open: %v", err)
+		out.Error = fmt.Errorf("open %s: %w", path, err).Error()
 		return out
 	}
 	defer conn.Close()
 
+	// database/sql.Open defers the connection, so force a header read here: a
+	// missing, locked, or non-database file surfaces as an inspection error
+	// rather than a fabricated integrity failure.
+	if err := conn.QueryRow("PRAGMA page_count").Scan(&out.PageCount); err != nil {
+		out.Error = fmt.Errorf("read %s: %w", path, err).Error()
+		return out
+	}
 	out.PageSize = intPragma(conn, "page_size")
-	out.PageCount = int64Pragma(conn, "page_count")
 	out.FreelistCount = int64Pragma(conn, "freelist_count")
 	if out.PageCount > 0 {
 		out.FragmentationPct = fragmentationPct(out.FreelistCount, out.PageCount)
@@ -195,9 +210,10 @@ func int64Pragma(conn *sql.DB, name string) int64 {
 func Discover(root string, readHeader func(path string) ([]byte, error)) ([]string, error) {
 	var found []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		// Tolerate unreadable entries and only collect regular files whose
-		// header identifies them as SQLite; always return nil to keep scanning.
-		if walkErr == nil && !d.IsDir() {
+		// Tolerate unreadable entries and only inspect regular files (never a
+		// FIFO/device, whose open could block) whose header identifies them as
+		// SQLite; always return nil to keep scanning.
+		if walkErr == nil && d.Type().IsRegular() {
 			if hdr, readErr := readHeader(path); readErr == nil && IsSQLite(hdr) {
 				found = append(found, path)
 			}

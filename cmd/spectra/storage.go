@@ -53,11 +53,7 @@ func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	paths, err := resolveDBPaths(fs.Args())
-	if err != nil {
-		fmt.Fprintf(stderr, "db-check: %v\n", err)
-		return 1
-	}
+	paths := resolveDBPaths(fs.Args())
 	if len(paths) == 0 {
 		fmt.Fprintln(stderr, "no SQLite databases found in the given paths")
 		return 1
@@ -75,25 +71,25 @@ func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {
 }
 
 // resolveDBPaths expands directory arguments into the SQLite files they contain
-// and keeps file arguments as-is.
-func resolveDBPaths(args []string) ([]string, error) {
+// and keeps file arguments as-is. A path that cannot be stat'd or a directory
+// that cannot be scanned is preserved so db-check reports its error rather than
+// silently skipping it or aborting the whole run.
+func resolveDBPaths(args []string) []string {
 	var paths []string
 	for _, a := range args {
 		fi, err := os.Stat(a)
-		if err != nil {
-			return nil, err
-		}
-		if !fi.IsDir() {
+		if err != nil || !fi.IsDir() {
 			paths = append(paths, a)
 			continue
 		}
 		found, err := dbcheck.Discover(a, readDBHeader)
 		if err != nil {
-			return nil, err
+			paths = append(paths, a)
+			continue
 		}
 		paths = append(paths, found...)
 	}
-	return paths, nil
+	return paths
 }
 
 func readDBHeader(path string) ([]byte, error) {
