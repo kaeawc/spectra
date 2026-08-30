@@ -14,6 +14,7 @@ import (
 	"github.com/kaeawc/spectra/internal/asar"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/electronfuse"
+	"github.com/kaeawc/spectra/internal/leveldbcheck"
 )
 
 func runWeb(args []string) int {
@@ -37,10 +38,74 @@ func runWebWithIO(args []string, stdout, stderr io.Writer, inspect detectFunc) i
 		return runWebProcesses(rest, stdout, stderr, defaultProcessCollector)
 	case "symbolicate":
 		return runWebSymbolicate(rest, stdout, stderr, os.ReadFile)
+	case "leveldb-health":
+		return runWebLevelDBHealth(rest, stdout, stderr, leveldbcheck.DefaultDeps())
 	default:
-		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses, processes, symbolicate)\n", sub)
+		fmt.Fprintf(stderr, "unknown web subcommand %q (want: asar-diff, fuses, processes, symbolicate, leveldb-health)\n", sub)
 		return 2
 	}
+}
+
+func runWebLevelDBHealth(args []string, stdout, stderr io.Writer, deps leveldbcheck.Deps) int {
+	fs := flag.NewFlagSet("spectra web leveldb-health", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "usage: spectra web leveldb-health [--json] <path>...  (a LevelDB store dir, or a parent to scan)")
+		return 2
+	}
+
+	var paths []string
+	for _, arg := range fs.Args() {
+		// Discover nested stores under a parent; when the argument itself yields
+		// no store (e.g. a store directory whose CURRENT is missing), inspect it
+		// directly so the corruption is reported rather than silently skipped.
+		if found := leveldbcheck.Discover(arg, deps); len(found) > 0 {
+			paths = append(paths, found...)
+		} else {
+			paths = append(paths, arg)
+		}
+	}
+
+	report := leveldbcheck.Check(paths, deps)
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+		return 0
+	}
+	renderLevelDBHealth(stdout, report)
+	return 0
+}
+
+func renderLevelDBHealth(w io.Writer, report leveldbcheck.Report) {
+	fmt.Fprintf(w, "=== LevelDB health (%d scanned, %d with problems) ===\n", report.Scanned, report.Problems)
+	for _, s := range report.Stores {
+		if s.Error != "" {
+			fmt.Fprintf(w, "  %s\n    error: %s\n", s.Path, s.Error)
+			continue
+		}
+		fmt.Fprintf(w, "  %s\n", s.Path)
+		fmt.Fprintf(w, "    tables=%d (%s) logs=%d (%s) manifest=%s total=%s\n",
+			s.TableFiles, humanSize(s.TableBytes), s.LogFiles, humanSize(s.LogBytes),
+			manifestLabel(s), humanSize(s.TotalBytes))
+		for _, p := range s.Problems {
+			fmt.Fprintf(w, "      - %s\n", p)
+		}
+	}
+}
+
+func manifestLabel(s leveldbcheck.Store) string {
+	if s.ManifestOK {
+		return s.ManifestFile + " (ok)"
+	}
+	if s.ManifestFile != "" {
+		return s.ManifestFile + " (MISSING)"
+	}
+	return "none"
 }
 
 type webFusesOutput struct {
