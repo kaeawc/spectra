@@ -1,12 +1,17 @@
 package netdiag
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -125,5 +130,37 @@ func TestAnalyzeChainExpiringSoon(t *testing.T) {
 	}
 	if probe.TrustValid != true {
 		t.Errorf("expiring-but-trusted leaf should still validate: %s", probe.TrustError)
+	}
+}
+
+func TestProbeTLSCapturesUntrustedChain(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatalf("port: %v", err)
+	}
+
+	probe, err := realTLSProber{}.ProbeTLS(context.Background(), u.Hostname(), port, 3*time.Second)
+	if err != nil {
+		t.Fatalf("ProbeTLS: %v", err)
+	}
+	// The endpoint speaks TLS (OK) but presents an untrusted self-signed chain
+	// that must still be captured and explained, not hidden behind an error.
+	if !probe.OK {
+		t.Fatalf("expected OK for a reachable TLS endpoint; error=%q", probe.Error)
+	}
+	if probe.TrustValid {
+		t.Error("httptest self-signed cert must not validate against the system store")
+	}
+	if len(probe.Chain) == 0 || probe.LeafSPKIPin == "" {
+		t.Errorf("expected the presented chain to be captured, got %d certs", len(probe.Chain))
+	}
+	if probe.TrustError == "" {
+		t.Error("expected a trust error explaining the failure")
 	}
 }

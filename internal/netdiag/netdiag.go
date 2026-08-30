@@ -13,6 +13,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -639,37 +640,39 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 		probe.Error = err.Error()
 		return probe, nil
 	}
-	// The diagnostic must capture and report the presented chain even when it
-	// does not validate (expired, intercepted, self-signed), so the library's
-	// abort-on-failure verification is replaced by VerifyPeerCertificate, which
-	// never aborts; trust is evaluated explicitly by analyzeChain below.
-	cfg := &tls.Config{
-		ServerName:         host,
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true, // #nosec G402 -- diagnostic captures untrusted chains; trust validated in analyzeChain
-		VerifyConnection: func(tls.ConnectionState) error {
-			return nil // do not abort on an untrusted chain; report it instead
-		},
-	}
-	conn := tls.Client(rawConn, cfg)
+	// Verification stays enabled (no InsecureSkipVerify). When it fails because
+	// the chain is untrusted, expired, or intercepted, Go returns a
+	// CertificateVerificationError carrying the presented certificates, so the
+	// diagnostic still captures and explains the chain rather than hiding it.
+	conn := tls.Client(rawConn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	var certs []*x509.Certificate
 	if err := conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
-		probe.Error = err.Error()
-		return probe, nil
+		var cve *tls.CertificateVerificationError
+		if !errors.As(err, &cve) || len(cve.UnverifiedCertificates) == 0 {
+			probe.Error = err.Error()
+			return probe, nil
+		}
+		// Reached the certificate stage: the endpoint speaks TLS but the chain
+		// did not validate. Report it via the trust/interception fields.
+		certs = cve.UnverifiedCertificates
+		probe.OK = true
+	} else {
+		defer conn.Close()
+		state := conn.ConnectionState()
+		probe.OK = true
+		probe.Version = tlsVersion(state.Version)
+		probe.ALPN = state.NegotiatedProtocol
+		certs = state.PeerCertificates
 	}
-	defer conn.Close()
-	state := conn.ConnectionState()
-	probe.OK = true
-	probe.Version = tlsVersion(state.Version)
-	probe.ALPN = state.NegotiatedProtocol
-	if len(state.PeerCertificates) > 0 {
-		cert := state.PeerCertificates[0]
+	if len(certs) > 0 {
+		cert := certs[0]
 		probe.Subject = cert.Subject.String()
 		probe.Issuer = cert.Issuer.String()
 		probe.DNSNames = cert.DNSNames
 		probe.ZscalerHint = strings.Contains(strings.ToLower(probe.Issuer), "zscaler") || strings.Contains(strings.ToLower(probe.Subject), "zscaler")
 	}
-	analyzeChain(&probe, host, state.PeerCertificates, nil, time.Now())
+	analyzeChain(&probe, host, certs, nil, time.Now())
 	return probe, nil
 }
 
