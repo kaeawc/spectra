@@ -410,6 +410,28 @@ spectra network firewall
 spectra network firewall --json
 ```
 
+## `spectra storage db-check`
+
+Inspects the health of embedded SQLite databases — the state stores macOS apps
+scatter through `~/Library/Application Support` and `~/Library/Containers`.
+Each argument is a database file or a directory (directories are walked for
+files with the SQLite header). Every database is opened **read-only** — the
+file under inspection is never written — and reported with its size, page
+geometry, journal mode, free-page fragmentation, the size of any
+un-checkpointed `-wal` sidecar, and the result of `PRAGMA quick_check`. A
+database is counted as a problem when it fails integrity, carries WAL bloat
+over 32 MiB, or has a freelist above 25% of its pages; one that cannot be
+opened (missing, locked by a live writer, or not a database) is reported with
+its error instead of failing the whole run.
+
+### Examples
+
+```bash
+spectra storage db-check ~/Library/Messages/chat.db
+spectra storage db-check --json "~/Library/Application Support/MyApp"
+spectra storage db-check app1.db app2.db
+```
+
 ## `spectra crash readiness`
 
 Audits whether the machine can produce a debuggable crash *before* one

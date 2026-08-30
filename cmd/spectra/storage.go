@@ -4,13 +4,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/dbcheck"
 	"github.com/kaeawc/spectra/internal/storagestate"
 )
 
 func runStorage(args []string) int {
+	if len(args) > 0 && args[0] == "db-check" {
+		return runStorageDBCheck(args[1:], os.Stdout, os.Stderr)
+	}
 	fs := flag.NewFlagSet("spectra storage", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
@@ -34,6 +39,92 @@ func runStorage(args []string) int {
 
 	printStorageState(state, *includeSnapshots, *includeSpotlight)
 	return 0
+}
+
+func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("spectra storage db-check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "usage: spectra storage db-check [--json] <path>...  (a SQLite file, or a directory to scan)")
+		return 2
+	}
+
+	paths := resolveDBPaths(fs.Args())
+	if len(paths) == 0 {
+		fmt.Fprintln(stderr, "no SQLite databases found in the given paths")
+		return 1
+	}
+
+	report := dbcheck.Check(paths, dbcheck.DefaultDeps())
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+		return 0
+	}
+	printDBCheckReport(stdout, report)
+	return 0
+}
+
+// resolveDBPaths expands directory arguments into the SQLite files they contain
+// and keeps file arguments as-is. A path that cannot be stat'd or a directory
+// that cannot be scanned is preserved so db-check reports its error rather than
+// silently skipping it or aborting the whole run.
+func resolveDBPaths(args []string) []string {
+	var paths []string
+	for _, a := range args {
+		fi, err := os.Stat(a)
+		if err != nil || !fi.IsDir() {
+			paths = append(paths, a)
+			continue
+		}
+		found, err := dbcheck.Discover(a, readDBHeader)
+		if err != nil {
+			paths = append(paths, a)
+			continue
+		}
+		paths = append(paths, found...)
+	}
+	return paths
+}
+
+func readDBHeader(path string) ([]byte, error) {
+	f, err := os.Open(path) // #nosec G304 -- inspecting user-supplied database paths
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	hdr := make([]byte, 16)
+	n, err := io.ReadFull(f, hdr)
+	if err != nil && n < 16 {
+		return nil, err
+	}
+	return hdr[:n], nil
+}
+
+func printDBCheckReport(stdout io.Writer, report dbcheck.Report) {
+	fmt.Fprintf(stdout, "=== SQLite db-check (%d scanned, %d with problems) ===\n", report.Scanned, report.Problems)
+	for _, db := range report.Databases {
+		if db.Error != "" {
+			fmt.Fprintf(stdout, "  %s\n    error: %s\n", db.Path, db.Error)
+			continue
+		}
+		status := "ok"
+		if !db.IntegrityOK {
+			status = fmt.Sprintf("INTEGRITY (%d)", len(db.IntegrityErrors))
+		}
+		fmt.Fprintf(stdout, "  %s\n", db.Path)
+		fmt.Fprintf(stdout, "    size=%s journal=%s integrity=%s frag=%.1f%% free=%d/%d pages wal=%s\n",
+			humanSize(db.SizeBytes), stateOrDash(db.JournalMode), status,
+			db.FragmentationPct, db.FreelistCount, db.PageCount, humanSize(db.WALBytes))
+		for _, e := range db.IntegrityErrors {
+			fmt.Fprintf(stdout, "      - %s\n", truncate(e, 100))
+		}
+	}
 }
 
 func printStorageState(s storagestate.State, includeSnapshots, includeSpotlight bool) {
