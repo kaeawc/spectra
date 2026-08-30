@@ -428,8 +428,35 @@ its error instead of failing the whole run.
 
 ```bash
 spectra storage db-check ~/Library/Messages/chat.db
-spectra storage db-check --json "~/Library/Application Support/MyApp"
+spectra storage db-check --json "$HOME/Library/Application Support/MyApp"
 spectra storage db-check app1.db app2.db
+```
+
+## `spectra storage cache-triage`
+
+Classifies each subdirectory of a cache root (default `~/Library/Caches`) so you
+can reclaim space without deleting real data. `~/Library/Caches` is usually the
+largest safe win, but some apps stash cookies, tokens, or SQLite state there, so
+"delete all caches" is risky. Each subdirectory is sized and classed as:
+
+- **safe** — a pure build/tooling cache that fully reconstructs from source or
+  network (Go build cache, npm/yarn/pnpm, pip, CocoaPods, Homebrew, node-gyp,
+  Playwright, …);
+- **regenerable** — an ordinary app runtime cache (the default), safe to delete
+  and rebuilt on demand;
+- **risky** — a subtree containing markers of real data (cookies, credentials or
+  tokens, `.sqlite`/`.db`, LevelDB) that should be reviewed before deletion.
+
+Risky data outweighs a safe-looking name, so the classification is conservative.
+The command is read-only — it never deletes anything — and reports total cache
+bytes, reclaimable bytes (safe + regenerable), and the risky bytes held back.
+
+### Examples
+
+```bash
+spectra storage cache-triage
+spectra storage cache-triage --json
+spectra storage cache-triage "$HOME/Library/Containers/com.example.App/Data/Library/Caches"
 ```
 
 ## `spectra crash readiness`
