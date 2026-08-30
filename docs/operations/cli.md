@@ -327,6 +327,30 @@ spectra jvm jfr view gc-pauses /tmp/app.jfr
 spectra jvm jfr stop 4012 --name spectra
 ```
 
+## `spectra runtime`
+
+Identifies a live process's language runtime and lists the diagnostics available
+for it — one entry point when you have a PID but don't yet know whether it's a
+JVM, Node/Electron, Go, .NET, Python, or a native binary. It classifies from the
+executable path, the full command line, and two cheap pure-Go probes: the
+embedded Go build info (`debug/buildinfo`) fingerprints a Go binary, and a
+`dotnet-diagnostic-<pid>-*-socket` in the temp directory identifies .NET. It
+reports the evidence that decided the class and routes to the next step — an
+existing Spectra command where one exists (`spectra jvm <pid>`,
+`spectra web processes`) or the standard technique otherwise (SIGUSR1 + CDP for
+Node/Electron, a SIGQUIT goroutine dump or net/http/pprof for Go, the
+`dotnet-*` diagnostic tools for .NET, `py-spy` for Python) — always including
+the universal `spectra sample <pid>` fallback. It is read-only: it advises, and
+never signals, attaches to, or profiles the process itself.
+
+### Examples
+
+```bash
+spectra runtime 4012
+spectra runtime attach 4012
+spectra runtime --json 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
