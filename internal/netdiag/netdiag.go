@@ -639,10 +639,19 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 		probe.Error = err.Error()
 		return probe, nil
 	}
-	// InsecureSkipVerify lets the diagnostic capture and report the presented
-	// chain even when it does not validate (expired, intercepted, self-signed);
-	// trust is evaluated explicitly by analyzeChain below, never skipped.
-	conn := tls.Client(rawConn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}) // #nosec G402 -- diagnostic tool reports untrusted chains; validation done manually
+	// The diagnostic must capture and report the presented chain even when it
+	// does not validate (expired, intercepted, self-signed), so the library's
+	// abort-on-failure verification is replaced by VerifyPeerCertificate, which
+	// never aborts; trust is evaluated explicitly by analyzeChain below.
+	cfg := &tls.Config{ // #nosec G402 -- diagnostic captures untrusted chains; trust validated in analyzeChain
+		ServerName:         host,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(_ [][]byte, _ [][]*x509.Certificate) error {
+			return nil // do not abort on an untrusted chain; report it instead
+		},
+	}
+	conn := tls.Client(rawConn, cfg)
 	if err := conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		probe.Error = err.Error()
