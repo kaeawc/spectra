@@ -5,7 +5,14 @@ package netdiag
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"sort"
@@ -25,6 +32,13 @@ const (
 	slowTCPMS = 750
 	slowTLSMS = 1000
 )
+
+// expirySoonDays flags a leaf certificate approaching expiry.
+const expirySoonDays = 21
+
+// interceptionVendors are substrings of issuer/subject names used by common
+// enterprise TLS-interception proxies. Matching is case-insensitive.
+var interceptionVendors = []string{"zscaler", "netskope", "forcepoint", "palo alto", "fortinet", "fortigate", "bluecoat", "blue coat", "mcafee web gateway", "cisco umbrella"}
 
 // Options controls one app-focused network diagnosis.
 type Options struct {
@@ -115,6 +129,38 @@ type TLSProbe struct {
 	DNSNames    []string `json:"dns_names,omitempty"`
 	ZscalerHint bool     `json:"zscaler_hint,omitempty"`
 	Error       string   `json:"error,omitempty"`
+
+	// Chain is the presented certificate list, leaf first.
+	Chain []CertInfo `json:"chain,omitempty"`
+	// LeafSPKIPin is the base64 SHA-256 of the leaf SubjectPublicKeyInfo,
+	// comparable against an application's certificate-pinning set.
+	LeafSPKIPin  string `json:"leaf_spki_pin,omitempty"`
+	SigAlgorithm string `json:"signature_algorithm,omitempty"`
+	KeyType      string `json:"key_type,omitempty"`
+	KeyBits      int    `json:"key_bits,omitempty"`
+	// TrustValid reports whether the presented chain validates against the
+	// system trust store for ServerName. TrustError explains a failure.
+	TrustValid bool   `json:"trust_valid"`
+	TrustError string `json:"trust_error,omitempty"`
+	// Intercepted flags a likely TLS-interception proxy; InterceptionReason
+	// names the signal (known vendor, self-signed leaf, untrusted root).
+	Intercepted        bool   `json:"intercepted,omitempty"`
+	InterceptionReason string `json:"interception_reason,omitempty"`
+	// LeafExpiresInDays is days until the leaf certificate NotAfter;
+	// ExpiringSoon is set when that is within expirySoonDays.
+	LeafExpiresInDays int  `json:"leaf_expires_in_days,omitempty"`
+	ExpiringSoon      bool `json:"expiring_soon,omitempty"`
+}
+
+// CertInfo summarizes one certificate in a presented TLS chain.
+type CertInfo struct {
+	Subject      string `json:"subject"`
+	Issuer       string `json:"issuer"`
+	NotBefore    string `json:"not_before"`
+	NotAfter     string `json:"not_after"`
+	IsCA         bool   `json:"is_ca,omitempty"`
+	DaysToExpiry int    `json:"days_to_expiry"`
+	SPKIPin      string `json:"spki_pin,omitempty"`
 }
 
 type TraceProbe struct {
@@ -593,7 +639,10 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 		probe.Error = err.Error()
 		return probe, nil
 	}
-	conn := tls.Client(rawConn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	// InsecureSkipVerify lets the diagnostic capture and report the presented
+	// chain even when it does not validate (expired, intercepted, self-signed);
+	// trust is evaluated explicitly by analyzeChain below, never skipped.
+	conn := tls.Client(rawConn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}) // #nosec G402 -- diagnostic tool reports untrusted chains; validation done manually
 	if err := conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		probe.Error = err.Error()
@@ -611,7 +660,94 @@ func (p realTLSProber) ProbeTLS(ctx context.Context, host string, port int, time
 		probe.DNSNames = cert.DNSNames
 		probe.ZscalerHint = strings.Contains(strings.ToLower(probe.Issuer), "zscaler") || strings.Contains(strings.ToLower(probe.Subject), "zscaler")
 	}
+	analyzeChain(&probe, host, state.PeerCertificates, nil, time.Now())
 	return probe, nil
+}
+
+// analyzeChain populates the chain, key, trust, interception, and expiry fields
+// on probe from the presented certificates. roots nil uses the system trust
+// store; now is injected so results are deterministic under test.
+func analyzeChain(probe *TLSProbe, host string, certs []*x509.Certificate, roots *x509.CertPool, now time.Time) {
+	if len(certs) == 0 {
+		return
+	}
+	leaf := certs[0]
+	probe.LeafSPKIPin = spkiPin(leaf)
+	probe.SigAlgorithm = leaf.SignatureAlgorithm.String()
+	probe.KeyType, probe.KeyBits = keyDetail(leaf)
+	for _, c := range certs {
+		probe.Chain = append(probe.Chain, CertInfo{
+			Subject:      certName(c.Subject),
+			Issuer:       certName(c.Issuer),
+			NotBefore:    c.NotBefore.UTC().Format(time.RFC3339),
+			NotAfter:     c.NotAfter.UTC().Format(time.RFC3339),
+			IsCA:         c.IsCA,
+			DaysToExpiry: daysUntil(c.NotAfter, now),
+			SPKIPin:      spkiPin(c),
+		})
+	}
+
+	inter := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		inter.AddCert(c)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Intermediates: inter, Roots: roots, CurrentTime: now}); err == nil {
+		probe.TrustValid = true
+	} else {
+		probe.TrustError = err.Error()
+	}
+
+	probe.Intercepted, probe.InterceptionReason = interceptionSignal(leaf, probe.TrustValid, probe.TrustError)
+	probe.LeafExpiresInDays = daysUntil(leaf.NotAfter, now)
+	probe.ExpiringSoon = probe.LeafExpiresInDays <= expirySoonDays
+}
+
+// interceptionSignal reports whether the leaf certificate looks like it comes
+// from a TLS-interception proxy, and the signal that matched.
+func interceptionSignal(leaf *x509.Certificate, trustValid bool, trustErr string) (bool, string) {
+	hay := strings.ToLower(leaf.Issuer.String() + " " + leaf.Subject.String())
+	for _, v := range interceptionVendors {
+		if strings.Contains(hay, v) {
+			return true, "issuer matches known interception vendor: " + v
+		}
+	}
+	if leaf.Issuer.String() == leaf.Subject.String() && !leaf.IsCA {
+		return true, "leaf certificate is self-signed"
+	}
+	if !trustValid && strings.Contains(strings.ToLower(trustErr), "unknown authority") {
+		return true, "chain does not validate to a trusted root"
+	}
+	return false, ""
+}
+
+func spkiPin(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func keyDetail(cert *x509.Certificate) (string, int) {
+	switch pub := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return "RSA", pub.N.BitLen()
+	case *ecdsa.PublicKey:
+		return "ECDSA", pub.Curve.Params().BitSize
+	case ed25519.PublicKey:
+		return "Ed25519", len(pub) * 8
+	default:
+		return "", 0
+	}
+}
+
+// certName prefers the common name, falling back to the full RDN string.
+func certName(n pkix.Name) string {
+	if n.CommonName != "" {
+		return n.CommonName
+	}
+	return n.String()
+}
+
+func daysUntil(t, now time.Time) int {
+	return int(t.Sub(now).Hours() / 24)
 }
 
 func tlsVersion(v uint16) string {

@@ -377,6 +377,18 @@ output. Positional hosts and `--ports` narrow the inferred app endpoints; when
 no app scope is provided, positional hosts can be used as explicit probe
 targets.
 
+For each TLS endpoint the probe reports the full presented certificate chain
+(subject, issuer, validity, days-to-expiry, and the base64 SHA-256 SPKI pin per
+certificate, so pins can be compared against an app's pinned set), the leaf key
+type/size and signature algorithm, and whether the chain validates against the
+macOS system trust store (`trust=valid` / `trust=UNTRUSTED` with the reason).
+It flags a leaf `expires_in` within 21 days and marks likely TLS interception
+(`intercepted=…`) when the leaf is issued by a known interception vendor, is
+self-signed, or does not chain to a trusted root. The probe intentionally
+completes the handshake without library-side verification so an untrusted or
+expired chain is still captured and explained rather than hidden behind a
+handshake error.
+
 ### Examples
 
 ```bash
