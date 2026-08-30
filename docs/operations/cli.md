@@ -620,6 +620,29 @@ spectra web symbolicate app.js.map 1:284620
 spectra web symbolicate --json app.js.map 1:284620 1:9931
 ```
 
+## `spectra web leveldb-health`
+
+Reports the structural health of the LevelDB stores Chromium/Electron apps use
+for IndexedDB, Local Storage, and Session Storage. Each argument is a LevelDB
+store directory or a parent directory to scan (a directory containing a
+`CURRENT` file is a store). Inspection is **file-level only** — it counts the
+sorted table files (`.ldb`/`.sst`) and write-ahead logs (`.log`), reads the
+small `CURRENT` file to check the manifest it names actually exists, and sums
+the store size — so it never decodes tables, never opens the store for writing,
+and does not contend with a running browser. A store is flagged when `CURRENT`
+is missing/unreadable or points at an absent manifest, when the table-file
+count crosses the compaction-backlog threshold, or when the write-ahead log is
+bloated (an unclean shutdown or heavy pending writes). The persistent `LOCK`
+file is ignored — its presence is normal and does not indicate the store is in
+use.
+
+### Examples
+
+```bash
+spectra web leveldb-health "~/Library/Application Support/MyApp/Local Storage/leveldb"
+spectra web leveldb-health --json "~/Library/Application Support/MyApp/IndexedDB"
+```
+
 ## `spectra anomalies`
 
 Flags processes whose latest RSS sits well above their own recent baseline,
