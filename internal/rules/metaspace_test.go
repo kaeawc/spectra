@@ -65,6 +65,30 @@ func TestJVMMetaspacePressureFiresForCompressedClassSpace(t *testing.T) {
 	}
 }
 
+func TestJVMMetaspacePressureBothCeilingsDistinctIdentities(t *testing.T) {
+	s := baseSnap()
+	s.JVMs = []jvm.Info{{
+		PID:       10,
+		MainClass: "both.App",
+		VMArgs:    "-XX:MaxMetaspaceSize=256m -XX:CompressedClassSpaceSize=64m",
+		GC:        &jvm.GCStats{MC: 245000, MU: 240000, CCSC: 62000, CCSU: 61000},
+	}}
+	findings := ruleJVMMetaspacePressure().MatchFn(s)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings (metaspace + compressed class space), got %d: %v", len(findings), findings)
+	}
+	// Both share the rule ID but must have distinct subjects so the issue
+	// catalog (keyed by rule_id + machine_uuid + subject) tracks them separately.
+	if findings[0].Subject == findings[1].Subject {
+		t.Fatalf("findings must have distinct subjects, both = %q", findings[0].Subject)
+	}
+	for _, f := range findings {
+		if !strings.Contains(f.Subject, "Metaspace") && !strings.Contains(f.Subject, "Compressed class space") {
+			t.Errorf("subject should name the affected space: %q", f.Subject)
+		}
+	}
+}
+
 func TestParseVMArgsMetaspaceCeilings(t *testing.T) {
 	f := ParseVMArgs("-XX:MaxMetaspaceSize=512m -XX:CompressedClassSpaceSize=128m")
 	if f.MaxMetaspaceSizeBytes != 512*1024*1024 {

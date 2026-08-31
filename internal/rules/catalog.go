@@ -216,11 +216,15 @@ func ruleJVMMetaspacePressure() Rule {
 			for _, j := range s.JVMs {
 				f := FactsFor(j)
 				subject := fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass)
+				// Metaspace and compressed class space are distinct exhaustion
+				// paths that can both trip for one PID; give each a distinct
+				// Subject so the issue catalog keys them as separate issues
+				// (identity is rule_id + machine_uuid + subject).
 				if pct, ok := MetaspaceCeilingPct(j, f); ok && pct >= MetaspaceNearLimitPct {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-metaspace-pressure",
 						Severity: SeverityMedium,
-						Subject:  subject,
+						Subject:  subject + " (Metaspace)",
 						Message: fmt.Sprintf(
 							"Metaspace is %.0f%% of the -XX:MaxMetaspaceSize ceiling (%dMB); approaching OutOfMemoryError: Metaspace.",
 							pct, f.MaxMetaspaceSizeBytes/(1024*1024)),
@@ -231,7 +235,7 @@ func ruleJVMMetaspacePressure() Rule {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-metaspace-pressure",
 						Severity: SeverityMedium,
-						Subject:  subject,
+						Subject:  subject + " (Compressed class space)",
 						Message: fmt.Sprintf(
 							"Compressed class space is %.0f%% of the -XX:CompressedClassSpaceSize ceiling (%dMB); approaching OutOfMemoryError: Compressed class space.",
 							pct, f.CompressedClassSpaceSizeBytes/(1024*1024)),
