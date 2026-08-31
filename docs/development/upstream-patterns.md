@@ -101,7 +101,7 @@ when the corresponding feature lands.
 | `internal/tokens/` | HMAC-signed JWT-compatible tokens | If we add per-host bearer tokens beyond Tailscale ACLs |
 | `internal/paginator/` | Cursor pagination for list endpoints | If snapshot-list responses get long enough to warrant it |
 | `internal/kv/` | Generic in-memory store with TTL | If the daemon caches anything in RAM with expiry |
-| `internal/db/`, `sql/`, `sqlc.yaml` | Postgres-specific | Never — Spectra uses SQLite, see [../design/storage.md](../design/storage.md) |
+| `internal/db/`, `sql/`, `sqlc.yaml` | Postgres-specific persistence | Never for Spectra's own storage — that stays SQLite, see [../design/storage.md](../design/storage.md). Outbound read-only inspection of *other* apps' postgres databases lives in `internal/dbinspect/` and is unrelated to these patterns |
 | `internal/handlers/`, `internal/middleware/`, `internal/jobs/`, `internal/investigations/` | Server-specific business logic | Never — those are golang-build's product |
 | `internal/tracing/`, `internal/profiling/` | Full OpenTelemetry + Pyroscope | Likely never; the daemon may add a minimal `perf` instead |
 | `internal/blobstore/` | S3-backed object store | Never — Spectra's blob store is local filesystem |

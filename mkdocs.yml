@@ -98,6 +98,7 @@ nav:
       - Process profiling: inspection/process-profiling.md
       - Toolchains: inspection/toolchains.md
       - JVM: inspection/jvm.md
+      - Databases: inspection/databases.md
       - Live data sources: inspection/live-data-sources.md
   - Playbooks:
       - Overview: playbooks/index.md

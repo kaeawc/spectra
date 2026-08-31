@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/corefile"
+	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/logquery"
@@ -31,6 +33,7 @@ type Collectors struct {
 	Snapshots   SnapshotCollector
 	JVMs        JVMCollector
 	Toolchain   ToolchainCollector
+	DB          DBInspector
 	Power       PowerCollector
 	Memory      MemoryCollector
 	Storage     StorageCollector
@@ -76,6 +79,18 @@ type JVMCollector interface {
 
 type ToolchainCollector interface {
 	CollectToolchains(ctx context.Context, opts toolchain.CollectOptions) toolchain.Toolchains
+}
+
+// DBInspector opens read-only sessions against databases an application
+// under debug talks to. Live-socket discovery goes through NetworkCollector;
+// this interface covers env discovery and the catalog reads.
+type DBInspector interface {
+	DiscoverDBEnv() []dbinspect.EnvHint
+	Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error)
+	Schema(ctx context.Context, dsn, schema string) (*dbinspect.SchemaReport, error)
+	Relations(ctx context.Context, dsn, schema string) (*dbinspect.RelationsReport, error)
+	Stats(ctx context.Context, dsn, schema string) (*dbinspect.StatsReport, error)
+	Sample(ctx context.Context, dsn, table string, limit int) (*dbinspect.SampleReport, error)
 }
 
 // PowerCollector reports battery/thermal state and per-pid energy sampling.
@@ -145,6 +160,7 @@ func defaultCollectors() Collectors {
 		Snapshots:   defaultSnapshotCollector{},
 		JVMs:        defaultJVMCollector{},
 		Toolchain:   defaultToolchainCollector{},
+		DB:          defaultDBInspector{},
 		Power:       defaultPowerCollector{},
 		Memory:      defaultMemoryCollector{},
 		Storage:     defaultStorageCollector{},
@@ -157,6 +173,32 @@ func defaultCollectors() Collectors {
 		Playbooks:   defaultPlaybookCatalog{},
 		Clock:       systemClock{},
 	}
+}
+
+type defaultDBInspector struct{}
+
+func (defaultDBInspector) DiscoverDBEnv() []dbinspect.EnvHint {
+	return dbinspect.DiscoverEnv(os.Getenv)
+}
+
+func (defaultDBInspector) Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error) {
+	return dbinspect.CollectOverview(ctx, dsn, dbinspect.Options{})
+}
+
+func (defaultDBInspector) Schema(ctx context.Context, dsn, schema string) (*dbinspect.SchemaReport, error) {
+	return dbinspect.CollectSchema(ctx, dsn, schema, dbinspect.Options{})
+}
+
+func (defaultDBInspector) Relations(ctx context.Context, dsn, schema string) (*dbinspect.RelationsReport, error) {
+	return dbinspect.CollectRelations(ctx, dsn, schema, dbinspect.Options{})
+}
+
+func (defaultDBInspector) Stats(ctx context.Context, dsn, schema string) (*dbinspect.StatsReport, error) {
+	return dbinspect.CollectStats(ctx, dsn, schema, dbinspect.Options{})
+}
+
+func (defaultDBInspector) Sample(ctx context.Context, dsn, table string, limit int) (*dbinspect.SampleReport, error) {
+	return dbinspect.SampleTable(ctx, dsn, table, limit, dbinspect.Options{})
 }
 
 type defaultAppInspector struct{}

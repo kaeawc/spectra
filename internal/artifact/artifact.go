@@ -24,6 +24,7 @@ const (
 	KindPacketCapture = "packet_capture"
 	KindFlamegraph    = "flamegraph"
 	KindCoreDump      = "core_dump"
+	KindDBSample      = "db_sample"
 
 	SensitivityLow        = "low"
 	SensitivityMedium     = "medium"
@@ -151,7 +152,7 @@ func (m *Manager) Record(ctx context.Context, rec Record) (Record, error) {
 
 func defaultSensitivity(kind string) string {
 	switch kind {
-	case KindHeapDump, KindCoreDump:
+	case KindHeapDump, KindCoreDump, KindDBSample:
 		return SensitivityVeryHigh
 	case KindPacketCapture:
 		return SensitivityHigh

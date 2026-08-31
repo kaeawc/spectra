@@ -1454,6 +1454,8 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 	d.Register("jvm.heap_dump", jvmHeapDump)
 	d.Register("jvm.heapDump", jvmHeapDump)
 
+	registerDBHandlers(d, artifactRecorder, artifactPolicy, log)
+
 	// jdk.list — enumerate installed JDK toolchains.
 	d.Register("jdk.list", func(_ json.RawMessage) (any, error) {
 		tc := collectToolchains(context.Background(), toolchain.CollectOptions{})

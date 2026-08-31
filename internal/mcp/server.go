@@ -73,6 +73,9 @@ func mergeInspectionCollectors(c, defaults Collectors) Collectors {
 	if c.Toolchain == nil {
 		c.Toolchain = defaults.Toolchain
 	}
+	if c.DB == nil {
+		c.DB = defaults.DB
+	}
 	return c
 }
 
@@ -234,6 +237,7 @@ func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
 		"process":     s.toolProcess,
 		"jvm":         s.toolJVM,
 		"network":     s.toolNetwork,
+		"db":          s.toolDB,
 		"toolchain":   s.toolToolchain,
 		"issues":      s.toolIssues,
 		"remote":      s.toolRemote,
