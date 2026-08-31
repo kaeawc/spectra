@@ -437,6 +437,25 @@ spectra spindump --input /tmp/foo.spindump.txt
 spectra spindump --sudo --out /tmp/foo.txt --json 4012
 ```
 
+## `spectra vmmap`
+
+Summarizes a process's memory composition from `vmmap --summary` — a footprint
+number has no shape on its own, and the raw table is a wall of columns. It
+reports the physical footprint and its peak, then per region type the
+virtual / resident / dirty / swapped sizes, ranked by dirty size (the real
+memory cost), top `--top` (default 8), plus the TOTAL row. `vmmap --summary`
+works without root for a same-user process; for another user's process it needs
+root, so a permission failure is reported as "re-run as root (sudo)". `--json`
+emits the structured result.
+
+### Examples
+
+```bash
+spectra vmmap 4012
+spectra vmmap --top 15 4012
+spectra vmmap --json 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
