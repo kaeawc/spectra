@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -29,6 +30,7 @@ func V1Catalog() []Rule {
 		ruleJVMGCPressure(),
 		ruleJVMMetaspacePressure(),
 		ruleJVMOOMDumpDisabled(),
+		ruleJVMRSSExceedsHeap(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -284,6 +286,74 @@ func ruleJVMOOMDumpDisabled() Rule {
 			return findings
 		},
 	}
+}
+
+// Native-excess thresholds for jvm-rss-exceeds-heap.
+const (
+	// nativeExcessFloorKiB is the absolute off-heap footprint (RSS minus committed
+	// heap+metadata) above which the gap is worth surfacing. Set high enough to
+	// absorb the normal native overhead — shared libraries, JIT code cache (which
+	// jstat committed does not include), and thread stacks.
+	nativeExcessFloorKiB int64 = 1024 * 1024 // 1 GiB
+	// nativeExcessRatio is the minimum multiple of committed managed memory the
+	// RSS must reach, so a large-heap JVM (whose RSS is naturally large) does not
+	// trip on the absolute floor alone.
+	nativeExcessRatio = 2.0
+)
+
+// ruleJVMRSSExceedsHeap correlates a JVM's process RSS with its committed heap +
+// class metadata. When resident memory greatly exceeds what the heap accounts
+// for, the excess is off-heap/native (direct buffers, thread stacks, JNI, mmap,
+// or a native leak) — a symptom heap-only tools cannot see. Conservative dual
+// thresholds keep it quiet on JVMs with ordinary native overhead.
+func ruleJVMRSSExceedsHeap() Rule {
+	return Rule{
+		ID:       "jvm-rss-exceeds-heap",
+		Severity: SeverityLow,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, j := range s.JVMs {
+				if j.GC == nil {
+					continue
+				}
+				committedKiB := int64(j.GC.OC + j.GC.EC + j.GC.S0C + j.GC.S1C + j.GC.MC + j.GC.CCSC)
+				if committedKiB <= 0 {
+					continue
+				}
+				proc, ok := processByPID(s.Processes, j.PID)
+				if !ok || proc.RSSKiB <= 0 {
+					continue
+				}
+				excessKiB := proc.RSSKiB - committedKiB
+				if excessKiB < nativeExcessFloorKiB {
+					continue
+				}
+				if float64(proc.RSSKiB) < float64(committedKiB)*nativeExcessRatio {
+					continue
+				}
+				findings = append(findings, Finding{
+					RuleID:   "jvm-rss-exceeds-heap",
+					Severity: SeverityLow,
+					Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+					Message: fmt.Sprintf(
+						"Resident set is %d MiB, %.1fx the JVM's committed heap+metadata (%d MiB); ~%d MiB is off-heap/native.",
+						proc.RSSKiB/1024, float64(proc.RSSKiB)/float64(committedKiB), committedKiB/1024, excessKiB/1024),
+					Fix: "Attribute native memory with `jcmd <pid> VM.native_memory summary` (needs -XX:NativeMemoryTracking=summary); check direct byte buffers, thread-stack count, and JNI/native libraries.",
+				})
+			}
+			return findings
+		},
+	}
+}
+
+// processByPID returns the process with the given PID, or ok=false if none.
+func processByPID(procs []process.Info, pid int) (process.Info, bool) {
+	for _, p := range procs {
+		if p.PID == pid {
+			return p, true
+		}
+	}
+	return process.Info{}, false
 }
 
 // ruleJDKMajorVersionDrift fires when more than one installed JDK shares
