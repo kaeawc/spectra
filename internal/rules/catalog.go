@@ -31,6 +31,7 @@ func V1Catalog() []Rule {
 		ruleJVMMetaspacePressure(),
 		ruleJVMOOMDumpDisabled(),
 		ruleJVMRSSExceedsHeap(),
+		ruleJVMGCAlgorithm(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -354,6 +355,59 @@ func processByPID(procs []process.Info, pid int) (process.Info, bool) {
 		}
 	}
 	return process.Info{}, false
+}
+
+// GC-algorithm thresholds for jvm-gc-algorithm.
+const (
+	// serialGCLargeHeapMinXmxBytes is the -Xmx above which SerialGC's
+	// single-threaded stop-the-world pauses become a real problem.
+	serialGCLargeHeapMinXmxBytes int64 = 2 * 1024 * 1024 * 1024 // 2 GiB
+	// serialGCMinCores is the core count above which a parallel/concurrent
+	// collector could do meaningfully better than SerialGC.
+	serialGCMinCores = 2
+)
+
+// ruleJVMGCAlgorithm flags GC-collector choices that are almost always a
+// misconfiguration: Epsilon (a no-op collector that guarantees an eventual OOM)
+// and SerialGC on a large heap (single-threaded, long stop-the-world pauses).
+// The unconditional serial-gc note in `jvm explain` stays informational; this
+// rule only fires in the genuinely problematic cases and feeds issue tracking.
+func ruleJVMGCAlgorithm() Rule {
+	return Rule{
+		ID:       "jvm-gc-algorithm",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			cores := s.Host.CPUCores
+			var findings []Finding
+			for _, j := range s.JVMs {
+				f := FactsFor(j)
+				subject := fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass)
+				switch f.GCAlgorithm {
+				case "Epsilon":
+					findings = append(findings, Finding{
+						RuleID:   "jvm-gc-algorithm",
+						Severity: SeverityMedium,
+						Subject:  subject,
+						Message:  "Epsilon (no-op) GC never reclaims memory; the JVM will OutOfMemoryError once the heap fills.",
+						Fix:      "Use a real collector (G1/Parallel/Z) unless this process is a deliberate short-lived allocation benchmark.",
+					})
+				case "Serial":
+					if f.XmxBytes >= serialGCLargeHeapMinXmxBytes && cores >= serialGCMinCores {
+						findings = append(findings, Finding{
+							RuleID:   "jvm-gc-algorithm",
+							Severity: SeverityMedium,
+							Subject:  subject,
+							Message: fmt.Sprintf(
+								"SerialGC with a %d MiB heap on %d cores causes long stop-the-world pauses; SerialGC is single-threaded.",
+								f.XmxBytes/(1024*1024), cores),
+							Fix: "Switch to G1 (-XX:+UseG1GC) or Parallel (-XX:+UseParallelGC) for a multi-core, large-heap workload.",
+						})
+					}
+				}
+			}
+			return findings
+		},
+	}
 }
 
 // ruleJDKMajorVersionDrift fires when more than one installed JDK shares
