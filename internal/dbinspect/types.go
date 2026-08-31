@@ -20,7 +20,8 @@ type Engine string
 const (
 	EnginePostgres Engine = "postgres"
 	EngineMySQL    Engine = "mysql"
-	EngineSQLite   Engine = "sqlite" // discovery only for now
+	EngineSQLite   Engine = "sqlite"
+	EngineMongo    Engine = "mongodb"
 )
 
 // ConnectFn opens a read-only connection for a DSN. Injected so tests can
@@ -49,9 +50,12 @@ type Rows interface {
 // the DSN and uses that engine's built-in connector with a 10s overall
 // timeout.
 type Options struct {
-	// Connect opens the connection. Nil means the engine's built-in
-	// connector (ConnectPostgres or ConnectMySQL).
+	// Connect opens the connection for the SQL-shaped engines. Nil means
+	// the engine's built-in connector.
 	Connect ConnectFn
+	// ConnectMongo opens the client for the mongodb engine, whose command
+	// surface doesn't fit Conn/Rows. Nil means the built-in mongo driver.
+	ConnectMongo MongoConnectFn
 	// Engine forces the engine instead of inferring it from the DSN.
 	Engine Engine
 	// Timeout bounds the whole operation (connect + queries). Zero means 10s.

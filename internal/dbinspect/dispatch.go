@@ -22,6 +22,10 @@ func opsFor(engine Engine) engineOps {
 		return engineOps{ConnectMySQL, mysqlOverview, mysqlSchema, mysqlRelations, mysqlStats, mysqlSample}
 	case EngineSQLite:
 		return engineOps{ConnectSQLite, sqliteOverview, sqliteSchema, sqliteRelations, sqliteStats, sqliteSample}
+	case EngineMongo:
+		// The mongodb engine connects through Options.ConnectMongo, not the
+		// SQL-shaped ConnectFn, so connect stays nil here.
+		return engineOps{nil, mongoOverview, mongoSchema, mongoRelations, mongoStats, mongoSample}
 	default:
 		return engineOps{ConnectPostgres, postgresOverview, postgresSchema, postgresRelations, postgresStats, postgresSample}
 	}
@@ -56,7 +60,7 @@ func resolveEngine(dsn string, o Options) Engine {
 // engine's built-in connector when the caller didn't inject one.
 func resolve(dsn string, o Options) (engineOps, Options) {
 	ops := opsFor(resolveEngine(dsn, o))
-	if o.Connect == nil {
+	if o.Connect == nil && ops.connect != nil {
 		o.Connect = ops.connect
 	}
 	return ops, o
