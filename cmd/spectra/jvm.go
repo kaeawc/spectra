@@ -16,6 +16,7 @@ import (
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/diag"
+	"github.com/kaeawc/spectra/internal/gclog"
 	"github.com/kaeawc/spectra/internal/heap"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -94,6 +95,7 @@ func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
 		"heap-histogram": runJVMHeapHistogram,
 		"heap-hprof":     runJVMHeapHPROF,
 		"heap-dump":      runJVMHeapDump,
+		"gc-log":         runJVMGCLog,
 		"jfr":            runJVMJFR,
 		"gc-stats":       runJVMGCStats,
 		"vm-memory":      runJVMVMMemory,
@@ -303,6 +305,65 @@ func runJVMHeapHistogramCompare(args []string) int {
 	}
 	printGrowthSuspects(os.Stdout, growth)
 	return 0
+}
+
+// runJVMGCLog parses a JDK unified-logging (`-Xlog:gc*`) GC log file and prints
+// an aggregate pause summary — the per-pause view jstat counters cannot give.
+func runJVMGCLog(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm gc-log", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the parsed GC pause summary as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm gc-log [--json] <file>")
+		return 2
+	}
+	summary, err := gclog.ParseFile(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading %q: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(summary)
+		return 0
+	}
+	printGCLogSummary(os.Stdout, fs.Arg(0), summary)
+	return 0
+}
+
+func printGCLogSummary(w io.Writer, source string, s gclog.Summary) {
+	fmt.Fprintf(w, "GC log %s — %d pauses, %.1fms total, %.1fms max, %.2fms avg\n",
+		source, s.Pauses, s.TotalPauseMs, s.MaxPauseMs, s.AvgPauseMs)
+	fmt.Fprintf(w, "  Young/Mixed: %d   Full: %d   System.gc(): %d   evacuation failures: %d\n",
+		s.YoungGCCount, s.FullGCCount, s.SystemGCCount, s.EvacuationFailures)
+	if s.LongestPause != nil {
+		p := s.LongestPause
+		fmt.Fprintf(w, "  Longest: GC(%d) Pause %s %s %.3fms\n", p.ID, p.Kind, p.Cause, p.PauseMs)
+	}
+	if len(s.Causes) > 0 {
+		type causeCount struct {
+			cause string
+			n     int
+		}
+		list := make([]causeCount, 0, len(s.Causes))
+		for c, n := range s.Causes {
+			list = append(list, causeCount{c, n})
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].n != list[j].n {
+				return list[i].n > list[j].n
+			}
+			return list[i].cause < list[j].cause
+		})
+		fmt.Fprintln(w, "  Causes:")
+		for _, c := range list {
+			fmt.Fprintf(w, "    %4d  %s\n", c.n, c.cause)
+		}
+	}
 }
 
 // runJVMHeapHPROF analyzes a saved binary .hprof heap dump: it ranks the

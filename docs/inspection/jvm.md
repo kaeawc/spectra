@@ -41,6 +41,7 @@ spectra jvm heap-hprof [--json] [--suspects N] <file.hprof>
 spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
+spectra jvm gc-log [--json] <file>
 spectra jvm vm-memory [--json] <pid>
 spectra jvm jmx status [--json] <pid>
 spectra jvm jmx start-local [--json] <pid>
@@ -57,6 +58,12 @@ spectra jvm jfr summary [--json] <recording.jfr>
 spectra jvm jfr view [--json] <view> <recording.jfr>
 spectra jvm jfr analyze [--json] [--view <name>]... <recording.jfr>
 ```
+
+`gc-log` parses a JDK unified-logging (`-Xlog:gc*`) GC log file into an aggregate
+pause summary — pause count, total/max/avg pause, Full vs young/mixed counts,
+`System.gc()` calls, evacuation failures, and the longest pause — the per-pause
+view the jstat-counter GC-pressure rule cannot provide. ZGC/Shenandoah
+concurrent-cycle formats and the legacy pre-JDK9 log format are out of scope.
 
 `heap-hprof` reads binary `.hprof` dumps (`jcmd GC.heap_dump` / `jmap -dump`)
 into the same class histogram the live `heap-histogram` produces, so a dump can
