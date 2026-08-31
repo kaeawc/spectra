@@ -56,6 +56,11 @@ type Snapshot struct {
 	JVMs             []jvm.Info          `json:"jvms,omitempty"`
 	RuntimeTelemetry []telemetry.Process `json:"runtime_telemetry,omitempty"`
 
+	// OOMReports records java.lang.OutOfMemoryError occurrences found in the
+	// discovered log files of running JVMs. Populated only in deep mode (when
+	// process LogFiles are available); empty otherwise.
+	OOMReports []OOMReport `json:"oom_reports,omitempty"`
+
 	// JVMHistory is recent per-PID JVM samples (oldest first) populated by
 	// callers that have access to a snapshot store. Optional: rules that
 	// don't see history fall back to point-in-time checks.
@@ -309,11 +314,23 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	wg.Wait()
 	s.Warnings = warnings
 	jvm.AttributeJDKs(s.JVMs, s.Toolchains.JDKs)
-	if !opts.SkipJVMs {
-		s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
-	}
+	finalizeJVMData(ctx, &s, opts)
 	attributeRuntimeJDKs(s.RuntimeTelemetry, s.Toolchains.JDKs)
 	return s
+}
+
+// finalizeJVMData runs the post-Wait JVM steps that need collectors already
+// joined: runtime telemetry, and OOM log scanning (which needs both JVMs and
+// process LogFiles). Kept out of Build to hold Build's cyclomatic complexity
+// under the gate.
+func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
+	if opts.SkipJVMs {
+		return
+	}
+	s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
+	if !opts.SkipProcesses {
+		s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
+	}
 }
 
 func snapshotCollectorCount(opts Options) int {

@@ -337,3 +337,8 @@ Implemented:
 13. Optional Java Attach API agent with MBean browsing, MBean attribute
     reads, zero-argument operation invocation, in-process probes, named
     counters, workflow probes, and optional Unix-domain-socket transport.
+14. OutOfMemoryError detection: bounded scanning of each running JVM's
+    deep-mode-discovered log files, classifying occurrences by variant (Java
+    heap space, GC overhead, metaspace, compressed class space, direct buffer,
+    native thread, array size, native memory) and surfacing them via the
+    `jvm-oom-detected` recommendation.
