@@ -37,6 +37,8 @@ spectra jvm explain [--samples 1] [--interval 1s] <pid>
 spectra jvm thread-dump [--json] [--summary] <pid>
 spectra jvm heap-histogram [--json] [--suspects N] <pid>
 spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>
+spectra jvm heap-hprof [--json] [--suspects N] <file.hprof>
+spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
 spectra jvm vm-memory [--json] <pid>
@@ -55,6 +57,12 @@ spectra jvm jfr summary [--json] <recording.jfr>
 spectra jvm jfr view [--json] <view> <recording.jfr>
 spectra jvm jfr analyze [--json] [--view <name>]... <recording.jfr>
 ```
+
+`heap-hprof` reads binary `.hprof` dumps (`jcmd GC.heap_dump` / `jmap -dump`)
+into the same class histogram the live `heap-histogram` produces, so a dump can
+be ranked for its largest classes or diffed against another dump to shortlist
+leak suspects. `heap-histogram compare` auto-detects its inputs, so each file may
+be a text `GC.class_histogram` capture or a binary `.hprof`.
 
 Daemon methods:
 
