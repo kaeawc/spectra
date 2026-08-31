@@ -28,6 +28,7 @@ func V1Catalog() []Rule {
 		ruleUpdatesStaleMajorPrepared(),
 		ruleJVMGCPressure(),
 		ruleJVMMetaspacePressure(),
+		ruleJVMOOMDumpDisabled(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -242,6 +243,43 @@ func ruleJVMMetaspacePressure() Rule {
 						Fix: "Raise -XX:CompressedClassSpaceSize, or investigate a classloader leak.",
 					})
 				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleJVMOOMDumpDisabled flags a tuned, long-running JVM that has not enabled
+// -XX:+HeapDumpOnOutOfMemoryError. An OutOfMemoryError is frequently
+// non-reproducible; without an automatic dump at the moment of failure, the
+// evidence is lost. Gated to processes that look like real services (explicit
+// -Xmx, not dev tooling) so it stays quiet on a developer machine.
+func ruleJVMOOMDumpDisabled() Rule {
+	return Rule{
+		ID:       "jvm-oom-dump-disabled",
+		Severity: SeverityLow,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			profiles := BuiltinProfiles()
+			var findings []Finding
+			for _, j := range s.JVMs {
+				f := FactsFor(j)
+				if f.HeapDumpOnOOM {
+					continue // already captures a dump on OOM
+				}
+				if f.XmxBytes <= 0 {
+					continue // untuned / likely transient; don't nag
+				}
+				profile := MatchProfile(j, profiles)
+				if HasTag(profile, TagLauncher) || HasTag(profile, TagIDE) || HasTag(profile, TagBuildToolDaemon) {
+					continue // dev tooling, not a service needing OOM post-mortems
+				}
+				findings = append(findings, Finding{
+					RuleID:   "jvm-oom-dump-disabled",
+					Severity: SeverityLow,
+					Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
+					Message:  "No -XX:+HeapDumpOnOutOfMemoryError: an OutOfMemoryError will terminate this JVM with no heap dump for post-mortem analysis.",
+					Fix:      "Add -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=<dir> so an OOM writes a heap dump automatically.",
+				})
 			}
 			return findings
 		},
