@@ -5,9 +5,35 @@ import (
 	"strings"
 )
 
+// engineOps binds one engine's connector and collectors. New engines add a
+// registry entry rather than growing per-function switches.
+type engineOps struct {
+	connect   ConnectFn
+	overview  func(ctx context.Context, dsn string, o Options) (*Overview, error)
+	schema    func(ctx context.Context, dsn, schema string, o Options) (*SchemaReport, error)
+	relations func(ctx context.Context, dsn, schema string, o Options) (*RelationsReport, error)
+	stats     func(ctx context.Context, dsn, schema string, o Options) (*StatsReport, error)
+	sample    func(ctx context.Context, dsn, table string, limit int, o Options) (*SampleReport, error)
+}
+
+func opsFor(engine Engine) engineOps {
+	switch engine {
+	case EngineMySQL:
+		return engineOps{ConnectMySQL, mysqlOverview, mysqlSchema, mysqlRelations, mysqlStats, mysqlSample}
+	case EngineSQLite:
+		return engineOps{ConnectSQLite, sqliteOverview, sqliteSchema, sqliteRelations, sqliteStats, sqliteSample}
+	default:
+		return engineOps{ConnectPostgres, postgresOverview, postgresSchema, postgresRelations, postgresStats, postgresSample}
+	}
+}
+
+// sqliteFileSuffixes mark a bare path as an SQLite database.
+var sqliteFileSuffixes = []string{".db", ".sqlite", ".sqlite3", ".db3"}
+
 // resolveEngine picks the engine for a DSN: an explicit Options.Engine wins,
-// then the URL scheme, then the go-sql-driver "user@tcp(host)/db" form.
-// Everything else — libpq keyword form, bare PG* env fallback — is postgres.
+// then the URL scheme, then the go-sql-driver "user@tcp(host)/db" form, then
+// a bare path with an SQLite file suffix. Everything else — libpq keyword
+// form, bare PG* env fallback — is postgres.
 func resolveEngine(dsn string, o Options) Engine {
 	if o.Engine != "" {
 		return o.Engine
@@ -18,65 +44,50 @@ func resolveEngine(dsn string, o Options) Engine {
 	if strings.Contains(dsn, "@tcp(") || strings.Contains(dsn, "@unix(") {
 		return EngineMySQL
 	}
+	for _, suffix := range sqliteFileSuffixes {
+		if strings.HasSuffix(dsn, suffix) {
+			return EngineSQLite
+		}
+	}
 	return EnginePostgres
 }
 
-// connectorFor fills Options.Connect with the engine's built-in connector
-// when the caller didn't inject one.
-func connectorFor(o Options, engine Engine) Options {
-	if o.Connect != nil {
-		return o
+// resolve picks the ops for a DSN and fills Options.Connect with the
+// engine's built-in connector when the caller didn't inject one.
+func resolve(dsn string, o Options) (engineOps, Options) {
+	ops := opsFor(resolveEngine(dsn, o))
+	if o.Connect == nil {
+		o.Connect = ops.connect
 	}
-	if engine == EngineMySQL {
-		o.Connect = ConnectMySQL
-	} else {
-		o.Connect = ConnectPostgres
-	}
-	return o
+	return ops, o
 }
 
 // CollectOverview returns server, database, and session facts plus a count
 // of tables per user schema.
 func CollectOverview(ctx context.Context, dsn string, o Options) (*Overview, error) {
-	engine := resolveEngine(dsn, o)
-	o = connectorFor(o, engine)
-	if engine == EngineMySQL {
-		return mysqlOverview(ctx, dsn, o)
-	}
-	return postgresOverview(ctx, dsn, o)
+	ops, o := resolve(dsn, o)
+	return ops.overview(ctx, dsn, o)
 }
 
 // CollectSchema returns every user relation with its columns and indexes.
 // Pass schema to limit scope to one schema, or "" for all user schemas.
 func CollectSchema(ctx context.Context, dsn, schema string, o Options) (*SchemaReport, error) {
-	engine := resolveEngine(dsn, o)
-	o = connectorFor(o, engine)
-	if engine == EngineMySQL {
-		return mysqlSchema(ctx, dsn, schema, o)
-	}
-	return postgresSchema(ctx, dsn, schema, o)
+	ops, o := resolve(dsn, o)
+	return ops.schema(ctx, dsn, schema, o)
 }
 
 // CollectRelations returns every foreign-key relationship whose referencing
 // table is in scope. Pass schema to limit scope, or "" for all user schemas.
 func CollectRelations(ctx context.Context, dsn, schema string, o Options) (*RelationsReport, error) {
-	engine := resolveEngine(dsn, o)
-	o = connectorFor(o, engine)
-	if engine == EngineMySQL {
-		return mysqlRelations(ctx, dsn, schema, o)
-	}
-	return postgresRelations(ctx, dsn, schema, o)
+	ops, o := resolve(dsn, o)
+	return ops.relations(ctx, dsn, schema, o)
 }
 
 // CollectStats returns per-table health, largest tables first. Row counts
 // are engine estimates — no COUNT(*) is issued.
 func CollectStats(ctx context.Context, dsn, schema string, o Options) (*StatsReport, error) {
-	engine := resolveEngine(dsn, o)
-	o = connectorFor(o, engine)
-	if engine == EngineMySQL {
-		return mysqlStats(ctx, dsn, schema, o)
-	}
-	return postgresStats(ctx, dsn, schema, o)
+	ops, o := resolve(dsn, o)
+	return ops.stats(ctx, dsn, schema, o)
 }
 
 // SampleTable reads up to limit rows from one table. limit defaults to 10
@@ -89,10 +100,6 @@ func SampleTable(ctx context.Context, dsn, table string, limit int, o Options) (
 	if limit > maxSampleLimit {
 		limit = maxSampleLimit
 	}
-	engine := resolveEngine(dsn, o)
-	o = connectorFor(o, engine)
-	if engine == EngineMySQL {
-		return mysqlSample(ctx, dsn, table, limit, o)
-	}
-	return postgresSample(ctx, dsn, table, limit, o)
+	ops, o := resolve(dsn, o)
+	return ops.sample(ctx, dsn, table, limit, o)
 }
