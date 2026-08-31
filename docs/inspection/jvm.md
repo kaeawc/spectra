@@ -15,11 +15,13 @@ Heap forensics beyond capture is intentionally split into reusable
 application-runtime interfaces before it grows a command surface.
 `internal/heap` defines generic heap records, snapshots, parsers, and
 analyzers that JVM, native, Node, Python, WebKit, and future collectors can
-adapt to. The JVM adapter parses `jcmd GC.class_histogram` output into
-structured rows, compares histogram snapshots, and ranks shallow-size and
-growth suspects. It does not parse `.hprof` object graphs yet, so dominator
-trees, retained sizes, paths-to-GC-roots, object queries, and heap-dump
-diffing remain future work.
+adapt to. The JVM adapter parses both `jcmd GC.class_histogram` output and
+binary `.hprof` heap dumps (`ParseHPROF` / `HPROFParser`) into structured
+per-class histograms, compares histogram snapshots, and ranks shallow-size and
+growth suspects — so an `.hprof` can be diffed against a live histogram or
+against another dump to shortlist leak suspects. It does not yet parse the
+`.hprof` object *reference graph*, so dominator trees, retained sizes,
+paths-to-GC-roots, and object queries remain future work.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
