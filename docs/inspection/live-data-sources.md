@@ -137,13 +137,14 @@ JDK path, Spectra also records `jdk_install_id`, `jdk_source`, and
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `lsof -i -P -n` remote ports 5432/3306/27017/... | which apps hold sockets to database servers | user | shared with connections collector | `db.discover` |
+| `lsof -i -P -n` remote ports 5432/3306/27017/6379/... | which apps hold sockets to database servers | user | shared with connections collector | `db.discover` |
 | connection env-var allowlist (`DATABASE_URL`, `PG*`, ...) | connection hints, credentials redacted | user | free | `db.discover` |
 | `lsof -nP` REG handles with database suffixes | which apps hold SQLite files open (WAL/SHM folded in) | user | one host-wide lsof pass | `db.discover` |
 | `sqlite_schema` + pragma functions via modernc.org/sqlite (mode=ro, query_only) | sqlite schema, columns, indexes, foreign keys, stat1 row estimates | file read access | one read-only connection | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
 | `pg_catalog` + `pg_stat_*` via pgx (read-only session) | schema, columns, indexes, foreign keys, table health estimates | database credentials | one connection, catalog reads only | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
 | `information_schema` via go-sql-driver (read-only session) | mysql/mariadb schema, columns, indexes, foreign keys, size estimates | database credentials | one connection, catalog reads only | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
 | `listCollections`/`listIndexes`/`collStats` via mongo driver (read commands only, secondary-preferred) | mongodb databases, collections, index specs, size estimates | database credentials | one connection, read commands only | `db.overview`, `db.schema`, `db.stats` |
+| `INFO`/`SCAN`/`TYPE` via go-redis (read commands only) | redis/valkey version, memory, keyspace counters, key-pattern sample | database credentials | one connection, bounded scans | `db.overview`, `db.schema`, `db.stats` |
 | `SELECT * ... LIMIT n` or bounded `find` | bounded row sample | database credentials + `confirm_sensitive` | one bounded query | `db.sample` artifact |
 
 Sessions are forced read-only (`default_transaction_read_only=on`, `SET SESSION TRANSACTION READ ONLY`) plus statement and lock

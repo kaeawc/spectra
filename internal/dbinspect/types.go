@@ -22,6 +22,7 @@ const (
 	EngineMySQL    Engine = "mysql"
 	EngineSQLite   Engine = "sqlite"
 	EngineMongo    Engine = "mongodb"
+	EngineRedis    Engine = "redis"
 )
 
 // ConnectFn opens a read-only connection for a DSN. Injected so tests can
@@ -56,6 +57,9 @@ type Options struct {
 	// ConnectMongo opens the client for the mongodb engine, whose command
 	// surface doesn't fit Conn/Rows. Nil means the built-in mongo driver.
 	ConnectMongo MongoConnectFn
+	// ConnectRedis opens the client for the redis engine, whose command
+	// surface doesn't fit Conn/Rows either. Nil means the built-in go-redis.
+	ConnectRedis RedisConnectFn
 	// Engine forces the engine instead of inferring it from the DSN.
 	Engine Engine
 	// Timeout bounds the whole operation (connect + queries). Zero means 10s.

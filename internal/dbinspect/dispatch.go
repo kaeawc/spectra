@@ -23,9 +23,12 @@ func opsFor(engine Engine) engineOps {
 	case EngineSQLite:
 		return engineOps{ConnectSQLite, sqliteOverview, sqliteSchema, sqliteRelations, sqliteStats, sqliteSample}
 	case EngineMongo:
-		// The mongodb engine connects through Options.ConnectMongo, not the
-		// SQL-shaped ConnectFn, so connect stays nil here.
+		// The mongodb and redis engines connect through their own seams
+		// (Options.ConnectMongo/ConnectRedis), not the SQL-shaped ConnectFn,
+		// so connect stays nil for both.
 		return engineOps{nil, mongoOverview, mongoSchema, mongoRelations, mongoStats, mongoSample}
+	case EngineRedis:
+		return engineOps{nil, redisOverview, redisSchema, redisRelations, redisStats, redisSample}
 	default:
 		return engineOps{ConnectPostgres, postgresOverview, postgresSchema, postgresRelations, postgresStats, postgresSample}
 	}
