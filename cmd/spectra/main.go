@@ -71,6 +71,7 @@ func subcommandList() []subcommand {
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
 		{"spindump", "Capture and summarize a per-thread stack report (heaviest stacks)", runSpindump},
+		{"vmmap", "Summarize a process's memory composition by region (dirty/resident/swapped)", runVmmap},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
 		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
