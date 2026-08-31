@@ -69,6 +69,7 @@ func subcommandList() []subcommand {
 		{"install-daemon", "Install the user LaunchAgent for spectra serve", runInstallDaemonCmd},
 		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
+		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
 		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
