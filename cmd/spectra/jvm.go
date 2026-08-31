@@ -92,6 +92,7 @@ func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
 	handlers := map[string]func([]string) int{
 		"thread-dump":    runJVMThreadDump,
 		"heap-histogram": runJVMHeapHistogram,
+		"heap-hprof":     runJVMHeapHPROF,
 		"heap-dump":      runJVMHeapDump,
 		"jfr":            runJVMJFR,
 		"gc-stats":       runJVMGCStats,
@@ -304,12 +305,106 @@ func runJVMHeapHistogramCompare(args []string) int {
 	return 0
 }
 
+// runJVMHeapHPROF analyzes a saved binary .hprof heap dump: it ranks the
+// largest classes, or (with the "compare" subcommand) diffs two dumps to rank
+// growth suspects. This is the on-disk counterpart to heap-histogram.
+func runJVMHeapHPROF(args []string) int {
+	if len(args) > 0 && args[0] == "compare" {
+		return runJVMHeapHPROFCompare(args[1:])
+	}
+
+	fs := flag.NewFlagSet("spectra jvm heap-hprof", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit the parsed histogram and ranked suspects as JSON")
+	suspects := fs.Int("suspects", 20, "Number of largest classes (leak suspects) to rank")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-hprof [--json] [--suspects N] <file.hprof>")
+		fmt.Fprintln(os.Stderr, "       spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>")
+		return 2
+	}
+	path := fs.Arg(0)
+	hist, err := heap.ParseHPROFFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parsing %q: %v\n", path, err)
+		return 1
+	}
+	limit := *suspects
+	if limit <= 0 {
+		limit = 20
+	}
+	ranked := heap.RankHistogramSuspects(hist, limit)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(heapHistogramReport{Histogram: hist, Suspects: ranked})
+		return 0
+	}
+	printHeapSuspectsFor(os.Stdout, path, ranked, hist.Total)
+	return 0
+}
+
+// runJVMHeapHPROFCompare diffs two .hprof dumps and ranks the classes that grew
+// the most between them — the leak-suspect shortlist.
+func runJVMHeapHPROFCompare(args []string) int {
+	fs := flag.NewFlagSet("spectra jvm heap-hprof compare", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	asJSON := fs.Bool("json", false, "Emit deltas and growth suspects as JSON")
+	limit := fs.Int("suspects", 20, "Number of growth suspects to rank")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>")
+		return 2
+	}
+	before, err := heap.ParseHPROFFile(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parsing %q: %v\n", fs.Arg(0), err)
+		return 1
+	}
+	after, err := heap.ParseHPROFFile(fs.Arg(1))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parsing %q: %v\n", fs.Arg(1), err)
+		return 1
+	}
+	growth := heap.RankGrowthSuspects(before, after, *limit)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(heapCompareReport{Deltas: heap.CompareHistograms(before, after), Growth: growth})
+		return 0
+	}
+	printGrowthSuspects(os.Stdout, growth)
+	return 0
+}
+
+// readHistogramFile parses a saved heap capture, auto-detecting a binary
+// `.hprof` dump (magic "JAVA PROFILE") versus a text `GC.class_histogram`. HPROF
+// is stream-parsed so a multi-GiB dump is not loaded whole into memory.
 func readHistogramFile(path string) (heap.Histogram, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return heap.Histogram{}, err
 	}
-	return heap.ParseHistogram(string(data))
+	defer f.Close()
+
+	const magic = "JAVA PROFILE"
+	head := make([]byte, len(magic))
+	n, _ := io.ReadFull(f, head)
+	if string(head[:n]) == magic {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return heap.Histogram{}, err
+		}
+		return heap.ParseHPROF(f)
+	}
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		return heap.Histogram{}, err
+	}
+	return heap.ParseHistogram(string(head[:n]) + string(rest))
 }
 
 // heapHistogramReport is the JSON shape emitted by `heap-histogram --json`.
@@ -325,7 +420,13 @@ type heapCompareReport struct {
 }
 
 func printHeapSuspects(w io.Writer, pid int, suspects []heap.Suspect, total heap.ClassEntry) {
-	fmt.Fprintf(w, "Heap histogram for PID %d — %d classes, %d bytes total live\n", pid, total.Instances, total.Bytes)
+	printHeapSuspectsFor(w, fmt.Sprintf("PID %d", pid), suspects, total)
+}
+
+// printHeapSuspectsFor renders the largest-classes table for any histogram
+// source label (a live PID or an .hprof file path).
+func printHeapSuspectsFor(w io.Writer, source string, suspects []heap.Suspect, total heap.ClassEntry) {
+	fmt.Fprintf(w, "Heap histogram for %s — %d instances, %d bytes total live\n", source, total.Instances, total.Bytes)
 	fmt.Fprintf(w, "Top %d largest classes:\n", len(suspects))
 	for i, s := range suspects {
 		fmt.Fprintf(w, "  %2d. %-50s %12d bytes  %10d instances\n", i+1, s.ClassName, s.Bytes, s.Instances)
