@@ -459,6 +459,25 @@ spectra vmmap --top 15 4012
 spectra vmmap --json 4012
 ```
 
+## `spectra lsmp`
+
+Summarizes a process's Mach port table from `lsmp -p`. A Mach port leak — a
+service accumulating send rights until it hits the per-task limit and wedges —
+is invisible in the raw per-port table; this counts port entries by right type
+(recv / send / send-once / port-set) and flags a suspiciously high total. The
+parser keys on the leading hex port name and the documented rights keyword, so
+column-spacing differences between macOS versions don't break it. `lsmp`
+requires root (it uses `task_for_pid`), so `--sudo` prepends `sudo` and a
+permission failure is reported as "re-run with --sudo (or as root)". `--json`
+emits the structured result.
+
+### Examples
+
+```bash
+spectra lsmp --sudo 4012
+spectra lsmp --json --sudo 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
