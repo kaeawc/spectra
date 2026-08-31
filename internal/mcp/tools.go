@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
@@ -43,6 +44,7 @@ func toolDefinitions() []ToolDefinition {
 		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
 		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
+		operationToolDef("db", "Read-only database inspection (postgres). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
 		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
 		operationToolDef("remote", "Call a Spectra daemon or list known hosts. Ops: health, hosts, rpc, fanout. Ask: \"Check host health.\" \"What hosts do we know about?\"", []string{"health", "hosts", "rpc", "triage", "fanout"}),
@@ -289,6 +291,9 @@ func operationToolDef(name, description string, operations []string) ToolDefinit
 			"output":            stringProp("Fix output."),
 			"exit_code":         integerProp("Exit code."),
 			"applied_by":        stringProp("Actor."),
+			"dsn":               stringProp("Database DSN or URL."),
+			"table":             stringProp("Table name, optionally schema-qualified."),
+			"schema":            stringProp("Database schema filter."),
 			"interface":         stringProp("Network interface."),
 			"host":              stringProp("Host filter."),
 			"port":              integerProp("Port filter."),
@@ -1098,6 +1103,81 @@ func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
 	default:
 		return toolError("unknown network operation: " + p.Operation)
 	}
+}
+
+type dbToolParams struct {
+	Operation        string `json:"operation"`
+	DSN              string `json:"dsn"`
+	Schema           string `json:"schema"`
+	Table            string `json:"table"`
+	Limit            int    `json:"limit"`
+	ConfirmSensitive bool   `json:"confirm_sensitive"`
+}
+
+func (s *Server) toolDB(raw json.RawMessage) ToolResult {
+	var p dbToolParams
+	if err := decodeArgs(raw, &p); err != nil {
+		return toolError(err.Error())
+	}
+	ctx := context.Background()
+	switch p.Operation {
+	case "discover", "":
+		conns := dbinspect.DiscoverConnections(s.collect.Network.CollectConnections())
+		env := s.collect.DB.DiscoverDBEnv()
+		return toolText(toolEnvelope{
+			Summary:   fmt.Sprintf("found %d live database connection(s) and %d connection env var(s)", len(conns), len(env)),
+			Raw:       dbinspect.Discovery{Connections: conns, Env: env},
+			Timestamp: s.now(),
+		})
+	case "overview":
+		overview, err := s.collect.DB.Overview(ctx, p.DSN)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		summary := fmt.Sprintf("postgres %s database %q: %d schema(s), %d/%d connections",
+			overview.ServerVersion, overview.Database, len(overview.Schemas), overview.Connections, overview.MaxConnections)
+		return toolText(toolEnvelope{Summary: summary, Raw: overview, Timestamp: s.now()})
+	case "schema":
+		report, err := s.collect.DB.Schema(ctx, p.DSN, p.Schema)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d relation(s)", len(report.Tables)), Raw: report, Timestamp: s.now()})
+	case "relations":
+		report, err := s.collect.DB.Relations(ctx, p.DSN, p.Schema)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d foreign key(s)", len(report.ForeignKeys)), Raw: report, Timestamp: s.now()})
+	case "stats":
+		report, err := s.collect.DB.Stats(ctx, p.DSN, p.Schema)
+		if err != nil {
+			return toolError(err.Error())
+		}
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected stats for %d table(s)", len(report.Tables)), Raw: report, Timestamp: s.now()})
+	case "sample":
+		return s.toolDBSample(ctx, p)
+	default:
+		return toolError("unknown db operation: " + p.Operation)
+	}
+}
+
+func (s *Server) toolDBSample(ctx context.Context, p dbToolParams) ToolResult {
+	if p.Table == "" {
+		return toolError("db sample requires {\"table\": \"<schema.table>\"}")
+	}
+	if !p.ConfirmSensitive {
+		return toolError("db sample requires {\"confirm_sensitive\": true} because row data may contain secrets and PII")
+	}
+	report, err := s.collect.DB.Sample(ctx, p.DSN, p.Table, p.Limit)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolText(toolEnvelope{
+		Summary:   fmt.Sprintf("sampled %d row(s) from %s.%s", len(report.Rows), report.Schema, report.Table),
+		Raw:       report,
+		Timestamp: s.now(),
+	})
 }
 
 func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {

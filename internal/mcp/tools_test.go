@@ -91,6 +91,7 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 		"process",
 		"jvm",
 		"network",
+		"db",
 		"toolchain",
 		"issues",
 		"remote",
