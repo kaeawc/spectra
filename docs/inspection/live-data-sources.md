@@ -133,6 +133,19 @@ JDK discovery. Running JVM inspection records each process's `java.home`,
 JDK path, Spectra also records `jdk_install_id`, `jdk_source`, and
 `jdk_path`.
 
+## Database observation
+
+| Source | Output | Privilege | Cost | Used by |
+|---|---|---|---|---|
+| `lsof -i -P -n` remote ports 5432/3306/... | which apps hold sockets to database servers | user | shared with connections collector | `db.discover` |
+| connection env-var allowlist (`DATABASE_URL`, `PG*`, ...) | connection hints, credentials redacted | user | free | `db.discover` |
+| `pg_catalog` + `pg_stat_*` via pgx (read-only session) | schema, columns, indexes, foreign keys, table health estimates | database credentials | one connection, catalog reads only | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
+| `SELECT * ... LIMIT n` via pgx | bounded row sample | database credentials + `confirm_sensitive` | one bounded query | `db.sample` artifact |
+
+Sessions force `default_transaction_read_only=on` plus statement and lock
+timeouts, so inspection cannot write or stall the target server — see
+[databases.md](databases.md).
+
 ## Code-signing and entitlements
 
 | Source | Output | Privilege | Cost | Used by |

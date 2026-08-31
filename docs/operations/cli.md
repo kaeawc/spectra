@@ -37,6 +37,7 @@ The short `-v` is unaffected: it still means "show detection signals" for
 | `rules` | Evaluate recommendation rules against a snapshot |
 | `issues` | List, check, or update persisted recommendation issues |
 | `jvm` | List or inspect running JVM processes |
+| `db` | Discover and inspect databases apps connect to (read-only; postgres) |
 | `toolchain` | Show installed language runtimes and package managers |
 | `network` | Show current routes, DNS, VPN, proxy, and listening ports |
 | `power` | Show current battery and thermal state |
@@ -350,6 +351,29 @@ spectra runtime 4012
 spectra runtime attach 4012
 spectra runtime --json 4012
 ```
+
+## `spectra db`
+
+Discovers databases that apps on this host connect to, then inspects them
+read-only: schema, foreign-key relationships, and per-table health stats.
+PostgreSQL only for now. Sessions are forced read-only with statement and
+lock timeouts, so inspection cannot write or stall the server. Connection
+strings resolve from `--dsn`, then `SPECTRA_DB_DSN`, then `DATABASE_URL`,
+then libpq `PG*` env vars. `sample` reads row data, which may contain PII —
+it is recorded in the artifact manifest at `very-high` sensitivity.
+
+### Examples
+
+```bash
+spectra db discover
+spectra db overview --dsn postgres://app@10.0.0.5/orders
+spectra db schema --schema public --json
+spectra db relations
+spectra db stats
+spectra db sample --limit 20 billing.invoices
+```
+
+See [../inspection/databases.md](../inspection/databases.md).
 
 ## `spectra xattr-inspect`
 

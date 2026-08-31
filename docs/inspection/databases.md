@@ -1,0 +1,106 @@
+# Database inspection
+
+When an application under debug talks to a database, the schema, its
+relationships, and the table health stats are often the fastest route to an
+explanation — a missing index behind a slow screen, dead-tuple bloat behind
+growing latency, a foreign key that explains a cascade of deletes. `spectra
+db` connects directly with credentials you already have and reads that
+picture without disturbing the running workload.
+
+PostgreSQL is supported today via [pgx](https://github.com/jackc/pgx).
+Discovery already recognizes MySQL endpoints; MySQL and SQLite inspection
+are planned follow-ons behind the same engine-neutral report types in
+`internal/dbinspect`.
+
+## Non-disruptive by construction
+
+Every inspection opens one short-lived connection with session parameters
+forced at startup, so no query — even a mistaken one — can write or stall
+the server:
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `default_transaction_read_only` | `on` | every transaction is read-only |
+| `statement_timeout` | 5s | no query can run away |
+| `lock_timeout` | 2s | never queues behind DDL or long writers |
+| `idle_in_transaction_session_timeout` | 5s | can't pin vacuum horizon |
+| `application_name` | `spectra-dbinspect` | identifiable in `pg_stat_activity` |
+
+Structural reads use only `pg_catalog` and `pg_stat_*` views. Row counts
+are planner estimates (`reltuples`, `n_live_tup`) — spectra never issues
+`COUNT(*)` or any other full-table scan. Every caller-supplied filter is a
+bind parameter; the one place an identifier is interpolated (row sampling)
+resolves the name through `to_regclass` against `pg_class` first and
+quote-escapes the catalog's own spelling.
+
+## Discovering that an app uses a database
+
+`spectra db discover` combines two signals:
+
+- **Live sockets** — active connections whose remote port is a well-known
+  database port (5432/5433/6432 postgres, 3306/3307 mysql), from the same
+  `lsof` collector that backs `spectra network connections`, with PID and
+  command attribution.
+- **Connection env vars** — a fixed allowlist (`DATABASE_URL`,
+  `POSTGRES_URL`, `PGHOST`, `PGUSER`, `PGPASSWORD`, ...), never the full
+  environment. Passwords and URL credentials are redacted before they reach
+  output or logs.
+
+## CLI
+
+```bash
+spectra db discover
+spectra db overview
+spectra db schema --schema public
+spectra db relations
+spectra db stats
+spectra db sample --limit 20 billing.invoices
+```
+
+Connection strings resolve from `--dsn`, then `SPECTRA_DB_DSN`, then
+`DATABASE_URL`, then the standard libpq `PG*` env vars. Both URL and
+keyword DSN forms work. Every subcommand takes `--json`.
+
+- `overview` — server version, database size, connection usage, and table
+  counts per schema.
+- `schema` — every user relation with columns (type, nullability, default,
+  primary key) and indexes.
+- `relations` — foreign keys with column lists and delete/update actions,
+  for reconstructing the data model.
+- `stats` — per-table `pg_stat_user_tables` health: sequential vs index
+  scans, live/dead row estimates, total size, last (auto)vacuum and
+  analyze. Largest tables first.
+- `sample` — up to N rows (default 10, capped at 500) from one table.
+
+## Row data is sensitive
+
+Schema and stats are structural. Row samples are not: they can contain
+customer PII and secrets. `sample` is therefore treated like a heap dump —
+it is recorded in the artifact manifest at `very-high` sensitivity, and the
+daemon RPC and MCP operations refuse it without
+`{"confirm_sensitive": true}`, subject to the same
+[artifact policy](../operations/artifacts.md) as `jvm.heap_dump`.
+
+## Daemon RPC and MCP
+
+The daemon registers `db.discover`, `db.overview`, `db.schema`,
+`db.relations`, `db.stats`, and `db.sample`, so a remote engineer can
+inspect through an existing `spectra serve` session:
+
+```bash
+spectra connect work-mac db.overview '{"dsn": "postgres://app@10.0.0.5/orders"}'
+```
+
+The MCP server exposes the same operations on the `db` tool
+(`operation: discover | overview | schema | relations | stats | sample`),
+so an agent can go from "this process holds a socket to 10.0.0.5:5432" to a
+schema map in two calls.
+
+## See also
+
+- [Live data sources](live-data-sources.md) — where database inspection
+  sits among the other collectors.
+- [Network endpoints](network-endpoints.md) — the socket attribution that
+  feeds discovery.
+- [Artifacts](../operations/artifacts.md) — sensitivity policy that gates
+  row sampling.
