@@ -47,6 +47,47 @@ rules:
 	}
 }
 
+// TestYAMLRuleMatchesGCAndHistory proves the newly projected memory fields are
+// reachable from external CEL rules: a rule can gate on derived GC occupancy
+// combined with the rising-heap trend summary.
+func TestYAMLRuleMatchesGCAndHistory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(path, []byte(`
+rules:
+  - id: yaml-jvm-oldgen-rising
+    severity: high
+    for_each: jvms
+    match: item.gc.old_gen_used_pct > 90 && item.history.rising_old_gen
+    subject: "jvm:{{ .item.pid }}"
+    message: "old gen high and rising"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := LoadYAMLRules([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := snapshot.Snapshot{
+		JVMs: []jvm.Info{
+			{PID: 1, GC: &jvm.GCStats{OC: 1000, OU: 950}}, // high but no history -> no match
+			{PID: 2, GC: &jvm.GCStats{OC: 1000, OU: 960}}, // high and rising -> match
+			{PID: 3, GC: &jvm.GCStats{OC: 1000, OU: 500}}, // rising but not high -> no match
+		},
+		JVMHistory: snapshot.JVMHistory{
+			{PID: 2, OldGenPct: 80}, {PID: 2, OldGenPct: 88}, {PID: 2, OldGenPct: 96},
+			{PID: 3, OldGenPct: 30}, {PID: 3, OldGenPct: 40}, {PID: 3, OldGenPct: 50},
+		},
+	}
+	findings := Evaluate(s, catalog)
+	if len(findings) != 1 {
+		t.Fatalf("len(findings) = %d, want 1: %#v", len(findings), findings)
+	}
+	if findings[0].Subject != "jvm:2" {
+		t.Fatalf("subject = %q, want jvm:2", findings[0].Subject)
+	}
+}
+
 func TestYAMLRuleHostLevel(t *testing.T) {
 	spec := YAMLRuleSpec{
 		ID:       "yaml-low-ram",

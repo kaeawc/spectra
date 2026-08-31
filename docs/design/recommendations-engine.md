@@ -177,8 +177,19 @@ app.bundle_id, app.version, app.runtime, app.architectures, app.entitlements,
   app.granted_perms, app.storage.total_bytes, app.helpers, app.frameworks, ...
 process.pid, process.rss_kib, process.cpu_pct, process.command
 jvm.version, jvm.vendor, jvm.max_heap_mb, jvm.gc_count, jvm.thread_count
+jvm.gc.{oc,ou,mc,mu,ec,eu,s0c,s1c,s0u,s1u,ccsc,ccsu,ygc,ygct,fgc,fgct,gct},
+  jvm.gc.{old_gen_used_pct, metaspace_used_pct, full_gc_count, full_gc_time_s,
+  young_gc_count}
+jvm.classes.{loaded, unloaded, loaded_kib, unloaded_kib, class_load_time}
+jvm.history.{sample_count, has_trend, rising_old_gen, old_gen_pct_first,
+  old_gen_pct_last, fgc_first, fgc_last, heap_mb_first, heap_mb_last}
 toolchain.brew_formulae[], toolchain.jdks[], toolchain.node_versions[]
 ```
+
+`jvm.gc` and `jvm.classes` are `null` when the corresponding `jstat` reading
+was not collected; guard with e.g. `jvm.gc != null`. `jvm.history` is always
+present (zero-valued when there are no samples), so `jvm.history.rising_old_gen`
+is null-safe; require real trend data with `jvm.history.sample_count > 0`.
 
 Baseline-diff inputs (`diff.added_apps[]`, `diff.removed_apps[]`,
 `diff.changed_versions[]`) are **not** part of the single-snapshot projection
