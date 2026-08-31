@@ -83,9 +83,10 @@ type ToolchainCollector interface {
 
 // DBInspector opens read-only sessions against databases an application
 // under debug talks to. Live-socket discovery goes through NetworkCollector;
-// this interface covers env discovery and the catalog reads.
+// this interface covers env and open-file discovery plus the catalog reads.
 type DBInspector interface {
 	DiscoverDBEnv() []dbinspect.EnvHint
+	DiscoverSQLiteFiles() []dbinspect.FileCandidate
 	Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error)
 	Schema(ctx context.Context, dsn, schema string) (*dbinspect.SchemaReport, error)
 	Relations(ctx context.Context, dsn, schema string) (*dbinspect.RelationsReport, error)
@@ -179,6 +180,10 @@ type defaultDBInspector struct{}
 
 func (defaultDBInspector) DiscoverDBEnv() []dbinspect.EnvHint {
 	return dbinspect.DiscoverEnv(os.Getenv)
+}
+
+func (defaultDBInspector) DiscoverSQLiteFiles() []dbinspect.FileCandidate {
+	return dbinspect.DiscoverSQLiteFiles(dbinspect.DefaultRunner)
 }
 
 func (defaultDBInspector) Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error) {

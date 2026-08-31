@@ -67,6 +67,7 @@ func runDBDiscover(args []string) int {
 	discovery := dbinspect.Discovery{
 		Connections: dbinspect.DiscoverConnections(netstate.CollectConnections(netstate.DefaultRunner)),
 		Env:         dbinspect.DiscoverEnv(os.Getenv),
+		SQLiteFiles: dbinspect.DiscoverSQLiteFiles(dbinspect.DefaultRunner),
 	}
 
 	if *asJSON {
@@ -218,8 +219,8 @@ func runDBSample(args []string) int {
 
 func printDBDiscovery(d dbinspect.Discovery) {
 	fmt.Println("=== Database discovery ===")
-	if len(d.Connections) == 0 && len(d.Env) == 0 {
-		fmt.Println("no database connections or connection env vars found")
+	if len(d.Connections) == 0 && len(d.Env) == 0 && len(d.SQLiteFiles) == 0 {
+		fmt.Println("no database connections, connection env vars, or open sqlite files found")
 		return
 	}
 	if len(d.Connections) > 0 {
@@ -239,6 +240,14 @@ func printDBDiscovery(d dbinspect.Discovery) {
 				engine = fmt.Sprintf(" (%s)", h.Engine)
 			}
 			fmt.Printf("  %-16s %s%s\n", h.Name, h.Value, engine)
+		}
+	}
+	if len(d.SQLiteFiles) > 0 {
+		fmt.Printf("\nopen sqlite files (%d):\n", len(d.SQLiteFiles))
+		fmt.Printf("  %-7s  %-20s  %s\n", "PID", "COMMAND", "PATH")
+		fmt.Println("  " + strings.Repeat("-", 76))
+		for _, f := range d.SQLiteFiles {
+			fmt.Printf("  %-7d  %-20s  %s\n", f.PID, truncate(f.Command, 20), f.Path)
 		}
 	}
 }

@@ -38,7 +38,7 @@ func subcommandList() []subcommand {
 		{"list", "Inspect every .app under /Applications", runList},
 		{"snapshot", "Capture a structured snapshot of host + installed apps", runSnapshot},
 		{"jvm", "List or inspect running JVM processes", runJVM},
-		{"db", "Discover and inspect databases apps connect to (read-only; postgres, mysql)", runDB},
+		{"db", "Discover and inspect databases apps connect to (read-only; postgres, mysql, sqlite)", runDB},
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
 		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"power", "Show current battery and thermal state", runPower},
