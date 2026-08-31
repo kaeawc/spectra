@@ -356,8 +356,8 @@ spectra runtime --json 4012
 
 Discovers databases that apps on this host connect to, then inspects them
 read-only: schema, foreign-key relationships, and per-table health stats.
-PostgreSQL, MySQL/MariaDB, and SQLite are supported; the engine is inferred from the
-DSN (`postgres://` / `mysql://` / `sqlite://` URLs, go-sql-driver's `user@tcp(host)/db`
+PostgreSQL, MySQL/MariaDB, SQLite, and MongoDB are supported; the engine is inferred from the
+DSN (`postgres://` / `mysql://` / `sqlite://` / `mongodb://` URLs, go-sql-driver's `user@tcp(host)/db`
 form, a bare `.db`/`.sqlite` path, or libpq keyword form). Sessions are forced read-only with statement
 and lock timeouts, so inspection cannot write or stall the server.
 Connection strings resolve from `--dsn`, then `SPECTRA_DB_DSN`, then
