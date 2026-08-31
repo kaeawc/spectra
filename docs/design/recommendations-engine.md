@@ -212,6 +212,7 @@ Implemented rules:
 - `jvm-oom-dump-disabled`
 - `jvm-rss-exceeds-heap`
 - `jvm-gc-algorithm`
+- `jvm-oom-detected`
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`

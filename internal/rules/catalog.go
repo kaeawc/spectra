@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/oom"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -32,6 +33,7 @@ func V1Catalog() []Rule {
 		ruleJVMOOMDumpDisabled(),
 		ruleJVMRSSExceedsHeap(),
 		ruleJVMGCAlgorithm(),
+		ruleJVMOOMDetected(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -403,6 +405,37 @@ func ruleJVMGCAlgorithm() Rule {
 							Fix: "Switch to G1 (-XX:+UseG1GC) or Parallel (-XX:+UseParallelGC) for a multi-core, large-heap workload.",
 						})
 					}
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleJVMOOMDetected fires when a JVM's discovered log files contain a
+// java.lang.OutOfMemoryError. The OOM variant determines the fix — they are
+// unrelated problems — so findings are keyed and messaged per variant. High
+// severity: an actual memory failure occurred (as recorded in the log).
+func ruleJVMOOMDetected() Rule {
+	return Rule{
+		ID:       "jvm-oom-detected",
+		Severity: SeverityHigh,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, r := range s.OOMReports {
+				seen := make(map[oom.Variant]bool)
+				for _, ev := range r.Events {
+					if seen[ev.Variant] {
+						continue // one finding per (PID, variant)
+					}
+					seen[ev.Variant] = true
+					findings = append(findings, Finding{
+						RuleID:   "jvm-oom-detected",
+						Severity: SeverityHigh,
+						Subject:  fmt.Sprintf("PID %d (%s) %s", r.PID, r.MainClass, ev.Variant),
+						Message:  fmt.Sprintf("OutOfMemoryError (%s) recorded in %s.", ev.Variant.Human(), r.LogPath),
+						Fix:      ev.Variant.Remediation(),
+					})
 				}
 			}
 			return findings
