@@ -1,11 +1,12 @@
 // Package dbinspect connects to databases an application under debug talks
 // to and reads schema, relationships, and health statistics without
 // disturbing the running workload. Sessions are read-only by construction:
-// the connector forces default_transaction_read_only, applies statement and
-// lock timeouts, and only ever issues catalog or SELECT queries.
+// each connector forces a read-only session with statement and lock
+// timeouts, and only ever issues catalog or SELECT queries.
 //
-// PostgreSQL (via pgx) is the first supported engine; discovery already
-// recognizes MySQL endpoints so those engines can slot in later.
+// PostgreSQL (via pgx) and MySQL/MariaDB (via go-sql-driver) are supported;
+// the engine is inferred from the DSN. Discovery also recognizes SQLite so
+// it can slot in later.
 package dbinspect
 
 import (
@@ -18,12 +19,12 @@ type Engine string
 
 const (
 	EnginePostgres Engine = "postgres"
-	EngineMySQL    Engine = "mysql"  // discovery only for now
+	EngineMySQL    Engine = "mysql"
 	EngineSQLite   Engine = "sqlite" // discovery only for now
 )
 
 // ConnectFn opens a read-only connection for a DSN. Injected so tests can
-// fake the server; nil selects the built-in pgx connector.
+// fake the server; nil selects the built-in connector for the engine.
 type ConnectFn func(ctx context.Context, dsn string) (Conn, error)
 
 // Conn is the subset of a database connection the inspector needs.
@@ -32,8 +33,9 @@ type Conn interface {
 	Close(ctx context.Context) error
 }
 
-// Rows is the subset of a result cursor the inspector needs. pgx.Rows
-// satisfies everything except Columns, which the adapter supplies.
+// Rows is the subset of a result cursor the inspector needs. Each driver's
+// adapter supplies whatever its native cursor lacks (Columns for pgx,
+// Values for database/sql).
 type Rows interface {
 	Next() bool
 	Scan(dest ...any) error
@@ -43,11 +45,15 @@ type Rows interface {
 	Close()
 }
 
-// Options configures an inspection. The zero value uses the built-in pgx
-// connector with a 10s overall timeout.
+// Options configures an inspection. The zero value infers the engine from
+// the DSN and uses that engine's built-in connector with a 10s overall
+// timeout.
 type Options struct {
-	// Connect opens the connection. Nil means ConnectPostgres.
+	// Connect opens the connection. Nil means the engine's built-in
+	// connector (ConnectPostgres or ConnectMySQL).
 	Connect ConnectFn
+	// Engine forces the engine instead of inferring it from the DSN.
+	Engine Engine
 	// Timeout bounds the whole operation (connect + queries). Zero means 10s.
 	Timeout time.Duration
 }
@@ -55,9 +61,6 @@ type Options struct {
 const defaultTimeout = 10 * time.Second
 
 func withDefaults(o Options) Options {
-	if o.Connect == nil {
-		o.Connect = ConnectPostgres
-	}
 	if o.Timeout <= 0 {
 		o.Timeout = defaultTimeout
 	}

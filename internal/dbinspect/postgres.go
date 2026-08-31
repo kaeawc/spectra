@@ -44,9 +44,9 @@ WHERE ` + userSchemaFilter + `
 GROUP BY n.nspname
 ORDER BY n.nspname`
 
-// CollectOverview returns server, database, and session facts plus a count
+// postgresOverview returns server, database, and session facts plus a count
 // of tables per user schema.
-func CollectOverview(ctx context.Context, dsn string, o Options) (*Overview, error) {
+func postgresOverview(ctx context.Context, dsn string, o Options) (*Overview, error) {
 	out := &Overview{Engine: EnginePostgres}
 	err := withConn(ctx, dsn, o, func(ctx context.Context, conn Conn) error {
 		if err := scanOverviewRow(ctx, conn, out); err != nil {
@@ -147,9 +147,9 @@ WHERE ` + userSchemaFilter + `
   AND ($1 = '' OR n.nspname = $1)
 ORDER BY n.nspname, c.relname, ic.relname`
 
-// CollectSchema returns every user relation with its columns and indexes.
+// postgresSchema returns every user relation with its columns and indexes.
 // Pass schema to limit scope to one schema, or "" for all user schemas.
-func CollectSchema(ctx context.Context, dsn, schema string, o Options) (*SchemaReport, error) {
+func postgresSchema(ctx context.Context, dsn, schema string, o Options) (*SchemaReport, error) {
 	out := &SchemaReport{Engine: EnginePostgres}
 	err := withConn(ctx, dsn, o, func(ctx context.Context, conn Conn) error {
 		tables, err := collectTables(ctx, conn, schema)
@@ -257,9 +257,9 @@ WHERE con.contype = 'f'
   AND ($1 = '' OR fn.nspname = $1)
 ORDER BY fn.nspname, fc.relname, con.conname`
 
-// CollectRelations returns every foreign-key relationship whose referencing
+// postgresRelations returns every foreign-key relationship whose referencing
 // table is in scope. Pass schema to limit scope, or "" for all user schemas.
-func CollectRelations(ctx context.Context, dsn, schema string, o Options) (*RelationsReport, error) {
+func postgresRelations(ctx context.Context, dsn, schema string, o Options) (*RelationsReport, error) {
 	out := &RelationsReport{Engine: EnginePostgres}
 	err := withConn(ctx, dsn, o, func(ctx context.Context, conn Conn) error {
 		rows, err := conn.Query(ctx, foreignKeysQuery, schema)
@@ -317,9 +317,9 @@ WHERE ($1 = '' OR s.schemaname = $1)
 ORDER BY pg_total_relation_size(s.relid) DESC, s.schemaname, s.relname
 LIMIT 500`
 
-// CollectStats returns per-table planner and vacuum health, largest tables
+// postgresStats returns per-table planner and vacuum health, largest tables
 // first. Row counts are pg_stat estimates — no COUNT(*) is issued.
-func CollectStats(ctx context.Context, dsn, schema string, o Options) (*StatsReport, error) {
+func postgresStats(ctx context.Context, dsn, schema string, o Options) (*StatsReport, error) {
 	out := &StatsReport{Engine: EnginePostgres}
 	err := withConn(ctx, dsn, o, func(ctx context.Context, conn Conn) error {
 		rows, err := conn.Query(ctx, tableStatsQuery, schema)
@@ -357,10 +357,10 @@ const (
 	maxSampleLimit     = 500
 )
 
-// SampleTable reads up to limit rows from one table. limit defaults to 10
+// postgresSample reads up to limit rows from one table. limit defaults to 10
 // and is capped at 500. Callers must gate this behind explicit confirmation:
 // row data may contain customer PII.
-func SampleTable(ctx context.Context, dsn, table string, limit int, o Options) (*SampleReport, error) {
+func postgresSample(ctx context.Context, dsn, table string, limit int, o Options) (*SampleReport, error) {
 	if limit <= 0 {
 		limit = defaultSampleLimit
 	}
