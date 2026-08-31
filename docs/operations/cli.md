@@ -356,11 +356,14 @@ spectra runtime --json 4012
 
 Discovers databases that apps on this host connect to, then inspects them
 read-only: schema, foreign-key relationships, and per-table health stats.
-PostgreSQL only for now. Sessions are forced read-only with statement and
-lock timeouts, so inspection cannot write or stall the server. Connection
-strings resolve from `--dsn`, then `SPECTRA_DB_DSN`, then `DATABASE_URL`,
-then libpq `PG*` env vars. `sample` reads row data, which may contain PII —
-it is recorded in the artifact manifest at `very-high` sensitivity.
+PostgreSQL and MySQL/MariaDB are supported; the engine is inferred from the
+DSN (`postgres://` / `mysql://` URLs, go-sql-driver's `user@tcp(host)/db`
+form, or libpq keyword form). Sessions are forced read-only with statement
+and lock timeouts, so inspection cannot write or stall the server.
+Connection strings resolve from `--dsn`, then `SPECTRA_DB_DSN`, then
+`DATABASE_URL`, then libpq `PG*` env vars. `sample` reads row data, which
+may contain PII — it is recorded in the artifact manifest at `very-high`
+sensitivity.
 
 ### Examples
 

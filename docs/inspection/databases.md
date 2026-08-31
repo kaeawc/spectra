@@ -7,16 +7,21 @@ growing latency, a foreign key that explains a cascade of deletes. `spectra
 db` connects directly with credentials you already have and reads that
 picture without disturbing the running workload.
 
-PostgreSQL is supported today via [pgx](https://github.com/jackc/pgx).
-Discovery already recognizes MySQL endpoints; MySQL and SQLite inspection
-are planned follow-ons behind the same engine-neutral report types in
-`internal/dbinspect`.
+PostgreSQL is supported via [pgx](https://github.com/jackc/pgx) and
+MySQL/MariaDB via [go-sql-driver](https://github.com/go-sql-driver/mysql),
+both behind the same engine-neutral report types in `internal/dbinspect`.
+The engine is inferred from the DSN: `postgres://` / `postgresql://` URLs
+and libpq keyword form select postgres, `mysql://` URLs and go-sql-driver's
+`user:pass@tcp(host:port)/db` form select mysql. SQLite inspection is a
+planned follow-on.
 
 ## Non-disruptive by construction
 
-Every inspection opens one short-lived connection with session parameters
-forced at startup, so no query — even a mistaken one — can write or stall
-the server:
+Every inspection opens one short-lived connection with a session forced
+read-only and bounded, so no query — even a mistaken one — can write or
+stall the server.
+
+PostgreSQL sessions set at startup:
 
 | Parameter | Value | Effect |
 |---|---|---|
@@ -26,12 +31,21 @@ the server:
 | `idle_in_transaction_session_timeout` | 5s | can't pin vacuum horizon |
 | `application_name` | `spectra-dbinspect` | identifiable in `pg_stat_activity` |
 
-Structural reads use only `pg_catalog` and `pg_stat_*` views. Row counts
-are planner estimates (`reltuples`, `n_live_tup`) — spectra never issues
+MySQL/MariaDB sessions run `SET SESSION TRANSACTION READ ONLY` immediately
+after connecting — if the server refuses, spectra refuses to inspect it —
+then bound waits best-effort (`max_execution_time` on MySQL,
+`max_statement_time` on MariaDB, `innodb_lock_wait_timeout` on both). The
+connection pool is capped at one connection so those session settings
+govern every query.
+
+Structural reads use only the engine's catalog (`pg_catalog` and
+`pg_stat_*` on postgres, `information_schema` on mysql). Row counts are
+estimates (`reltuples`/`n_live_tup`, `table_rows`) — spectra never issues
 `COUNT(*)` or any other full-table scan. Every caller-supplied filter is a
 bind parameter; the one place an identifier is interpolated (row sampling)
-resolves the name through `to_regclass` against `pg_class` first and
-quote-escapes the catalog's own spelling.
+resolves the name through the catalog first (`to_regclass` against
+`pg_class`, or `information_schema.TABLES`) and quote-escapes the catalog's
+own spelling.
 
 ## Discovering that an app uses a database
 
@@ -67,9 +81,11 @@ keyword DSN forms work. Every subcommand takes `--json`.
   primary key) and indexes.
 - `relations` — foreign keys with column lists and delete/update actions,
   for reconstructing the data model.
-- `stats` — per-table `pg_stat_user_tables` health: sequential vs index
-  scans, live/dead row estimates, total size, last (auto)vacuum and
-  analyze. Largest tables first.
+- `stats` — per-table health, largest tables first. On postgres this is
+  `pg_stat_user_tables`: sequential vs index scans, live/dead row
+  estimates, total size, last (auto)vacuum and analyze. On mysql it is
+  `information_schema.TABLES` row and size estimates — scan counters need
+  `performance_schema` and are left zero.
 - `sample` — up to N rows (default 10, capped at 500) from one table.
 
 ## Row data is sensitive
