@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -59,6 +60,9 @@ func Symbolicate(ctx context.Context, req Request, runner Runner) (Result, error
 	if req.LoadAddress == "" {
 		return Result{}, fmt.Errorf("symbolicate: a load address is required")
 	}
+	if !isHexAddress(req.LoadAddress) {
+		return Result{}, fmt.Errorf("symbolicate: invalid load address %q (want a hex value like 0x10a400000)", req.LoadAddress)
+	}
 	if len(req.Addresses) == 0 {
 		return Result{}, fmt.Errorf("symbolicate: at least one address is required")
 	}
@@ -80,8 +84,10 @@ func Symbolicate(ctx context.Context, req Request, runner Runner) (Result, error
 }
 
 // parseFrames pairs each input address with atos's corresponding output line.
+// atos emits exactly one line per input address, in order, so blank lines must
+// be preserved as unresolved placeholders to keep the pairing aligned.
 func parseFrames(addresses []string, out string) []Frame {
-	lines := nonEmptyLines(out)
+	lines := atosLines(out)
 	frames := make([]Frame, len(addresses))
 	for i, addr := range addresses {
 		f := Frame{Address: addr}
@@ -113,12 +119,26 @@ func parseLine(addr, line string) (symbol, location string, resolved bool) {
 	return symbol, location, resolved
 }
 
-func nonEmptyLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		if t := strings.TrimSpace(l); t != "" {
-			out = append(out, t)
-		}
+// atosLines splits atos output into per-address lines, dropping only the
+// trailing newline. Internal blank lines are kept so a blank line for one
+// address does not shift every later address onto the wrong symbol.
+func atosLines(s string) []string {
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return nil
 	}
-	return out
+	return strings.Split(s, "\n")
+}
+
+// isHexAddress reports whether s is a hexadecimal address, with an optional
+// 0x prefix.
+func isHexAddress(s string) bool {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "0x")
+	s = strings.TrimPrefix(s, "0X")
+	if s == "" {
+		return false
+	}
+	_, err := strconv.ParseUint(s, 16, 64)
+	return err == nil
 }

@@ -73,6 +73,40 @@ func TestSymbolicateValidation(t *testing.T) {
 	}
 }
 
+func TestSymbolicateRejectsBadLoadAddress(t *testing.T) {
+	ran := false
+	runner := func(context.Context, string, ...string) ([]byte, error) { ran = true; return nil, nil }
+	_, err := Symbolicate(context.Background(), Request{Binary: "/b", LoadAddress: "not-an-address", Addresses: []string{"0x2"}}, runner)
+	if err == nil {
+		t.Error("expected a validation error for a non-hex load address")
+	}
+	if ran {
+		t.Error("atos must not run when the load address is invalid")
+	}
+	// A bare hex value (no 0x) is still valid.
+	if _, err := Symbolicate(context.Background(), Request{Binary: "/b", LoadAddress: "10a400000", Addresses: []string{"0x2"}}, runnerReturning("s\n", nil)); err != nil {
+		t.Errorf("bare hex load address should be accepted: %v", err)
+	}
+}
+
+func TestSymbolicatePreservesBlankLines(t *testing.T) {
+	// atos returned a blank line for the middle address; the third address must
+	// still pair with symbol-C, not shift up.
+	res, err := Symbolicate(context.Background(), Request{Binary: "/b", LoadAddress: "0x1", Addresses: []string{"0xa", "0xb", "0xc"}}, runnerReturning("symbol-A\n\nsymbol-C\n", nil))
+	if err != nil {
+		t.Fatalf("Symbolicate: %v", err)
+	}
+	if res.Frames[0].Symbol != "symbol-A" {
+		t.Errorf("frame0 = %+v", res.Frames[0])
+	}
+	if res.Frames[1].Resolved {
+		t.Errorf("frame1 (blank line) should be unresolved: %+v", res.Frames[1])
+	}
+	if res.Frames[2].Symbol != "symbol-C" {
+		t.Errorf("frame2 = %+v", res.Frames[2])
+	}
+}
+
 func TestSymbolicateRunnerError(t *testing.T) {
 	_, err := Symbolicate(context.Background(), Request{Binary: "/b", LoadAddress: "0x1", Addresses: []string{"0x2"}}, runnerReturning("", errors.New("atos: no such file")))
 	if err == nil {
