@@ -371,6 +371,26 @@ spectra xattr-inspect --json /Applications/Some.app
 spectra xattr-inspect ~/Downloads
 ```
 
+## `spectra symbolicate`
+
+Resolves raw stack addresses to `symbol + file:line` using `atos`, against a
+Mach-O image or its `.dSYM`. This is the enabling primitive for the
+native-capture features — a captured stack (from a core, a crash report, or a
+spindump) is just hex until it is symbolicated. Give the image with `-o`, its
+load address with `-l`, and the addresses as arguments or on stdin (one per
+line). For each address it reports the resolved symbol and `file:line` when
+`atos` provides them; an address `atos` cannot resolve (it echoes the address
+back) is reported as unresolved rather than dropped. `--arch` selects a slice of
+a universal binary. Read-only, no root.
+
+### Examples
+
+```bash
+spectra symbolicate -o /Applications/Some.app/Contents/MacOS/Some -l 0x10a400000 0x10a4b31a0 0x10a4b3200
+spectra symbolicate -o ./Some.app.dSYM -l 0x10a400000 --arch arm64 --json 0x10a4b31a0
+lldb-derived-addresses.txt | spectra symbolicate -o ./Some -l 0x10a400000
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
