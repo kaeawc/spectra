@@ -46,6 +46,8 @@ var wellKnownPorts = map[int]Engine{
 	27017: EngineMongo,
 	27018: EngineMongo,
 	27019: EngineMongo,
+	6379:  EngineRedis,
+	6380:  EngineRedis,
 }
 
 // DiscoverConnections filters active sockets down to ones whose remote port
@@ -107,6 +109,7 @@ var connectionEnvVars = []struct {
 	{"MYSQL_PWD", EngineMySQL, true},
 	{"MONGODB_URI", EngineMongo, false},
 	{"MONGO_URL", EngineMongo, false},
+	{"REDIS_URL", EngineRedis, false},
 }
 
 // DiscoverEnv reads the connection env-var allowlist through getenv (a seam
@@ -147,6 +150,8 @@ func engineFromScheme(dsn string) Engine {
 		return EngineSQLite
 	case "mongodb", "mongodb+srv":
 		return EngineMongo
+	case "redis", "rediss":
+		return EngineRedis
 	default:
 		return ""
 	}
