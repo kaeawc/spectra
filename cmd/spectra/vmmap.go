@@ -31,6 +31,10 @@ func runVmmapWithIO(args []string, stdout, stderr io.Writer, runner vmmapRunner)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *top < 0 {
+		fmt.Fprintln(stderr, "vmmap: --top must be >= 0 (0 means all regions)")
+		return 2
+	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "usage: spectra vmmap [--top <n>] [--json] <pid>")
 		return 2
@@ -91,5 +95,10 @@ func printVmmap(w io.Writer, pid int, s vmmap.Summary) {
 }
 
 func defaultVmmapRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	if err != nil {
+		// Return out too: the caller inspects it to detect a permission failure.
+		return out, fmt.Errorf("vmmap --summary: %w", err)
+	}
+	return out, nil
 }

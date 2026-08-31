@@ -60,10 +60,21 @@ func TestRunVmmapPermissionMessage(t *testing.T) {
 
 func TestRunVmmapArgValidation(t *testing.T) {
 	runner := vmmapRunnerReturning(vmmapCLIOut, nil)
-	for _, args := range [][]string{{}, {"notapid"}, {"0"}, {"1", "2"}} {
+	for _, args := range [][]string{{}, {"notapid"}, {"0"}, {"1", "2"}, {"--top", "-1", "4012"}} {
 		var out, errBuf bytes.Buffer
 		if code := runVmmapWithIO(args, &out, &errBuf, runner); code != 2 {
 			t.Errorf("args %v: exit = %d, want 2", args, code)
 		}
+	}
+}
+
+func TestRunVmmapGenericError(t *testing.T) {
+	runner := vmmapRunnerReturning("", errors.New("vmmap --summary: exit status 1"))
+	var out, errBuf bytes.Buffer
+	if code := runVmmapWithIO([]string{"4012"}, &out, &errBuf, runner); code != 1 {
+		t.Fatalf("exit = %d, want 1 on a runner error", code)
+	}
+	if !strings.Contains(errBuf.String(), "failed") {
+		t.Errorf("expected a failure message, got: %q", errBuf.String())
 	}
 }
