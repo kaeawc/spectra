@@ -38,11 +38,14 @@ type Discovery struct {
 // wellKnownPorts maps default server ports to engines. 6432 is pgbouncer,
 // which fronts postgres.
 var wellKnownPorts = map[int]Engine{
-	5432: EnginePostgres,
-	5433: EnginePostgres,
-	6432: EnginePostgres,
-	3306: EngineMySQL,
-	3307: EngineMySQL,
+	5432:  EnginePostgres,
+	5433:  EnginePostgres,
+	6432:  EnginePostgres,
+	3306:  EngineMySQL,
+	3307:  EngineMySQL,
+	27017: EngineMongo,
+	27018: EngineMongo,
+	27019: EngineMongo,
 }
 
 // DiscoverConnections filters active sockets down to ones whose remote port
@@ -102,6 +105,8 @@ var connectionEnvVars = []struct {
 	{"MYSQL_HOST", EngineMySQL, false},
 	{"MYSQL_TCP_PORT", EngineMySQL, false},
 	{"MYSQL_PWD", EngineMySQL, true},
+	{"MONGODB_URI", EngineMongo, false},
+	{"MONGO_URL", EngineMongo, false},
 }
 
 // DiscoverEnv reads the connection env-var allowlist through getenv (a seam
@@ -140,6 +145,8 @@ func engineFromScheme(dsn string) Engine {
 		return EngineMySQL
 	case "sqlite", "file":
 		return EngineSQLite
+	case "mongodb", "mongodb+srv":
+		return EngineMongo
 	default:
 		return ""
 	}
