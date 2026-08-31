@@ -21,7 +21,7 @@ func SnapshotActivation(s snapshot.Snapshot) map[string]any {
 		"host":       projectHost(s.Host),
 		"apps":       projectApps(s.Apps),
 		"processes":  projectProcesses(s.Processes),
-		"jvms":       projectJVMs(s.JVMs),
+		"jvms":       projectJVMs(s.JVMs, s.JVMHistory),
 		"toolchains": projectToolchains(s.Toolchains),
 		"network":    s.Network,
 		"storage":    s.Storage,
@@ -113,7 +113,7 @@ func projectProcesses(processes []process.Info) []any {
 	return out
 }
 
-func projectJVMs(jvms []jvm.Info) []any {
+func projectJVMs(jvms []jvm.Info, history snapshot.JVMHistory) []any {
 	out := make([]any, 0, len(jvms))
 	for _, info := range jvms {
 		out = append(out, map[string]any{
@@ -133,6 +133,8 @@ func projectJVMs(jvms []jvm.Info) []any {
 			"sys_props":      info.SysProps,
 			"gc_count":       gcCount(info.GC),
 			"gc":             projectGC(info.GC),
+			"classes":        projectClasses(info.Classes),
+			"history":        projectJVMHistory(history, info.PID),
 		})
 	}
 	return out
@@ -153,19 +155,90 @@ func projectGC(gc *jvm.GCStats) any {
 	if gc == nil {
 		return nil
 	}
-	return map[string]any{
+	m := map[string]any{
 		"ygc":  gc.YGC,
 		"ygct": gc.YGCT,
 		"fgc":  gc.FGC,
 		"fgct": gc.FGCT,
 		"gct":  gc.GCT,
+		"s0c":  gc.S0C,
+		"s1c":  gc.S1C,
+		"s0u":  gc.S0U,
+		"s1u":  gc.S1U,
 		"ec":   gc.EC,
 		"eu":   gc.EU,
 		"oc":   gc.OC,
 		"ou":   gc.OU,
 		"mc":   gc.MC,
 		"mu":   gc.MU,
+		"ccsc": gc.CCSC,
+		"ccsu": gc.CCSU,
+		// Convenience aliases so external rules read the same names the
+		// built-in Go rules use.
+		"full_gc_count":  gc.FGC,
+		"full_gc_time_s": gc.FGCT,
+		"young_gc_count": gc.YGC,
 	}
+	// Derived occupancy percentages. Kept identical to the predicate math in
+	// predicates.go (OldGenUsedPct / metaspace) so external and built-in rules
+	// agree on the same thresholds.
+	if gc.OC > 0 {
+		m["old_gen_used_pct"] = gc.OU * 100 / gc.OC
+	} else {
+		m["old_gen_used_pct"] = 0.0
+	}
+	if gc.MC > 0 {
+		m["metaspace_used_pct"] = gc.MU * 100 / gc.MC
+	} else {
+		m["metaspace_used_pct"] = 0.0
+	}
+	return m
+}
+
+// projectClasses exposes the jstat -class counters to external rules.
+func projectClasses(c *jvm.ClassStats) any {
+	if c == nil {
+		return nil
+	}
+	return map[string]any{
+		"loaded":          c.Loaded,
+		"unloaded":        c.Unloaded,
+		"loaded_kib":      c.LoadedKiB,
+		"unloaded_kib":    c.UnloadedKiB,
+		"class_load_time": c.ClassLoadTime,
+	}
+}
+
+// projectJVMHistory summarizes the per-PID trend samples so a rule can gate on
+// a rising heap without walking a raw sample slice in CEL.
+//
+// Unlike gc/classes (which are nil when the reading was not collected), history
+// is ALWAYS a map with the same key set — zero-valued when there are no samples
+// for the PID. This keeps `item.history.rising_old_gen` null-safe in CEL and
+// lets a rule require data explicitly with `item.history.sample_count > 0`.
+func projectJVMHistory(history snapshot.JVMHistory, pid int) map[string]any {
+	samples := history.SamplesFor(pid)
+	m := map[string]any{
+		"sample_count":      len(samples),
+		"has_trend":         HasTrendFor(history, pid),
+		"rising_old_gen":    RisingOldGenFor(history, pid),
+		"old_gen_pct_first": 0.0,
+		"old_gen_pct_last":  0.0,
+		"fgc_first":         int64(0),
+		"fgc_last":          int64(0),
+		"heap_mb_first":     int64(0),
+		"heap_mb_last":      int64(0),
+	}
+	if len(samples) > 0 {
+		first, last := samples[0], samples[len(samples)-1]
+		m["old_gen_pct_first"] = first.OldGenPct
+		m["old_gen_pct_last"] = last.OldGenPct
+		m["fgc_first"] = first.FGC
+		m["fgc_last"] = last.FGC
+		m["heap_mb_first"] = first.HeapMB
+		m["heap_mb_last"] = last.HeapMB
+	}
+	return m
 }
 
 func projectToolchains(t toolchain.Toolchains) map[string]any {
