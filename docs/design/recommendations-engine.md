@@ -211,6 +211,7 @@ Implemented rules:
 - `jvm-metaspace-pressure`
 - `jvm-oom-dump-disabled`
 - `jvm-rss-exceeds-heap`
+- `jvm-gc-algorithm`
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`
