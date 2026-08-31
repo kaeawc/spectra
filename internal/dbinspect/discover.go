@@ -27,10 +27,12 @@ type EnvHint struct {
 }
 
 // Discovery aggregates every clue that the host (or an app on it) uses a
-// database: live sockets to known server ports plus connection env vars.
+// database: live sockets to known server ports, connection env vars, and
+// SQLite database files held open by running processes.
 type Discovery struct {
-	Connections []Candidate `json:"connections,omitempty"`
-	Env         []EnvHint   `json:"env,omitempty"`
+	Connections []Candidate     `json:"connections,omitempty"`
+	Env         []EnvHint       `json:"env,omitempty"`
+	SQLiteFiles []FileCandidate `json:"sqlite_files,omitempty"`
 }
 
 // wellKnownPorts maps default server ports to engines. 6432 is pgbouncer,

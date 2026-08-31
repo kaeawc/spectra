@@ -35,11 +35,13 @@ func decodeDBParams(method string, params json.RawMessage) (dbParams, error) {
 // db.sample additionally requires confirm_sensitive because row data may
 // contain customer PII.
 func registerDBHandlers(d *rpc.Dispatcher, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger) {
-	// db.discover — live sockets to database ports plus connection env vars.
+	// db.discover — live sockets to database ports, connection env vars, and
+	// open SQLite database files.
 	d.Register("db.discover", func(_ json.RawMessage) (any, error) {
 		return dbinspect.Discovery{
 			Connections: dbinspect.DiscoverConnections(netstate.CollectConnections(netstate.DefaultRunner)),
 			Env:         dbinspect.DiscoverEnv(os.Getenv),
+			SQLiteFiles: dbinspect.DiscoverSQLiteFiles(dbinspect.DefaultRunner),
 		}, nil
 	})
 
