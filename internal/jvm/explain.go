@@ -239,11 +239,40 @@ func explainMemorySections(e *Explanation, mem explainMemory) {
 			Recommendation: "Reproduce with `-XX:NativeMemoryTracking=summary` for category growth, or `detail` when fragmentation/location matters.",
 		})
 	} else if mem.NativeMemory.Output != "" {
-		e.Observations = append(e.Observations, Observation{
+		e.Observations = append(e.Observations, nativeMemoryObservation(mem.NativeMemory.Output))
+	}
+}
+
+// nativeMemoryObservation parses the NMT summary and reports total committed
+// native memory plus the largest categories, so a JVM whose RSS exceeds its heap
+// (see the jvm-rss-exceeds-heap rule) can be localized to Thread stacks, Class
+// metadata, Code cache, GC structures, or Internal/Other (direct buffers, JNI).
+func nativeMemoryObservation(output string) Observation {
+	nmt := ParseNMTSummary(output)
+	if len(nmt.Categories) == 0 {
+		return Observation{
 			ID:       "native-memory-available",
 			Severity: "info",
 			Summary:  "Native memory tracking output is available for category analysis.",
-		})
+		}
+	}
+	top := nmt.Categories
+	if len(top) > 5 {
+		top = top[:5]
+	}
+	var b strings.Builder
+	for i, c := range top {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %dMiB", c.Name, c.CommittedKiB/1024)
+	}
+	return Observation{
+		ID:             "native-memory-available",
+		Severity:       "info",
+		Summary:        fmt.Sprintf("Native memory committed %dMiB across %d categories.", nmt.TotalCommittedKiB/1024, len(nmt.Categories)),
+		Evidence:       "Top by committed size: " + b.String(),
+		Recommendation: "Compare category growth across two summaries to localize a native leak: Thread = stacks, Class = metaspace/classloaders, Code = JIT, Internal/Other = direct buffers & JNI.",
 	}
 }
 

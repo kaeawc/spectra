@@ -207,8 +207,9 @@ can be used for non-CPU profiles.
   native memory tracking, and soft-reference policy;
 - code-cache use, including nmethod/adaptor counts and `full_count`;
 - soft-reference evidence from the class histogram;
-- native-memory availability, including why fragmentation cannot be judged
-  when NMT is off;
+- native-memory attribution: when NMT is enabled, the summary is parsed into
+  categories and the largest committed ones (Java Heap, Class, Thread, Code, GC,
+  Internal) are reported; when NMT is off, why fragmentation cannot be judged;
 - optional repeated `jstat` samples via `--samples` and `--interval` for
   short-window old-gen/metaspace/full-GC trends.
 
