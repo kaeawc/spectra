@@ -2,6 +2,7 @@ package heap
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -72,6 +73,12 @@ const (
 // header with compressed oops. Diffs — the primary use — are robust to it.
 const hprofArrayHeaderBytes = 16
 
+// maxHPROFStringBytes bounds a single STRING_IN_UTF8 record body. HPROF string
+// records hold symbol names (classes, fields, threads), which are small; the
+// cap guards against a corrupt or hostile length field driving a multi-GiB
+// allocation before the body is even read (CWE-400).
+const maxHPROFStringBytes = 64 << 20 // 64 MiB
+
 // HPROFParser implements heap.Parser for JVM .hprof dumps.
 type HPROFParser struct{}
 
@@ -81,7 +88,7 @@ func (HPROFParser) Runtime() Runtime { return RuntimeJVM }
 // ParseSnapshot parses an in-memory .hprof dump. For large dumps prefer
 // ParseHPROF (streaming) or ParseHPROFFile.
 func (HPROFParser) ParseSnapshot(out []byte) (Snapshot, error) {
-	return ParseHPROF(strings.NewReader(string(out)))
+	return ParseHPROF(bytes.NewReader(out))
 }
 
 // ParseHPROFFile streams and parses the .hprof file at path.
@@ -236,6 +243,9 @@ func readStringRecord(hr *hprofReader, st *hprofState, length int64) error {
 	if n < 0 {
 		return fmt.Errorf("hprof: negative string length %d", n)
 	}
+	if n > maxHPROFStringBytes {
+		return fmt.Errorf("hprof: string record too large (%d bytes, max %d)", n, maxHPROFStringBytes)
+	}
 	body := make([]byte, n)
 	if _, err := io.ReadFull(hr.r, body); err != nil {
 		return fmt.Errorf("hprof: string body: %w", err)
@@ -264,13 +274,18 @@ func readLoadClassRecord(hr *hprofReader, st *hprofState) error {
 }
 
 // readHeapDump parses the sub-records inside a HEAP DUMP / HEAP DUMP SEGMENT,
-// consuming exactly length bytes via a limited reader.
+// consuming exactly length bytes via a limited reader. If the underlying stream
+// ends before the declared length is consumed (a truncated dump), it returns
+// io.ErrUnexpectedEOF rather than a silently-partial histogram.
 func readHeapDump(hr *hprofReader, st *hprofState, length int64) error {
-	limited := io.LimitReader(hr.r, length)
-	sub := &hprofReader{r: bufio.NewReader(limited), idSize: hr.idSize}
+	lr := &io.LimitedReader{R: hr.r, N: length}
+	sub := &hprofReader{r: bufio.NewReader(lr), idSize: hr.idSize}
 	for {
 		tag, err := sub.u1()
 		if errors.Is(err, io.EOF) {
+			if lr.N != 0 {
+				return fmt.Errorf("hprof: truncated heap dump (%d of %d bytes missing): %w", lr.N, length, io.ErrUnexpectedEOF)
+			}
 			return nil
 		}
 		if err != nil {

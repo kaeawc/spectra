@@ -3,6 +3,8 @@ package heap
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -200,6 +202,34 @@ func TestParseHPROFRejectsUnknownSubTag(t *testing.T) {
 	b.heapDumpSegment(seg.Bytes())
 	if _, err := ParseHPROF(bytes.NewReader(b.buf.Bytes())); err == nil {
 		t.Fatal("expected error on unknown sub-record tag")
+	}
+}
+
+func TestParseHPROFRejectsTruncatedSegment(t *testing.T) {
+	b := newHPROFBuilder(8)
+	// Emit a heap-dump segment header claiming more bytes than we provide, then
+	// stop the stream mid-segment (after one valid sub-record).
+	b.u1(0x1C)
+	b.u4(0)  // time
+	b.u4(64) // declared length, larger than the body below
+	var seg bytes.Buffer
+	b.rootStickyClass(&seg, 1) // 1 + 8 bytes, well under 64
+	b.buf.Write(seg.Bytes())
+	if _, err := ParseHPROF(bytes.NewReader(b.buf.Bytes())); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected io.ErrUnexpectedEOF on truncated segment, got %v", err)
+	}
+}
+
+func TestParseHPROFRejectsOversizedStringRecord(t *testing.T) {
+	b := newHPROFBuilder(8)
+	// A STRING record header claiming a body far beyond the allocation cap must
+	// be rejected before allocating (guards against corrupt/hostile lengths).
+	b.u1(0x01)
+	b.u4(0)                                 // time
+	b.u4(uint32(maxHPROFStringBytes) + 100) // declared record length
+	b.writeIDTo(&b.buf, 1)                  // string id; body would follow but never does
+	if _, err := ParseHPROF(bytes.NewReader(b.buf.Bytes())); err == nil {
+		t.Fatal("expected error on oversized string record")
 	}
 }
 
