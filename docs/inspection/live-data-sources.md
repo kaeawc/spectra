@@ -140,9 +140,10 @@ JDK path, Spectra also records `jdk_install_id`, `jdk_source`, and
 | `lsof -i -P -n` remote ports 5432/3306/... | which apps hold sockets to database servers | user | shared with connections collector | `db.discover` |
 | connection env-var allowlist (`DATABASE_URL`, `PG*`, ...) | connection hints, credentials redacted | user | free | `db.discover` |
 | `pg_catalog` + `pg_stat_*` via pgx (read-only session) | schema, columns, indexes, foreign keys, table health estimates | database credentials | one connection, catalog reads only | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
-| `SELECT * ... LIMIT n` via pgx | bounded row sample | database credentials + `confirm_sensitive` | one bounded query | `db.sample` artifact |
+| `information_schema` via go-sql-driver (read-only session) | mysql/mariadb schema, columns, indexes, foreign keys, size estimates | database credentials | one connection, catalog reads only | `db.overview`, `db.schema`, `db.relations`, `db.stats` |
+| `SELECT * ... LIMIT n` via pgx or go-sql-driver | bounded row sample | database credentials + `confirm_sensitive` | one bounded query | `db.sample` artifact |
 
-Sessions force `default_transaction_read_only=on` plus statement and lock
+Sessions are forced read-only (`default_transaction_read_only=on`, `SET SESSION TRANSACTION READ ONLY`) plus statement and lock
 timeouts, so inspection cannot write or stall the target server — see
 [databases.md](databases.md).
 

@@ -3,6 +3,7 @@ module github.com/kaeawc/spectra
 go 1.26.6
 
 require (
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/cel-go v0.30.0
 	github.com/jackc/pgx/v5 v5.10.0
 	golang.org/x/sys v0.47.0
