@@ -14,14 +14,33 @@ import (
 	"github.com/kaeawc/spectra/internal/spindump"
 )
 
+// Absolute paths to the macOS utilities, so PATH cannot substitute them.
+const (
+	spindumpBin = "/usr/sbin/spindump"
+	sudoBin     = "/usr/bin/sudo"
+)
+
 // spindumpRunner runs a command and returns its combined output.
 type spindumpRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-func runSpindump(args []string) int {
-	return runSpindumpWithIO(args, os.Stdout, os.Stderr, defaultSpindumpRunner)
+// spindumpDeps injects command execution and filesystem access so the command
+// is testable without a real capture or real files.
+type spindumpDeps struct {
+	run       spindumpRunner
+	readFile  func(path string) ([]byte, error)
+	writeFile func(path string, data []byte, perm os.FileMode) error
 }
 
-func runSpindumpWithIO(args []string, stdout, stderr io.Writer, runner spindumpRunner) int {
+func runSpindump(args []string) int {
+	deps := spindumpDeps{
+		run:       defaultSpindumpRunner,
+		readFile:  os.ReadFile,
+		writeFile: os.WriteFile,
+	}
+	return runSpindumpWithIO(args, os.Stdout, os.Stderr, deps)
+}
+
+func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDeps) int {
 	fs := flag.NewFlagSet("spectra spindump", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "Parse an existing spindump report file instead of capturing")
@@ -39,7 +58,11 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, runner spindumpR
 			fmt.Fprintln(stderr, "spindump: pass either --input or a pid, not both")
 			return 2
 		}
-		data, err := os.ReadFile(*input)
+		if *out != "" {
+			fmt.Fprintln(stderr, "spindump: --out has no effect with --input (the report already exists)")
+			return 2
+		}
+		data, err := deps.readFile(*input)
 		if err != nil {
 			fmt.Fprintf(stderr, "spindump: read %s: %v\n", *input, err)
 			return 1
@@ -55,13 +78,13 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, runner spindumpR
 			fmt.Fprintf(stderr, "invalid PID %q\n", fs.Arg(0))
 			return 2
 		}
-		report, err = captureSpindump(runner, pid, *duration, *sudo)
+		report, err = captureSpindump(deps.run, pid, *duration, *sudo)
 		if err != nil {
 			fmt.Fprintf(stderr, "%v\n", err)
 			return 1
 		}
 		if *out != "" {
-			if err := os.WriteFile(*out, []byte(report), 0o600); err != nil {
+			if err := deps.writeFile(*out, []byte(report), 0o600); err != nil {
 				fmt.Fprintf(stderr, "spindump: write %s: %v\n", *out, err)
 				return 1
 			}
@@ -80,11 +103,11 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, runner spindumpR
 }
 
 func captureSpindump(runner spindumpRunner, pid, duration int, sudo bool) (string, error) {
-	name := "spindump"
+	name := spindumpBin
 	args := []string{strconv.Itoa(pid), strconv.Itoa(duration), "-stdout"}
 	if sudo {
 		args = append([]string{name}, args...)
-		name = "sudo"
+		name = sudoBin
 	}
 	out, err := runner(context.Background(), name, args...)
 	if err != nil {

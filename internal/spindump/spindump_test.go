@@ -1,6 +1,9 @@
 package spindump
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleReport = `Date/Time:        2026-08-30 12:00:00 -0700
 Duration:         2.01s
@@ -58,6 +61,24 @@ func TestParseHeaviestRankedAndThreadHeadersExcluded(t *testing.T) {
 	// Symbols must be stripped of the (Image + off), [addr], and "+ off" noise.
 	if !hasSymbol(foo.Heaviest, "-[Renderer draw:]", 150) {
 		t.Errorf("expected a clean -[Renderer draw:] frame at 150 samples, got %+v", foo.Heaviest)
+	}
+}
+
+func TestParseStripsControlBytes(t *testing.T) {
+	// A report whose process name and a frame carry terminal escape bytes must
+	// come out sanitized.
+	report := "Process:          Ev\x1b[31mil [7]\n  9  Thread_1\n    9  bad\x07sym + 1 (X + 1) [0x1]\n"
+	rep := Parse(report)
+	if len(rep.Processes) != 1 {
+		t.Fatalf("processes = %d", len(rep.Processes))
+	}
+	if strings.ContainsRune(rep.Processes[0].Name, 0x1b) {
+		t.Errorf("process name still has an escape byte: %q", rep.Processes[0].Name)
+	}
+	for _, f := range rep.Processes[0].Heaviest {
+		if strings.ContainsRune(f.Symbol, 0x07) {
+			t.Errorf("symbol still has a control byte: %q", f.Symbol)
+		}
 	}
 }
 

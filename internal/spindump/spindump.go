@@ -65,7 +65,7 @@ func Parse(report string) Report {
 		if m := processHeader.FindStringSubmatch(line); m != nil {
 			flush()
 			pid, _ := strconv.Atoi(m[2])
-			cur = &ProcessReport{Name: strings.TrimSpace(m[1]), PID: pid}
+			cur = &ProcessReport{Name: sanitize(strings.TrimSpace(m[1])), PID: pid}
 			samplesBySymbol = map[string]int{}
 			continue
 		}
@@ -98,7 +98,22 @@ func frameSymbol(rest string) string {
 		rest = rest[:i]
 	}
 	rest = offsetSuffix.ReplaceAllString(rest, "")
-	return strings.TrimSpace(rest)
+	return sanitize(strings.TrimSpace(rest))
+}
+
+// sanitize removes terminal control bytes from text taken from a report, so an
+// untrusted report cannot inject escape sequences into the terminal or JSON.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t':
+			return ' '
+		case r < 0x20 || r == 0x7f:
+			return -1
+		default:
+			return r
+		}
+	}, s)
 }
 
 // isThreadHeader reports whether a frame's text is actually a thread or
