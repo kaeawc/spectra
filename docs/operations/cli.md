@@ -391,6 +391,28 @@ spectra symbolicate -o ./Some.app.dSYM -l 0x10a400000 --arch arm64 --json 0x10a4
 lldb-derived-addresses.txt | spectra symbolicate -o ./Some -l 0x10a400000
 ```
 
+## `spectra spindump`
+
+Captures and summarizes a `spindump` report — per-thread call trees with
+per-frame sample counts — which is otherwise hundreds of lines of indented text.
+The parser is the core and works two ways: `--input <file>` parses a report you
+already have (no root), and `spectra spindump <pid>` captures one. Because
+`spindump` must run as root to sample a live process, `--sudo` prepends `sudo`,
+and a permission failure is reported as "run with --sudo (or as root)" rather
+than a raw error. The summary shows the capture duration and, per process, its
+name, pid, and the heaviest symbols (top frames by sample count, with thread and
+dispatch-queue headers excluded). `--out <file>` also saves the raw report; raw
+frame addresses can be fed through `spectra symbolicate`. `--json` emits the
+structured result.
+
+### Examples
+
+```bash
+spectra spindump --duration 3 --sudo 4012
+spectra spindump --input /tmp/foo.spindump.txt
+spectra spindump --sudo --out /tmp/foo.txt --json 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
