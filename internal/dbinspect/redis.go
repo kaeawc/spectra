@@ -3,6 +3,7 @@ package dbinspect
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -104,6 +105,19 @@ func redisInfoInt64(info map[string]string, key string) int64 {
 	return n
 }
 
+// redisInfoInt converts an INFO counter to int, clamped to [0, MaxInt32]
+// so the narrowing is safe even on 32-bit builds.
+func redisInfoInt(info map[string]string, key string) int {
+	n := redisInfoInt64(info, key)
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int(n)
+}
+
 func redisOverview(ctx context.Context, dsn string, o Options) (*Overview, error) {
 	out := &Overview{Engine: EngineRedis, Database: redisDBFromDSN(dsn)}
 	err := withRedis(ctx, dsn, o, func(ctx context.Context, client RedisRunner) error {
@@ -119,9 +133,9 @@ func redisOverview(ctx context.Context, dsn string, o Options) (*Overview, error
 		// Replicas are the one server-enforced read-only mode redis has.
 		out.ReadOnlySession = info["role"] == "slave"
 		out.SizeBytes = redisInfoInt64(info, "used_memory")
-		out.Connections = int(redisInfoInt64(info, "connected_clients"))
+		out.Connections = redisInfoInt(info, "connected_clients")
 		if cfg, err := client.ConfigGet(ctx, "maxclients"); err == nil {
-			out.MaxConnections = int(redisInfoInt64(cfg, "maxclients"))
+			out.MaxConnections = redisInfoInt(cfg, "maxclients")
 		}
 		out.Schemas = parseRedisKeyspace(info)
 		return nil
