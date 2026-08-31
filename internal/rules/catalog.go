@@ -27,6 +27,7 @@ func V1Catalog() []Rule {
 		ruleBackupDestinationlessSchedulerLeak(),
 		ruleUpdatesStaleMajorPrepared(),
 		ruleJVMGCPressure(),
+		ruleJVMMetaspacePressure(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -194,6 +195,51 @@ func ruleJVMGCPressure() Rule {
 						Subject:  fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass),
 						Message:  fmt.Sprintf("%d full GCs have consumed %.1fs; check for old-gen pressure or promotion failures.", j.GC.FGC, j.GC.FGCT),
 						Fix:      "Capture a JFR recording or heap histogram to identify allocation hot spots and retained objects.",
+					})
+				}
+			}
+			return findings
+		},
+	}
+}
+
+// ruleJVMMetaspacePressure fires when used class-metadata space is approaching
+// a configured hard ceiling, which precedes OutOfMemoryError: Metaspace (or
+// Compressed class space). It only fires when the relevant ceiling flag is set;
+// unbounded metaspace growth (no ceiling) is a trend signal handled elsewhere.
+func ruleJVMMetaspacePressure() Rule {
+	return Rule{
+		ID:       "jvm-metaspace-pressure",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			var findings []Finding
+			for _, j := range s.JVMs {
+				f := FactsFor(j)
+				subject := fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass)
+				// Metaspace and compressed class space are distinct exhaustion
+				// paths that can both trip for one PID; give each a distinct
+				// Subject so the issue catalog keys them as separate issues
+				// (identity is rule_id + machine_uuid + subject).
+				if pct, ok := MetaspaceCeilingPct(j, f); ok && pct >= MetaspaceNearLimitPct {
+					findings = append(findings, Finding{
+						RuleID:   "jvm-metaspace-pressure",
+						Severity: SeverityMedium,
+						Subject:  subject + " (Metaspace)",
+						Message: fmt.Sprintf(
+							"Metaspace is %.0f%% of the -XX:MaxMetaspaceSize ceiling (%dMB); approaching OutOfMemoryError: Metaspace.",
+							pct, f.MaxMetaspaceSizeBytes/(1024*1024)),
+						Fix: "Raise -XX:MaxMetaspaceSize, or investigate a classloader leak (loaded-class count rising after workload quiescence).",
+					})
+				}
+				if pct, ok := CompressedClassCeilingPct(j, f); ok && pct >= MetaspaceNearLimitPct {
+					findings = append(findings, Finding{
+						RuleID:   "jvm-metaspace-pressure",
+						Severity: SeverityMedium,
+						Subject:  subject + " (Compressed class space)",
+						Message: fmt.Sprintf(
+							"Compressed class space is %.0f%% of the -XX:CompressedClassSpaceSize ceiling (%dMB); approaching OutOfMemoryError: Compressed class space.",
+							pct, f.CompressedClassSpaceSizeBytes/(1024*1024)),
+						Fix: "Raise -XX:CompressedClassSpaceSize, or investigate a classloader leak.",
 					})
 				}
 			}
