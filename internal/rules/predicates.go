@@ -37,6 +37,38 @@ func OldGenUsedPct(j jvm.Info) float64 {
 // OldGenHigh reports whether old-gen occupancy is above OldGenHighPct.
 func OldGenHigh(j jvm.Info) bool { return OldGenUsedPct(j) >= OldGenHighPct }
 
+// MetaspaceNearLimitPct is the used-vs-configured-ceiling occupancy above
+// which class-metadata space is reported as pressure. Approaching a hard
+// ceiling risks OutOfMemoryError: Metaspace / Compressed class space.
+//
+// Note this is deliberately measured against the *configured ceiling*
+// (-XX:MaxMetaspaceSize / -XX:CompressedClassSpaceSize), not committed
+// capacity: committed metaspace (jstat MC) tracks used (MU) by design and
+// sits near 100% normally, so a used/committed ratio would be pure noise.
+const MetaspaceNearLimitPct = 90.0
+
+// MetaspaceCeilingPct returns used metaspace as a percent of the configured
+// -XX:MaxMetaspaceSize ceiling. ok is false when the ceiling is unset or the
+// counters are missing, in which case the point-in-time ratio is meaningless
+// (unbounded metaspace growth is a trend signal, not a snapshot one).
+func MetaspaceCeilingPct(j jvm.Info, f VMArgsFacts) (pct float64, ok bool) {
+	if f.MaxMetaspaceSizeBytes <= 0 || j.GC == nil || j.GC.MU <= 0 {
+		return 0, false
+	}
+	usedBytes := j.GC.MU * 1024 // jstat MU is KiB
+	return usedBytes * 100 / float64(f.MaxMetaspaceSizeBytes), true
+}
+
+// CompressedClassCeilingPct mirrors MetaspaceCeilingPct for the compressed
+// class space and its -XX:CompressedClassSpaceSize ceiling.
+func CompressedClassCeilingPct(j jvm.Info, f VMArgsFacts) (pct float64, ok bool) {
+	if f.CompressedClassSpaceSizeBytes <= 0 || j.GC == nil || j.GC.CCSU <= 0 {
+		return 0, false
+	}
+	usedBytes := j.GC.CCSU * 1024 // jstat CCSU is KiB
+	return usedBytes * 100 / float64(f.CompressedClassSpaceSizeBytes), true
+}
+
 // TightHeapByDesign reports whether the JVM is configured to keep the
 // heap intentionally close to full via -XX:MaxHeapFreeRatio. A small
 // MaxHeapFreeRatio tells the JVM not to grow free space, which means

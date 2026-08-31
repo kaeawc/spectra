@@ -14,6 +14,11 @@ type VMArgsFacts struct {
 	XmxBytes int64
 	XmsBytes int64
 
+	// Class-metadata ceilings. 0 means "flag not present" — metaspace and
+	// compressed class space are effectively unbounded by default on 64-bit.
+	MaxMetaspaceSizeBytes         int64
+	CompressedClassSpaceSizeBytes int64
+
 	MaxHeapFreeRatio      int
 	MinHeapFreeRatio      int
 	MaxMetaspaceFreeRatio int
@@ -70,6 +75,10 @@ func applyVMArgToken(f *VMArgsFacts, tok string) bool {
 		f.XmxBytes = parseSizeSuffix(tok[len("-Xmx"):])
 	case strings.HasPrefix(tok, "-Xms"):
 		f.XmsBytes = parseSizeSuffix(tok[len("-Xms"):])
+	case strings.HasPrefix(tok, "-XX:MaxMetaspaceSize="):
+		f.MaxMetaspaceSizeBytes = parseSizeSuffix(tok[len("-XX:MaxMetaspaceSize="):])
+	case strings.HasPrefix(tok, "-XX:CompressedClassSpaceSize="):
+		f.CompressedClassSpaceSizeBytes = parseSizeSuffix(tok[len("-XX:CompressedClassSpaceSize="):])
 	case strings.HasPrefix(tok, "-XX:MaxHeapFreeRatio="):
 		f.MaxHeapFreeRatio = atoiOrNeg1(tok[len("-XX:MaxHeapFreeRatio="):])
 	case strings.HasPrefix(tok, "-XX:MinHeapFreeRatio="):

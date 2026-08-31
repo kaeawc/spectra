@@ -305,8 +305,9 @@ purpose-built for the workflow that exists today:
 - **Persistent.** Thread dumps and JFR recordings can be stored in the blob
   cache; heap dumps are written as explicit `.hprof` artifacts.
 - **Catalog-driven.** Recommendations engine fires JVM-specific rules
-  (EOL versions, heap-vs-RAM ratios, GC pressure) the same way as
-  every other inspection ([../design/recommendations-engine.md](../design/recommendations-engine.md)).
+  (EOL versions, heap-vs-RAM ratios, GC pressure, metaspace approaching a
+  configured ceiling) the same way as every other inspection
+  ([../design/recommendations-engine.md](../design/recommendations-engine.md)).
 
 ## Implementation status
 
