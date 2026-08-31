@@ -12,14 +12,15 @@ MySQL/MariaDB via [go-sql-driver](https://github.com/go-sql-driver/mysql),
 SQLite via [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) —
 spectra's own storage driver, so SQLite support adds no dependency — and
 MongoDB via the
-[official driver](https://github.com/mongodb/mongo-go-driver). All four
+[official driver](https://github.com/mongodb/mongo-go-driver), and
+Redis/Valkey via [go-redis](https://github.com/redis/go-redis). All five
 sit behind the same engine-neutral report types in `internal/dbinspect`.
 The engine is inferred from the DSN: `postgres://` / `postgresql://` URLs
 and libpq keyword form select postgres, `mysql://` URLs and
 go-sql-driver's `user:pass@tcp(host:port)/db` form select mysql,
 `sqlite://` URLs, `file:` URIs, or a bare path ending in `.db` /
-`.sqlite` / `.sqlite3` select sqlite, and `mongodb://` /
-`mongodb+srv://` URIs select mongodb.
+`.sqlite` / `.sqlite3` select sqlite, `mongodb://` / `mongodb+srv://`
+URIs select mongodb, and `redis://` / `rediss://` URLs select redis.
 
 ## Non-disruptive by construction
 
@@ -56,6 +57,13 @@ construction: spectra only ever issues read commands (`buildInfo`,
 inspection stays off the primary, timeouts are short, the pool is one
 connection, and the session is identifiable by `appName`.
 
+Redis/Valkey likewise: only read commands are issued — `INFO`,
+`CONFIG GET`, incremental `SCAN` (never `KEYS`, which blocks the server),
+`TYPE`, `TTL`, and bounded per-type value reads (never `SMEMBERS` or
+`HGETALL`, which are unbounded on large keys). Timeouts are short, the
+pool is one connection, and the client is identifiable by name in
+`CLIENT LIST`.
+
 Structural reads use only the engine's catalog (`pg_catalog` and
 `pg_stat_*` on postgres, `information_schema` on mysql, `sqlite_schema`
 and pragma functions on sqlite, the `list*`/`*Stats` commands on
@@ -73,8 +81,9 @@ the SQL engines) resolves the name through the catalog first
 
 - **Live sockets** — active connections whose remote port is a well-known
   database port (5432/5433/6432 postgres, 3306/3307 mysql,
-  27017–27019 mongodb), from the same `lsof` collector that backs
-  `spectra network connections`, with PID and command attribution.
+  27017–27019 mongodb, 6379/6380 redis), from the same `lsof` collector
+  that backs `spectra network connections`, with PID and command
+  attribution.
 - **Connection env vars** — a fixed allowlist (`DATABASE_URL`,
   `POSTGRES_URL`, `PGHOST`, `PGUSER`, `PGPASSWORD`, ...), never the full
   environment. Passwords and URL credentials are redacted before they reach
@@ -106,6 +115,13 @@ specifications, and `relations` is honestly empty — MongoDB has no
 foreign keys, and application-level references are not discoverable from
 the catalog.
 
+On redis, logical databases (db0..db15) play the role of schemas and
+generalized key patterns of tables: `schema` runs a bounded `SCAN` sample
+(up to 1000 keys) and buckets keys into templates like `session:*` with
+the observed type and in-sample count. `relations` is honestly empty, and
+`sample` takes a key or `MATCH` pattern instead of a table name,
+returning key/type/TTL/bounded-value rows.
+
 - `overview` — server version, database size, connection usage, and table
   counts per schema.
 - `schema` — every user relation with columns (type, nullability, default,
@@ -119,7 +135,8 @@ the catalog.
   `information_schema.TABLES` row and size estimates — scan counters need
   `performance_schema` and are left zero. On sqlite, row estimates come
   from `sqlite_stat1` (present after `ANALYZE`) and sizes from the
-  `dbstat` virtual table when the build ships it.
+  `dbstat` virtual table when the build ships it. On redis, the per-db
+  keyspace counters from `INFO`.
 - `sample` — up to N rows (default 10, capped at 500) from one table.
 
 ## Row data is sensitive
