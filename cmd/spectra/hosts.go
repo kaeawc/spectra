@@ -39,13 +39,18 @@ func runHostsWith(args []string, stdout io.Writer, stderr io.Writer, list hostLi
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	probeFlag := fs.Bool("probe", false, "Probe each known host and report reachability")
-	discoverFlag := fs.Bool("discover", false, "Merge tailscale peer discovery from `tailscale status --json`")
-	discoverDaemonsFlag := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from Tailscale peers")
+	discoverFlag := fs.Bool("discover", false, "Merge peer discovery from the --discover-via source")
+	discoverDaemonsFlag := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from discovered peers")
+	discoverViaFlag := fs.String("discover-via", "auto", "Peer discovery source: auto (both), tailscale, or nebula")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe] [--discover|--discover-daemons]")
+		fmt.Fprintln(stderr, "usage: spectra hosts [--json] [--probe] [--discover|--discover-daemons] [--discover-via auto|tailscale|nebula]")
+		return 2
+	}
+	if err := selectDiscoverProvider(*discoverViaFlag); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 

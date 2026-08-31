@@ -45,9 +45,15 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 	timeout := fs.Duration("timeout", 3*time.Second, "Dial/read timeout per target")
 	hosts := fs.String("hosts", "", "Comma-separated daemon targets; defaults to discovered hosts")
 	probe := fs.Bool("probe", false, "When discovering hosts, skip entries that fail a health check")
-	discoverHosts := fs.Bool("discover", false, "Include tailscale peers from tailscale status --json")
-	discoverDaemons := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from Tailscale peers")
+	discoverHosts := fs.Bool("discover", false, "Include peers discovered from the --discover-via source")
+	discoverDaemons := fs.Bool("discover-daemons", false, "Discover reachable Spectra daemons from discovered peers")
+	discoverVia := fs.String("discover-via", "auto", "Peer discovery source: auto (both), tailscale, or nebula")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := selectDiscoverProvider(*discoverVia); err != nil {
+		fmt.Fprintln(stderr, err)
+		printFanUsage(stderr)
 		return 2
 	}
 
@@ -92,7 +98,7 @@ func runFanWith(args []string, stdout io.Writer, stderr io.Writer, caller fanRPC
 }
 
 func printFanUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [--discover|--discover-daemons] [status|host|jvm|processes|network|storage|power|rules]")
+	fmt.Fprintln(w, "usage: spectra fan [--hosts host-a,host-b] [--probe] [--discover|--discover-daemons] [--discover-via auto|tailscale|nebula] [status|host|jvm|processes|network|storage|power|rules]")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] inspect <App.app>")
 	fmt.Fprintln(w, "   or: spectra fan [--hosts host-a,host-b] call <method> [json-params]")
 }
