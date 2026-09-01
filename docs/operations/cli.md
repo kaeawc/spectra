@@ -499,6 +499,24 @@ spectra malloc-history --address 0x600000abcdef --sudo 4012
 spectra malloc-history --top 20 --json --sudo 4012
 ```
 
+## `spectra flamegraph`
+
+Renders a native CPU flamegraph (SVG) from a process sample — the counterpart to
+`spectra jvm flamegraph` for non-JVM processes. It captures a `sample` (or reads
+one with `--input`), folds the call graph into collapsed stacks with correct
+**self** sample counts (a frame's own time = its samples minus its children's),
+and draws a self-contained SVG: width proportional to samples, stacked by depth,
+a deterministic per-frame color, and native `<title>` hover tooltips — no
+external scripts or fonts. It writes to `--out` (default `<pid>.flamegraph.svg`).
+Frame addresses in the source sample can be resolved with `spectra symbolicate`.
+
+### Examples
+
+```bash
+spectra flamegraph --duration 5 4012
+spectra flamegraph --input /tmp/app.sample.txt --out /tmp/app.svg
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
