@@ -73,6 +73,7 @@ func subcommandList() []subcommand {
 		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
 		{"spindump", "Capture and summarize a per-thread stack report (heaviest stacks)", runSpindump},
 		{"vmmap", "Summarize a process's memory composition by region (dirty/resident/swapped)", runVmmap},
+		{"vmregions", "Composition by sharing/protection/backing, with RWX (W^X) flagging", runVmregions},
 		{"lsmp", "Summarize a process's Mach port table (right counts, leak detection)", runLsmp},
 		{"malloc-history", "Attribute allocations to call stacks (requires MallocStackLogging)", runMallocHistory},
 		{"flamegraph", "Render a native CPU flamegraph (SVG) from a process sample", runFlamegraph},
