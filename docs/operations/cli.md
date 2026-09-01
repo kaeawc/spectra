@@ -478,6 +478,27 @@ spectra lsmp --sudo 4012
 spectra lsmp --json --sudo 4012
 ```
 
+## `spectra malloc-history`
+
+Attributes heap allocations to the call stacks that made them, from
+`malloc_history` — useful when a leak reproduces under `MallocStackLogging`.
+By default it runs `malloc_history -allBySize` and summarizes the top allocation
+sites (bytes, call count, leaf frame) ranked by bytes (`--top`, default 10);
+with `--address <hex>` it reports the ALLOC/FREE backtraces for one heap
+address. `malloc_history` needs the target launched with `MallocStackLogging=1`,
+so when logging isn't enabled the command says so and explains the precondition
+rather than returning empty. It needs root for another user's process, so
+`--sudo` prepends `sudo`; backtrace addresses can be fed through
+`spectra symbolicate`. `--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra malloc-history --sudo 4012
+spectra malloc-history --address 0x600000abcdef --sudo 4012
+spectra malloc-history --top 20 --json --sudo 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
