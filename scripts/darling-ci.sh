@@ -35,6 +35,15 @@ indarling() {
   timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "$*" </dev/null
 }
 
+# Like indarling, but with dist-darling/guestbin (the CI-only plutil shim,
+# see ci/plutil) prepended to PATH. Used for spectra probes and test runs;
+# the utility probe uses plain indarling so it reports what Darling itself
+# ships. The host filesystem appears at /Volumes/SystemRoot in the guest.
+GUEST_BIN="/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin"
+indarling_tools() {
+  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\"; $*" </dev/null
+}
+
 if ! command -v darling >/dev/null 2>&1; then
   echo "error: darling is not installed" >&2
   exit 1
@@ -48,6 +57,9 @@ mkdir -p dist-darling
 for tool in spectra spectra-mcp spectra-helper; do
   CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o "dist-darling/$tool" "./cmd/$tool/" || exit 1
 done
+# Darling ships no plutil; build the CI-only shim into the guest PATH dir.
+mkdir -p dist-darling/guestbin
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o dist-darling/guestbin/plutil ./ci/plutil/ || exit 1
 
 log "Booting Darling prefix (first run initializes ~/.darling)"
 if ! indarling 'sw_vers; uname -mrs'; then
@@ -74,6 +86,8 @@ for tool in plutil otool codesign file sqlite3 ps sysctl sw_vers; do
     summary "| \`$tool\` | no |"
   fi
 done
+summary ""
+summary "A CI-only \`plutil\` shim (ci/plutil, built for darwin) is on PATH for the probes and tests below."
 
 # Gate on a dependency-free binary: it proves the Go darwin runtime itself
 # executes under Darling. The spectra binaries additionally bind
@@ -135,7 +149,7 @@ probes=(
 )
 for probe in "${probes[@]}"; do
   log "spectra $probe"
-  if indarling "./dist-darling/spectra $probe"; then
+  if indarling_tools "./dist-darling/spectra $probe"; then
     summary "| \`spectra $probe\` | pass |"
   else
     rc=$?
@@ -171,7 +185,7 @@ while IFS=' ' read -r import_path dir; do
   fi
 
   echo "--- $import_path"
-  if (cd "$dir" && indarling "./$bin -test.timeout 240s") >"$TEST_LOG" 2>&1; then
+  if (cd "$dir" && indarling_tools "./$bin -test.timeout 240s") >"$TEST_LOG" 2>&1; then
     pass=$((pass + 1))
     timeouts_in_a_row=0
     summary "| \`$short\` | pass |"
