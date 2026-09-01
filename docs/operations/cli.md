@@ -536,6 +536,27 @@ spectra vmregions --top 20 4012
 spectra vmregions --json 4012
 ```
 
+## `spectra hang`
+
+Captures a `sample` and classifies why a process's **main thread** is hung —
+answering the question a raw sample can't. It finds the `com.apple.main-thread`,
+follows its hottest stack to the leaf, and reports a verdict: **idle** (parked in
+`mach_msg` under a CFRunLoop, healthy — waiting for events), **lock-blocked**
+(leaf is a mutex/condvar/ulock wait, or a synchronous `mach_msg` IPC outside the
+run loop — the main thread should never wait on a lock), **io-blocked** (leaf is
+a synchronous syscall such as `read`/`select`/`open`), **spinning** (leaf is
+application code on-CPU — a compute hang), or **unknown**. It exits non-zero when
+the main thread is genuinely hung (lock/I-O/spin) so scripts can gate on it.
+`--input` analyzes an existing sample file; `--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra hang 4012
+spectra hang --duration 3 4012
+spectra hang --input /tmp/beachball.sample.txt --json
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery

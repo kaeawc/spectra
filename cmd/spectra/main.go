@@ -77,6 +77,7 @@ func subcommandList() []subcommand {
 		{"lsmp", "Summarize a process's Mach port table (right counts, leak detection)", runLsmp},
 		{"malloc-history", "Attribute allocations to call stacks (requires MallocStackLogging)", runMallocHistory},
 		{"flamegraph", "Render a native CPU flamegraph (SVG) from a process sample", runFlamegraph},
+		{"hang", "Classify why a process's main thread is hung (lock/I-O/spin/idle)", runHang},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
 		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
