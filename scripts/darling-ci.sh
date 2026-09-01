@@ -26,12 +26,13 @@ trap 'rm -f "$TEST_LOG"' EXIT
 summary() { printf '%s\n' "$*" >>"$SUMMARY_FILE"; }
 log() { printf '\n=== %s\n' "$*"; }
 
-# Run a command line inside the Darling prefix. `darling shell CMD` passes
-# CMD to the guest shell (no -c flag — darling would try to execute "-c"),
-# and maps the Linux cwd to the same path inside the prefix, so relative
-# paths work. timeout(1) guards against hangs in darlingserver or the guest.
+# Run a command line inside the Darling prefix. `darling shell` treats its
+# arguments as literal argv words (no shell evaluation), so hand the line to
+# the guest's bash explicitly. darling maps the Linux cwd to the same path
+# inside the prefix, so relative paths work. timeout(1) guards against hangs
+# in darlingserver or the guest process.
 indarling() {
-  timeout "$DARLING_TIMEOUT" darling shell "$*" </dev/null
+  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "$*" </dev/null
 }
 
 if ! command -v darling >/dev/null 2>&1; then
