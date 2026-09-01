@@ -9,13 +9,34 @@
  * via DYLD_FORCE_FLAT_NAMESPACE (the imports are two-level-bound to
  * Security.framework, which an inserted library cannot otherwise satisfy).
  *
- * The stubs only need to exist so dyld can bind them; unit tests never
- * evaluate real certificate trust. Returning NULL makes any accidental
- * caller see an empty result rather than undefined behavior.
+ * Go's crypto/x509 does call these while loading system roots, so the
+ * stubs are implemented in terms of the older macOS 11 APIs they
+ * superseded (the same fallback Go itself used before requiring macOS 12).
+ * The extern symbols resolve at load time against the real frameworks via
+ * -undefined dynamic_lookup.
  */
+
+extern long SecTrustGetCertificateCount(void *trust);
+extern void *SecTrustGetCertificateAtIndex(void *trust, long i);
+extern void *CFArrayCreateMutable(void *allocator, long capacity, const void *callbacks);
+extern void CFArrayAppendValue(void *array, const void *value);
+extern const char kCFTypeArrayCallBacks[];
 
 /* CFArrayRef SecTrustCopyCertificateChain(SecTrustRef); macOS 12.0+ */
 void *SecTrustCopyCertificateChain(void *trust) {
-	(void)trust;
-	return 0;
+	if (!trust) {
+		return 0;
+	}
+	long n = SecTrustGetCertificateCount(trust);
+	void *arr = CFArrayCreateMutable(0, n, kCFTypeArrayCallBacks);
+	if (!arr) {
+		return 0;
+	}
+	for (long i = 0; i < n; i++) {
+		void *cert = SecTrustGetCertificateAtIndex(trust, i);
+		if (cert) {
+			CFArrayAppendValue(arr, cert);
+		}
+	}
+	return arr;
 }

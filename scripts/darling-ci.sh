@@ -74,7 +74,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o dist-darling/gues
 # with a note when it's unavailable (e.g. local runs).
 SECSHIM_ENV=""
 if command -v zig >/dev/null 2>&1; then
-  zig cc -target x86_64-macos -shared \
+  zig cc -target x86_64-macos -shared -Wl,-undefined,dynamic_lookup \
     -o dist-darling/guestbin/libsecshim.dylib ci/secshim/secshim.c || exit 1
   SECSHIM_ENV="DYLD_FORCE_FLAT_NAMESPACE=1 DYLD_INSERT_LIBRARIES=/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin/libsecshim.dylib"
 else
