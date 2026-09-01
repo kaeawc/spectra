@@ -732,6 +732,29 @@ spectra storage cache-triage --json
 spectra storage cache-triage "$HOME/Library/Containers/com.example.App/Data/Library/Caches"
 ```
 
+## `spectra storage growth`
+
+Diffs the storage sections of two snapshots to find what grew over time, and how
+fast. Every snapshot stamps `taken_at` and records storage state (volume usage,
+`~/Library` and app-caches footprint, per-app on-disk sizes); this ranks the
+areas that grew between two of them by growth size, each with a **bytes/day**
+rate computed from the timestamps. It compares per volume (by mount point), the
+user-library and app-caches footprints, and per app (by path; a newly appeared
+app counts from zero). Shrinking areas are excluded from the ranking but still
+count toward the reported total. `--top` bounds the list (default 10); a
+non-positive interval yields zero rates with a note rather than an error;
+`--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra snapshot capture --out /tmp/before.json
+# ... time passes ...
+spectra snapshot capture --out /tmp/after.json
+spectra storage growth /tmp/before.json /tmp/after.json
+spectra storage growth --top 20 --json /tmp/before.json /tmp/after.json
+```
+
 ## `spectra crash readiness`
 
 Audits whether the machine can produce a debuggable crash *before* one
