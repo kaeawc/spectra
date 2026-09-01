@@ -517,6 +517,25 @@ spectra flamegraph --duration 5 4012
 spectra flamegraph --input /tmp/app.sample.txt --out /tmp/app.svg
 ```
 
+## `spectra vmregions`
+
+Aggregates a process's full `vmmap` region list by **sharing, protection, and
+backing** — the lens `spectra vmmap` (region-type summary) does not give. It
+reports total resident/dirty, shared-resident (SM=SHM), file-backed vs anonymous
+dirty, and writable vs executable resident, then lists every **RWX region**
+(current protection writable *and* executable — a W^X violation / JIT-or-exploit
+smell) and the top `--top` regions by dirty size. `vmmap` works without root for
+a same-user process; another user's process needs root, surfaced as "re-run as
+root (sudo)". `--json` emits the structured result.
+
+### Examples
+
+```bash
+spectra vmregions 4012
+spectra vmregions --top 20 4012
+spectra vmregions --json 4012
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
