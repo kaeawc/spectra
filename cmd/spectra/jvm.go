@@ -94,6 +94,7 @@ func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
 		"thread-dump":    runJVMThreadDump,
 		"heap-histogram": runJVMHeapHistogram,
 		"heap-hprof":     runJVMHeapHPROF,
+		"dominators":     runJVMDominators,
 		"heap-dump":      runJVMHeapDump,
 		"gc-log":         runJVMGCLog,
 		"jfr":            runJVMJFR,
