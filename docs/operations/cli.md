@@ -573,9 +573,10 @@ incident view, so "what happened around 14:03?" has a single answer instead of
 being scattered across `process`, `logs`, and `updates`. Events carry a time,
 source, severity, and summary; the timeline is sorted ascending and filtered to
 a `--since` window (default 1h). Collection is best-effort — one failing source
-does not drop the others. `--json` emits the structured result. This first
-release wires the **process-start** source (each recently started process);
-the unified-log and install-history sources follow.
+does not drop the others. `--json` emits the structured result. It merges three
+sources: **process starts** (each recently started process), **unified-log
+errors** (faults and errors from `log show`, bounded to the window), and
+**installs** (the system install/update history).
 
 ### Examples
 
