@@ -136,6 +136,30 @@ spectra fan --discover status
 spectra fan --discover-daemons status
 ```
 
+### Discovery source
+
+`--discover` and `--discover-daemons` default to `--discover-via auto`, which
+attempts every source and merges the results: a Tailscale-only host, a
+Nebula-only host, and a host on both all discover cleanly, and a source that is
+absent (no `tailscale`, no Nebula certs) is skipped rather than treated as an
+error. Pass `--discover-via tailscale` or `--discover-via nebula` to force a
+single source.
+
+- **Tailscale** reads peers from `tailscale status --json`.
+- **Nebula** has no live peer list, so the source of truth is the signed host
+  certs: Spectra enumerates `~/.nebula` (override with `SPECTRA_NEBULA_CERTS`),
+  runs `nebula-cert print -json` on each `*.crt`, and returns their overlay IPs.
+  Because Nebula has no MagicDNS, discovery yields IPs rather than names.
+
+`--discover-daemons` then narrows the merged set to hosts actually running a
+Spectra daemon.
+
+```bash
+spectra hosts --discover                        # auto: Tailscale + Nebula
+spectra hosts --discover-daemons --discover-via nebula
+spectra fan --discover-via tailscale jvm
+```
+
 The client makes parallel RPC calls to each daemon and aggregates
 results locally into one JSON envelope. The remaining intended shape is:
 
