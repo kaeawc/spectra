@@ -43,8 +43,9 @@ GUEST_BIN="/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin"
 # Darling's sigtramp emulation crashes when signals (SIGCHLD from heavy
 # subprocess exec, SIGURG from async preemption) land on threads inside
 # libSystem syscalls ("SIGSEGV ... semasleep on Darwin signal stack").
-# asyncpreemptoff removes the SIGURG source; GOMAXPROCS=1 narrows the
-# window for the rest.
+# asyncpreemptoff and GOMAXPROCS=1 remove some signal sources and narrow
+# the race window but do not fully prevent it — internal/detect's
+# subprocess-heavy suite still crashes this way (Darling bug, not ours).
 indarling_tools() {
   timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\" GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1; $*" </dev/null
 }
