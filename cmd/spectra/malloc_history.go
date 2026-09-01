@@ -62,12 +62,15 @@ func runMallocHistoryWithIO(args []string, stdout, stderr io.Writer, runner mall
 		return 2
 	}
 
+	// malloc_history takes the pid first, then the mode/address:
+	//   malloc_history <pid> -allBySize
+	//   malloc_history <pid> <address>
 	name := mallocHistoryBin
-	var cmdArgs []string
+	cmdArgs := []string{strconv.Itoa(pid)}
 	if *address != "" {
-		cmdArgs = []string{strconv.Itoa(pid), *address}
+		cmdArgs = append(cmdArgs, *address)
 	} else {
-		cmdArgs = []string{"-allBySize", strconv.Itoa(pid)}
+		cmdArgs = append(cmdArgs, "-allBySize")
 	}
 	if *sudo {
 		cmdArgs = append([]string{name}, cmdArgs...)
