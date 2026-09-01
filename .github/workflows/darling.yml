@@ -1,0 +1,56 @@
+name: Darling
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Experimental: run the darwin/amd64 build of Spectra under Darling
+  # (https://darlinghq.org), a macOS translation layer, on a Linux runner.
+  #
+  # There is no Xcode project in this repo, so there is no xcodebuild step to
+  # port — the macOS "build" is the GOOS=darwin cross-compile, and Darling's
+  # job is executing the resulting Mach-O binaries and test suite.
+  #
+  # The pinned release debs target Ubuntu 24.04 (noble) amd64; keep the
+  # runner pinned to match. Darling has been userspace-only (darlingserver)
+  # since 2022, so no kernel module is needed on hosted runners.
+  darling-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Experimental job: results land in the step summary and logs, but a
+    # failure never blocks the PR. Drop this once it proves stable.
+    continue-on-error: true
+    env:
+      DARLING_DEBS_URL: https://github.com/darlinghq/darling/releases/download/v0.1.20260608/debs_20260608.zip
+      DARLING_DEBS_SHA256: 27469ef3932da2e91dd7fb34b70e3628a3e54b7af9fb5480051f44af35eca1fd
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install Darling
+        run: |
+          curl -fsSL --retry 3 -o /tmp/darling-debs.zip "$DARLING_DEBS_URL"
+          echo "$DARLING_DEBS_SHA256  /tmp/darling-debs.zip" | sha256sum -c -
+          unzip -q /tmp/darling-debs.zip -d /tmp/darling-debs
+          sudo apt-get update
+          # Minimal CLI dependency closure; the full `darling` metapackage
+          # drags in GUI, Python 2, Ruby, and Perl components we don't need.
+          sudo apt-get install -y \
+            /tmp/darling-debs/debs_*/darling-core_*.deb \
+            /tmp/darling-debs/debs_*/darling-system_*.deb \
+            /tmp/darling-debs/debs_*/darling-cli-gui-common_*.deb \
+            /tmp/darling-debs/debs_*/darling-cli-python2-common_*.deb \
+            /tmp/darling-debs/debs_*/darling-cli_*.deb
+
+      - name: Build and test under Darling
+        run: ./scripts/darling-ci.sh

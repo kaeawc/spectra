@@ -89,6 +89,10 @@ Living docs in `docs/`. mkdocs nav at `mkdocs.yml`. Validation:
 - `validate-workflows` — `shellcheck` + YAML parse on `.github/`.
 - `docs` — mkdocs nav + lychee + `mkdocs build --strict`.
 
+`.github/workflows/darling.yml` (experimental, `continue-on-error`): runs the
+darwin/amd64 cross-compile and test suite under Darling on a Linux runner via
+`scripts/darling-ci.sh`.
+
 Go version comes from `go.mod`.
 
 ## Conventions

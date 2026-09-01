@@ -1,5 +1,6 @@
 /spectra
 /dist/
+/dist-darling/
 *.test
 *.out
 .DS_Store
