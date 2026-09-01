@@ -181,6 +181,10 @@ while IFS=' ' read -r import_path dir; do
     if [ "$rc" -eq 124 ]; then
       timeouts_in_a_row=$((timeouts_in_a_row + 1))
       summary "| \`$short\` | timed out |"
+    elif grep -q 'Symbol not found' "$TEST_LOG"; then
+      timeouts_in_a_row=0
+      sym="$(grep -m1 'Symbol not found' "$TEST_LOG" | sed 's/.*Symbol not found: //')"
+      summary "| \`$short\` | dyld: missing \`$sym\` |"
     else
       timeouts_in_a_row=0
       summary "| \`$short\` | fail (exit $rc) |"
