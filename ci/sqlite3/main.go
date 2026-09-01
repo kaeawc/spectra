@@ -47,7 +47,7 @@ func query(path, sqlText string, stdout io.Writer) error {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(sqlText) // #nosec G202 -- CI shim mirrors sqlite3(1): the SQL is the CLI argument
+	rows, err := db.Query(sqlText) // #nosec G701 -- CI shim mirrors sqlite3(1): the SQL is the CLI argument
 	if err != nil {
 		return err
 	}
