@@ -305,6 +305,13 @@ spectra issues update --status fixed issue-123
 
 Lists or inspects running JVM processes and exposes JDK-tool diagnostics.
 
+`spectra jvm dominators <file.hprof>` goes beyond the class histogram (shallow
+sizes): it parses the heap dump's object reference graph, builds the dominator
+tree over the GC roots, and ranks objects by **retained size** — the memory that
+would actually be freed if the object were collected. The object retaining the
+largest share of the reachable heap is the leak suspect a histogram cannot
+surface. `--top` bounds the ranking; `--json` emits the structured result.
+
 ### Examples
 
 ```bash
@@ -315,6 +322,8 @@ spectra jvm explain --samples 6 --interval 10s 4012
 spectra jvm thread-dump --summary 4012
 spectra jvm heap-histogram --suspects 20 4012
 spectra jvm heap-dump --out /tmp/app.hprof 4012
+spectra jvm dominators --top 20 /tmp/app.hprof
+spectra jvm dominators --json /tmp/app.hprof
 spectra jvm gc-stats --json 4012
 spectra jvm vm-memory --json 4012
 spectra jvm jmx status 4012
