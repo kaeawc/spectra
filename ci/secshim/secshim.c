@@ -9,34 +9,17 @@
  * via DYLD_FORCE_FLAT_NAMESPACE (the imports are two-level-bound to
  * Security.framework, which an inserted library cannot otherwise satisfy).
  *
- * Go's crypto/x509 does call these while loading system roots, so the
- * stubs are implemented in terms of the older macOS 11 APIs they
- * superseded (the same fallback Go itself used before requiring macOS 12).
- * The extern symbols resolve at load time against the real frameworks via
- * -undefined dynamic_lookup.
+ * The stub must have ZERO undefined symbols: the inserted dylib loads into
+ * every process, including pure-Go test binaries that link only libSystem.
+ * Referencing framework data symbols (e.g. kCFTypeArrayCallBacks) aborts
+ * those at load, and implementing the function via Darling's real trust
+ * APIs SIGABRTs the processes that do link Security — both were tried.
+ * Returning NULL makes Go's system-root loading see an empty chain and
+ * fall back gracefully, which is the empirically best behavior.
  */
-
-extern long SecTrustGetCertificateCount(void *trust);
-extern void *SecTrustGetCertificateAtIndex(void *trust, long i);
-extern void *CFArrayCreateMutable(void *allocator, long capacity, const void *callbacks);
-extern void CFArrayAppendValue(void *array, const void *value);
-extern const char kCFTypeArrayCallBacks[];
 
 /* CFArrayRef SecTrustCopyCertificateChain(SecTrustRef); macOS 12.0+ */
 void *SecTrustCopyCertificateChain(void *trust) {
-	if (!trust) {
-		return 0;
-	}
-	long n = SecTrustGetCertificateCount(trust);
-	void *arr = CFArrayCreateMutable(0, n, kCFTypeArrayCallBacks);
-	if (!arr) {
-		return 0;
-	}
-	for (long i = 0; i < n; i++) {
-		void *cert = SecTrustGetCertificateAtIndex(trust, i);
-		if (cert) {
-			CFArrayAppendValue(arr, cert);
-		}
-	}
-	return arr;
+	(void)trust;
+	return 0;
 }
