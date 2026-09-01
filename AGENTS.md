@@ -81,6 +81,11 @@ Living docs in `docs/`. mkdocs nav at `mkdocs.yml`. Validation:
 
 - `test` — macOS runner; `go vet`, `go build`, `gotestsum -race`, smoke
   tests against `/System/Applications/Calculator.app` etc.
+- `darling-smoke` — always skipped (`if: false`); kept wired for when
+  Darling can present macOS 12. Runs the darwin/amd64 cross-compile and
+  test suite under Darling on a Linux runner via `scripts/darling-ci.sh`
+  with the CI-only shims in `ci/` (plutil, sqlite3, Security stub — never
+  part of macOS builds).
 - `complexity` — `gocyclo -over 15`.
 - `static-analysis` — `golangci-lint v2`.
 - `check-licenses` — `go-licenses report`.
