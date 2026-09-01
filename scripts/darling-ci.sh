@@ -40,11 +40,13 @@ indarling() {
 # the utility probe uses plain indarling so it reports what Darling itself
 # ships. The host filesystem appears at /Volumes/SystemRoot in the guest.
 GUEST_BIN="/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin"
-# asyncpreemptoff: Go's SIGURG-based async preemption crashes on Darling's
-# signal-stack emulation once tests fork subprocesses heavily
-# ("SIGSEGV ... semasleep on Darwin signal stack").
+# Darling's sigtramp emulation crashes when signals (SIGCHLD from heavy
+# subprocess exec, SIGURG from async preemption) land on threads inside
+# libSystem syscalls ("SIGSEGV ... semasleep on Darwin signal stack").
+# asyncpreemptoff removes the SIGURG source; GOMAXPROCS=1 narrows the
+# window for the rest.
 indarling_tools() {
-  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\" GODEBUG=asyncpreemptoff=1; $*" </dev/null
+  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\" GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1; $*" </dev/null
 }
 
 if ! command -v darling >/dev/null 2>&1; then
