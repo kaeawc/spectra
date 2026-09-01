@@ -47,7 +47,7 @@ GUEST_BIN="/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin"
 # the race window but do not fully prevent it — internal/detect's
 # subprocess-heavy suite still crashes this way (Darling bug, not ours).
 indarling_tools() {
-  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\" GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1; $*" </dev/null
+  timeout "$DARLING_TIMEOUT" darling shell /bin/bash -c "export PATH=\"$GUEST_BIN:\$PATH\" GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1 $SECSHIM_ENV; $*" </dev/null
 }
 
 if ! command -v darling >/dev/null 2>&1; then
@@ -63,9 +63,23 @@ mkdir -p dist-darling
 for tool in spectra spectra-mcp spectra-helper; do
   CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o "dist-darling/$tool" "./cmd/$tool/" || exit 1
 done
-# Darling ships no plutil; build the CI-only shim into the guest PATH dir.
+# Darling ships neither plutil nor sqlite3; build the CI-only shims into the
+# guest PATH dir.
 mkdir -p dist-darling/guestbin
 CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o dist-darling/guestbin/plutil ./ci/plutil/ || exit 1
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o dist-darling/guestbin/sqlite3 ./ci/sqlite3/ || exit 1
+
+# Stub the Security.framework symbols Darling's macOS 11.7 framework lacks
+# (see ci/secshim/secshim.c). Requires zig as the darwin cross-linker; skip
+# with a note when it's unavailable (e.g. local runs).
+SECSHIM_ENV=""
+if command -v zig >/dev/null 2>&1; then
+  zig cc -target x86_64-macos -shared \
+    -o dist-darling/guestbin/libsecshim.dylib ci/secshim/secshim.c || exit 1
+  SECSHIM_ENV="DYLD_FORCE_FLAT_NAMESPACE=1 DYLD_INSERT_LIBRARIES=/Volumes/SystemRoot$REPO_ROOT/dist-darling/guestbin/libsecshim.dylib"
+else
+  echo "note: zig not found; Security stub disabled, crypto/x509 binaries will fail at dyld"
+fi
 
 log "Booting Darling prefix (first run initializes ~/.darling)"
 if ! indarling 'sw_vers; uname -mrs'; then
@@ -83,7 +97,7 @@ summary "### macOS utilities available inside Darling"
 summary ""
 summary "| utility | present |"
 summary "|---------|---------|"
-for tool in plutil otool codesign file sqlite3 ps sysctl sw_vers; do
+for tool in plutil otool codesign file sqlite3 ps sysctl sw_vers spctl launchctl xattr vm_stat; do
   if path="$(indarling "command -v $tool" 2>/dev/null)"; then
     echo "found: $tool -> $path"
     summary "| \`$tool\` | yes — \`$path\` |"
@@ -93,7 +107,7 @@ for tool in plutil otool codesign file sqlite3 ps sysctl sw_vers; do
   fi
 done
 summary ""
-summary "A CI-only \`plutil\` shim (ci/plutil, built for darwin) is on PATH for the probes and tests below."
+summary "CI-only shims are injected for the probes and tests below: \`plutil\` (ci/plutil) and \`sqlite3\` (ci/sqlite3) on PATH, plus Security.framework symbol stubs (ci/secshim) via DYLD_INSERT_LIBRARIES when built."
 
 # Gate on a dependency-free binary: it proves the Go darwin runtime itself
 # executes under Darling. The spectra binaries additionally bind
