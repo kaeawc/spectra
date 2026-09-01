@@ -40,10 +40,13 @@ if ! command -v darling >/dev/null 2>&1; then
   exit 1
 fi
 
+# -ldflags=-w strips DWARF: Go's darwin binaries overlap the __DWARF and
+# __LINKEDIT segment vmaddrs, which Darling's loader rejects with
+# "Cannot mmap segment __LINKEDIT: File exists" (darlinghq/darling#1178).
 log "Cross-compiling darwin/amd64 binaries"
 mkdir -p dist-darling
 for tool in spectra spectra-mcp spectra-helper; do
-  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o "dist-darling/$tool" "./cmd/$tool/" || exit 1
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags=-w -o "dist-darling/$tool" "./cmd/$tool/" || exit 1
 done
 
 log "Booting Darling prefix (first run initializes ~/.darling)"
@@ -144,7 +147,7 @@ while IFS=' ' read -r import_path dir; do
   fi
 
   bin="$(basename "$import_path").darling.test"
-  if ! CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go test -c -o "$dir/$bin" "$import_path"; then
+  if ! CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go test -c -ldflags=-w -o "$dir/$bin" "$import_path"; then
     nocompile=$((nocompile + 1))
     summary "| \`$short\` | did not compile for darwin |"
     continue
