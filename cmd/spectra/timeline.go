@@ -46,10 +46,16 @@ func runTimelineWithIO(args []string, stdout, stderr io.Writer, now func() time.
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(tl)
+		if err := enc.Encode(tl); err != nil {
+			fmt.Fprintf(stderr, "timeline: write output: %v\n", err)
+			return 1
+		}
 		return 0
 	}
-	tl.Render(stdout)
+	if err := tl.Render(stdout); err != nil {
+		fmt.Fprintf(stderr, "timeline: write output: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

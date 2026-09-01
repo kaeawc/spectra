@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -79,17 +80,36 @@ func Collect(since time.Time, sources ...Source) (Timeline, []error) {
 	return Merge(groups...).Since(since), errs
 }
 
-// Render writes the timeline as aligned text.
-func (t Timeline) Render(w io.Writer) {
+// Render writes the timeline as aligned text, sanitizing event fields so a
+// control byte in a source's data cannot inject terminal escape sequences. It
+// returns the first write error (e.g. a broken pipe).
+func (t Timeline) Render(w io.Writer) error {
 	if len(t.Events) == 0 {
-		fmt.Fprintln(w, "(no events in the window)")
-		return
+		_, err := fmt.Fprintln(w, "(no events in the window)")
+		return err
 	}
 	for _, e := range t.Events {
-		fmt.Fprintf(w, "%s  %-5s  %-8s  %s\n",
+		if _, err := fmt.Fprintf(w, "%s  %-5s  %-8s  %s\n",
 			e.Time.Local().Format("2006-01-02 15:04:05"),
-			e.Severity, truncateField(e.Source, 8), e.Summary)
+			e.Severity, truncateField(sanitize(e.Source), 8), sanitize(e.Summary)); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// sanitize strips C0/C1 control bytes from text taken from a source.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t':
+			return ' '
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+			return -1
+		default:
+			return r
+		}
+	}, s)
 }
 
 func sortEvents(evs []Event) {

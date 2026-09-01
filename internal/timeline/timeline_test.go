@@ -90,13 +90,35 @@ func TestCollectAppliesWindow(t *testing.T) {
 
 func TestRenderEmptyAndPopulated(t *testing.T) {
 	var empty bytes.Buffer
-	Timeline{}.Render(&empty)
+	if err := (Timeline{}).Render(&empty); err != nil {
+		t.Fatalf("render: %v", err)
+	}
 	if !strings.Contains(empty.String(), "no events") {
 		t.Errorf("empty render = %q", empty.String())
 	}
 	var buf bytes.Buffer
-	Merge([]Event{{Time: at("2026-01-01T10:00:00Z"), Source: "process", Severity: SeverityWarn, Summary: "hello"}}).Render(&buf)
+	_ = Merge([]Event{{Time: at("2026-01-01T10:00:00Z"), Source: "process", Severity: SeverityWarn, Summary: "hello"}}).Render(&buf)
 	if !strings.Contains(buf.String(), "warn") || !strings.Contains(buf.String(), "hello") {
 		t.Errorf("render = %q", buf.String())
 	}
 }
+
+func TestRenderSanitizesControlBytes(t *testing.T) {
+	var buf bytes.Buffer
+	_ = Merge([]Event{{Time: at("2026-01-01T10:00:00Z"), Source: "pro\x1bcess", Summary: "ev\x07il\x1b[31m"}}).Render(&buf)
+	out := buf.String()
+	if strings.ContainsAny(out, "\x1b\x07") {
+		t.Errorf("control bytes not stripped: %q", out)
+	}
+}
+
+func TestRenderPropagatesWriteError(t *testing.T) {
+	tl := Merge([]Event{{Time: at("2026-01-01T10:00:00Z"), Source: "s", Summary: "x"}})
+	if err := tl.Render(failWriter{}); err == nil {
+		t.Error("expected a write error to propagate")
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
