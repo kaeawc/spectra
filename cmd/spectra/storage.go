@@ -18,6 +18,9 @@ func runStorage(args []string) int {
 	if len(args) > 0 && args[0] == "db-check" {
 		return runStorageDBCheck(args[1:], os.Stdout, os.Stderr)
 	}
+	if len(args) > 0 && args[0] == "growth" {
+		return runStorageGrowth(args[1:], os.Stdout, os.Stderr)
+	}
 	if len(args) > 0 && args[0] == "cache-triage" {
 		return runStorageCacheTriage(args[1:], os.Stdout, os.Stderr, os.UserHomeDir)
 	}
