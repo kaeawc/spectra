@@ -566,6 +566,25 @@ spectra hang --duration 3 4012
 spectra hang --input /tmp/beachball.sample.txt --json
 ```
 
+## `spectra timeline`
+
+Merges timestamped events from independent sources into one chronological
+incident view, so "what happened around 14:03?" has a single answer instead of
+being scattered across `process`, `logs`, and `updates`. Events carry a time,
+source, severity, and summary; the timeline is sorted ascending and filtered to
+a `--since` window (default 1h). Collection is best-effort — one failing source
+does not drop the others. `--json` emits the structured result. This first
+release wires the **process-start** source (each recently started process);
+the unified-log and install-history sources follow.
+
+### Examples
+
+```bash
+spectra timeline
+spectra timeline --since 30m
+spectra timeline --since 6h --json
+```
+
 ## `spectra power`
 
 Shows current host power and thermal state: AC/battery source, battery
