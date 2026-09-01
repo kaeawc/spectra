@@ -91,3 +91,41 @@ func TestRenderSVGEscapesXML(t *testing.T) {
 		t.Errorf("symbol angle brackets not escaped:\n%s", svg)
 	}
 }
+
+// realBranchGraph mirrors the tree-drawing indentation `sample` emits for a
+// branching thread: leading spaces plus +, !, and : characters.
+const realBranchGraph = `Analysis of sampling ...
+
+Call graph:
+    100 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 60 main.workerA  (in burn) + 92  [0x1]
+    + ! 60 hashLoop  (in burn) + 10  [0x2]
+    + 40 main.workerB  (in burn) + 80  [0x3]
+    +   40 sortLoop  (in burn) + 8  [0x4]
+    100 Thread_2
+    + 100 runtime.usleep  (in burn) + 20  [0x5]
+    + ! 100 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x6]
+
+Total number in stack:
+      100 something
+`
+
+func TestFoldBranchingSampleFormat(t *testing.T) {
+	folded := Fold(realBranchGraph)
+	if len(folded) < 3 {
+		t.Fatalf("expected multiple folded stacks from a branching sample, got %d: %+v", len(folded), folded)
+	}
+	byLeaf := map[string]Folded{}
+	for _, f := range folded {
+		byLeaf[f.Frames[len(f.Frames)-1]] = f
+	}
+	if got := byLeaf["hashLoop"]; got.Count != 60 || strings.Join(got.Frames, ";") != "Thread_1;main.workerA;hashLoop" {
+		t.Errorf("hashLoop branch = %+v", got)
+	}
+	if got := byLeaf["sortLoop"]; got.Count != 40 || strings.Join(got.Frames, ";") != "Thread_1;main.workerB;sortLoop" {
+		t.Errorf("sortLoop branch = %+v", got)
+	}
+	if got := byLeaf["__semwait_signal"]; got.Count != 100 || got.Frames[0] != "Thread_2" {
+		t.Errorf("thread-2 leaf = %+v", got)
+	}
+}

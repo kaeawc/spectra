@@ -17,8 +17,10 @@ type Folded struct {
 var (
 	// callGraphStart marks the beginning of sample's call-tree section.
 	callGraphStart = "Call graph:"
-	// frameLine matches an indented "<count> <symbol...>" call-graph line.
-	frameLine  = regexp.MustCompile(`^(\s+)(\d+)\s+(.*\S)\s*$`)
+	// frameLine matches an indented "<count> <symbol...>" call-graph line. When a
+	// thread's stack branches, `sample` draws the indentation with +, !, :, and |
+	// tree characters rather than plain spaces, so the indent run includes them.
+	frameLine  = regexp.MustCompile(`^([\s+!:|]+)(\d+)\s+(.*\S)\s*$`)
 	offsetTail = regexp.MustCompile(`\s+\+\s+\d+$`)
 )
 
