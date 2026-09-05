@@ -95,7 +95,9 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		cancel()
 		t.Fatal(err)
 	}
-	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+	// Generous hang guard, not a perf bound: real collectors (process.list,
+	// process.tree) can take well over 15s on loaded CI runners.
+	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(120 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
