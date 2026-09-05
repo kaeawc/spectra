@@ -132,3 +132,17 @@ func BenchmarkChurnTick(b *testing.B) {
 func procInfo(pid, ppid int, app string, start time.Time) process.Info {
 	return process.Info{PID: pid, PPID: ppid, AppPath: app, StartTime: start}
 }
+
+func TestChurnTrackerSurvivesTypedNilWatcher(t *testing.T) {
+	// Regression: runDaemon once stored a typed-nil *spawnFailureWatcher in
+	// the spawnFailureCounter interface, which passed the interface nil check
+	// and crashed the churn loop's first failureCounts call.
+	var watcher *spawnFailureWatcher
+	if got := watcher.CountsSince(time.Now()); got != nil {
+		t.Fatalf("nil watcher CountsSince = %v, want nil", got)
+	}
+	tracker := newChurnTracker(watcher)
+	if got := tracker.failureCounts(time.Now()); got != nil {
+		t.Fatalf("failureCounts with typed-nil watcher = %v, want nil", got)
+	}
+}
