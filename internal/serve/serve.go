@@ -213,13 +213,15 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	log.Info("daemon storage ready", "db", dbPath)
 
 	collector := metrics.NewCollector()
-	var failures *spawnFailureWatcher
+	// Assign the watcher into the interface only when it exists: a typed-nil
+	// *spawnFailureWatcher would defeat the interface nil checks downstream.
+	churn := newChurnTracker(nil)
 	if opts.TrackSpawnFailures {
-		failures = newSpawnFailureWatcher()
+		failures := newSpawnFailureWatcher()
 		go failures.Start(ctx)
 		log.Info("daemon spawn failure watcher enabled", "source", "log stream")
+		churn = newChurnTracker(failures)
 	}
-	churn := newChurnTracker(failures)
 	liveTelemetry := telemetry.NewLiveCollector()
 	history := livehistory.NewRing(livehistory.DefaultCapacity)
 	sampler := metrics.NewSampler(collector, time.Second, nil)
