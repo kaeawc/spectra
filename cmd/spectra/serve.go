@@ -35,6 +35,11 @@ func runServe(args []string) int {
 	tsnetTags := fs.String("tsnet-tags", "", "Comma-separated Tailscale tags to advertise, such as tag:engineer")
 	tsnetAllowLogins := fs.String("tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
 	tsnetAllowNodes := fs.String("tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
+	nebulaEnabled := fs.Bool("nebula", false, "Join a Nebula overlay as an embedded userspace node (no root or tun device)")
+	nebulaConfig := fs.String("nebula-config", "", "Path to a standard nebula config.yaml (required with --nebula)")
+	nebulaAddr := fs.String("nebula-addr", serve.DefaultNebulaAddr, "Overlay listen address for nebula, such as :7878")
+	nebulaAllowNames := fs.String("nebula-allow-names", "", "Comma-separated Nebula certificate names allowed to connect")
+	nebulaAllowGroups := fs.String("nebula-allow-groups", "", "Comma-separated Nebula certificate groups allowed to connect")
 	artifactPolicy := fs.String("artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	logFile := fs.String("log-file", "", "JSONL daemon log path (default: ~/Library/Logs/Spectra/daemon.jsonl)")
 	noLogFile := fs.Bool("no-log-file", false, "Disable the daemon JSONL log file")
@@ -47,6 +52,10 @@ func runServe(args []string) int {
 		return 2
 	}
 	if err := validateServeListen(*tcpAddr, *allowRemote); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if err := validateServeNebula(*nebulaEnabled, *nebulaConfig); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
@@ -97,6 +106,9 @@ func runServe(args []string) int {
 		AllowRemote:        *allowRemote,
 		TsnetEnabled:       *tsnetEnabled,
 		TsnetAddr:          *tsnetAddr,
+		NebulaEnabled:      *nebulaEnabled,
+		NebulaAddr:         *nebulaAddr,
+		NebulaConfigPath:   *nebulaConfig,
 		ArtifactPolicy:     policy,
 		AutoSnap:           autoSnap,
 		TrackSpawnFailures: *trackSpawnFailures,
@@ -117,6 +129,11 @@ func runServe(args []string) int {
 		TsnetTags:          splitCommaList(*tsnetTags),
 		TsnetAllowLogins:   splitCommaList(*tsnetAllowLogins),
 		TsnetAllowNodes:    splitCommaList(*tsnetAllowNodes),
+		NebulaEnabled:      *nebulaEnabled,
+		NebulaConfigPath:   *nebulaConfig,
+		NebulaAddr:         *nebulaAddr,
+		NebulaAllowNames:   splitCommaList(*nebulaAllowNames),
+		NebulaAllowGroups:  splitCommaList(*nebulaAllowGroups),
 		SpectraVersion:     version,
 		DetectStore:        detectStore,
 		ArtifactPolicy:     policy,
@@ -137,6 +154,9 @@ type serveStartupStatus struct {
 	AllowRemote        bool
 	TsnetEnabled       bool
 	TsnetAddr          string
+	NebulaEnabled      bool
+	NebulaAddr         string
+	NebulaConfigPath   string
 	ArtifactPolicy     artifact.Policy
 	AutoSnap           serve.AutoSnapConfig
 	TrackSpawnFailures bool
@@ -156,6 +176,10 @@ func printServeStartup(w io.Writer, status serveStartupStatus) {
 	if status.TsnetEnabled {
 		fmt.Fprintf(w, "spectra serve: joining tailnet via tsnet on %s\n", status.TsnetAddr)
 		fmt.Fprintln(w, "spectra serve: tsnet auth uses existing state or TS_AUTHKEY; first-run login URLs are written to the daemon log or stderr")
+	}
+	if status.NebulaEnabled {
+		fmt.Fprintf(w, "spectra serve: joining nebula overlay on %s (config %s)\n", status.NebulaAddr, status.NebulaConfigPath)
+		fmt.Fprintln(w, "spectra serve: nebula runs in-process with a userspace stack; the overlay reaches only this daemon, and no root or tun device is needed")
 	}
 	autoSnap := status.AutoSnap.Normalize()
 	if autoSnap.Disabled {
@@ -198,6 +222,16 @@ func parseArtifactPolicy(mode string) (artifact.Policy, error) {
 func validateServeListen(tcpAddr string, allowRemote bool) error {
 	if tcpAddr != "" && !allowRemote && !isLoopbackListenAddr(tcpAddr) {
 		return fmt.Errorf("spectra serve: --tcp is limited to loopback unless --allow-remote is set")
+	}
+	return nil
+}
+
+func validateServeNebula(enabled bool, configPath string) error {
+	if !enabled {
+		return nil
+	}
+	if strings.TrimSpace(configPath) == "" {
+		return fmt.Errorf("spectra serve: --nebula requires --nebula-config pointing at a nebula config.yaml")
 	}
 	return nil
 }

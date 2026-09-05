@@ -19,21 +19,26 @@ import (
 const daemonAgentLabel = "dev.spectra.daemon"
 
 type daemonAgentOptions struct {
-	SockPath         string
-	TCPAddr          string
-	AllowRemote      bool
-	TsnetEnabled     bool
-	TsnetAddr        string
-	TsnetHostname    string
-	TsnetStateDir    string
-	TsnetEphemeral   bool
-	TsnetTags        string
-	TsnetAllowLogins string
-	TsnetAllowNodes  string
-	ArtifactPolicy   string
-	LogFile          string
-	NoLogFile        bool
-	NoLoad           bool
+	SockPath          string
+	TCPAddr           string
+	AllowRemote       bool
+	TsnetEnabled      bool
+	TsnetAddr         string
+	TsnetHostname     string
+	TsnetStateDir     string
+	TsnetEphemeral    bool
+	TsnetTags         string
+	TsnetAllowLogins  string
+	TsnetAllowNodes   string
+	NebulaEnabled     bool
+	NebulaConfigPath  string
+	NebulaAddr        string
+	NebulaAllowNames  string
+	NebulaAllowGroups string
+	ArtifactPolicy    string
+	LogFile           string
+	NoLogFile         bool
+	NoLoad            bool
 }
 
 type daemonAgentDeps struct {
@@ -151,6 +156,11 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 	fs.StringVar(&opts.TsnetTags, "tsnet-tags", "", "Comma-separated Tailscale tags to advertise")
 	fs.StringVar(&opts.TsnetAllowLogins, "tsnet-allow-logins", "", "Comma-separated Tailscale login names allowed to connect")
 	fs.StringVar(&opts.TsnetAllowNodes, "tsnet-allow-nodes", "", "Comma-separated Tailscale node names allowed to connect")
+	fs.BoolVar(&opts.NebulaEnabled, "nebula", false, "Join a Nebula overlay as an embedded userspace node")
+	fs.StringVar(&opts.NebulaConfigPath, "nebula-config", "", "Path to a standard nebula config.yaml (required with --nebula)")
+	fs.StringVar(&opts.NebulaAddr, "nebula-addr", serve.DefaultNebulaAddr, "Overlay listen address for nebula")
+	fs.StringVar(&opts.NebulaAllowNames, "nebula-allow-names", "", "Comma-separated Nebula certificate names allowed to connect")
+	fs.StringVar(&opts.NebulaAllowGroups, "nebula-allow-groups", "", "Comma-separated Nebula certificate groups allowed to connect")
 	fs.StringVar(&opts.ArtifactPolicy, "artifact-policy", "confirm", "Daemon artifact policy: confirm, deny, or allow")
 	fs.StringVar(&opts.LogFile, "log-file", "", "JSONL daemon log path")
 	fs.BoolVar(&opts.NoLogFile, "no-log-file", false, "Disable daemon JSONL log file")
@@ -159,10 +169,14 @@ func parseDaemonAgentOptions(name string, args []string, stderr io.Writer) (daem
 		return daemonAgentOptions{}, false
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--tsnet-allow-logins users] [--tsnet-allow-nodes nodes] [--artifact-policy confirm|deny|allow] [--log-file path|--no-log-file] [--no-load]")
+		fmt.Fprintln(stderr, "usage: spectra install-daemon [--sock path] [--tcp addr] [--allow-remote] [--tsnet] [--tsnet-hostname name] [--tsnet-allow-logins users] [--tsnet-allow-nodes nodes] [--nebula --nebula-config path] [--nebula-allow-names names] [--nebula-allow-groups groups] [--artifact-policy confirm|deny|allow] [--log-file path|--no-log-file] [--no-load]")
 		return daemonAgentOptions{}, false
 	}
 	if err := (artifact.Policy{Mode: opts.ArtifactPolicy}).Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return daemonAgentOptions{}, false
+	}
+	if err := validateServeNebula(opts.NebulaEnabled, opts.NebulaConfigPath); err != nil {
 		fmt.Fprintln(stderr, err)
 		return daemonAgentOptions{}, false
 	}
@@ -219,8 +233,26 @@ func appendServeRemoteArgs(args []string, o daemonAgentOptions) []string {
 	if o.TsnetAllowNodes != "" {
 		args = append(args, "--tsnet-allow-nodes", o.TsnetAllowNodes)
 	}
+	args = appendServeNebulaArgs(args, o)
 	if o.ArtifactPolicy != "" {
 		args = append(args, "--artifact-policy", o.ArtifactPolicy)
+	}
+	return args
+}
+
+func appendServeNebulaArgs(args []string, o daemonAgentOptions) []string {
+	args = appendBoolArg(args, "--nebula", o.NebulaEnabled)
+	if o.NebulaConfigPath != "" {
+		args = append(args, "--nebula-config", o.NebulaConfigPath)
+	}
+	if o.NebulaAddr != "" && o.NebulaAddr != serve.DefaultNebulaAddr {
+		args = append(args, "--nebula-addr", o.NebulaAddr)
+	}
+	if o.NebulaAllowNames != "" {
+		args = append(args, "--nebula-allow-names", o.NebulaAllowNames)
+	}
+	if o.NebulaAllowGroups != "" {
+		args = append(args, "--nebula-allow-groups", o.NebulaAllowGroups)
 	}
 	return args
 }
