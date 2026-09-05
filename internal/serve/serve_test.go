@@ -79,7 +79,7 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		collectToolchains = origCollectToolchains
 		collectJDKs = origCollectJDKs
 	})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -95,7 +95,9 @@ func testDaemonWithDB(t *testing.T) (*json.Encoder, *json.Decoder, *store.DB, co
 		cancel()
 		t.Fatal(err)
 	}
-	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+	// Generous hang guard, not a perf bound: real collectors (process.list,
+	// process.tree) can take well over 15s on loaded CI runners.
+	if err := conn.(interface{ SetDeadline(time.Time) error }).SetDeadline(time.Now().Add(120 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
@@ -315,28 +317,28 @@ func TestRunTsnetUsesFactoryAndServesRPC(t *testing.T) {
 }
 
 func TestTsnetPolicyAllowsLoginOrNode(t *testing.T) {
-	policy := tsnetPolicy{
+	policy := meshPolicy{
 		AllowedLogins: []string{"alice@example.com"},
 		AllowedNodes:  []string{"work-mac.tailnet.ts.net"},
 	}
 	tests := []struct {
 		name string
-		peer *TsnetPeer
+		peer *MeshPeer
 		want bool
 	}{
 		{
 			name: "login match",
-			peer: &TsnetPeer{LoginName: "Alice@Example.com", NodeName: "other.tailnet.ts.net."},
+			peer: &MeshPeer{LoginName: "Alice@Example.com", NodeName: "other.tailnet.ts.net."},
 			want: true,
 		},
 		{
 			name: "node match",
-			peer: &TsnetPeer{LoginName: "bob@example.com", NodeName: "work-mac.tailnet.ts.net."},
+			peer: &MeshPeer{LoginName: "bob@example.com", NodeName: "work-mac.tailnet.ts.net."},
 			want: true,
 		},
 		{
 			name: "no match",
-			peer: &TsnetPeer{LoginName: "bob@example.com", NodeName: "other.tailnet.ts.net."},
+			peer: &MeshPeer{LoginName: "bob@example.com", NodeName: "other.tailnet.ts.net."},
 			want: false,
 		},
 		{
@@ -362,16 +364,17 @@ func TestTsnetIdentityListenerRejectsDisallowedPeer(t *testing.T) {
 	defer ln.Close()
 	logs := logger.NewCapture(slog.LevelInfo)
 	fake := newFakeTsnetFactory(t)
-	fake.peer = TsnetPeer{
+	fake.peer = MeshPeer{
 		LoginName:   "bob@example.com",
 		DisplayName: "Bob Example",
 		NodeName:    "bob-mac.tailnet.ts.net.",
 	}
-	wrapped := &tsnetIdentityListener{
+	wrapped := &meshIdentityListener{
 		Listener: ln,
 		node:     fake.newNode(TsnetConfig{}),
+		provider: "tsnet",
 		log:      logs,
-		policy:   tsnetPolicy{AllowedLogins: []string{"alice@example.com"}},
+		policy:   meshPolicy{AllowedLogins: []string{"alice@example.com"}},
 	}
 	errCh := make(chan error, 1)
 	connCh := make(chan net.Conn, 1)
@@ -409,7 +412,7 @@ func TestListenTsnetClosesNodeOnListenError(t *testing.T) {
 	fake := newFakeTsnetFactory(t)
 	fake.listenErr = wantErr
 
-	ln, node, status, err := listenTsnet(Options{
+	ln, mesh, err := listenTsnet(Options{
 		TsnetAddr:     ":7879",
 		TsnetHostname: "work-mac",
 		TsnetStateDir: dir,
@@ -421,8 +424,8 @@ func TestListenTsnetClosesNodeOnListenError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("listenTsnet err = %v, want %v", err, wantErr)
 	}
-	if ln != nil || node != nil || status != nil {
-		t.Fatalf("listenTsnet returned values on error: %v %v %v", ln, node, status)
+	if ln != nil || mesh.node != nil || mesh.status != nil {
+		t.Fatalf("listenTsnet returned values on error: %v %v %v", ln, mesh.node, mesh.status)
 	}
 	if !fake.closed() {
 		t.Fatal("fake tsnet node was not closed after Listen error")
@@ -455,7 +458,7 @@ type fakeTsnetFactory struct {
 	closeCalled bool
 	whoisCalled bool
 	remoteAddr  string
-	peer        TsnetPeer
+	peer        MeshPeer
 }
 
 func newFakeTsnetFactory(t *testing.T) *fakeTsnetFactory {
@@ -464,7 +467,7 @@ func newFakeTsnetFactory(t *testing.T) *fakeTsnetFactory {
 		t:     t,
 		ready: make(chan struct{}),
 		whois: make(chan struct{}),
-		peer: TsnetPeer{
+		peer: MeshPeer{
 			LoginName:   "alice@example.com",
 			DisplayName: "Alice Example",
 			NodeName:    "alice-mac.tailnet.ts.net.",
@@ -472,7 +475,7 @@ func newFakeTsnetFactory(t *testing.T) *fakeTsnetFactory {
 	}
 }
 
-func (f *fakeTsnetFactory) newNode(cfg TsnetConfig) TsnetNode {
+func (f *fakeTsnetFactory) newNode(cfg TsnetConfig) MeshNode {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cfg = cfg
@@ -539,11 +542,11 @@ func (n *fakeTsnetNode) Listen(network string, _ string) (net.Listener, error) {
 	return ln, nil
 }
 
-func (n *fakeTsnetNode) TailscaleIPs() (netip.Addr, netip.Addr) {
-	return netip.MustParseAddr("100.64.0.10"), netip.MustParseAddr("fd7a:115c:a1e0::10")
+func (n *fakeTsnetNode) Addrs() []netip.Addr {
+	return []netip.Addr{netip.MustParseAddr("100.64.0.10"), netip.MustParseAddr("fd7a:115c:a1e0::10")}
 }
 
-func (n *fakeTsnetNode) WhoIs(_ context.Context, remoteAddr string) (*TsnetPeer, error) {
+func (n *fakeTsnetNode) WhoIs(_ context.Context, remoteAddr string) (*MeshPeer, error) {
 	f := (*fakeTsnetFactory)(n)
 	f.mu.Lock()
 	f.remoteAddr = remoteAddr
@@ -1204,7 +1207,7 @@ func TestDaemonJVMTelemetryLiveReturnsRecentSamples(t *testing.T) {
 	d := rpc.NewDispatcher()
 	liveTelemetry := telemetry.NewLiveCollector()
 	liveTelemetry.Add(jvm.TelemetrySample{PID: 42, TakenAt: time.Now().UTC(), HeapUsedKiB: 1024})
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), liveTelemetry, livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), liveTelemetry, livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil)
 
 	sockPath := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sockPath)
@@ -1282,7 +1285,7 @@ func TestDaemonJVMHeapDumpRecordsArtifact(t *testing.T) {
 	defer db.Close()
 	fake := &artifact.FakeRecorder{}
 	d := rpc.NewDispatcher()
-	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, artifact.Policy{}, logger.Discard(), nil, nil)
+	registerHandlers(d, "test-version", db, metrics.NewCollector(), telemetry.NewLiveCollector(), livehistory.NewRing(livehistory.DefaultCapacity), cache.Default, nil, nil, fake, artifact.Policy{}, logger.Discard(), nil)
 	client, server := net.Pipe()
 	defer client.Close()
 	go d.Serve(server)

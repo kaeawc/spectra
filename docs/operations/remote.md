@@ -19,10 +19,12 @@ architecture; this page is the operator-facing reference.
 spectra serve --tcp 127.0.0.1:7878                 # local TCP, useful for smoke tests
 spectra serve --tcp 100.64.0.5:7878 --allow-remote # explicit tailnet bind
 spectra serve --tsnet --tsnet-hostname work-mac    # managed tailnet node
+spectra serve --nebula --nebula-config ~/.nebula/config.yaml  # embedded Nebula node
 
 spectra connect local                              # default Unix socket
 spectra connect work-mac                           # TCP port 7878, including MagicDNS
 spectra connect 100.64.0.5:7878                    # raw address
+spectra connect 192.168.100.11:7878                # Nebula overlay address
 ```
 
 For explicit TCP, the remote Mac must:
@@ -46,6 +48,35 @@ allowlist:
 spectra serve --tsnet --tsnet-allow-logins alice@example.com,bob@example.com
 spectra serve --tsnet --tsnet-allow-nodes alice-mac.tailnet.ts.net
 ```
+
+Both managed overlay modes share one mesh abstraction, so they behave the
+same way: an embedded node joins the overlay in-process, the daemon listens
+on `:7878` there, and an optional Spectra-side allowlist gates peers by the
+identity the overlay attests. Run either, or both at once.
+
+For embedded Nebula mode, the remote Mac must run
+`spectra serve --nebula --nebula-config <path>` pointing at a standard
+nebula `config.yaml` (pki paths, `static_host_map`, lighthouse, firewall —
+the same file the standalone `nebula` daemon would use). The node runs
+in-process with a userspace network stack, so it needs no root and creates
+no tun device, and the overlay can reach only what the daemon listens on —
+nothing else on the machine. Certificates are provisioned externally with
+`nebula-cert` against your mesh CA.
+
+Nebula peers are identified by their signed certificate, so the allowlist
+gates on cert names and groups instead of Tailscale logins:
+
+```bash
+spectra serve --nebula --nebula-config ~/.nebula/config.yaml \
+  --nebula-allow-groups engineers
+spectra serve --nebula --nebula-config ~/.nebula/config.yaml \
+  --nebula-allow-names alice-mac,bob-mac
+```
+
+The nebula firewall rules inside `config.yaml` still apply first; the
+Spectra allowlist narrows further. `health` reports each enabled overlay
+under its provider name (`tsnet`, `nebula`) with its listen address and
+overlay IPs.
 
 ## What you can do
 
@@ -184,7 +215,11 @@ the listener, it can call daemon RPC methods. Use loopback, SSH tunnels,
 Tailscale ACLs, or firewall rules to limit access.
 
 Managed `tsnet` mode makes Tailscale identity the default authorization
-layer. The Tailscale ACL example for a personal tailnet:
+layer. Embedded Nebula mode makes the mesh CA the authorization layer:
+only hosts holding a certificate signed by your CA can reach the overlay
+at all, the nebula firewall rules in `config.yaml` gate the port, and
+`--nebula-allow-names` / `--nebula-allow-groups` narrow further by
+cert-attested identity. The Tailscale ACL example for a personal tailnet:
 
 ```hujson
 {
