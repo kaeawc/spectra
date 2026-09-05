@@ -328,6 +328,11 @@ func (w *spawnFailureWatcher) Start(ctx context.Context) {
 }
 
 func (w *spawnFailureWatcher) CountsSince(cutoff time.Time) map[string]int {
+	// Survive a typed-nil watcher stored in the spawnFailureCounter
+	// interface, which slips past the caller's interface nil check.
+	if w == nil {
+		return nil
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.trimLocked(cutoff.Add(-time.Minute))
