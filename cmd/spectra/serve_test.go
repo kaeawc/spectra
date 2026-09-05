@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +103,34 @@ func TestSplitCommaList(t *testing.T) {
 	want := []string{"tag:engineer", "tag:spectra", "tag:debug"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("splitCommaList = %v, want %v", got, want)
+	}
+}
+
+func TestValidateServeNebula(t *testing.T) {
+	if err := validateServeNebula(false, ""); err != nil {
+		t.Fatalf("disabled nebula should not require config: %v", err)
+	}
+	if err := validateServeNebula(true, "/etc/nebula/config.yaml"); err != nil {
+		t.Fatalf("nebula with config should validate: %v", err)
+	}
+	if err := validateServeNebula(true, "  "); err == nil {
+		t.Fatal("nebula without config should fail validation")
+	}
+}
+
+func TestPrintServeStartupNebula(t *testing.T) {
+	var buf bytes.Buffer
+	printServeStartup(&buf, serveStartupStatus{
+		Sock:             "/tmp/spectra.sock",
+		NebulaEnabled:    true,
+		NebulaAddr:       ":7878",
+		NebulaConfigPath: "/etc/nebula/config.yaml",
+	})
+	out := buf.String()
+	if !strings.Contains(out, "joining nebula overlay on :7878 (config /etc/nebula/config.yaml)") {
+		t.Fatalf("startup output missing nebula line: %q", out)
+	}
+	if !strings.Contains(out, "userspace stack") {
+		t.Fatalf("startup output missing userspace note: %q", out)
 	}
 }

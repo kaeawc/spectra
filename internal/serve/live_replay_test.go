@@ -42,7 +42,7 @@ func seededDaemon(t *testing.T, ring *livehistory.Ring, collector *metrics.Colle
 
 	d := rpc.NewDispatcher()
 	registerHandlers(d, "test-version", db, collector, telemetry.NewLiveCollector(), ring,
-		cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil, nil)
+		cache.Default, nil, nil, &artifact.FakeRecorder{}, artifact.Policy{}, logger.Discard(), nil)
 
 	sockPath := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sockPath)

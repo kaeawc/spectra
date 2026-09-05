@@ -71,6 +71,12 @@ type Options struct {
 	TsnetAllowLogins   []string
 	TsnetAllowNodes    []string
 	TsnetFactory       TsnetFactory
+	NebulaEnabled      bool
+	NebulaConfigPath   string
+	NebulaAddr         string
+	NebulaAllowNames   []string
+	NebulaAllowGroups  []string
+	NebulaFactory      NebulaFactory
 	SpectraVersion     string
 	DBPath             string              // empty = store.DefaultPath()
 	CacheRegistry      *cache.Registry     // nil = cache.Default
@@ -84,6 +90,11 @@ type Options struct {
 }
 
 const DefaultTsnetAddr = ":7878"
+
+// DefaultNebulaAddr is the overlay listen address for the embedded nebula
+// node, matching the tsnet default so `spectra connect <overlay-ip>` works
+// unchanged.
+const DefaultNebulaAddr = ":7878"
 
 const (
 	DefaultAutoSnapInterval = 5 * time.Minute
@@ -120,75 +131,84 @@ func Run(ctx context.Context, opts Options) error {
 		log = logger.Discard()
 	}
 
-	listeners, tsNode, tsnetStatus, sockPath, err := initListeners(opts, log)
+	listeners, meshes, sockPath, err := initListeners(opts, log)
 	if err != nil {
 		return err
 	}
-	if tsNode != nil {
-		defer tsNode.Close()
+	for _, mesh := range meshes {
+		if mesh.node != nil {
+			defer mesh.node.Close()
+		}
 	}
-	return runDaemon(ctx, log, opts, listeners, tsNode, tsnetStatus, sockPath)
+	return runDaemon(ctx, log, opts, listeners, meshes, sockPath)
 }
 
-func initListeners(opts Options, log logger.Logger) ([]net.Listener, TsnetNode, *TsnetStatus, string, error) {
+func initListeners(opts Options, log logger.Logger) ([]net.Listener, []meshRuntime, string, error) {
 	sockPath := opts.SockPath
 	if sockPath == "" {
 		var err error
 		sockPath, err = DefaultSockPath()
 		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("serve: resolve sock path: %w", err)
+			return nil, nil, "", fmt.Errorf("serve: resolve sock path: %w", err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
-		return nil, nil, nil, "", fmt.Errorf("serve: mkdir: %w", err)
+		return nil, nil, "", fmt.Errorf("serve: mkdir: %w", err)
 	}
 	// Remove stale socket file if daemon was not cleanly shut down.
 	_ = os.Remove(sockPath)
 
 	unixLn, err := net.Listen("unix", sockPath)
 	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("serve: listen %s: %w", sockPath, err)
+		return nil, nil, "", fmt.Errorf("serve: listen %s: %w", sockPath, err)
 	}
 	if err := os.Chmod(sockPath, 0o600); err != nil {
 		unixLn.Close()
-		return nil, nil, nil, "", fmt.Errorf("serve: chmod %s: %w", sockPath, err)
+		return nil, nil, "", fmt.Errorf("serve: chmod %s: %w", sockPath, err)
 	}
 	log.Info("daemon unix listener ready", "socket", sockPath)
 
 	listeners := []net.Listener{unixLn}
-	tsnetStatus := (*TsnetStatus)(nil)
+	var meshes []meshRuntime
+	fail := func(err error) ([]net.Listener, []meshRuntime, string, error) {
+		closeListeners(listeners)
+		for _, mesh := range meshes {
+			if mesh.node != nil {
+				_ = mesh.node.Close()
+			}
+		}
+		os.Remove(sockPath)
+		return nil, nil, "", err
+	}
 	if opts.TCPAddr != "" {
 		tcpLn, err := net.Listen("tcp", opts.TCPAddr)
 		if err != nil {
-			unixLn.Close()
-			os.Remove(sockPath)
-			return nil, nil, nil, "", fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err)
+			return fail(fmt.Errorf("serve: listen tcp %s: %w", opts.TCPAddr, err))
 		}
 		listeners = append(listeners, tcpLn)
 		log.Warn("daemon tcp listener ready", "address", opts.TCPAddr)
 	}
-	var tsNode TsnetNode
 	if opts.TsnetEnabled {
-		tsListener, tsServer, status, listenErr := maybeInitTsnetListener(opts, log)
-		err = listenErr
+		tsListener, mesh, err := listenTsnet(opts, log)
 		if err != nil {
-			closeListeners(listeners)
-			os.Remove(sockPath)
-			return nil, nil, nil, "", err
+			return fail(err)
 		}
 		listeners = append(listeners, tsListener)
-		tsNode = tsServer
-		tsnetStatus = status
+		meshes = append(meshes, mesh)
+	}
+	if opts.NebulaEnabled {
+		nebListener, mesh, err := listenNebula(opts, log)
+		if err != nil {
+			return fail(err)
+		}
+		listeners = append(listeners, nebListener)
+		meshes = append(meshes, mesh)
 	}
 
-	return listeners, tsNode, tsnetStatus, sockPath, nil
+	return listeners, meshes, sockPath, nil
 }
 
-func maybeInitTsnetListener(opts Options, log logger.Logger) (net.Listener, TsnetNode, *TsnetStatus, error) {
-	return listenTsnet(opts, log)
-}
-
-func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners []net.Listener, tsNode TsnetNode, tsnetStatus *TsnetStatus, sockPath string) error {
+func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners []net.Listener, meshes []meshRuntime, sockPath string) error {
 	if len(listeners) == 0 {
 		os.Remove(sockPath)
 		return fmt.Errorf("serve: no listeners configured")
@@ -259,7 +279,7 @@ func runDaemon(ctx context.Context, log logger.Logger, opts Options, listeners [
 	}
 
 	d := rpc.NewDispatcher()
-	registerHandlersWithChurn(d, opts.SpectraVersion, db, collector, churn, liveTelemetry, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsNode)
+	registerHandlersWithChurn(d, opts.SpectraVersion, db, collector, churn, liveTelemetry, history, cacheReg, opts.DetectStore, detectWriter, artifactRecorder, artifactPolicy, log, meshes)
 	log.Info("daemon serving", "version", opts.SpectraVersion, "listeners", len(listeners), "artifact_policy", artifactPolicy.Mode)
 
 	go func() {
@@ -295,20 +315,20 @@ func DefaultTsnetHostname() string {
 	return "spectra"
 }
 
-func listenTsnet(opts Options, log logger.Logger) (net.Listener, TsnetNode, *TsnetStatus, error) {
+func listenTsnet(opts Options, log logger.Logger) (net.Listener, meshRuntime, error) {
 	stateDir := opts.TsnetStateDir
 	if stateDir == "" {
 		var err error
 		stateDir, err = DefaultTsnetStateDir()
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("serve: resolve tsnet state dir: %w", err)
+			return nil, meshRuntime{}, fmt.Errorf("serve: resolve tsnet state dir: %w", err)
 		}
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return nil, nil, nil, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
+		return nil, meshRuntime{}, fmt.Errorf("serve: mkdir tsnet state dir: %w", err)
 	}
 	if err := os.Chmod(stateDir, 0o700); err != nil { // #nosec G302 -- tsnet state dir must remain owner-private.
-		return nil, nil, nil, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
+		return nil, meshRuntime{}, fmt.Errorf("serve: chmod tsnet state dir %s: %w", stateDir, err)
 	}
 	addr := opts.TsnetAddr
 	if addr == "" {
@@ -320,7 +340,7 @@ func listenTsnet(opts Options, log logger.Logger) (net.Listener, TsnetNode, *Tsn
 	}
 	hostname = sanitizeTsnetHostname(hostname)
 	if hostname == "" {
-		return nil, nil, nil, fmt.Errorf("serve: invalid empty tsnet hostname")
+		return nil, meshRuntime{}, fmt.Errorf("serve: invalid empty tsnet hostname")
 	}
 	factory := opts.TsnetFactory
 	if factory == nil {
@@ -343,26 +363,59 @@ func listenTsnet(opts Options, log logger.Logger) (net.Listener, TsnetNode, *Tsn
 	ln, err := s.Listen("tcp", addr)
 	if err != nil {
 		_ = s.Close()
-		return nil, nil, nil, fmt.Errorf("serve: listen tsnet %s: %w", addr, err)
+		return nil, meshRuntime{}, fmt.Errorf("serve: listen tsnet %s: %w", addr, err)
 	}
-	if opts.Logger != nil || len(opts.TsnetAllowLogins) > 0 || len(opts.TsnetAllowNodes) > 0 {
-		ln = &tsnetIdentityListener{
-			Listener: ln,
-			node:     s,
-			log:      log,
-			policy: tsnetPolicy{
-				AllowedLogins: opts.TsnetAllowLogins,
-				AllowedNodes:  opts.TsnetAllowNodes,
-			},
-		}
-	}
-	status := &TsnetStatus{
+	ln = wrapMeshIdentityListener(ln, s, "tsnet", log, opts.Logger != nil, meshPolicy{
+		AllowedLogins: opts.TsnetAllowLogins,
+		AllowedNodes:  opts.TsnetAllowNodes,
+	})
+	status := &MeshStatus{
 		Enabled:    true,
+		Provider:   "tsnet",
 		Hostname:   hostname,
 		ListenAddr: addr,
 	}
 	log.Info("daemon tsnet listener ready", "hostname", hostname, "address", addr, "state_dir", stateDir)
-	return ln, s, status, nil
+	return ln, meshRuntime{node: s, status: status}, nil
+}
+
+func listenNebula(opts Options, log logger.Logger) (net.Listener, meshRuntime, error) {
+	configPath := strings.TrimSpace(opts.NebulaConfigPath)
+	if configPath == "" {
+		return nil, meshRuntime{}, fmt.Errorf("serve: nebula mode requires a nebula config path")
+	}
+	addr := opts.NebulaAddr
+	if addr == "" {
+		addr = DefaultNebulaAddr
+	}
+	factory := opts.NebulaFactory
+	if factory == nil {
+		factory = NewNebulaServer
+	}
+	node, err := factory(NebulaConfig{
+		ConfigPath: configPath,
+		Version:    opts.SpectraVersion,
+		Logger:     log,
+	})
+	if err != nil {
+		return nil, meshRuntime{}, fmt.Errorf("serve: start nebula node: %w", err)
+	}
+	ln, err := node.Listen("tcp", addr)
+	if err != nil {
+		_ = node.Close()
+		return nil, meshRuntime{}, fmt.Errorf("serve: listen nebula %s: %w", addr, err)
+	}
+	ln = wrapMeshIdentityListener(ln, node, "nebula", log, opts.Logger != nil, meshPolicy{
+		AllowedNodes:  opts.NebulaAllowNames,
+		AllowedGroups: opts.NebulaAllowGroups,
+	})
+	status := &MeshStatus{
+		Enabled:    true,
+		Provider:   "nebula",
+		ListenAddr: addr,
+	}
+	log.Info("daemon nebula listener ready", "address", addr, "config", configPath)
+	return ln, meshRuntime{node: node, status: status}, nil
 }
 
 func sanitizeTsnetHostname(host string) string {
@@ -515,12 +568,12 @@ func snapshotLoop(ctx context.Context, version string, db *store.DB, history *li
 // registerHandlers wires all JSON-RPC methods into d.
 //
 //gocyclo:ignore
-func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
-	registerHandlersWithChurn(d, version, db, collector, nil, liveTelemetry, history, cacheReg, detectStore, detectWriter, artifactRecorder, artifactPolicy, log, tsnetStatus, tsnetNode)
+func registerHandlers(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, meshes []meshRuntime) {
+	registerHandlersWithChurn(d, version, db, collector, nil, liveTelemetry, history, cacheReg, detectStore, detectWriter, artifactRecorder, artifactPolicy, log, meshes)
 }
 
 //gocyclo:ignore
-func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, churn *churnTracker, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, tsnetStatus *TsnetStatus, tsnetNode TsnetNode) {
+func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, collector *metrics.Collector, churn *churnTracker, liveTelemetry *telemetry.LiveCollector, history *livehistory.Ring, cacheReg *cache.Registry, detectStore *cache.ShardedStore, detectWriter *cache.AsyncWriter, artifactRecorder artifact.Recorder, artifactPolicy artifact.Policy, log logger.Logger, meshes []meshRuntime) {
 	if history == nil {
 		history = livehistory.NewRing(livehistory.DefaultCapacity)
 	}
@@ -534,18 +587,13 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 	}
 	d.Register("health", func(_ json.RawMessage) (any, error) {
 		result := map[string]any{"ok": true, "version": version, "artifact_policy": artifactPolicy}
-		if tsnetStatus != nil {
-			status := *tsnetStatus
-			if tsnetNode != nil {
-				ip4, ip6 := tsnetNode.TailscaleIPs()
-				if ip4.IsValid() {
-					status.IPv4 = ip4.String()
-				}
-				if ip6.IsValid() {
-					status.IPv6 = ip6.String()
-				}
+		for _, mesh := range meshes {
+			if mesh.status == nil || mesh.status.Provider == "" {
+				continue
 			}
-			result["tsnet"] = status
+			status := *mesh.status
+			mesh.fillAddrs(&status)
+			result[status.Provider] = status
 		}
 		return result, nil
 	})
