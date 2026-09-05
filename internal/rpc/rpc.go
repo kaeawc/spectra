@@ -89,6 +89,20 @@ func (d *Dispatcher) Register(method string, fn HandlerFunc) {
 	d.mu.Unlock()
 }
 
+// Dispatch invokes the registered handler for method directly, bypassing the
+// wire framing. Callers that run methods outside a connection (such as the
+// daemon's detached job runner) use this to share one method table with the
+// network path.
+func (d *Dispatcher) Dispatch(method string, params json.RawMessage) (any, error) {
+	d.mu.RLock()
+	fn, ok := d.handlers[method]
+	d.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("method not found: %s", method)
+	}
+	return fn(params)
+}
+
 // Serve handles one connection. Each newline-delimited JSON request on
 // the connection produces a newline-delimited JSON response.
 // The function returns when the connection is closed.

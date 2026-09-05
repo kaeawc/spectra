@@ -556,6 +556,43 @@ func registerHandlersWithChurn(d *rpc.Dispatcher, version string, db *store.DB, 
 		return artifactPolicy, nil
 	})
 
+	// Detached collector jobs: start a method in the background, drop the
+	// connection, and fetch the result from any later connection. Jobs share
+	// the dispatcher's method table, so per-method policy applies unchanged.
+	jobs := newJobManager(d.Dispatch)
+	d.Register("job.start", func(params json.RawMessage) (any, error) {
+		var p struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, rpc.InvalidParams("job.start: %v", err)
+		}
+		id, err := jobs.Start(p.Method, p.Params)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("daemon job started", "job_id", id, "method", p.Method)
+		return map[string]string{"id": id, "state": jobStateRunning}, nil
+	})
+	d.Register("job.get", func(params json.RawMessage) (any, error) {
+		var p struct {
+			ID     string `json:"id"`
+			WaitMS int    `json:"wait_ms"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, rpc.InvalidParams("job.get: %v", err)
+		}
+		rec, ok := jobs.Get(p.ID, time.Duration(p.WaitMS)*time.Millisecond)
+		if !ok {
+			return nil, fmt.Errorf("job.get: unknown job %q", p.ID)
+		}
+		return rec, nil
+	})
+	d.Register("job.list", func(_ json.RawMessage) (any, error) {
+		return jobs.List(), nil
+	})
+
 	d.Register("snapshot.list", func(_ json.RawMessage) (any, error) {
 		return db.ListSnapshots(context.Background(), "")
 	})

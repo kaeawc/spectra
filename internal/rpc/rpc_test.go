@@ -136,3 +136,20 @@ func FuzzHandle(f *testing.F) {
 		}
 	})
 }
+
+func TestDispatcherDispatchDirect(t *testing.T) {
+	d := NewDispatcher()
+	d.Register("echo", func(params json.RawMessage) (any, error) {
+		return string(params), nil
+	})
+	got, err := d.Dispatch("echo", json.RawMessage(`{"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"a":1}` {
+		t.Fatalf("Dispatch result = %v", got)
+	}
+	if _, err := d.Dispatch("missing", nil); err == nil {
+		t.Fatal("expected error for unregistered method")
+	}
+}
