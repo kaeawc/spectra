@@ -95,6 +95,8 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> snapshot [list|create|get|diff|processes|login-items|granted-perms|prune] ...")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> issues check [snapshot-id]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network [state|connections|firewall|by-app [App.app ...]] | network-by-app [App.app ...]")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> job start <method> [json-params] | job get <id> | jobs")
+	fmt.Fprintln(w, "   or: spectra connect [--timeout 35s] <target> job wait <id> [seconds]   (use --timeout larger than the wait)")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "targets: local, unix:/path/to/sock, /path/to/sock, host:port, host")
@@ -201,6 +203,50 @@ func parseConnectRules(args []string) (string, json.RawMessage, bool, error) {
 	return "", nil, true, fmt.Errorf("connect rules accepts at most one snapshot id")
 }
 
+// parseConnectJob covers detached collector jobs: start a method without
+// holding the connection open, then fetch or wait on the result later from
+// any connection. `job wait` blocks daemon-side, so pass a --timeout larger
+// than the wait.
+func parseConnectJob(args []string) (string, json.RawMessage, bool, error) {
+	if len(args) < 2 {
+		return "", nil, true, fmt.Errorf("connect job requires start|get|wait")
+	}
+	switch args[1] {
+	case "start":
+		if len(args) < 3 || len(args) > 4 {
+			return "", nil, true, fmt.Errorf("connect job start requires <method> [json-params]")
+		}
+		p := map[string]any{"method": args[2]}
+		if len(args) == 4 {
+			var raw json.RawMessage
+			if err := json.Unmarshal([]byte(args[3]), &raw); err != nil {
+				return "", nil, true, fmt.Errorf("connect job start params: %w", err)
+			}
+			p["params"] = raw
+		}
+		return "job.start", connectParams(p), true, nil
+	case "get":
+		if len(args) != 3 {
+			return "", nil, true, fmt.Errorf("connect job get requires <id>")
+		}
+		return "job.get", connectParams(map[string]any{"id": args[2]}), true, nil
+	case "wait":
+		if len(args) < 3 || len(args) > 4 {
+			return "", nil, true, fmt.Errorf("connect job wait requires <id> [seconds]")
+		}
+		waitSecs := 30
+		if len(args) == 4 {
+			secs, err := strconv.Atoi(args[3])
+			if err != nil || secs <= 0 {
+				return "", nil, true, fmt.Errorf("connect job wait seconds must be a positive integer")
+			}
+			waitSecs = secs
+		}
+		return "job.get", connectParams(map[string]any{"id": args[2], "wait_ms": waitSecs * 1000}), true, nil
+	}
+	return "", nil, true, fmt.Errorf("connect job requires start|get|wait")
+}
+
 func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage, bool, error) {
 	return map[string]func([]string) (string, json.RawMessage, bool, error){
 		"diff":                      parseConnectSnapshotDiff,
@@ -229,6 +275,7 @@ func connectShortcutParsers() map[string]func([]string) (string, json.RawMessage
 		"storage":                   parseConnectStorage,
 		"rules":                     parseConnectRules,
 		"issues":                    parseConnectIssues,
+		"job":                       parseConnectJob,
 		"snapshot":                  parseConnectSnapshot,
 	}
 }
@@ -850,6 +897,7 @@ func connectStringSliceShortcuts() map[string]connectStringSliceShortcut {
 func connectNoArgShortcuts() map[string]string {
 	return map[string]string{
 		"build-tools":         "toolchain.build_tools",
+		"jobs":                "job.list",
 		"brew":                "toolchain.brew",
 		"cache-stats":         "cache.stats",
 		"connections":         "network.connections",

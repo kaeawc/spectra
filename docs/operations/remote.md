@@ -131,6 +131,32 @@ spectra connect work-mac brew
 
 Use `call` for less common methods such as direct JDK calls.
 
+### Detached collector jobs
+
+Slow collectors do not require holding the connection open. `job start`
+launches any RPC method in the background on the daemon and returns
+immediately with a job id; disconnect, then fetch the result later from any
+connection — the same one, a new one, or a different machine on the same
+trusted path:
+
+```bash
+spectra connect work-mac job start storage.system
+# → {"id":"job-3-9f2c1a44","state":"running"}
+
+spectra connect work-mac jobs                       # list jobs, newest first
+spectra connect work-mac job get job-3-9f2c1a44     # poll: running|done|failed
+spectra connect --timeout 65s work-mac job wait job-3-9f2c1a44 60
+# → blocks daemon-side up to 60s for completion; pass a --timeout larger
+#   than the wait
+```
+
+Jobs run through the same method table as direct calls, so per-method policy
+applies unchanged: sensitive artifact captures still require
+`confirm_sensitive` under `--artifact-policy=confirm`, and `job.*` methods
+cannot themselves be started as jobs. Job state is held in daemon memory:
+finished results are kept for an hour (capped at 200 jobs, oldest finished
+pruned first) and do not survive a daemon restart.
+
 The same typed surface is also available as a top-level client flag when you
 want the normal command shape:
 

@@ -1524,3 +1524,49 @@ func TestDaemonJDKScanReturnsSlice(t *testing.T) {
 		t.Fatalf("result type %T, want []any or nil", resp.Result)
 	}
 }
+
+func TestDaemonJobLifecycle(t *testing.T) {
+	enc, dec, cancel := testDaemon(t)
+	defer cancel()
+
+	resp := rpcCall(t, enc, dec, 40, "job.start", `{"method":"health"}`)
+	if resp.Error != nil {
+		t.Fatalf("job.start: %v", resp.Error)
+	}
+	started, ok := resp.Result.(map[string]any)
+	if !ok || started["id"] == "" || started["state"] != "running" {
+		t.Fatalf("job.start result = %+v", resp.Result)
+	}
+	id := started["id"].(string)
+
+	resp = rpcCall(t, enc, dec, 41, "job.get", `{"id":"`+id+`","wait_ms":5000}`)
+	if resp.Error != nil {
+		t.Fatalf("job.get: %v", resp.Error)
+	}
+	rec, ok := resp.Result.(map[string]any)
+	if !ok || rec["state"] != "done" {
+		t.Fatalf("job.get result = %+v, want done", resp.Result)
+	}
+	inner, ok := rec["result"].(map[string]any)
+	if !ok || inner["ok"] != true {
+		t.Fatalf("job result payload = %+v, want health ok", rec["result"])
+	}
+
+	resp = rpcCall(t, enc, dec, 42, "job.list", `{}`)
+	if resp.Error != nil {
+		t.Fatalf("job.list: %v", resp.Error)
+	}
+	list, ok := resp.Result.([]any)
+	if !ok || len(list) == 0 {
+		t.Fatalf("job.list result = %+v, want non-empty array", resp.Result)
+	}
+
+	resp = rpcCall(t, enc, dec, 43, "job.start", `{"method":"job.list"}`)
+	if resp.Error == nil {
+		t.Fatal("expected error starting a job.* method as a job")
+	}
+	resp = rpcCall(t, enc, dec, 44, "job.get", `{"id":"job-404-dead"}`)
+	if resp.Error == nil {
+		t.Fatal("expected error for unknown job id")
+	}
+}
