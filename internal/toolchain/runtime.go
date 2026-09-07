@@ -4,8 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // discoverNode enumerates Node.js installations from all common managers.
@@ -115,9 +118,10 @@ func discoverGo(opts CollectOptions) ([]RuntimeInstall, error) {
 	for _, v := range listDirs(filepath.Join(opts.Home, ".local", "share", "mise", "installs", "go")) {
 		out = append(out, runtimeInstall("mise", v, filepath.Join(opts.Home, ".local", "share", "mise", "installs", "go", v, "bin", "go"), active))
 	}
-	// asdf
+	// asdf — the go packages tool dir is named <GOOS>_<GOARCH>.
+	goPlatform := runtime.GOOS + "_" + runtime.GOARCH
 	for _, v := range listDirs(filepath.Join(opts.Home, ".asdf", "installs", "golang")) {
-		out = append(out, runtimeInstall("asdf", v, filepath.Join(opts.Home, ".asdf", "installs", "golang", v, "packages", "pkg", "tool", "darwin_arm64", "go"), active))
+		out = append(out, runtimeInstall("asdf", v, filepath.Join(opts.Home, ".asdf", "installs", "golang", v, "packages", "pkg", "tool", goPlatform, "go"), active))
 	}
 	// brew
 	for _, cellar := range opts.BrewCellars {
@@ -361,11 +365,19 @@ func discoverBuildTools(opts CollectOptions) []BuildTool {
 		add("bazel", v, "system")
 	}
 
-	// Make — check brew cellar first, then Xcode command line tools.
+	// Make — brew cellar first, then the system make. On macOS make ships
+	// via the Xcode command line tools and is invoked through xcrun; other
+	// OSes call make directly (xcrun does not exist there).
 	if v := brewVersion(opts.BrewCellars, "make"); v != "" {
 		add("make", v, "brew")
-	} else if v := versionFromCmd(opts.CmdRunner, "xcrun", "make", "--version"); v != "" {
-		add("make", v, "system")
+	} else {
+		makeName, makeArgs := "make", []string{"--version"}
+		if hostos.Current() == hostos.Darwin {
+			makeName, makeArgs = "xcrun", []string{"make", "--version"}
+		}
+		if v := versionFromCmd(opts.CmdRunner, makeName, makeArgs...); v != "" {
+			add("make", v, "system")
+		}
 	}
 
 	// CMake — check brew cellar first.

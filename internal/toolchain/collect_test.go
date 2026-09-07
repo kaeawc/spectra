@@ -5,7 +5,32 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin so default BrewCellar / JVM-root
+// selection and the xcrun-vs-make branch are host-independent in tests.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
+
+func TestWithDefaultsLinux(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	o := withDefaults(CollectOptions{Home: "/home/u"})
+	if len(o.BrewCellars) == 0 || o.BrewCellars[0] != "/home/linuxbrew/.linuxbrew/Cellar" {
+		t.Errorf("BrewCellars = %v, want linuxbrew cellar first", o.BrewCellars)
+	}
+	if o.SystemJVMRoot != "/usr/lib/jvm" {
+		t.Errorf("SystemJVMRoot = %q, want /usr/lib/jvm", o.SystemJVMRoot)
+	}
+	if o.UserJVMRoot != "" {
+		t.Errorf("UserJVMRoot = %q, want empty on Linux", o.UserJVMRoot)
+	}
+}
 
 func TestCollectIntegration(t *testing.T) {
 	home := t.TempDir()

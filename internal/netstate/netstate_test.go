@@ -5,7 +5,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin so the macOS command-stub tests
+// (route/scutil/lsof/nettop) are host-independent. Linux parsers are
+// exercised directly in linux_test.go.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 func TestParseRoute(t *testing.T) {
 	out := `   route to: default
@@ -88,7 +100,7 @@ func TestReadHostsOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts")
 	os.WriteFile(path, []byte(content), 0o644)
 
-	entries := readHostsOverrides(path)
+	entries := readHostsOverrides(path, hostsDefaultsDarwin)
 	if len(entries) != 2 {
 		t.Fatalf("got %d entries, want 2: %+v", len(entries), entries)
 	}
@@ -104,7 +116,7 @@ func TestReadHostsOverrides(t *testing.T) {
 }
 
 func TestReadHostsOverridesMissing(t *testing.T) {
-	entries := readHostsOverrides("/nonexistent/hosts")
+	entries := readHostsOverrides("/nonexistent/hosts", hostsDefaultsDarwin)
 	if entries != nil {
 		t.Error("expected nil for missing hosts file")
 	}
