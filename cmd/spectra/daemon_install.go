@@ -49,9 +49,13 @@ type daemonAgentDeps struct {
 }
 
 func runInstallDaemonCmd(args []string) int {
-	if hostos.Current() != hostos.Darwin {
-		fmt.Fprintf(os.Stderr, "spectra install-daemon: %v\n", hostos.Unsupported("launchd daemon install"))
-		fmt.Fprintln(os.Stderr, "The daemon installer targets macOS launchd; systemd support is not yet available.")
+	switch hostos.Current() {
+	case hostos.Darwin:
+		// launchd path below.
+	case hostos.Linux:
+		return runInstallDaemonLinux(args)
+	default:
+		fmt.Fprintf(os.Stderr, "spectra install-daemon: %v\n", hostos.Unsupported("daemon install"))
 		return 1
 	}
 	if len(args) > 0 {
