@@ -53,6 +53,27 @@ jobs:
           ./spectra /System/Applications/Calculator.app
           ./spectra --json /System/Applications/Chess.app | python3 -m json.tool
 
+  # Cross-compile + vet for Linux. Spectra targets macOS first, but is
+  # being made host-OS-aware; this lane keeps the Linux build honest so
+  # OS-specific breakage (build-tag collisions, macOS-only literals) is
+  # caught immediately rather than at release time. CGO is disabled to
+  # match the static Linux build (the cgo thread collector is darwin-only).
+  build-linux:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go build (linux)
+        run: go build ./...
+      - name: go vet (linux)
+        run: go vet ./...
+
   complexity:
     runs-on: ubuntu-latest
     steps:
