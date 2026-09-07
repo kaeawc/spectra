@@ -1,0 +1,21 @@
+# Spectra daemon — systemd --user unit template.
+#
+# Install per user (no root):
+#   spectra install-daemon
+# which writes ~/.config/systemd/user/spectra-daemon.service and enables it.
+#
+# This template is for reference / distro packaging. Adjust ExecStart to the
+# installed spectra path if packaging system-wide.
+[Unit]
+Description=Spectra daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/spectra serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

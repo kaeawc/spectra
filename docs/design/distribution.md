@@ -6,6 +6,14 @@ Spectra can do. This page captures the analysis behind the current
 release packaging now present in-tree, and why the Mac App Store is out
 of scope for the full product.
 
+Spectra also ships Linux archives. `scripts/dist.sh` cross-builds
+`linux_amd64` and `linux_arm64` tarballs (static, `CGO_ENABLED=0`)
+alongside the macOS ones, and each Linux archive includes the systemd unit
+templates in `packaging/systemd/`. On Linux the daemon installs as a
+`systemctl --user` unit and the privileged helper as a systemd system unit
+(`spectra install-daemon` / `spectra install-helper`); there is no launchd,
+notarization, or Mac App Store consideration.
+
 Today the supported path is:
 
 ```bash

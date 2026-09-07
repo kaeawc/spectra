@@ -53,6 +53,49 @@ jobs:
           ./spectra /System/Applications/Calculator.app
           ./spectra --json /System/Applications/Chess.app | python3 -m json.tool
 
+  # Native Linux build + test. Spectra targets macOS first but is host-OS-
+  # aware; this lane runs the suite for the Linux-backend collector packages
+  # (CGO off, matching the static Linux binary) and smoke-tests the OS-aware
+  # commands against real /proc and /sys. The detect engine and its consumers
+  # shell out to macOS-only tools (plutil/otool/codesign) in their tests and
+  # are macOS-only by design; vet+build still cover them for Linux compilation.
+  test-linux:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build -o spectra ./cmd/spectra/
+      - name: go test (Linux backends)
+        run: |
+          go test -count=1 \
+            ./internal/hostos/... \
+            ./internal/process/... \
+            ./internal/metrics/... \
+            ./internal/storagestate/... \
+            ./internal/netstate/... \
+            ./internal/sysinfo/... \
+            ./internal/toolchain/... \
+            ./internal/helper/...
+      - name: Smoke test OS-aware commands
+        run: |
+          set -x
+          ./spectra process | head -5
+          ./spectra storage | head -5
+          ./spectra snapshot > /dev/null
+          if ./spectra inspect /nonexistent.app 2>&1 | grep -qi 'unsupported'; then
+            echo "app inspection correctly refused on Linux"
+          else
+            echo "expected inspect to report unsupported on Linux"; exit 1
+          fi
+
   # Runs the darwin/amd64 cross-compile (the macOS "build"; there is no
   # Xcode project, so no xcodebuild) and the test suite as Mach-O binaries
   # under Darling (https://darlinghq.org) on a Linux runner, via
