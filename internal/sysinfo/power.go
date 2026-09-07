@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // PowerState captures battery and thermal facts.
@@ -77,9 +79,13 @@ type PowerCollector struct {
 	Source PowerSource
 }
 
-// CollectPower gathers PowerState from pmset. Any sub-command failure is
-// silently absorbed; partial results are still valid.
+// CollectPower gathers PowerState. On macOS it parses pmset; on Linux it
+// reads /sys/class/power_supply (thermal pressure has no Linux equivalent,
+// so those fields stay zero). Any sub-source failure is silently absorbed.
 func CollectPower(run CmdRunner) PowerState {
+	if hostos.Current() == hostos.Linux {
+		return collectPowerLinux("/sys/class/power_supply")
+	}
 	return PowerCollector{Source: CommandPowerSource{Run: run}}.Collect()
 }
 
