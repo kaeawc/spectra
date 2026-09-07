@@ -21,6 +21,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/livehistory"
@@ -51,6 +52,11 @@ var (
 
 // DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
 func DefaultSockPath() (string, error) {
+	if hostos.Current() == hostos.Linux {
+		if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
+			return filepath.Join(run, "spectra", "sock"), nil
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

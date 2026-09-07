@@ -4,10 +4,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
-// DefaultLogPath returns the canonical daemon JSONL log path.
+// DefaultLogPath returns the canonical daemon JSONL log path: the macOS
+// unified log convention (~/Library/Logs/Spectra) on Darwin, and the XDG
+// state directory ($XDG_STATE_HOME or ~/.local/state) on Linux.
 func DefaultLogPath() (string, error) {
+	if hostos.Current() == hostos.Linux {
+		base := os.Getenv("XDG_STATE_HOME")
+		if base == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			base = filepath.Join(home, ".local", "state")
+		}
+		return filepath.Join(base, "spectra", "daemon.jsonl"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
