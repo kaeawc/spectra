@@ -21,6 +21,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/livehistory"
@@ -47,8 +48,16 @@ var (
 	runJFRSummary     = jvm.SummarizeJFR
 )
 
-// DefaultSockPath returns the canonical Unix socket path (~/.spectra/sock).
+// DefaultSockPath returns the canonical Unix socket path. On Linux it
+// prefers $XDG_RUNTIME_DIR (a per-user tmpfs with correct 0700 perms and a
+// short path that avoids the sun_path length limit on long or networked
+// home directories); elsewhere, and as a fallback, it uses ~/.spectra/sock.
 func DefaultSockPath() (string, error) {
+	if hostos.Current() == hostos.Linux {
+		if run := os.Getenv("XDG_RUNTIME_DIR"); run != "" {
+			return filepath.Join(run, "spectra", "sock"), nil
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
