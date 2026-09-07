@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 // CmdRunner abstracts subprocess calls for testability.
@@ -22,6 +25,12 @@ type Sampler struct {
 	collector *Collector
 	interval  time.Duration
 	run       CmdRunner
+
+	// OS selects the sampling backend. Zero value resolves to the host.
+	// macOS parses ps(1); Linux reads procfs via the process collector.
+	OS hostos.Kind
+	// ProcFS overrides the Linux procfs root (default "/proc") for tests.
+	ProcFS string
 }
 
 // NewSampler returns a Sampler that will push samples into c at the given
@@ -47,8 +56,13 @@ func (s *Sampler) Run(ctx context.Context) {
 	}
 }
 
-// sample runs ps once and records one sample per process.
+// sample records one sample per process. On Linux it reads procfs via the
+// process collector; on macOS it parses a single ps(1) fork.
 func (s *Sampler) sample(at time.Time) {
+	if hostos.Resolve(s.OS) == hostos.Linux {
+		s.sampleLinux(at)
+		return
+	}
 	// pid=, rss=, vsz=, pcpu=  — no comm= to avoid space issues
 	out, err := s.run("ps", "-axwwo", "pid=,rss=,vsz=,pcpu=")
 	if err != nil {
@@ -59,6 +73,23 @@ func (s *Sampler) sample(at time.Time) {
 		if ok {
 			s.collector.Add(sample)
 		}
+	}
+}
+
+// sampleLinux collects one sample per process from procfs.
+func (s *Sampler) sampleLinux(at time.Time) {
+	procs := process.CollectAll(context.Background(), process.CollectOptions{
+		OS:     hostos.Linux,
+		ProcFS: s.ProcFS,
+	})
+	for _, p := range procs {
+		s.collector.Add(Sample{
+			TakenAt:  at,
+			PID:      p.PID,
+			RSSKiB:   p.RSSKiB,
+			VSizeKiB: p.VSizeKiB,
+			CPUPct:   p.CPUPct,
+		})
 	}
 }
 

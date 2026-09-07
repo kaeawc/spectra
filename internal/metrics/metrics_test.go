@@ -2,10 +2,24 @@ package metrics
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin so the ps(1)-based sampler tests are
+// host-independent. The Linux backend is exercised explicitly via an OS +
+// ProcFS override in TestSamplerLinuxProcFS.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 // --- RingBuffer ---
 
@@ -176,6 +190,41 @@ func TestSamplerFakeRunner(t *testing.T) {
 	}
 	if got := c.Recent(200, 10); len(got) != 1 {
 		t.Errorf("PID 200: expected 1 sample, got %d", len(got))
+	}
+}
+
+func TestSamplerLinuxProcFS(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("btime 1600000000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pidDir := filepath.Join(root, "321")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stat := "321 (svc) S 1 321 321 0 -1 0 0 0 0 0 10 5 0 0 20 0 4 0 1000 500000 64 0 0 0 0 0 0 0 0\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "stat"), []byte(stat), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "status"), []byte("Uid:\t0\t0\t0\t0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte("svc\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCollector()
+	s := NewSampler(c, time.Hour, nil)
+	s.OS = hostos.Linux
+	s.ProcFS = root
+	s.sample(time.Now())
+
+	if got := c.Recent(321, 10); len(got) != 1 {
+		t.Fatalf("PID 321: expected 1 sample from procfs, got %d", len(got))
+	}
+	wantRSS := int64(64) * int64(os.Getpagesize()) / 1024
+	if got := c.Recent(321, 10)[0]; got.RSSKiB != wantRSS {
+		t.Errorf("RSSKiB = %d, want %d", got.RSSKiB, wantRSS)
 	}
 }
 
