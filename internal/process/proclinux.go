@@ -156,12 +156,15 @@ func parseLinuxStat(data []byte) (linuxStat, bool) {
 		return linuxStat{}, false
 	}
 	atoi := func(i int) int64 { n, _ := strconv.ParseInt(rest[i], 10, 64); return n }
+	// ppid and numThreads are int-width fields; parse them with Atoi to
+	// avoid a narrowing int64→int conversion (CWE-190).
+	atoiInt := func(i int) int { n, _ := strconv.Atoi(rest[i]); return n }
 	return linuxStat{
 		comm:           comm,
-		ppid:           int(atoi(idxPPID)),
+		ppid:           atoiInt(idxPPID),
 		utimeTicks:     atoi(idxUtime),
 		stimeTicks:     atoi(idxStime),
-		numThreads:     int(atoi(idxThreads)),
+		numThreads:     atoiInt(idxThreads),
 		starttimeTicks: atoi(idxStarttime),
 		vsizeBytes:     atoi(idxVsize),
 		rssPages:       atoi(idxRSS),
