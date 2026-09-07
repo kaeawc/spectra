@@ -145,9 +145,8 @@ spectra connect work-mac job start storage.system
 
 spectra connect work-mac jobs                       # list jobs, newest first
 spectra connect work-mac job get job-3-9f2c1a44     # poll: running|done|failed
-spectra connect --timeout 65s work-mac job wait job-3-9f2c1a44 60
-# → blocks daemon-side up to 60s for completion; pass a --timeout larger
-#   than the wait
+spectra connect work-mac job wait job-3-9f2c1a44 60
+# → blocks daemon-side up to 60s for completion
 ```
 
 Jobs run through the same method table as direct calls, so per-method policy
@@ -156,6 +155,14 @@ applies unchanged: sensitive artifact captures still require
 cannot themselves be started as jobs. Job state is held in daemon memory:
 finished results are kept for an hour (capped at 200 jobs, oldest finished
 pruned first) and do not survive a daemon restart.
+
+Client read deadlines adapt to the method: slow collector families
+(`storage.*`, `snapshot.*`, `inspect.*`, `process.*`, `jvm.*`, `rules.*`,
+`toolchain.*`, capture methods) get 120s, methods that carry their own
+duration (`job wait`, `sample`, capture starts) get that duration plus a
+margin, and everything else 30s. An explicit `--timeout` overrides all of
+this, and dialing an unreachable host still fails fast on the short dial
+timeout.
 
 The same typed surface is also available as a top-level client flag when you
 want the normal command shape:
