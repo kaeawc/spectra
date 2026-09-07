@@ -26,7 +26,7 @@ type connectTarget struct {
 func runConnect(args []string) int {
 	fs := flag.NewFlagSet("spectra connect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	timeout := fs.Duration("timeout", 3*time.Second, "Dial/read timeout")
+	timeout := fs.Duration("timeout", 3*time.Second, "Dial timeout; also the read timeout when set explicitly (otherwise the read deadline adapts to the method)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -47,6 +47,19 @@ func runConnect(args []string) int {
 		return 2
 	}
 
+	explicitTimeout := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			explicitTimeout = true
+		}
+	})
+	readTimeout := *timeout
+	if !explicitTimeout {
+		readTimeout = connectReadTimeout(method, params)
+	}
+
+	// Dial stays on the short flag default so an unreachable host fails fast;
+	// only the read deadline stretches for slow collectors.
 	conn, err := dialConnectTarget(target, *timeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect %s: %v\n", fs.Arg(0), err)
@@ -55,7 +68,7 @@ func runConnect(args []string) int {
 	defer conn.Close()
 
 	if d, ok := conn.(interface{ SetDeadline(time.Time) error }); ok {
-		_ = d.SetDeadline(time.Now().Add(*timeout))
+		_ = d.SetDeadline(time.Now().Add(readTimeout))
 	}
 
 	result, err := callRPC(conn, method, params)
@@ -96,7 +109,7 @@ func printConnectUsage(w io.Writer) {
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> issues check [snapshot-id]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> storage <App.app> [more.apps] | network [state|connections|firewall|by-app [App.app ...]] | network-by-app [App.app ...]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> job start <method> [json-params] | job get <id> | jobs")
-	fmt.Fprintln(w, "   or: spectra connect [--timeout 35s] <target> job wait <id> [seconds]   (use --timeout larger than the wait)")
+	fmt.Fprintln(w, "   or: spectra connect <target> job wait <id> [seconds]")
 	fmt.Fprintln(w, "   or: spectra connect [--timeout 3s] <target> call <method> [json-params]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "targets: local, unix:/path/to/sock, /path/to/sock, host:port, host")
@@ -205,8 +218,8 @@ func parseConnectRules(args []string) (string, json.RawMessage, bool, error) {
 
 // parseConnectJob covers detached collector jobs: start a method without
 // holding the connection open, then fetch or wait on the result later from
-// any connection. `job wait` blocks daemon-side, so pass a --timeout larger
-// than the wait.
+// any connection. `job wait` blocks daemon-side; the client read deadline
+// stretches past the wait automatically unless --timeout is set explicitly.
 func parseConnectJob(args []string) (string, json.RawMessage, bool, error) {
 	if len(args) < 2 {
 		return "", nil, true, fmt.Errorf("connect job requires start|get|wait")
@@ -1055,6 +1068,63 @@ func parseConnectGenericCall(args []string) (string, json.RawMessage, error) {
 		return "", nil, fmt.Errorf("invalid json params: %w", err)
 	}
 	return args[1], params, nil
+}
+
+const (
+	connectBaseReadTimeout = 30 * time.Second
+	connectSlowReadTimeout = 120 * time.Second
+	connectReadMargin      = 30 * time.Second
+)
+
+// connectSlowMethodPrefixes are RPC families that run real collectors — process
+// sweeps, storage walks, bundle inspection, JVM attach — and routinely exceed a
+// short deadline on loaded machines.
+var connectSlowMethodPrefixes = []string{
+	"storage.",
+	"snapshot.",
+	"inspect.",
+	"process.",
+	"jvm.",
+	"rules.",
+	"toolchain.",
+	"network.capture.",
+	"helper.net_capture.",
+}
+
+// connectReadTimeout picks the read deadline when --timeout was not given
+// explicitly: methods that carry their own duration get that duration plus a
+// margin, slow collector families get a long deadline, and everything else a
+// moderate one. An explicit --timeout always wins over all of this.
+func connectReadTimeout(method string, params json.RawMessage) time.Duration {
+	switch method {
+	case "job.get":
+		var p struct {
+			WaitMS int `json:"wait_ms"`
+		}
+		if json.Unmarshal(params, &p) == nil && p.WaitMS > 0 {
+			return time.Duration(p.WaitMS)*time.Millisecond + connectReadMargin
+		}
+	case "process.sample":
+		var p struct {
+			Duration int `json:"duration"`
+		}
+		if json.Unmarshal(params, &p) == nil && p.Duration > 0 {
+			return time.Duration(p.Duration)*time.Second + connectReadMargin
+		}
+	case "helper.net_capture.start":
+		var p struct {
+			DurationMS int `json:"duration_ms"`
+		}
+		if json.Unmarshal(params, &p) == nil && p.DurationMS > 0 {
+			return time.Duration(p.DurationMS)*time.Millisecond + connectReadMargin
+		}
+	}
+	for _, prefix := range connectSlowMethodPrefixes {
+		if strings.HasPrefix(method, prefix) {
+			return connectSlowReadTimeout
+		}
+	}
+	return connectBaseReadTimeout
 }
 
 func dialConnectTarget(target connectTarget, timeout time.Duration) (io.ReadWriteCloser, error) {

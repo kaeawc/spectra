@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/rpc"
 )
@@ -331,5 +332,35 @@ func TestLoopbackListenAddr(t *testing.T) {
 		if isLoopbackListenAddr(addr) {
 			t.Fatalf("%s should not be loopback", addr)
 		}
+	}
+}
+
+func TestConnectReadTimeout(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		params string
+		want   time.Duration
+	}{
+		{name: "fast method gets base", method: "health", want: 30 * time.Second},
+		{name: "storage is slow", method: "storage.system", want: 120 * time.Second},
+		{name: "jvm attach is slow", method: "jvm.explain", want: 120 * time.Second},
+		{name: "snapshot is slow", method: "snapshot.create", want: 120 * time.Second},
+		{name: "job wait derives from wait_ms", method: "job.get", params: `{"id":"x","wait_ms":60000}`, want: 90 * time.Second},
+		{name: "job get without wait gets base", method: "job.get", params: `{"id":"x"}`, want: 30 * time.Second},
+		{name: "sample derives from duration", method: "process.sample", params: `{"pid":1,"duration":10}`, want: 40 * time.Second},
+		{name: "sample without duration falls to slow family", method: "process.sample", params: `{"pid":1}`, want: 120 * time.Second},
+		{name: "capture start derives from duration_ms", method: "helper.net_capture.start", params: `{"interface":"en0","duration_ms":5000}`, want: 35 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var params json.RawMessage
+			if tc.params != "" {
+				params = json.RawMessage(tc.params)
+			}
+			if got := connectReadTimeout(tc.method, params); got != tc.want {
+				t.Fatalf("connectReadTimeout(%s) = %v, want %v", tc.method, got, tc.want)
+			}
+		})
 	}
 }
