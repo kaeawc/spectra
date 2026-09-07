@@ -358,9 +358,11 @@ func sudoCommandAllowed(name string) bool {
 
 // installHelperCmd dispatches install-helper subcommands.
 func runInstallHelperCmd(args []string) int {
-	if hostos.Current() != hostos.Darwin {
+	switch hostos.Current() {
+	case hostos.Darwin, hostos.Linux:
+		// supported below
+	default:
 		fmt.Fprintf(os.Stderr, "spectra install-helper: %v\n", hostos.Unsupported("privileged helper install"))
-		fmt.Fprintln(os.Stderr, "The privileged helper targets macOS launchd + TCC; a systemd-based Linux helper is not yet available.")
 		return 1
 	}
 	if len(args) > 0 {
@@ -368,8 +370,14 @@ func runInstallHelperCmd(args []string) int {
 		case "--status", "status":
 			return runHelperStatus(args[1:])
 		case "uninstall":
+			if hostos.Current() == hostos.Linux {
+				return runUninstallHelperLinux(args[1:])
+			}
 			return runUninstallHelper(args[1:])
 		}
+	}
+	if hostos.Current() == hostos.Linux {
+		return runInstallHelperLinux(args)
 	}
 	return runInstallHelper(args)
 }

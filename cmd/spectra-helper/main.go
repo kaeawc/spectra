@@ -26,13 +26,24 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/helper"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 var version = "dev"
 var lookupGroup = user.LookupGroup
 
 const sockPath = "/var/run/spectra-helper.sock"
-const helperGroup = "_spectra"
+
+// helperGroup is the Unix group that owns the helper socket. macOS uses the
+// underscore-prefixed service-account convention; Linux does not.
+var helperGroup = defaultHelperGroup()
+
+func defaultHelperGroup() string {
+	if hostos.Current() == hostos.Linux {
+		return "spectra"
+	}
+	return "_spectra"
+}
 
 func main() {
 	os.Exit(runWithArgs(os.Args[1:]))
