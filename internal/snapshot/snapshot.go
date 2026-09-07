@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -386,6 +387,12 @@ func snapshotAppPaths(opts Options) []string {
 	if opts.SkipApps {
 		return nil
 	}
+	// App auto-discovery is macOS-only: there is no .app model to scan for
+	// elsewhere. Explicit AppPaths are still honored above (and the detect
+	// engine gates them per OS).
+	if hostos.Current() != hostos.Darwin {
+		return nil
+	}
 	paths := append(scanApps("/Applications"), scanApps("/Applications/Utilities")...)
 	sort.Strings(paths)
 	return paths
@@ -396,6 +403,9 @@ func snapshotAppPaths(opts Options) []string {
 func collectApps(_ context.Context, opts Options) []detect.Result {
 	paths := opts.AppPaths
 	if len(paths) == 0 {
+		if hostos.Current() != hostos.Darwin {
+			return nil
+		}
 		paths = append(paths, scanApps("/Applications")...)
 		paths = append(paths, scanApps("/Applications/Utilities")...)
 	}
