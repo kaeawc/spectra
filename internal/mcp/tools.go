@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
@@ -1289,6 +1290,9 @@ func (s *Server) jcmdText(pid int, label string, fn func(int) ([]byte, error)) T
 }
 
 func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
+	if hostos.Current() != hostos.Darwin {
+		return "", hostos.Unsupported("process sampling (sample(1))")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "sample", fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS)).CombinedOutput()

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // runInspect is the bundle-inspection subcommand and the default
@@ -27,6 +28,12 @@ func runInspect(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	if hostos.Current() != hostos.Darwin {
+		fmt.Fprintf(os.Stderr, "spectra inspect: %v\n", hostos.Unsupported("app-bundle inspection"))
+		fmt.Fprintln(os.Stderr, "App inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS.")
+		return 1
 	}
 
 	var paths []string

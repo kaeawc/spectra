@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/bundleid"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -257,6 +258,10 @@ type Options struct {
 	Now         func() time.Time
 	Runner      proc.Runner
 	Home        string
+	// OS selects the host operating system. The zero value
+	// (hostos.Unknown) resolves to the host. App-bundle inspection is
+	// macOS-only; on any other OS DetectWith returns hostos.Unsupported.
+	OS hostos.Kind
 }
 
 type detector struct {
@@ -350,8 +355,18 @@ func Detect(appPath string) (Result, error) {
 // DetectWith is Detect with explicit options for callers that want the
 // optional, more expensive sub-detections (network endpoints).
 func DetectWith(appPath string, opts Options) (Result, error) {
-	d := newDetector(opts)
 	r := Result{Path: appPath, UI: "Unknown", Runtime: "unknown", Confidence: "low"}
+
+	// App-bundle inspection is intrinsically macOS: it parses .app
+	// layout, Mach-O binaries (otool), code signatures (codesign/spctl),
+	// Info.plist (plutil), and the TCC privacy DB. None of that exists on
+	// other operating systems, so fail fast with a clear message rather
+	// than shelling out to tools that aren't installed.
+	if hostos.Resolve(opts.OS) != hostos.Darwin {
+		return r, hostos.Unsupported("app-bundle inspection")
+	}
+
+	d := newDetector(opts)
 
 	info, err := os.Stat(appPath)
 	if err != nil {

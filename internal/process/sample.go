@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // CommandRunner runs a command and returns its stdout.
@@ -73,6 +75,11 @@ func NewSampler(runner CommandRunner, store SampleStore) *Sampler {
 
 // Capture runs `sample <pid> <duration-seconds> <interval-ms>`.
 func (s *Sampler) Capture(ctx context.Context, opts SampleOptions) (SampleResult, error) {
+	// sample(1) is a macOS developer tool with no cross-platform
+	// equivalent (Linux profiling uses perf); refuse cleanly elsewhere.
+	if hostos.Current() != hostos.Darwin {
+		return SampleResult{}, hostos.Unsupported("process sampling (sample(1))")
+	}
 	if opts.PID <= 0 {
 		return SampleResult{}, fmt.Errorf("sample requires positive pid")
 	}

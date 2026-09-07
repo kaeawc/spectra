@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // helperBinaryDest is where spectra-helper is installed.
@@ -357,6 +358,11 @@ func sudoCommandAllowed(name string) bool {
 
 // installHelperCmd dispatches install-helper subcommands.
 func runInstallHelperCmd(args []string) int {
+	if hostos.Current() != hostos.Darwin {
+		fmt.Fprintf(os.Stderr, "spectra install-helper: %v\n", hostos.Unsupported("privileged helper install"))
+		fmt.Fprintln(os.Stderr, "The privileged helper targets macOS launchd + TCC; a systemd-based Linux helper is not yet available.")
+		return 1
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "--status", "status":

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/fsutil"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/serve"
 )
 
@@ -48,6 +49,11 @@ type daemonAgentDeps struct {
 }
 
 func runInstallDaemonCmd(args []string) int {
+	if hostos.Current() != hostos.Darwin {
+		fmt.Fprintf(os.Stderr, "spectra install-daemon: %v\n", hostos.Unsupported("launchd daemon install"))
+		fmt.Fprintln(os.Stderr, "The daemon installer targets macOS launchd; systemd support is not yet available.")
+		return 1
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "uninstall":
