@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // State is the StorageState slice of a Spectra snapshot.
@@ -54,6 +56,9 @@ type CollectOptions struct {
 	LargestAppsN int
 	// CmdRunner overrides exec.Command for testing.
 	CmdRunner CmdRunner
+	// OS selects OS-specific behavior (df pseudo-volume filtering, the
+	// fstype source, and log/cache roots). Zero value resolves to host.
+	OS hostos.Kind
 }
 
 // Collect gathers StorageState.
@@ -68,28 +73,73 @@ func Collect(opts CollectOptions) State {
 	if run == nil {
 		run = execRunner
 	}
+	osKind := hostos.Resolve(opts.OS)
 
 	var s State
 	if out, err := run("df", "-Pk"); err == nil {
-		s.Volumes = parseDF(string(out))
+		s.Volumes = parseDF(string(out), osKind)
 	}
 	if len(s.Volumes) > 0 {
-		if out, err := run("mount"); err == nil {
-			applyFSTypes(s.Volumes, parseMountFSTypes(string(out)))
-		}
+		applyFSTypes(s.Volumes, collectFSTypes(osKind, run))
 	}
-	s.UserLibraryBytes = dirBytes(filepath.Join(opts.Home, "Library"))
-	s.AppCachesBytes = dirBytes(filepath.Join(opts.Home, "Library", "Caches"))
+	s.UserLibraryBytes, s.AppCachesBytes = collectUserFootprint(osKind, opts.Home)
 	if len(opts.AppPaths) > 0 {
 		s.LargestApps = topApps(opts.AppPaths, opts.LargestAppsN)
 	}
-	s.LogFiles = CollectLogFiles(opts.Home)
+	s.LogFiles = CollectLogFiles(opts.Home, osKind)
 	return s
+}
+
+// collectFSTypes returns mount-point → filesystem-type. macOS parses
+// mount(8) output; Linux reads /proc/mounts (mount(8)'s output format
+// differs between the two, and /proc/mounts needs no subprocess).
+func collectFSTypes(osKind hostos.Kind, run CmdRunner) map[string]string {
+	if osKind == hostos.Linux {
+		if data, err := os.ReadFile("/proc/mounts"); err == nil {
+			return parseProcMounts(string(data))
+		}
+		return nil
+	}
+	if out, err := run("mount"); err == nil {
+		return parseMountFSTypes(string(out))
+	}
+	return nil
+}
+
+// collectUserFootprint returns the user's library and cache on-disk sizes.
+// macOS uses ~/Library and ~/Library/Caches; Linux has no ~/Library, so
+// library size is left zero and cache maps to the XDG cache dir.
+func collectUserFootprint(osKind hostos.Kind, home string) (library, caches int64) {
+	if osKind == hostos.Linux {
+		cacheDir := filepath.Join(home, ".cache")
+		if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+			cacheDir = xdg
+		}
+		return 0, dirBytes(cacheDir)
+	}
+	return dirBytes(filepath.Join(home, "Library")),
+		dirBytes(filepath.Join(home, "Library", "Caches"))
+}
+
+// parseProcMounts converts /proc/mounts lines (spec mountpoint fstype
+// options dump pass) to a mount-point → fstype map.
+func parseProcMounts(out string) map[string]string {
+	fsTypes := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// /proc/mounts octal-escapes spaces in the mount point as \040.
+		mount := strings.ReplaceAll(fields[1], `\040`, " ")
+		fsTypes[mount] = fields[2]
+	}
+	return fsTypes
 }
 
 // parseDF converts `df -Pk` output to Volume slices.
 // POSIX df output: Filesystem 1024-blocks Used Available Capacity% Mounted-on
-func parseDF(out string) []Volume {
+func parseDF(out string, osKind hostos.Kind) []Volume {
 	var volumes []Volume
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
@@ -97,14 +147,7 @@ func parseDF(out string) []Volume {
 			continue
 		}
 		mount := fields[5]
-		// Skip pseudo filesystems.
-		if strings.HasPrefix(fields[0], "devfs") ||
-			strings.HasPrefix(fields[0], "map ") ||
-			strings.HasPrefix(mount, "/dev") ||
-			strings.HasPrefix(mount, "/System/Volumes/Preboot") ||
-			strings.HasPrefix(mount, "/System/Volumes/Recovery") ||
-			strings.HasPrefix(mount, "/System/Volumes/VM") ||
-			strings.HasPrefix(mount, "/System/Volumes/xarts") {
+		if skipDFVolume(osKind, fields[0], mount) {
 			continue
 		}
 		total := parseInt64(fields[1]) * 1024
@@ -118,6 +161,32 @@ func parseDF(out string) []Volume {
 		})
 	}
 	return volumes
+}
+
+// skipDFVolume reports whether a df row is a pseudo/irrelevant filesystem
+// that should be excluded from the volume list, per host OS.
+func skipDFVolume(osKind hostos.Kind, source, mount string) bool {
+	if osKind == hostos.Linux {
+		switch source {
+		case "tmpfs", "devtmpfs", "efivarfs", "devfs":
+			return true
+		}
+		if strings.HasPrefix(source, "/dev/loop") { // snap squashfs images
+			return true
+		}
+		return strings.HasPrefix(mount, "/proc") ||
+			strings.HasPrefix(mount, "/sys") ||
+			strings.HasPrefix(mount, "/dev") ||
+			strings.HasPrefix(mount, "/run")
+	}
+	// macOS (and other): APFS system volumes and devfs/autofs maps.
+	return strings.HasPrefix(source, "devfs") ||
+		strings.HasPrefix(source, "map ") ||
+		strings.HasPrefix(mount, "/dev") ||
+		strings.HasPrefix(mount, "/System/Volumes/Preboot") ||
+		strings.HasPrefix(mount, "/System/Volumes/Recovery") ||
+		strings.HasPrefix(mount, "/System/Volumes/VM") ||
+		strings.HasPrefix(mount, "/System/Volumes/xarts")
 }
 
 func applyFSTypes(volumes []Volume, fsTypes map[string]string) {

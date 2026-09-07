@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // LogFile is one log-shaped file discovered on disk. Owner is best-effort
@@ -31,17 +33,17 @@ type LogFile struct {
 // Heavy directories (Application Support) are walked one level deep to
 // keep cost bounded; per-app subtree scanning belongs in the demand-driven
 // inspect_app path, not the default snapshot.
-func CollectLogFiles(home string) []LogFile {
+//
+// On Linux the roots are /var/log and the XDG state/cache directories; the
+// macOS ~/Library and /Library/Logs trees have no Linux equivalent.
+func CollectLogFiles(home string, osKind hostos.Kind) []LogFile {
 	var out []LogFile
-	roots := []string{
-		filepath.Join(home, "Library", "Logs"),
-		"/Library/Logs",
-		"/var/log",
-	}
-	for _, root := range roots {
+	for _, root := range logRoots(hostos.Resolve(osKind), home) {
 		out = append(out, walkLogs(root, "")...)
 	}
-	out = append(out, walkAppSupportLogs(filepath.Join(home, "Library", "Application Support"))...)
+	if hostos.Resolve(osKind) != hostos.Linux {
+		out = append(out, walkAppSupportLogs(filepath.Join(home, "Library", "Application Support"))...)
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].SizeBytes != out[j].SizeBytes {
 			return out[i].SizeBytes > out[j].SizeBytes
@@ -49,6 +51,22 @@ func CollectLogFiles(home string) []LogFile {
 		return out[i].Path < out[j].Path
 	})
 	return out
+}
+
+// logRoots returns the log directories to scan for the given OS.
+func logRoots(osKind hostos.Kind, home string) []string {
+	if osKind == hostos.Linux {
+		stateDir := filepath.Join(home, ".local", "state")
+		if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+			stateDir = xdg
+		}
+		return []string{"/var/log", stateDir}
+	}
+	return []string{
+		filepath.Join(home, "Library", "Logs"),
+		"/Library/Logs",
+		"/var/log",
+	}
 }
 
 // walkLogs recursively scans a single log root, returning log-shaped files.

@@ -58,6 +58,9 @@ func printStorageState(s storagestate.State) {
 		if s.AppCachesBytes > 0 {
 			fmt.Printf("  ~/Library/Caches: %s\n", humanSize(s.AppCachesBytes))
 		}
+	} else if s.AppCachesBytes > 0 {
+		// Linux has no ~/Library; AppCachesBytes reflects the XDG cache dir.
+		fmt.Printf("\ncache:           %s total\n", humanSize(s.AppCachesBytes))
 	}
 
 	if len(s.LargestApps) > 0 {
