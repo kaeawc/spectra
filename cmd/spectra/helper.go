@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/helperclient"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // helperBinaryDest is where spectra-helper is installed.
@@ -357,13 +358,26 @@ func sudoCommandAllowed(name string) bool {
 
 // installHelperCmd dispatches install-helper subcommands.
 func runInstallHelperCmd(args []string) int {
+	switch hostos.Current() {
+	case hostos.Darwin, hostos.Linux:
+		// supported below
+	default:
+		fmt.Fprintf(os.Stderr, "spectra install-helper: %v\n", hostos.Unsupported("privileged helper install"))
+		return 1
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "--status", "status":
 			return runHelperStatus(args[1:])
 		case "uninstall":
+			if hostos.Current() == hostos.Linux {
+				return runUninstallHelperLinux(args[1:])
+			}
 			return runUninstallHelper(args[1:])
 		}
+	}
+	if hostos.Current() == hostos.Linux {
+		return runInstallHelperLinux(args)
 	}
 	return runInstallHelper(args)
 }

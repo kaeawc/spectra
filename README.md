@@ -69,8 +69,11 @@ make docs-serve     # http://127.0.0.1:8080
 
 ## Requirements
 
-- macOS (detection shells out to `plutil`, `otool`, `codesign`, `file`,
-  `sqlite3` — all preinstalled)
+- macOS or Linux. Spectra is host-OS-aware: on Linux it uses native
+  sources (`/etc/os-release`, `/proc`, `/sys`, `ip`/`ss`, `df`) and installs
+  the daemon/helper via systemd. App-bundle inspection is macOS-only — it
+  shells out to `plutil`, `otool`, `codesign`, `file`, and `sqlite3`, and is
+  refused with a clear message on Linux.
 - Go 1.26+ for source builds
 
 ## License

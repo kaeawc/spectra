@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -96,6 +97,16 @@ type CollectOptions struct {
 
 	// MemoryBytes overrides physical memory size for MemPercent tests.
 	MemoryBytes func() uint64
+
+	// OS selects the collection backend. The zero value (hostos.Unknown)
+	// resolves to the host OS. macOS uses ps(1) + libproc; Linux reads
+	// procfs directly.
+	OS hostos.Kind
+
+	// ProcFS overrides the procfs root for the Linux backend (default
+	// "/proc"). Injectable so the collector is testable against a fixture
+	// tree on any host.
+	ProcFS string
 }
 
 // Details contains direct per-process metadata collected without spawning
@@ -121,6 +132,26 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 	if run == nil {
 		run = defaultRunner
 	}
+
+	// Linux has no BSD ps(1) column syntax or libproc; read procfs
+	// directly, which also works on minimal distros (Alpine/BusyBox)
+	// whose ps lacks procps flags.
+	if hostos.Resolve(opts.OS) == hostos.Linux {
+		root := opts.ProcFS
+		if root == "" {
+			root = "/proc"
+		}
+		procs := collectLinuxProcs(root, opts.Now)
+		applyDerivedFields(procs, collectNow(opts), collectMemoryBytes(opts))
+		if len(opts.BundlePaths) > 0 {
+			attributeBundles(procs, opts.BundlePaths)
+		}
+		if opts.Deep && len(procs) > 0 {
+			enrichDeep(procs, run)
+		}
+		return procs
+	}
+
 	// Column order: pid ppid pcpu rss vsz uid user lstart command...
 	// lstart produces a 5-token date "Dow Mon DD HH:MM:SS YYYY".
 	// macOS ps does not support nlwp; ThreadCount is populated below by the

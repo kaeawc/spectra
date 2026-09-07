@@ -2,9 +2,21 @@ package sysinfo
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin so the pmset/sysctl stub tests are
+// host-independent. Linux backends are tested directly in linux_test.go.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 func stubSysctl(responses map[string]string) CmdRunner {
 	return func(name string, args ...string) ([]byte, error) {

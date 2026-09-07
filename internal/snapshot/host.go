@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/timemachine"
 	"howett.net/plist"
@@ -43,6 +44,13 @@ type HostCollectOptions struct {
 	LoadAverages  func(time.Time) (LoadAverages, error)
 	MemoryCollect func() (memstate.MemoryState, error)
 	TMCollect     func() (timemachine.TimeMachineState, error)
+	// OS selects the collection backend. The zero value (hostos.Unknown)
+	// resolves to the host OS via hostos.Resolve.
+	OS hostos.Kind
+	// ReadFile reads a file's bytes; defaults to os.ReadFile. The Linux
+	// backend uses it for /etc/os-release, /proc, and the machine-id files;
+	// injectable so tests can serve fixtures instead of the live filesystem.
+	ReadFile func(string) ([]byte, error)
 }
 
 // LiveHostCollector gathers HostInfo from the current machine.
@@ -131,6 +139,17 @@ func CollectHost(spectraVersion string) HostInfo {
 }
 
 func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
+	switch hostos.Resolve(c.Options.OS) {
+	case hostos.Linux:
+		return c.collectHostLinux(spectraVersion)
+	case hostos.Darwin:
+		return c.collectHostDarwin(spectraVersion)
+	default:
+		return c.collectHostMinimal(spectraVersion)
+	}
+}
+
+func (c LiveHostCollector) collectHostDarwin(spectraVersion string) HostInfo {
 	deps := hostDepsFromOptions(c.Options)
 	facts := collectHostFacts(deps)
 
@@ -186,6 +205,188 @@ func (c LiveHostCollector) CollectHost(spectraVersion string) HostInfo {
 	h.Memory = collectHostMemory(deps.memoryCollect)
 	h.TimeMachine = collectHostTimeMachine(deps.tmCollect)
 	return h
+}
+
+// collectHostMinimal fills only the always-available stdlib-derived fields
+// for operating systems without a dedicated backend.
+func (c LiveHostCollector) collectHostMinimal(spectraVersion string) HostInfo {
+	h := HostInfo{
+		OSName:         runtime.GOOS,
+		Architecture:   runtime.GOARCH,
+		SpectraVersion: spectraVersion,
+	}
+	if name, err := c.hostname()(); err == nil {
+		h.Hostname = name
+	}
+	return h
+}
+
+// collectHostLinux fills HostInfo from /etc/os-release and /proc. Every read
+// is best-effort: a missing or unreadable source leaves its field zero
+// rather than failing the snapshot.
+func (c LiveHostCollector) collectHostLinux(spectraVersion string) HostInfo {
+	readFile := c.Options.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	h := HostInfo{
+		OSName:         "Linux",
+		Architecture:   runtime.GOARCH,
+		SpectraVersion: spectraVersion,
+	}
+	if name, err := c.hostname()(); err == nil {
+		h.Hostname = name
+	}
+	if b, err := readFile("/etc/os-release"); err == nil {
+		if name, version, build := parseOSRelease(b); name != "" {
+			h.OSName = name
+			h.OSVersion = version
+			h.OSBuild = build
+		}
+	}
+	if b, err := readFile("/proc/cpuinfo"); err == nil {
+		if brand, cores := parseProcCPUInfo(b); brand != "" || cores > 0 {
+			h.CPUBrand = brand
+			h.CPUCores = cores
+		}
+	}
+	if b, err := readFile("/proc/meminfo"); err == nil {
+		if ram := parseProcMeminfo(b); ram > 0 {
+			h.RAMBytes = ram
+		}
+	}
+	if b, err := readFile("/proc/uptime"); err == nil {
+		if up := parseProcUptime(b); up > 0 {
+			h.UptimeSeconds = up
+		}
+	}
+	if id := readMachineID(readFile); id != "" {
+		h.MachineUUID = id
+	}
+	h.Facts = HostFacts{
+		Hostname:         h.Hostname,
+		Architecture:     h.Architecture,
+		OSProductName:    h.OSName,
+		OSProductVersion: h.OSVersion,
+		OSBuildVersion:   h.OSBuild,
+		Hardware: Hardware{
+			Chip:         h.CPUBrand,
+			CPUCores:     h.CPUCores,
+			MemoryBytes:  h.RAMBytes,
+			HardwareUUID: h.MachineUUID,
+		},
+		Uptime: time.Duration(h.UptimeSeconds) * time.Second,
+	}
+	return h
+}
+
+// hostname returns the configured hostname source or os.Hostname.
+func (c LiveHostCollector) hostname() func() (string, error) {
+	if c.Options.Hostname != nil {
+		return c.Options.Hostname
+	}
+	return os.Hostname
+}
+
+// parseOSRelease extracts the distro name, version, and build id from
+// /etc/os-release content, preferring NAME then PRETTY_NAME. Values may be
+// single- or double-quoted.
+func parseOSRelease(data []byte) (name, version, build string) {
+	fields := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		fields[strings.TrimSpace(k)] = unquoteOSRelease(strings.TrimSpace(v))
+	}
+	name = fields["NAME"]
+	if name == "" {
+		name = fields["PRETTY_NAME"]
+	}
+	return name, fields["VERSION_ID"], fields["BUILD_ID"]
+}
+
+func unquoteOSRelease(v string) string {
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+			return v[1 : len(v)-1]
+		}
+	}
+	return v
+}
+
+// parseProcCPUInfo returns the CPU model name and logical-core count from
+// /proc/cpuinfo. Cores is the number of "processor" entries.
+func parseProcCPUInfo(data []byte) (brand string, cores int) {
+	for _, line := range strings.Split(string(data), "\n") {
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		switch key {
+		case "processor":
+			cores++
+		case "model name", "Model", "cpu model":
+			if brand == "" {
+				brand = val
+			}
+		}
+	}
+	return brand, cores
+}
+
+// parseProcMeminfo returns total RAM in bytes from the MemTotal line of
+// /proc/meminfo, which is reported in kibibytes.
+func parseProcMeminfo(data []byte) uint64 {
+	for _, line := range strings.Split(string(data), "\n") {
+		key, val, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(key) != "MemTotal" {
+			continue
+		}
+		fields := strings.Fields(val)
+		if len(fields) == 0 {
+			return 0
+		}
+		kb, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kb * 1024
+	}
+	return 0
+}
+
+// parseProcUptime returns whole seconds since boot from /proc/uptime.
+func parseProcUptime(data []byte) int64 {
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0
+	}
+	secs, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil || secs < 0 {
+		return 0
+	}
+	return int64(secs)
+}
+
+// readMachineID returns a stable per-machine identifier from
+// /etc/machine-id, falling back to the D-Bus machine-id.
+func readMachineID(readFile func(string) ([]byte, error)) string {
+	for _, p := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
+		if b, err := readFile(p); err == nil {
+			if id := strings.TrimSpace(string(b)); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 func collectHostFacts(deps hostDeps) HostFacts {

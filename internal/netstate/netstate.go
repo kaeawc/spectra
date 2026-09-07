@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // State is the NetworkState slice of a Spectra snapshot.
@@ -76,6 +78,9 @@ func DefaultRunner(name string, args ...string) ([]byte, error) {
 // Collect gathers network state. Any sub-command failure is silently
 // absorbed; partial results are still valid.
 func Collect(run CmdRunner) State {
+	if hostos.Current() == hostos.Linux {
+		return collectLinux(run)
+	}
 	return CollectWithConnections(run, collectConnectionRows(run))
 }
 
@@ -85,6 +90,9 @@ func Collect(run CmdRunner) State {
 // netdiag.Diagnose needs both the full connection list and the State, so it
 // collects once and passes the rows here.
 func CollectWithConnections(run CmdRunner, conns []Connection) State {
+	if hostos.Current() == hostos.Linux {
+		return collectLinux(run)
+	}
 	var s State
 	if out, err := run("route", "-n", "get", "default"); err == nil {
 		s.DefaultRouteIface, s.DefaultRouteGW = parseRoute(string(out))
@@ -95,7 +103,7 @@ func CollectWithConnections(run CmdRunner, conns []Connection) State {
 	if out, err := run("scutil", "--proxy"); err == nil {
 		s.Proxy = parseProxy(string(out))
 	}
-	s.HostsOverrides = readHostsOverrides("/etc/hosts")
+	s.HostsOverrides = readHostsOverrides("/etc/hosts", hostsDefaultsDarwin)
 	if out, err := run("lsof", "-i", "-P", "-n", "-sTCP:LISTEN"); err == nil {
 		s.ListeningPorts = parseLSOFListen(string(out))
 	}
@@ -302,17 +310,18 @@ func scutilKV(out string) map[string]string {
 	return m
 }
 
-// readHostsOverrides reads /etc/hosts and returns non-default, non-comment
-// lines. hostsPath is parameterised for testing.
-func readHostsOverrides(hostsPath string) []HostsEntry {
-	// Default macOS /etc/hosts entries — skip these.
-	defaults := map[string]bool{
-		"127.0.0.1":       true,
-		"255.255.255.255": true,
-		"::1":             true,
-		"fe80::1%lo0":     true,
-	}
+// hostsDefaultsDarwin are the stock macOS /etc/hosts IPs.
+var hostsDefaultsDarwin = map[string]bool{
+	"127.0.0.1":       true,
+	"255.255.255.255": true,
+	"::1":             true,
+	"fe80::1%lo0":     true,
+}
 
+// readHostsOverrides reads /etc/hosts and returns non-default, non-comment
+// lines. hostsPath and defaults are parameterised for testing and per-OS
+// default filtering.
+func readHostsOverrides(hostsPath string, defaults map[string]bool) []HostsEntry {
 	f, err := os.Open(hostsPath)
 	if err != nil {
 		return nil

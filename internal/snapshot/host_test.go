@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/timemachine"
 )
@@ -17,8 +18,11 @@ import (
 // and only checked for sanity when present.
 func TestCollectHostMinimallyPopulated(t *testing.T) {
 	h := CollectHost("test-version")
-	if h.OSName != "macOS" {
-		t.Errorf("OSName = %q, want macOS", h.OSName)
+	if h.OSName == "" {
+		t.Error("OSName empty")
+	}
+	if hostos.Current() == hostos.Darwin && h.OSName != "macOS" {
+		t.Errorf("OSName = %q, want macOS on a Darwin host", h.OSName)
 	}
 	if h.SpectraVersion != "test-version" {
 		t.Errorf("SpectraVersion = %q, want test-version", h.SpectraVersion)
@@ -236,5 +240,75 @@ func TestHumanDuration(t *testing.T) {
 		if got != want {
 			t.Errorf("humanDuration(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCollectHostLinuxFromProc(t *testing.T) {
+	files := map[string][]byte{
+		"/etc/os-release": []byte("NAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nPRETTY_NAME=\"Ubuntu 22.04.3 LTS\"\nBUILD_ID=\"rolling\"\n"),
+		"/proc/cpuinfo":   []byte("processor\t: 0\nmodel name\t: Intel(R) Xeon(R) CPU\n\nprocessor\t: 1\nmodel name\t: Intel(R) Xeon(R) CPU\n"),
+		"/proc/meminfo":   []byte("MemTotal:       16384000 kB\n"),
+		"/proc/uptime":    []byte("3600.50 1234.00\n"),
+		"/etc/machine-id": []byte("0123456789abcdef0123456789abcdef\n"),
+	}
+	c := LiveHostCollector{Options: HostCollectOptions{
+		OS:       hostos.Linux,
+		Hostname: func() (string, error) { return "linux-host", nil },
+		ReadFile: func(name string) ([]byte, error) {
+			if b, ok := files[name]; ok {
+				return b, nil
+			}
+			return nil, fmt.Errorf("no fixture for %s", name)
+		},
+	}}
+	got := c.CollectHost("v1")
+	if got.OSName != "Ubuntu" || got.OSVersion != "22.04" || got.OSBuild != "rolling" {
+		t.Errorf("OS = %q %q %q, want Ubuntu 22.04 rolling", got.OSName, got.OSVersion, got.OSBuild)
+	}
+	if got.CPUBrand != "Intel(R) Xeon(R) CPU" || got.CPUCores != 2 {
+		t.Errorf("CPU = %q %d, want Intel(R) Xeon(R) CPU 2", got.CPUBrand, got.CPUCores)
+	}
+	if got.RAMBytes != 16384000*1024 {
+		t.Errorf("RAMBytes = %d", got.RAMBytes)
+	}
+	if got.UptimeSeconds != 3600 {
+		t.Errorf("UptimeSeconds = %d, want 3600", got.UptimeSeconds)
+	}
+	if got.MachineUUID != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("MachineUUID = %q", got.MachineUUID)
+	}
+	if got.Hostname != "linux-host" {
+		t.Errorf("Hostname = %q", got.Hostname)
+	}
+	if got.Facts.OSProductName != "Ubuntu" {
+		t.Errorf("Facts.OSProductName = %q", got.Facts.OSProductName)
+	}
+}
+
+func TestLinuxHostToleratesMissingSources(t *testing.T) {
+	c := LiveHostCollector{Options: HostCollectOptions{
+		OS:       hostos.Linux,
+		Hostname: func() (string, error) { return "bare", nil },
+		ReadFile: func(string) ([]byte, error) { return nil, fmt.Errorf("absent") },
+	}}
+	got := c.CollectHost("v")
+	if got.OSName != "Linux" {
+		t.Errorf("OSName = %q, want Linux fallback", got.OSName)
+	}
+	if got.CPUCores != 0 || got.RAMBytes != 0 || got.MachineUUID != "" {
+		t.Errorf("expected zero best-effort fields, got %+v", got)
+	}
+}
+
+func TestParseOSReleasePrettyFallback(t *testing.T) {
+	name, _, build := parseOSRelease([]byte("PRETTY_NAME='Arch Linux'\nBUILD_ID=rolling\n"))
+	if name != "Arch Linux" || build != "rolling" {
+		t.Errorf("parseOSRelease = %q %q", name, build)
+	}
+}
+
+func TestParseProcUptimeSnapshot(t *testing.T) {
+	if got := parseProcUptime([]byte("12345.67 9999.00")); got != 12345 {
+		t.Errorf("parseProcUptime = %d, want 12345", got)
 	}
 }

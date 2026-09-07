@@ -3,11 +3,34 @@ package process
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin for this package's tests. The
+// process collectors are still macOS-shaped in this phase (ps/lsof/
+// sample), so the success-path tests assume a Darwin host; tests that
+// exercise other-OS behavior override this locally with hostos.SetForTest.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
+
+func TestSamplerCaptureUnsupportedOffDarwin(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	_, err := NewSampler(&fakeCommandRunner{output: []byte("x")}, nil).
+		Capture(context.Background(), SampleOptions{PID: 42})
+	if !errors.Is(err, hostos.ErrUnsupported) {
+		t.Fatalf("Capture on Linux: err = %v, want hostos.ErrUnsupported", err)
+	}
+}
 
 type fakeCommandRunner struct {
 	output []byte

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // PowerState captures battery and thermal facts.
@@ -94,6 +96,9 @@ func CollectAssertions(run CmdRunner) []PowerAssertion {
 // CollectPower gathers PowerState from pmset. Any sub-command failure is
 // silently absorbed; partial results are still valid.
 func CollectPower(run CmdRunner) PowerState {
+	if hostos.Current() == hostos.Linux {
+		return collectPowerLinux("/sys/class/power_supply")
+	}
 	return PowerCollector{Source: CommandPowerSource{Run: run}}.Collect()
 }
 

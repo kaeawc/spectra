@@ -4,7 +4,91 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestMain pins the host OS to Darwin so the macOS df/mount/~Library tests
+// are host-independent. Linux behavior is exercised with explicit OS
+// arguments in the *Linux tests below.
+func TestMain(m *testing.M) {
+	restore := hostos.SetForTest(hostos.Darwin)
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
+
+func TestParseDFLinux(t *testing.T) {
+	const dfLinux = `Filesystem     1024-blocks      Used Available Capacity Mounted on
+/dev/nvme0n1p2   488384032 200000000 263000000      44% /
+tmpfs             16384000         0  16384000       0% /dev/shm
+devtmpfs           8192000         0   8192000       0% /dev
+/dev/loop3           56320     56320         0     100% /snap/core
+/dev/nvme0n1p1      523248     12000    511248       3% /boot/efi
+`
+	mounts := map[string]bool{}
+	for _, v := range parseDF(dfLinux, hostos.Linux) {
+		mounts[v.MountPoint] = true
+	}
+	if !mounts["/"] || !mounts["/boot/efi"] {
+		t.Errorf("expected / and /boot/efi, got %+v", mounts)
+	}
+	for _, skipped := range []string{"/dev/shm", "/dev", "/snap/core"} {
+		if mounts[skipped] {
+			t.Errorf("%s should be excluded on Linux", skipped)
+		}
+	}
+}
+
+func TestParseProcMounts(t *testing.T) {
+	const procMounts = `/dev/nvme0n1p2 / ext4 rw,relatime 0 0
+tmpfs /dev/shm tmpfs rw,nosuid 0 0
+/dev/sdb1 /mnt/my\040disk xfs rw 0 0
+`
+	got := parseProcMounts(procMounts)
+	if got["/"] != "ext4" {
+		t.Errorf("/ fstype = %q, want ext4", got["/"])
+	}
+	if got["/mnt/my disk"] != "xfs" {
+		t.Errorf("octal-escaped mount point not decoded: %+v", got)
+	}
+}
+
+func TestCollectUserFootprintLinux(t *testing.T) {
+	home := t.TempDir()
+	cache := filepath.Join(home, ".cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "blob"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lib, caches := collectUserFootprint(hostos.Linux, home)
+	if lib != 0 {
+		t.Errorf("UserLibraryBytes = %d, want 0 on Linux", lib)
+	}
+	if caches == 0 {
+		t.Error("AppCachesBytes should reflect ~/.cache on Linux")
+	}
+}
+
+func TestLogRootsLinux(t *testing.T) {
+	roots := logRoots(hostos.Linux, "/home/u")
+	want := map[string]bool{"/var/log": false, "/home/u/.local/state": false}
+	for _, r := range roots {
+		if _, ok := want[r]; ok {
+			want[r] = true
+		}
+		if r == "/Library/Logs" {
+			t.Error("macOS /Library/Logs should not be a Linux log root")
+		}
+	}
+	for r, seen := range want {
+		if !seen {
+			t.Errorf("expected Linux log root %q", r)
+		}
+	}
+}
 
 const dfOutput = `Filesystem                       1024-blocks      Used Available Capacity Mounted on
 /dev/disk3s1s1                   971309944 413876292 444843444    49% /
@@ -22,7 +106,7 @@ devfs on /dev (devfs, local, nobrowse)
 `
 
 func TestParseDF(t *testing.T) {
-	vols := parseDF(dfOutput)
+	vols := parseDF(dfOutput, hostos.Darwin)
 	// Should include /, /data but skip devfs and /System/Volumes/*
 	if len(vols) != 2 {
 		t.Fatalf("got %d volumes, want 2: %+v", len(vols), vols)
@@ -46,7 +130,7 @@ func TestParseDF(t *testing.T) {
 }
 
 func TestParseDFBytes(t *testing.T) {
-	vols := parseDF(dfOutput)
+	vols := parseDF(dfOutput, hostos.Darwin)
 	root := vols[0] // "/"
 	// 971309944 * 1024
 	if root.TotalBytes != 971309944*1024 {
@@ -65,7 +149,7 @@ func TestParseMountFSTypes(t *testing.T) {
 }
 
 func TestApplyFSTypes(t *testing.T) {
-	vols := parseDF(dfOutput)
+	vols := parseDF(dfOutput, hostos.Darwin)
 	applyFSTypes(vols, parseMountFSTypes(mountOutput))
 	for _, v := range vols {
 		switch v.MountPoint {
@@ -81,7 +165,7 @@ func TestApplyFSTypes(t *testing.T) {
 }
 
 func TestParseDFEmpty(t *testing.T) {
-	vols := parseDF("")
+	vols := parseDF("", hostos.Darwin)
 	if len(vols) != 0 {
 		t.Errorf("expected empty for blank input")
 	}

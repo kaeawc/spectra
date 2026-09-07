@@ -1,0 +1,22 @@
+# Spectra privileged helper — systemd system unit template.
+#
+# Install (root):
+#   sudo spectra install-helper
+# which creates the 'spectra' group, installs the binary to
+# /usr/local/lib/spectra/spectra-helper, writes this unit, and enables it.
+#
+# The helper exposes a narrow root-only JSON-RPC surface over
+# /var/run/spectra-helper.sock (0660 root:spectra); connecting clients are
+# authenticated by SO_PEERCRED.
+[Unit]
+Description=Spectra privileged helper
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/spectra/spectra-helper
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

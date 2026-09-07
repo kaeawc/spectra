@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 func TestCollectLogFiles(t *testing.T) {
@@ -20,7 +22,7 @@ func TestCollectLogFiles(t *testing.T) {
 	// non-log file under user library — skip
 	mustWrite(t, filepath.Join(home, "Library", "Logs", "Foo", "readme.txt"), "txt")
 
-	files := CollectLogFiles(home)
+	files := CollectLogFiles(home, hostos.Darwin)
 
 	got := map[string]string{}
 	for _, f := range files {
@@ -55,7 +57,7 @@ func TestCollectLogFiles_SortedBySizeDesc(t *testing.T) {
 	mustWrite(t, filepath.Join(home, "Library", "Logs", "small.log"), "x")
 	mustWrite(t, filepath.Join(home, "Library", "Logs", "big.log"), "xxxxxxxxxxxxxxxxxxxx")
 
-	files := CollectLogFiles(home)
+	files := CollectLogFiles(home, hostos.Darwin)
 	if len(files) < 2 {
 		t.Fatalf("expected ≥2 files, got %d", len(files))
 	}

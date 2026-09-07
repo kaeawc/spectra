@@ -13,6 +13,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/artifact"
 	"github.com/kaeawc/spectra/internal/fsutil"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/serve"
 )
 
@@ -53,6 +54,15 @@ type daemonAgentDeps struct {
 }
 
 func runInstallDaemonCmd(args []string) int {
+	switch hostos.Current() {
+	case hostos.Darwin:
+		// launchd path below.
+	case hostos.Linux:
+		return runInstallDaemonLinux(args)
+	default:
+		fmt.Fprintf(os.Stderr, "spectra install-daemon: %v\n", hostos.Unsupported("daemon install"))
+		return 1
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "uninstall":
