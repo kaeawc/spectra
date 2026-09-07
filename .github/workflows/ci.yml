@@ -53,15 +53,14 @@ jobs:
           ./spectra /System/Applications/Calculator.app
           ./spectra --json /System/Applications/Chess.app | python3 -m json.tool
 
-  # Cross-compile + vet for Linux. Spectra targets macOS first, but is
-  # being made host-OS-aware; this lane keeps the Linux build honest so
-  # OS-specific breakage (build-tag collisions, macOS-only literals) is
-  # caught immediately rather than at release time. CGO is disabled to
-  # match the static Linux build (the cgo thread collector is darwin-only).
-  build-linux:
+  # Native Linux build + test. Spectra targets macOS first but is host-OS-
+  # aware; this lane runs the suite on Linux (CGO off, matching the static
+  # Linux binary) and smoke-tests the OS-aware commands against real /proc
+  # and /sys. Linux has no .app model, so app inspection is expected to be
+  # refused rather than exercised.
+  test-linux:
     runs-on: ubuntu-latest
     env:
-      GOOS: linux
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v6
@@ -69,10 +68,39 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: go build (linux)
-        run: go build ./...
-      - name: go vet (linux)
+      - name: go vet
         run: go vet ./...
+      - name: go build
+        run: go build -o spectra ./cmd/spectra/
+      # Run the suite for packages with real Linux backends and injected /
+      # faked dependencies. The detect engine and its downstream consumers
+      # shell out to macOS-only tools (plutil/otool/codesign) in their tests
+      # and are macOS-only by design; vet+build above still cover them for
+      # Linux compilation, and the smoke test exercises the end-to-end path.
+      - name: go test (Linux backends)
+        run: |
+          go test -count=1 \
+            ./internal/hostos/... \
+            ./internal/process/... \
+            ./internal/metrics/... \
+            ./internal/storagestate/... \
+            ./internal/netstate/... \
+            ./internal/sysinfo/... \
+            ./internal/toolchain/... \
+            ./internal/helper/...
+      - name: Smoke test OS-aware commands
+        run: |
+          set -x
+          # Cross-platform collectors must run and exit cleanly on Linux.
+          ./spectra process | head -5
+          ./spectra storage | head -5
+          ./spectra snapshot > /dev/null
+          # App inspection has no Linux equivalent and must be refused clearly.
+          if ./spectra inspect /nonexistent.app 2>&1 | grep -qi 'unsupported'; then
+            echo "app inspection correctly refused on Linux"
+          else
+            echo "expected inspect to report unsupported on Linux"; exit 1
+          fi
 
   complexity:
     runs-on: ubuntu-latest
