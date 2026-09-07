@@ -18,10 +18,20 @@ product framing.
 - Internal packages (not part of any public API) live under `internal/`.
 - Filesystem writes that must survive crashes go through
   `internal/fsutil.WriteFileAtomic`.
-- macOS-only utilities (`plutil`, `otool`, `codesign`, `file`, `sqlite3`) are
-  invoked via `os/exec`. CLI is a Mac-only tool today; cross-compilation is
-  preserved for future platform expansion via build-tagged files like
-  `internal/detect/syscall_darwin.go`.
+- Spectra runs on macOS and Linux and is **host-OS-aware**: anything that
+  invokes or shells out to another tool must select the right binary, path,
+  and parser per OS through `internal/hostos` (the OS-selection layer), while
+  `internal/proc.Runner` stays the execution seam. Collectors take an
+  `OS hostos.Kind` option whose zero value resolves to the host; prefer a
+  runtime `Kind` switch in shared files over new `_linux.go` build-tag files
+  wherever the code is pure Go (so Linux paths are testable on a macOS box).
+- macOS-only concepts — `.app`/Mach-O inspection (`plutil`, `otool`,
+  `codesign`, `spctl`, `file`), the TCC privacy DB, and launchd — have no
+  Linux equivalent: gate them with `hostos.Unsupported(...)` off Darwin
+  rather than shelling out to tools that do not exist. Cross-platform
+  subsystems (host facts, processes, network, storage, sysinfo, toolchain)
+  have real Linux backends reading `/proc`, `/sys`, `/etc/os-release`, and
+  `ip`/`ss`/`df`.
 
 ## Build & Validate
 
@@ -81,6 +91,9 @@ Living docs in `docs/`. mkdocs nav at `mkdocs.yml`. Validation:
 
 - `test` — macOS runner; `go vet`, `go build`, `gotestsum -race`, smoke
   tests against `/System/Applications/Calculator.app` etc.
+- `test-linux` — ubuntu runner; `go vet`/`go build` for all packages plus
+  `go test` for the Linux-backend collector packages (`CGO_ENABLED=0`), and a
+  smoke test of the OS-aware commands against real `/proc` and `/sys`.
 - `complexity` — `gocyclo -over 15`.
 - `static-analysis` — `golangci-lint v2`.
 - `check-licenses` — `go-licenses report`.

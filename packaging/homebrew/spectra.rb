@@ -1,5 +1,5 @@
 class Spectra < Formula
-  desc "macOS app diagnostics and JVM-aware remote debugging"
+  desc "Host-aware app/JVM diagnostics and remote debugging (macOS + Linux)"
   homepage "https://github.com/kaeawc/spectra"
   url "https://github.com/kaeawc/spectra/archive/refs/tags/v0.0.0.tar.gz"
   sha256 "REPLACE_WITH_SOURCE_ARCHIVE_SHA256"

@@ -37,19 +37,26 @@ make build-all
 | `make ci` | vet + test + complexity + lint + security + licenses + docs |
 | `make clean` | Remove build artifacts |
 
-## Cross-compiling
+## Cross-compiling and Linux
 
-The Go module has no CGo dependencies, so it cross-compiles cleanly:
+Spectra builds and runs on Linux as well as macOS. The Linux build is
+pure Go (`CGO_ENABLED=0`); the one cgo dependency —
+`internal/process/thread_darwin.go`, which links `libproc` for per-process
+thread counts — is **darwin-only**, so macOS builds keep `CGO_ENABLED=1`
+while Linux disables it and reads thread counts from `/proc` instead.
 
 ```bash
-GOOS=linux GOARCH=arm64 go build ./...
+# Linux (static, pure Go)
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
 ```
 
-Note that the resulting Linux binary won't actually do anything useful
-(every collector shells out to a macOS tool that doesn't exist on
-Linux), but the build succeeds. This is what enables future Linux
-detection: the `syscall_other.go` build-tagged file ensures the
-non-darwin path doesn't reference `syscall.Stat_t.Blocks`.
+On Linux, the host-aware collectors use native sources — `/etc/os-release`
+and `/proc` for host facts, `/proc` for processes, `ip`/`ss`/`/proc/net`
+for network state, `df`/`/proc/mounts` for storage, `/sys` for power — and
+the daemon/helper install via systemd. App-bundle inspection
+(`.app`/Mach-O/`codesign`/TCC) has no Linux equivalent and is refused with
+a clear message. The `internal/hostos` package is the OS-selection layer
+every collector consults.
 
 ## Build version stamping
 
