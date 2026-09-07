@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // CollectOptions parameterises the collector. All path fields have sane
@@ -153,13 +155,22 @@ func withDefaults(o CollectOptions) CollectOptions {
 		h, _ := os.UserHomeDir()
 		o.Home = h
 	}
+	linux := hostos.Current() == hostos.Linux
 	if len(o.BrewCellars) == 0 {
-		o.BrewCellars = []string{"/opt/homebrew/Cellar", "/usr/local/Cellar"}
+		if linux {
+			o.BrewCellars = []string{"/home/linuxbrew/.linuxbrew/Cellar", filepath.Join(o.Home, ".linuxbrew", "Cellar")}
+		} else {
+			o.BrewCellars = []string{"/opt/homebrew/Cellar", "/usr/local/Cellar"}
+		}
 	}
 	if o.SystemJVMRoot == "" {
-		o.SystemJVMRoot = "/Library/Java/JavaVirtualMachines"
+		if linux {
+			o.SystemJVMRoot = "/usr/lib/jvm"
+		} else {
+			o.SystemJVMRoot = "/Library/Java/JavaVirtualMachines"
+		}
 	}
-	if o.UserJVMRoot == "" {
+	if o.UserJVMRoot == "" && !linux {
 		o.UserJVMRoot = filepath.Join(o.Home, "Library", "Java", "JavaVirtualMachines")
 	}
 	if o.CmdRunner == nil {
