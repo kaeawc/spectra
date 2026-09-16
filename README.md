@@ -1,8 +1,7 @@
 # Spectra
 
-A diagnostic agent for macOS that combines deep static inspection of installed
-apps with live process state, JVM toolchain awareness, and engineer-to-engineer
-remote debugging over Tailscale.
+A local diagnostic tool for macOS that combines deep static inspection of
+installed apps with live process state and JVM toolchain awareness.
 
 ```bash
 git clone https://github.com/kaeawc/spectra.git
@@ -39,11 +38,11 @@ also extracts every URL host referenced in the binary and `app.asar`.
 
 ## Status
 
-Today: a Go CLI plus optional daemon and privileged helper. Spectra does
+Today: a Go CLI plus an optional local privileged helper. Spectra does
 deep `.app` inspection, live process/network/storage/power inventory,
 JVM and toolchain diagnostics, SQLite-backed snapshots and diffs,
-recommendation rules, issue tracking, JSON-RPC over Unix socket or
-explicit TCP, and optional Tailscale `tsnet` daemon exposure.
+recommendation rules, and issue tracking. Cross-machine operation lives in
+the separately distributed Spectra Remote project.
 
 Implemented code with passing tests is treated as complete in the docs.
 Code whose tests are failing or absent is documented as partial until the

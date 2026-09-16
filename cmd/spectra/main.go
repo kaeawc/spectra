@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
 var version = "dev"
@@ -56,18 +55,11 @@ func subcommandList() []subcommand {
 		{"rules", "Evaluate recommendations rules against a snapshot", runRules},
 		{"issues", "List, check, or update persisted issues from the recommendations engine", runIssues},
 		{"baseline", "Manage baseline snapshots (list, drop)", runSnapshotBaseline},
-		{"serve", "Run the daemon (Unix socket, TCP, or tsnet JSON-RPC server)", runServe},
-		{"connect", "Call a Spectra daemon over Unix socket, TCP, or MagicDNS", runConnect},
-		{"fan", "Run one daemon RPC call against multiple targets", runFan},
-		{"hosts", "List hosts known from stored snapshots", runHosts},
 		{"fleet", "Cross-host rollups: which hosts trip a rule, and version-drift matrices", runFleet},
 		{"bisect", "Find the snapshot where a rule started firing, and what changed alongside it", runBisect},
 		{"reconcile", "Print an advisory plan to make one host's toolchain match another's", runReconcile},
-		{"status", "Check whether the local daemon is running", runStatus},
-		{"metrics", "Show stored process metrics (requires spectra serve)", runMetrics},
 		{"anomalies", "Flag processes deviating from their rolling RSS baseline", runAnomalies},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
-		{"install-daemon", "Install the user LaunchAgent for spectra serve", runInstallDaemonCmd},
 		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
@@ -106,13 +98,6 @@ func dispatch(args []string) int {
 	if verbose {
 		enableVerbose()
 	}
-	if remote, ok, err := parseGlobalRemoteArgs(args); ok {
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		return runRemoteCommand(remote)
-	}
 	if len(args) == 0 {
 		runHelp(os.Stderr)
 		return 2
@@ -127,101 +112,6 @@ func dispatch(args []string) int {
 	}
 	// No subcommand matched — default to inspect with the full arg list.
 	return runInspect(args)
-}
-
-type globalRemoteArgs struct {
-	target  string
-	timeout time.Duration
-	args    []string
-}
-
-func parseGlobalRemoteArgs(args []string) (globalRemoteArgs, bool, error) {
-	out := globalRemoteArgs{timeout: 3 * time.Second}
-	restStart := 0
-	for restStart < len(args) {
-		next, stop, err := parseGlobalRemoteArg(args, restStart, &out)
-		if err != nil {
-			return out, true, err
-		}
-		if stop {
-			restStart = next
-			goto done
-		}
-		restStart = next
-	}
-done:
-	if out.target == "" {
-		return out, false, nil
-	}
-	out.args = normalizeRemoteCommandArgs(args[restStart:])
-	return out, true, nil
-}
-
-func parseGlobalRemoteArg(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
-	arg := args[idx]
-	switch {
-	case arg == "--":
-		return idx + 1, true, nil
-	case isRemoteTargetFlag(arg):
-		if idx+1 >= len(args) {
-			return idx, true, fmt.Errorf("%s requires a target", arg)
-		}
-		out.target = args[idx+1]
-		return idx + 2, false, nil
-	case strings.HasPrefix(arg, "--remote="):
-		out.target = strings.TrimPrefix(arg, "--remote=")
-		return idx + 1, false, nil
-	case strings.HasPrefix(arg, "--target="):
-		out.target = strings.TrimPrefix(arg, "--target=")
-		return idx + 1, false, nil
-	case strings.HasPrefix(arg, "--rpc-target="):
-		out.target = strings.TrimPrefix(arg, "--rpc-target=")
-		return idx + 1, false, nil
-	case arg == "--timeout":
-		return parseGlobalRemoteTimeoutValue(args, idx, out)
-	case strings.HasPrefix(arg, "--timeout="):
-		return parseGlobalRemoteTimeoutInline(arg, idx, out)
-	default:
-		return idx, true, nil
-	}
-}
-
-func isRemoteTargetFlag(arg string) bool {
-	return arg == "--remote" || arg == "--target" || arg == "--rpc-target"
-}
-
-func parseGlobalRemoteTimeoutValue(args []string, idx int, out *globalRemoteArgs) (int, bool, error) {
-	if idx+1 >= len(args) {
-		return idx, true, fmt.Errorf("%s requires a duration", args[idx])
-	}
-	timeout, err := time.ParseDuration(args[idx+1])
-	if err != nil {
-		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
-	}
-	out.timeout = timeout
-	return idx + 2, false, nil
-}
-
-func parseGlobalRemoteTimeoutInline(arg string, idx int, out *globalRemoteArgs) (int, bool, error) {
-	timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
-	if err != nil {
-		return idx, true, fmt.Errorf("invalid --timeout: %w", err)
-	}
-	out.timeout = timeout
-	return idx + 1, false, nil
-}
-
-func normalizeRemoteCommandArgs(args []string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	if strings.HasSuffix(args[0], ".app") || strings.HasPrefix(args[0], "/") {
-		next := make([]string, 0, len(args)+1)
-		next = append(next, "inspect")
-		next = append(next, args...)
-		return next
-	}
-	return args
 }
 
 func runVersion(_ []string) int {
@@ -246,10 +136,9 @@ func runHelpCmd(_ []string) int {
 }
 
 func runHelp(w *os.File) {
-	fmt.Fprintln(w, "Spectra — macOS app diagnostics, JVM-aware remote debugging portal.")
+	fmt.Fprintln(w, "Spectra — macOS app diagnostics and JVM-aware debugging.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage: spectra <subcommand> [flags] [args]")
-	fmt.Fprintln(w, "       spectra --remote <target> <subcommand> [args]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  --verbose, --debug   Log enhancement/collection failures to stderr (or set SPECTRA_DEBUG)")
@@ -264,6 +153,4 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "  spectra --all -v")
 	fmt.Fprintln(w, "  spectra list -v")
 	fmt.Fprintln(w, "  spectra --json /Applications/Cursor.app")
-	fmt.Fprintln(w, "  spectra --remote work-mac jvm")
-	fmt.Fprintln(w, "  spectra --remote local inspect /Applications/Slack.app")
 }

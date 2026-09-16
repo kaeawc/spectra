@@ -28,10 +28,10 @@ func validateScheduleInterval(interval time.Duration) error {
 }
 
 func runSchedule(args []string) int {
-	return runScheduleWithIO(args, os.Stdout, os.Stderr, defaultDaemonAgentDeps())
+	return runScheduleWithIO(args, os.Stdout, os.Stderr, defaultScheduleAgentDeps())
 }
 
-func runScheduleWithIO(args []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+func runScheduleWithIO(args []string, stdout, stderr io.Writer, deps scheduleAgentDeps) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: spectra schedule <install [--interval 1h] [--no-load] | uninstall | status | print-plist>")
 		return 2
@@ -51,7 +51,7 @@ func runScheduleWithIO(args []string, stdout, stderr io.Writer, deps daemonAgent
 	}
 }
 
-func runScheduleInstall(args []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+func runScheduleInstall(args []string, stdout, stderr io.Writer, deps scheduleAgentDeps) int {
 	fs := flag.NewFlagSet("schedule install", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", time.Hour, "how often to capture a snapshot")
@@ -72,7 +72,7 @@ func runScheduleInstall(args []string, stdout, stderr io.Writer, deps daemonAgen
 	return 0
 }
 
-func runScheduleUninstall(_ []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+func runScheduleUninstall(_ []string, stdout, stderr io.Writer, deps scheduleAgentDeps) int {
 	plistPath, err := uninstallScheduleAgent(deps)
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
@@ -82,7 +82,7 @@ func runScheduleUninstall(_ []string, stdout, stderr io.Writer, deps daemonAgent
 	return 0
 }
 
-func runScheduleStatus(_ []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+func runScheduleStatus(_ []string, stdout, stderr io.Writer, deps scheduleAgentDeps) int {
 	out, loaded, err := scheduleAgentStatus(deps)
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
@@ -96,7 +96,7 @@ func runScheduleStatus(_ []string, stdout, stderr io.Writer, deps daemonAgentDep
 	return 0
 }
 
-func runSchedulePrintPlist(args []string, stdout, stderr io.Writer, deps daemonAgentDeps) int {
+func runSchedulePrintPlist(args []string, stdout, stderr io.Writer, deps scheduleAgentDeps) int {
 	fs := flag.NewFlagSet("schedule print-plist", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", time.Hour, "how often to capture a snapshot")
@@ -122,8 +122,8 @@ func runSchedulePrintPlist(args []string, stdout, stderr io.Writer, deps daemonA
 	return 0
 }
 
-func scheduleAgentPaths(home string) daemonAgentPathSet {
-	return daemonAgentPathSet{
+func scheduleAgentPaths(home string) scheduleAgentPathSet {
+	return scheduleAgentPathSet{
 		launchAgentsDir: filepath.Join(home, "Library", "LaunchAgents"),
 		logDir:          filepath.Join(home, "Library", "Logs", "Spectra"),
 		plistPath:       filepath.Join(home, "Library", "LaunchAgents", scheduleAgentLabel+".plist"),
@@ -132,7 +132,7 @@ func scheduleAgentPaths(home string) daemonAgentPathSet {
 	}
 }
 
-func installScheduleAgent(intervalSec int, noLoad bool, deps daemonAgentDeps) (string, error) {
+func installScheduleAgent(intervalSec int, noLoad bool, deps scheduleAgentDeps) (string, error) {
 	exe, err := deps.executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve executable: %w", err)
@@ -163,7 +163,7 @@ func installScheduleAgent(intervalSec int, noLoad bool, deps daemonAgentDeps) (s
 	return paths.plistPath, nil
 }
 
-func uninstallScheduleAgent(deps daemonAgentDeps) (string, error) {
+func uninstallScheduleAgent(deps scheduleAgentDeps) (string, error) {
 	home, err := deps.homeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
@@ -179,7 +179,7 @@ func uninstallScheduleAgent(deps daemonAgentDeps) (string, error) {
 // scheduleAgentStatus returns the launchctl print output and whether the agent
 // is loaded. A "service not found" result means simply not-loaded (loaded=false,
 // err=nil); any other launchctl failure is a real error.
-func scheduleAgentStatus(deps daemonAgentDeps) ([]byte, bool, error) {
+func scheduleAgentStatus(deps scheduleAgentDeps) ([]byte, bool, error) {
 	out, err := deps.output("print", "gui/"+deps.uid()+"/"+scheduleAgentLabel)
 	if err != nil {
 		if isServiceNotFound(out, err) {

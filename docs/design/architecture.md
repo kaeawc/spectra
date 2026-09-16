@@ -1,102 +1,26 @@
 # Architecture
 
-Spectra is heading toward a daemon-with-clients model where the same Go
-binary acts as either a long-lived collector or as a lightweight client
-that queries a local or remote daemon over JSON-RPC.
+Spectra is a local macOS diagnostic CLI. It inspects installed applications,
+collects live host state on demand, and stores local snapshots. It does not
+listen on network sockets or embed a remote transport.
 
-## Today: CLI plus optional daemon
-
-The current `spectra` binary can run static inspection in a single pass per
-invocation:
-
-```
-$ spectra /Applications/Claude.app
-   │
-   ├── Detect()                    # 3-layer framework classification
-   ├── populateMetadata()          # Info.plist, codesign, file
-   ├── readPrivacyDescriptions()   # Info.plist NS*UsageDescription
-   ├── scanDependencies()          # Frameworks/, npm, jars
-   ├── scanHelpers()               # XPC, PlugIns, Frameworks/*.app
-   ├── scanLoginItems()            # ~/Library + /Library LaunchAgents/Daemons
-   ├── scanRunningProcesses()      # ps -axwwo
-   ├── scanGrantedPermissions()    # sqlite3 TCC.db
-   ├── scanStorage()               # ~/Library size sweep (sparse-aware)
-   └── scanNetworkEndpoints()      # opt-in, scans app.asar
+```text
+spectra CLI
+  ├── app inspection and framework classification
+  ├── process, JVM, network, storage, power, and toolchain collectors
+  ├── local snapshot, baseline, rules, and issue storage
+  └── optional local privileged helper over a Unix socket
 ```
 
-Each sub-detection is independent. Results accumulate into a single
-`detect.Result` struct (see
-[reference/result-schema.md](../reference/result-schema.md)).
+The optional `spectra-helper` is a narrowly scoped local LaunchDaemon for
+root-only telemetry. It is not reachable over the network.
 
-It can also run a JSON-RPC daemon:
+Cross-machine diagnostics belong to the separately installed Spectra Remote
+agent and controller. Their versioned typed request contract lives in the
+`spectra-protocol` module, which has no transport dependencies.
 
-```bash
-spectra serve                         # Unix socket at ~/.spectra/sock
-spectra serve --tcp 127.0.0.1:7878    # opt-in TCP listener
-spectra connect 127.0.0.1:7878        # health check
-spectra connect 127.0.0.1:7878 snapshot
-```
+## Local collection
 
-## Daemon-with-clients
-
-Spectra is shaping into three roles played by the same binary:
-
-```
-┌─ Collector (long-lived) ───────────────────────────────────┐
-│  spectra serve                                              │
-│  ├ Listens on Unix socket and optional TCP JSON-RPC         │
-│  ├ Caches Detect() results keyed by content hash           │
-│  ├ Periodically samples live state (ps, lsof, nettop)      │
-│  ├ Writes snapshots to SQLite                              │
-│  └ Talks to optional privileged helper for root-only data  │
-└────────────────────────────────────────────────────────────┘
-        ↑ JSON-RPC over Unix socket / explicit TCP
-┌─ Client (interactive) ─────────────────────────────────────┐
-│  spectra list / spectra inspect / spectra connect host     │
-│  ├ Renders to terminal (table or JSON)                     │
-│  └ Renders to TUI (Bubble Tea)                             │
-└────────────────────────────────────────────────────────────┘
-        ↑ same RPC surface, talks to local or remote daemon
-┌─ Privileged helper (optional, root) ───────────────────────┐
-│  Installed by `sudo spectra install-helper`                 │
-│  ├ Installed as a LaunchDaemon                             │
-│  ├ Reads system TCC.db, runs powermetrics                  │
-│  └ Exposes data over a local Unix socket to the daemon     │
-└────────────────────────────────────────────────────────────┘
-```
-
-The collector is the only role that touches storage and live data
-collection. The CLI is a stateless client. The helper is opt-in and
-required only for root-grade visibility.
-
-## Why daemon-with-clients (vs CLI-only)
-
-- **Caching pays off across calls.** `Detect()` of an unchanged bundle is
-  pure work; a daemon caches it and serves repeat inspections in
-  microseconds.
-- **Live state needs continuity.** A ring buffer of recent CPU/RSS/network
-  samples enables "what was this process doing 30 minutes ago" without
-  the user having had Spectra running at the time.
-- **The recommendations engine and issue tracker need persistence.** Both
-  imply a single owner of the SQLite database — that's the daemon.
-- **Remote portal is the primary use case.** See
-  [remote-portal.md](remote-portal.md). A long-lived daemon that's a
-  tailnet node will make "inspect a teammate's Mac" a one-line command.
-
-## Why not native macOS GUI from the start
-
-The data layer (collectors, RPC surface, storage) is shared between TUI,
-GUI, and remote consumers. Building it once in Go and shipping a Bubble
-Tea TUI proves the data model works before investing in SwiftUI. A native
-GUI becomes a cheap follow-on once the daemon's RPC surface is stable.
-
-See [design/distribution.md](distribution.md) for why Mac App Store is
-incompatible with this architecture.
-
-## RPC protocol
-
-The implemented daemon protocol is newline-delimited JSON-RPC 2.0 over
-Unix sockets, explicit TCP, or embedded `tsnet`. All transports carry the
-same RPC method surface rather than creating separate APIs.
-
-See [storage.md](storage.md) for the data the RPC moves.
+Most CLI commands execute their collector directly and render a table or JSON.
+Snapshots persist only local state in SQLite. This keeps the main Spectra
+binary suitable for environments that prohibit remote-access tools.

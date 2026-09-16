@@ -7,7 +7,6 @@ func defaultPlaybooks() []Playbook {
 		networkFailure(),
 		storageBloat(),
 		terminalSpawning(),
-		remoteTriage(),
 		toolchainDrift(),
 	}
 }
@@ -240,7 +239,6 @@ func storageBloat() Playbook {
 				Purpose: "Connect growth to currently running processes.",
 				Commands: []Command{
 					{Args: []string{"process"}, Description: "List running processes sorted by RSS"},
-					{Args: []string{"connect", "work-mac", "storage", "/Applications/App.app"}, Description: "Inspect app storage on a remote Mac", Remote: true},
 				},
 			},
 		},
@@ -293,7 +291,6 @@ func terminalSpawning() Playbook {
 				Purpose: "Confirm helper sprawl, uptime, and app-scoped process ownership.",
 				Commands: []Command{
 					{Args: []string{"-v", "<suspect-app-path>"}, Description: "Inspect the suspect app with helper count, running processes, and storage context"},
-					{Args: []string{"connect", "local", "process-tree", "<suspect-app-path>"}, Description: "Show the app-scoped process tree"},
 					{Args: []string{"snapshot", "--baseline", "terminal-spawning-before"}, Description: "Capture the current state before remediation"},
 				},
 				Signals: []Signal{
@@ -323,61 +320,12 @@ func terminalSpawning() Playbook {
 	}
 }
 
-func remoteTriage() Playbook {
-	return Playbook{
-		ID:          "remote-triage",
-		Title:       "Remote triage",
-		Symptom:     "A teammate's Mac is slow, failing a workflow, or behaving differently from a known-good machine.",
-		Description: "Establish an explicit daemon target, collect a broad first pass, then narrow by symptom or compare snapshots.",
-		Steps: []Step{
-			{
-				ID:      "target",
-				Title:   "Establish the target",
-				Purpose: "Confirm the daemon is reachable over a trusted local, SSH, TCP, or tsnet path.",
-				Commands: []Command{
-					{Args: []string{"serve", "--tcp", "127.0.0.1:7878"}, Description: "Run a local loopback daemon"},
-					{Args: []string{"serve", "--tsnet"}, Description: "Run a daemon that joins the tailnet"},
-					{Args: []string{"connect", "work-mac"}, Description: "Health check a remote target", Remote: true},
-					{Args: []string{"connect", "work-mac", "snapshot"}, Description: "Capture a remote snapshot", Remote: true},
-				},
-			},
-			{
-				ID:      "first-pass",
-				Title:   "Collect the broad view",
-				Purpose: "Separate machine-wide symptoms from app-specific symptoms.",
-				Commands: []Command{
-					{Args: []string{"connect", "work-mac", "processes"}, Description: "List remote processes", Remote: true},
-					{Args: []string{"connect", "work-mac", "network"}, Description: "Show remote network state", Remote: true},
-					{Args: []string{"connect", "work-mac", "storage"}, Description: "Show remote storage state", Remote: true},
-					{Args: []string{"connect", "work-mac", "toolchains"}, Description: "Show remote toolchain inventory", Remote: true},
-					{Args: []string{"connect", "work-mac", "jvm"}, Description: "List remote JVMs", Remote: true},
-				},
-			},
-			{
-				ID:      "compare",
-				Title:   "Compare against a baseline",
-				Purpose: "Turn works-on-my-machine claims into snapshot diffs.",
-				Commands: []Command{
-					{Args: []string{"snapshot", "--baseline", "local-good"}, Description: "Save a local known-good baseline"},
-					{Args: []string{"diff", "local-good", "work-mac"}, Description: "Diff two snapshots"},
-					{Args: []string{"fan", "--hosts", "alice-laptop,bob-laptop", "snapshot"}, Description: "Capture snapshots across multiple targets", Remote: true},
-				},
-			},
-		},
-		References: []Reference{
-			{Title: "Remote operations", Path: "docs/operations/remote.md"},
-			{Title: "Daemon operations", Path: "docs/operations/daemon.md"},
-			{Title: "Threat model", Path: "docs/design/threat-model.md"},
-		},
-	}
-}
-
 func toolchainDrift() Playbook {
 	return Playbook{
 		ID:          "toolchain-drift",
 		Title:       "Toolchain drift",
 		Symptom:     "A build, test, JVM, package manager, or language runtime works on one Mac but fails on another.",
-		Description: "Collect local inventory, compare remote hosts or snapshots, and interpret version, vendor, manager, and PATH differences.",
+		Description: "Collect local inventory and compare saved snapshots to interpret version, vendor, manager, and PATH differences.",
 		Steps: []Step{
 			{
 				ID:      "local",
@@ -397,10 +345,8 @@ func toolchainDrift() Playbook {
 			{
 				ID:      "compare",
 				Title:   "Compare machines",
-				Purpose: "Use fan-out or snapshots when drift spans hosts or time.",
+				Purpose: "Use snapshots when drift matters over time.",
 				Commands: []Command{
-					{Args: []string{"fan", "--hosts", "alice-laptop,bob-laptop", "toolchains"}, Description: "Collect toolchains across hosts", Remote: true},
-					{Args: []string{"fan", "--hosts", "alice-laptop,bob-laptop", "jdk"}, Description: "Collect JDKs across hosts", Remote: true},
 					{Args: []string{"snapshot", "--baseline", "before-upgrade"}, Description: "Save a pre-change baseline"},
 					{Args: []string{"diff", "baseline", "before-upgrade", "live"}, Description: "Compare a baseline with live state"},
 				},

@@ -1,5 +1,5 @@
 class Spectra < Formula
-  desc "Host-aware app/JVM diagnostics and remote debugging (macOS + Linux)"
+  desc "Host-aware app and JVM diagnostics (macOS + Linux)"
   homepage "https://github.com/kaeawc/spectra"
   url "https://github.com/kaeawc/spectra/archive/refs/tags/v0.0.0.tar.gz"
   sha256 "REPLACE_WITH_SOURCE_ARCHIVE_SHA256"
@@ -16,13 +16,6 @@ class Spectra < Formula
 
     pkgshare.install "agent/spectra-agent.jar" if File.exist?("agent/spectra-agent.jar")
     doc.install "docs/install.md", "docs/operations/install-services.md", "docs/design/distribution.md"
-  end
-
-  service do
-    run [opt_bin/"spectra", "serve"]
-    keep_alive true
-    log_path var/"log/spectra.log"
-    error_log_path var/"log/spectra.err.log"
   end
 
   test do

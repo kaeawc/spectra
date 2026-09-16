@@ -18,8 +18,8 @@ type fakeAgent struct {
 
 func newFakeAgent() *fakeAgent { return &fakeAgent{written: map[string][]byte{}} }
 
-func (f *fakeAgent) deps() daemonAgentDeps {
-	return daemonAgentDeps{
+func (f *fakeAgent) deps() scheduleAgentDeps {
+	return scheduleAgentDeps{
 		executable: func() (string, error) { return "/usr/local/bin/spectra", nil },
 		homeDir:    func() (string, error) { return "/home/tester", nil },
 		uid:        func() string { return "501" },

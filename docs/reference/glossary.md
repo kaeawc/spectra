@@ -6,7 +6,7 @@ canonical doc when one exists.
 ## Spectra-specific
 
 **Agent.** Generic term we avoid in favor of the more precise
-[*daemon*](#daemon) and [*helper*](#privileged-helper). The
+[*helper*](#privileged-helper). The
 "spectra-agent" is specifically the Java agent JAR loaded into a
 running JVM via the Attach API for layer-2 JVM inspection — see
 [../inspection/jvm.md](../inspection/jvm.md).
@@ -30,9 +30,8 @@ with the binary, can be extended by project-local
 `spectra.yml` overrides or remote rule sources.
 
 **Collector.** A function that observes one slice of system state and
-returns a structured result. `Detect`, `scanRunningProcesses`,
-`scanGrantedPermissions`, etc. are collectors. The daemon is a
-composition of collectors.
+returns a structured result. `Detect`, `scanRunningProcesses`, and
+`scanGrantedPermissions` are collectors.
 
 **Confidence (high / medium / low).** Spectra's classifier output
 quality marker. *High* means a definitive signal matched (e.g. an
@@ -41,11 +40,9 @@ signal was non-specific (e.g. AppKit linked but no framework
 markers). *Low* means we couldn't classify and reported what we
 found.
 
-<a id="daemon"></a>**Daemon.** The long-lived [*unprivileged*](#unprivileged-daemon) Go
-process invoked via `spectra serve`. Owns [*SQLite*](#sqlite),
-[*blob store*](#blob-store), [*tsnet*](#tsnet) state, and lives in
-the user's home. Distinguished from the
-[*privileged helper*](#privileged-helper).
+<a id="daemon"></a>**Background job.** A local launchd job such as
+`spectra schedule`, which periodically captures snapshots. It does not expose
+a listener or accept requests from another machine.
 
 <a id="detect--detection"></a>**Detect / Detection.** The static-inspection layer that classifies
 a `.app` bundle's framework. Returns `detect.Result`. See
@@ -183,16 +180,6 @@ per `(service, client)` pair. Spectra reads it to populate
 LaunchAgent in `~/Library` runs as the user; one in `/Library/LaunchAgents`
 runs as the user (any user); a LaunchDaemon in `/Library/LaunchDaemons`
 runs as root.
-
-<a id="tsnet"></a>**tsnet.** Tailscale's Go library that lets a process join the
-tailnet directly as a node, without requiring `tailscaled`.
-Spectra's daemon embeds it so remote-portal connections work without
-port forwarding. See
-[../design/remote-portal.md](../design/remote-portal.md).
-
-<a id="unprivileged-daemon"></a>**Unprivileged daemon.** The user-running [*daemon*](#daemon)
-process. Distinguished from the
-[*privileged helper*](#privileged-helper).
 
 ## macOS-native terms (non-Spectra)
 
