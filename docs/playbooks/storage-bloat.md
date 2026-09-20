@@ -59,13 +59,6 @@ spectra process
 spectra -v /Applications/Docker.app
 ```
 
-For remote machines:
-
-```bash
-spectra connect work-mac storage
-spectra connect work-mac storage /Applications/Docker.app
-```
-
 ## References
 
 - [Storage footprint](../inspection/storage-footprint.md)

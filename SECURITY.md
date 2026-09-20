@@ -30,7 +30,7 @@ Security reports are especially relevant for:
 - JSON-RPC request parsing and authorization
 - local snapshot storage permissions
 - handling of app bundles, process data, and user-controlled paths
-- remote access over Tailscale or future network transports
+- the separately distributed Spectra Remote transport boundary
 
 Out-of-scope reports include social engineering, denial-of-service
 against development-only commands, and issues that require already

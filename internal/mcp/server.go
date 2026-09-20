@@ -240,7 +240,6 @@ func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
 		"db":          s.toolDB,
 		"toolchain":   s.toolToolchain,
 		"issues":      s.toolIssues,
-		"remote":      s.toolRemote,
 		"power":       s.toolPower,
 		"memory":      s.toolMemory,
 		"storage":     s.toolStorage,

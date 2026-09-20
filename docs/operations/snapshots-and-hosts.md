@@ -26,7 +26,8 @@ ioreg -d2 -c IOPlatformExpertDevice
 That value becomes `snapshot.host.machine_uuid` and the primary key in
 the `hosts` table. Hostname is recorded too, but it is descriptive: it
 can change when the Mac is renamed, joins a different network, or appears
-through Tailscale DNS.
+after the machine has been captured elsewhere and its snapshot is imported
+into the local registry.
 
 If the machine UUID cannot be collected, Spectra falls back to hostname
 when persisting the row. That keeps snapshots usable on partial or
@@ -51,15 +52,11 @@ appears after the first stored snapshot from that machine.
 
 ```bash
 spectra snapshot
-spectra hosts
 spectra snapshot list
 ```
 
-`spectra hosts` lists the known local registry. `--discover` can merge
-Tailscale peer names from `tailscale status --json`, and
-`--discover-daemons` keeps only peers with a reachable Spectra daemon.
-Discovered peers are transient command output unless a snapshot from
-that host is stored locally.
+The local registry is populated only by stored snapshots. It does not discover
+or contact other machines.
 
 ## Snapshot IDs
 
@@ -170,21 +167,9 @@ Use a baseline for any state that must survive routine cleanup:
 spectra snapshot create --baseline before-jdk-upgrade
 ```
 
-## Remote hosts
+## Multiple stored hosts
 
-The local database remains the source of truth for registered hosts.
-Remote daemon calls can create, list, fetch, or diff snapshots on another
-Spectra daemon, but each daemon owns its own SQLite database.
-
-For engineer-to-engineer debugging:
-
-1. Each Mac runs `spectra snapshot` or exposes `snapshot.create` through
-   the daemon.
-2. `spectra hosts` shows machines already seen in the local registry.
-3. `spectra hosts --discover-daemons` finds reachable Tailscale peers
-   running Spectra.
-4. `spectra diff <host-a> <host-b>` compares the newest stored snapshot
-   for each host when those snapshots are reachable or already known.
-
-The storage model deliberately avoids multi-writer replication. Cross-host
-diff is a client operation that loads two snapshots and compares them.
+The local database remains the source of truth for every stored host. It does
+not replicate, discover, or fetch snapshots over the network. When snapshots
+from multiple machines are present in the registry, `spectra reconcile` and
+`spectra fleet` compare their stored inventory locally.

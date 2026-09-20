@@ -531,13 +531,8 @@ func runSnapshotDiff(args []string) int {
 func printDiffUsage() {
 	fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
 	fmt.Fprintln(os.Stderr, "   or: spectra snapshot diff --since <duration>")
-	fmt.Fprintln(os.Stderr, "   or: spectra diff <host-a> <host-b|live>")
 	fmt.Fprintln(os.Stderr, "   or: spectra diff baseline [name|id] [live|id]")
 }
-
-type remoteSnapshotLoader func(ctx context.Context, host string, snapshotID string) (*snapshot.Snapshot, error)
-
-var loadRemoteSnapshot remoteSnapshotLoader = resolveRemoteSnapshot
 
 var collectLiveSnapshot = func(ctx context.Context) *snapshot.Snapshot {
 	snap := snapshot.Build(ctx, snapshot.Options{SpectraVersion: version})
@@ -567,11 +562,11 @@ func resolveDiffOperands(ctx context.Context, db snapshotRegistry, args []string
 		return nil, nil, fmt.Errorf("invalid diff operands")
 	}
 	idA, idB := args[0], args[1]
-	snapA, err := resolveSnapshotWithHostFallback(ctx, db, idA)
+	snapA, err := resolveSnapshot(ctx, db, idA)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot %q: %w", idA, err)
 	}
-	snapB, err := resolveSnapshotWithHostFallback(ctx, db, idB)
+	snapB, err := resolveSnapshot(ctx, db, idB)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot %q: %w", idB, err)
 	}
@@ -585,7 +580,7 @@ func resolveSinceDiffOperands(ctx context.Context, db snapshotRegistry, since ti
 	cutoff := now.UTC().Add(-since)
 	base, err := db.MostRecentSnapshotOlderThan(ctx, cutoff)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, fmt.Errorf("no stored snapshot older than %s exists; run `spectra snapshot create` or start the daemon", since)
+		return nil, nil, fmt.Errorf("no stored snapshot older than %s exists; run `spectra snapshot create`", since)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -627,79 +622,6 @@ func resolveSnapshot(ctx context.Context, db snapshotRegistry, id string) (*snap
 		return collectLiveSnapshot(ctx), nil
 	}
 	return loadSnapshotFromDB(ctx, db, id)
-}
-
-func resolveSnapshotWithHostFallback(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
-	remoteHost, remoteSnapshot, isRemote, err := parseRemoteDiffOperand(id)
-	if err != nil {
-		return nil, err
-	}
-	if isRemote {
-		return loadRemoteSnapshot(ctx, remoteHost, remoteSnapshot)
-	}
-	if strings.HasPrefix(id, "snap-") || id == "live" || strings.HasPrefix(id, "base-") || id == "" {
-		return resolveSnapshot(ctx, db, id)
-	}
-	snap, err := resolveSnapshot(ctx, db, id)
-	if err == nil {
-		return snap, nil
-	}
-	return loadRemoteSnapshot(ctx, id, "")
-}
-
-func parseRemoteDiffOperand(raw string) (host string, snapshotID string, ok bool, err error) {
-	parts := strings.SplitN(raw, "@", 2)
-	if len(parts) != 2 {
-		return "", "", false, nil
-	}
-	if len(parts[0]) == 0 {
-		return "", "", false, fmt.Errorf("invalid remote snapshot operand %q: empty host", raw)
-	}
-	if len(parts[1]) == 0 {
-		return "", "", false, fmt.Errorf("invalid remote snapshot operand %q: empty snapshot id", raw)
-	}
-	return parts[0], parts[1], true, nil
-}
-
-func resolveRemoteSnapshot(ctx context.Context, host string, snapshotID string) (*snapshot.Snapshot, error) {
-	target, err := parseConnectTarget(host)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := dialConnectTarget(target, 3*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("connect %s: %w", host, err)
-	}
-	defer conn.Close()
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	if snapshotID == "" {
-		raw, err := callRPC(conn, "snapshot.list", nil)
-		if err != nil {
-			return nil, fmt.Errorf("snapshot.list: %w", err)
-		}
-		var rows []store.SnapshotRow
-		if err := json.Unmarshal(raw, &rows); err != nil {
-			return nil, fmt.Errorf("snapshot.list: %w", err)
-		}
-		if len(rows) == 0 {
-			return nil, fmt.Errorf("host %s has no snapshots", host)
-		}
-		snapshotID = rows[0].ID
-	}
-
-	raw, err := callRPC(conn, "snapshot.get", connectParams(map[string]string{"ID": snapshotID}))
-	if err != nil {
-		return nil, fmt.Errorf("snapshot.get(%q): %w", snapshotID, err)
-	}
-	var snap snapshot.Snapshot
-	if err := json.Unmarshal(raw, &snap); err != nil {
-		return nil, fmt.Errorf("snapshot.get(%q): %w", snapshotID, err)
-	}
-	return &snap, nil
 }
 
 func resolveBaselineSnapshot(ctx context.Context, db snapshotRegistry, ref string) (*snapshot.Snapshot, error) {

@@ -32,13 +32,11 @@ type Step struct {
 	Signals  []Signal
 }
 
-// Command is a Spectra command template. Args intentionally excludes
-// the leading "spectra" binary name so callers can render commands for
-// local, remote, or embedded usage.
+// Command is a local Spectra command template. Args intentionally excludes
+// the leading "spectra" binary name so callers can render commands.
 type Command struct {
 	Args        []string
 	Description string
-	Remote      bool
 	Destructive bool
 }
 

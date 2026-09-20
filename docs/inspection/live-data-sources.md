@@ -12,28 +12,24 @@ fork cost twice.
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `ps -axwwo pid,ppid,pcpu,rss,vsz,uid,user,lstart,command` | full process table | user | ~30ms / call | `process.CollectAll`, snapshots, daemon ring buffer |
+| `ps -axwwo pid,ppid,pcpu,rss,vsz,uid,user,lstart,command` | full process table | user | ~30ms / call | `process.CollectAll`, snapshots |
 | `log stream --predicate 'eventMessage CONTAINS "posix_spawn" AND eventMessage CONTAINS "failed"' --info --style ndjson` | failed `posix_spawn` proxy events | user | streaming, opt-in | `process.churn` failed-spawn counts |
 | `proc_pidinfo(PROC_PIDTASKALLINFO)` + `proc_pidpath` | per-process thread count, BSD name, executable path | user | microseconds / process | `process.CollectAll`, snapshots |
 | `libproc` (cgo) | richer per-process: fd count, region info | user | ~per-process | future expansion |
 | `top -l 1 -n 10 -o power -stats pid,power,command` | flat per-process energy attribution | user | ~200ms | `power.energy_top_users` |
 | `sample <pid> 1` | one-second user-space sample, kernel sample optional | user (own procs); root (others) | ~1s + binding cost | `spectra sample` |
 
-`ps` is still the base inventory source for snapshots, `spectra process`,
-the daemon's ~1Hz metrics sampler, and the per-app churn tracker. Darwin builds
-enrich those rows with direct libproc calls for fields that are cheap and structured.
+`ps` is still the base inventory source for snapshots and `spectra process`.
+Darwin builds enrich those rows with direct libproc calls for fields that are cheap and structured.
 `--deep` process scans add one batched `lsof -p pid1,pid2,...` call to
 populate open file descriptor counts, listening ports, and outbound
 remote addresses. The natural upgrade path is expanding the direct
 `libproc` / `proc_pidinfo` coverage, which would eliminate more fork cost
 and add richer per-process detail.
 
-The failed-spawn side of churn is off by default because `log stream` is a
-long-running process with measurable overhead. When enabled with
-`spectra serve --track-spawn-failures`, Spectra treats unified log
-`posix_spawn` failure messages as a proxy for failed child creation. App
-attribution depends on the log payload containing a recognizable `.app` path;
-entries without one are ignored rather than guessed.
+Failed-spawn tracking is not part of the local-only core. The core can inspect
+the current process inventory and persisted snapshots without a long-running
+log watcher.
 
 ## File and disk activity
 

@@ -1,12 +1,10 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,7 +46,6 @@ func toolDefinitions() []ToolDefinition {
 		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
 		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
-		operationToolDef("remote", "Call a Spectra daemon or list known hosts. Ops: health, hosts, rpc, fanout. Ask: \"Check host health.\" \"What hosts do we know about?\"", []string{"health", "hosts", "rpc", "triage", "fanout"}),
 		powerToolDef(),
 		memoryToolDef(),
 		storageToolDef(),
@@ -189,7 +186,7 @@ func coreToolDef() ToolDefinition {
 func metricsToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "metrics",
-		Description: "Stored process metrics and app churn from a running spectra daemon. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
+		Description: "Locally stored process metrics and app churn. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"process", "churn"}, "process"),
 			"pid":       integerProp("PID filter (process)."),
@@ -283,11 +280,6 @@ func operationToolDef(name, description string, operations []string) ToolDefinit
 			"confirm_sensitive": boolProp("Allow sensitive artifact."),
 			"deep":              boolProp("More process detail."),
 			"include_raw":       boolProp("Return raw data."),
-			"network":           stringProp("unix or tcp."),
-			"address":           stringProp("Daemon address."),
-			"method":            stringProp("Daemon RPC method."),
-			"params":            map[string]interface{}{"type": "object", "description": "RPC params."},
-			"hosts":             arrayStringProp("Daemon addresses."),
 			"command":           stringProp("Fix command."),
 			"output":            stringProp("Fix output."),
 			"exit_code":         integerProp("Exit code."),
@@ -804,7 +796,7 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
 	case "history":
-		return toolError("process history requires a running spectra daemon; use remote operation=rpc method=process.history")
+		return toolError("process history is unavailable in the local-only MCP server")
 	default:
 		return toolError("unknown process operation: " + p.Operation)
 	}
@@ -1100,7 +1092,7 @@ func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
 		}
 		return toolText(toolEnvelope{Summary: "network diagnostic snapshot collected", Evidence: evidence, Raw: optionalRaw(p.IncludeRaw, map[string]interface{}{"state": state, "connections": conns}), Timestamp: s.now()})
 	case "firewall", "capture_start", "capture_stop":
-		return toolError("network " + p.Operation + " requires the privileged helper via a running spectra daemon; use remote operation=rpc")
+		return toolError("network " + p.Operation + " is unavailable in the local-only MCP server")
 	default:
 		return toolError("unknown network operation: " + p.Operation)
 	}
@@ -1309,78 +1301,6 @@ func (s *Server) toolIssuesFixHistory(db *store.DB, p issuesParams) ToolResult {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: s.now()})
-}
-
-func (s *Server) toolRemote(raw json.RawMessage) ToolResult {
-	var p remoteParams
-	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
-	}
-	if p.Network == "" {
-		p.Network = "tcp"
-	}
-	switch p.Operation {
-	case "health", "":
-		return s.toolRemoteHealth(p)
-	case "hosts":
-		return s.toolRemoteHosts()
-	case "rpc":
-		return s.toolRemoteRPC(p)
-	case "triage":
-		return toolError("remote triage is not a daemon RPC yet; use remote operation=rpc with method names such as snapshot.create, rules.check, jvm.list")
-	case "fanout":
-		return s.toolRemoteFanout(p)
-	default:
-		return toolError("unknown remote operation: " + p.Operation)
-	}
-}
-
-type remoteParams struct {
-	Operation string                 `json:"operation"`
-	Network   string                 `json:"network"`
-	Address   string                 `json:"address"`
-	Method    string                 `json:"method"`
-	Params    map[string]interface{} `json:"params"`
-	Hosts     []string               `json:"hosts"`
-}
-
-func (s *Server) toolRemoteHealth(p remoteParams) ToolResult {
-	address := p.Address
-	if address == "" {
-		address = "127.0.0.1:7878"
-	}
-	resp, err := callDaemon(p.Network, address, "health", nil)
-	if err != nil {
-		return toolError(err.Error())
-	}
-	return toolText(toolEnvelope{Summary: "remote health check completed", Raw: resp, Timestamp: s.now()})
-}
-
-func (s *Server) toolRemoteRPC(p remoteParams) ToolResult {
-	if p.Address == "" || p.Method == "" {
-		return toolError("remote rpc requires address and method")
-	}
-	resp, err := callDaemon(p.Network, p.Address, p.Method, p.Params)
-	if err != nil {
-		return toolError(err.Error())
-	}
-	return toolText(toolEnvelope{Summary: "remote rpc completed: " + p.Method, Raw: resp, Timestamp: s.now()})
-}
-
-func (s *Server) toolRemoteFanout(p remoteParams) ToolResult {
-	if len(p.Hosts) == 0 || p.Method == "" {
-		return toolError("remote fanout requires hosts and method")
-	}
-	out := make(map[string]interface{}, len(p.Hosts))
-	for _, host := range p.Hosts {
-		resp, err := callDaemon(p.Network, host, p.Method, p.Params)
-		if err != nil {
-			out[host] = map[string]string{"error": err.Error()}
-		} else {
-			out[host] = resp
-		}
-	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("fanout completed for %d host(s)", len(p.Hosts)), Raw: out, Timestamp: s.now()})
 }
 
 type inspectResult struct {
@@ -1742,33 +1662,6 @@ func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
 		return "", fmt.Errorf("sample pid %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
-}
-
-func callDaemon(network, address, method string, params interface{}) (interface{}, error) {
-	conn, err := net.DialTimeout(network, address, 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	if params == nil {
-		params = map[string]interface{}{}
-	}
-	req := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return nil, err
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	var resp struct {
-		Result interface{} `json:"result"`
-		Error  *RPCError   `json:"error"`
-	}
-	if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&resp); err != nil {
-		return nil, err
-	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("remote error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-	return resp.Result, nil
 }
 
 func summarizeApp(r detect.Result) []string {

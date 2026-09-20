@@ -43,7 +43,6 @@ func readResourceText(uri string) string {
 - network: routes, DNS, sockets
 - toolchain: JDKs, runtimes, build tools
 - issues: track findings
-- remote: call a Spectra daemon
 
 Ask:
 - What looks wrong with this app?
@@ -63,7 +62,6 @@ Then use:
 - snapshot diff for "what changed?"
 
 Heap dumps and flamegraphs require confirm_sensitive=true.
-Helper-only actions use remote operation=rpc.
 `,
 	}
 	return resources[uri]

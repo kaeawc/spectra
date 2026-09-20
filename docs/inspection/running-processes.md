@@ -87,9 +87,8 @@ The `RunningProcesses` field on the JSON result holds the full list:
 - **Bundle-grouped view.** Activity Monitor's flat process list shows
   35 Claude Helper processes. Spectra collapses them to one row with
   a count and total RSS — much easier to scan.
-- **Foundation for the daemon.** When `spectra serve` lands, this same
-  collector will run on a 1-second interval and produce the in-memory
-  ring buffer described in [../design/storage.md](../design/storage.md).
+- **Snapshot foundation.** This collector also supplies the point-in-time
+  process data stored in local snapshots.
 
 ## Limitations
 

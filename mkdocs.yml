@@ -5,7 +5,7 @@
 site_name: Spectra
 repo_name: spectra
 repo_url: https://github.com/kaeawc/spectra
-site_description: "macOS app diagnostics, JVM-aware remote debugging portal"
+site_description: "Local macOS app diagnostics and JVM debugging"
 site_author: Jason Pearson
 remote_branch: gh-pages
 use_directory_urls: true
@@ -69,7 +69,7 @@ nav:
       - Distribution: design/distribution.md
       - Storage: design/storage.md
       - System inventory: design/system-inventory.md
-      - Remote portal: design/remote-portal.md
+      - Remote separation: design/remote-portal.md
       - Privileged helper: design/privileged-helper.md
       - Threat model: design/threat-model.md
       - Recommendations engine: design/recommendations-engine.md
@@ -107,14 +107,14 @@ nav:
       - Network failure: playbooks/network-failure.md
       - Storage bloat: playbooks/storage-bloat.md
       - Terminal spawning: playbooks/terminal-spawning.md
-      - Remote triage: playbooks/remote-triage.md
+      - Cross-machine triage: playbooks/remote-triage.md
       - Toolchain drift: playbooks/toolchain-drift.md
   - Operations:
       - CLI: operations/cli.md
       - Issues: operations/issues.md
       - Install services: operations/install-services.md
-      - Daemon: operations/daemon.md
-      - Remote: operations/remote.md
+      - Background service: operations/daemon.md
+      - Remote separation: operations/remote.md
       - Snapshots and hosts: operations/snapshots-and-hosts.md
       - Caching: operations/caching.md
       - Artifact lifecycle: operations/artifacts.md

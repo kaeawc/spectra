@@ -144,7 +144,7 @@ application recordings. `internal/jvm` implements that interface for JFR: it can
 run and parse `jfr view` tables for GC pauses, allocation sites, hot methods,
 monitor blocking, file I/O, and socket I/O, then combine those event views with
 `jfr summary` counts into first-pass incident findings. The same structures are
-intended to back future CLI, daemon RPC, MCP, and remote-debugging views.
+intended to back future CLI and local MCP views.
 
 ## Compatibility posture
 
@@ -317,9 +317,7 @@ Swing app, hard to keep working with modern JDKs, no remote story
 beyond JMX-over-RMI port forwarding. Spectra's JVM subsystem is
 purpose-built for the workflow that exists today:
 
-- **Remote-by-default.** Same `spectra connect work-mac` portal as the
-  rest of Spectra over explicit TCP or managed `tsnet`
-  ([../design/remote-portal.md](../design/remote-portal.md)).
+- **Local by default.** JVM inspection runs against the current machine.
 - **Persistent.** Thread dumps and JFR recordings can be stored in the blob
   cache; heap dumps are written as explicit `.hprof` artifacts.
 - **Catalog-driven.** Recommendations engine fires JVM-specific rules
@@ -345,7 +343,7 @@ Implemented:
 8. `spectra jvm explain` interpretation for JVM args, GC pressure,
    metaspace/classloader footprint, code cache, soft references, native
    memory tracking, and short-window trends.
-9. CLI and daemon RPC surfaces for the implemented collectors.
+9. CLI and local MCP surfaces for the implemented collectors.
 10. Path-based attribution from each running JVM's `java.home` to the
    installed-JDK inventory.
 11. `jfr summary` parsing for structured recording metadata and event

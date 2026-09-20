@@ -88,22 +88,22 @@ when the corresponding feature lands.
 
 | Item | Why deferred | When to lift |
 |---|---|---|
-| `internal/cacheutil/` | Adds `klauspost/compress/zstd` as a third-party dep; no use site yet | When the daemon's blob cache lands ([../operations/caching.md](../operations/caching.md)) |
-| `internal/tui/` | Adds Bubble Tea, lipgloss, bubbles deps; no use site yet | When the daemon RPC stabilizes and we build the TUI client ([../design/architecture.md](../design/architecture.md)) |
-| `internal/httpserver/`, `internal/httpmw/`, `internal/httpx/` | HTTP machinery for the daemon | When `spectra serve` is implemented ([../operations/daemon.md](../operations/daemon.md)) |
-| `internal/auth/tailscale.go` | Tailscale identity authenticator | When `tsnet` is integrated ([../design/remote-portal.md](../design/remote-portal.md)) |
-| `internal/limiter/`, `internal/ratelimit/`, `internal/circuitbreaker/` | Rate limiting and outbound-call resilience | When the daemon makes outbound calls or accepts concurrent clients |
-| `internal/scheduler/` | In-process job scheduler | When the daemon runs periodic snapshots |
+| `internal/cacheutil/` | Adds `klauspost/compress/zstd` as a third-party dep; no use site yet | When a local blob-cache use site lands ([../operations/caching.md](../operations/caching.md)) |
+| `internal/tui/` | Adds Bubble Tea, lipgloss, bubbles deps; no use site yet | When a local TUI use case is defined |
+| `internal/httpserver/`, `internal/httpmw/`, `internal/httpx/` | HTTP machinery | Never in the local-only core |
+| `internal/auth/tailscale.go` | Tailscale identity authenticator | Belongs in Spectra Remote, not core |
+| `internal/limiter/`, `internal/ratelimit/`, `internal/circuitbreaker/` | Rate limiting and outbound-call resilience | When a local bounded operation needs it |
+| `internal/scheduler/` | In-process job scheduler | When local periodic snapshots need it |
 | `internal/eventbus/` | In-process pub/sub | If the daemon needs internal event distribution between collectors |
-| `internal/healthcheck/` | Liveness/readiness probes | When the daemon exposes `/health` |
-| `internal/jsonresp/` | JSON response helpers + structured error envelope | When daemon RPC handlers are written |
+| `internal/healthcheck/` | Liveness/readiness probes | Never in the local-only core |
+| `internal/jsonresp/` | JSON response helpers + structured error envelope | Never in the local-only core |
 | `internal/perf/` | Local timing tracker, no OTel | If we want a built-in CLI perf summary |
-| `internal/tokens/` | HMAC-signed JWT-compatible tokens | If we add per-host bearer tokens beyond Tailscale ACLs |
+| `internal/tokens/` | HMAC-signed JWT-compatible tokens | Belongs in Spectra Remote, not core |
 | `internal/paginator/` | Cursor pagination for list endpoints | If snapshot-list responses get long enough to warrant it |
-| `internal/kv/` | Generic in-memory store with TTL | If the daemon caches anything in RAM with expiry |
+| `internal/kv/` | Generic in-memory store with TTL | If a local collector caches anything in RAM with expiry |
 | `internal/db/`, `sql/`, `sqlc.yaml` | Postgres-specific persistence | Never for Spectra's own storage — that stays SQLite, see [../design/storage.md](../design/storage.md). Outbound read-only inspection of *other* apps' postgres databases lives in `internal/dbinspect/` and is unrelated to these patterns |
 | `internal/handlers/`, `internal/middleware/`, `internal/jobs/`, `internal/investigations/` | Server-specific business logic | Never — those are golang-build's product |
-| `internal/tracing/`, `internal/profiling/` | Full OpenTelemetry + Pyroscope | Likely never; the daemon may add a minimal `perf` instead |
+| `internal/tracing/`, `internal/profiling/` | Full OpenTelemetry + Pyroscope | Likely never; the local CLI may add a minimal `perf` instead |
 | `internal/blobstore/` | S3-backed object store | Never — Spectra's blob store is local filesystem |
 | `internal/cache/` (Valkey wrapper) | Redis/Valkey | Never |
 | `cmd/server/`, `cmd/loadgen/`, `cmd/onboard/`, `cmd/scaffold/`, `cmd/admin/` | Server-template entry points | Never |

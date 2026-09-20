@@ -61,19 +61,19 @@ spectra network firewall
 spectra network firewall --json
 ```
 
-## Remote target
+## Repeatable local comparison
 
-Network failures are often machine-specific. Compare the sick host with a
-known-good host:
+Network failures are often time-specific. Capture a baseline before reproducing
+the failure, then compare it with the current local state:
 
 ```bash
-spectra connect work-mac network
-spectra connect work-mac network-by-app /Applications/Slack.app
-spectra fan --hosts work-mac,known-good call network.connections
+spectra snapshot --baseline before-network-failure
+spectra network
+spectra diff baseline before-network-failure live
 ```
 
 ## References
 
 - [Network endpoints](../inspection/network-endpoints.md)
 - [Live data sources](../inspection/live-data-sources.md)
-- [CLI network commands](../operations/cli.md#spectra-network)
+- [CLI commands](../operations/cli.md)

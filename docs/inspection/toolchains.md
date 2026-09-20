@@ -2,8 +2,8 @@
 
 Spectra catalogs package managers, language runtimes, JVM managers, build
 tools, and shell environment fields that affect runtime resolution. The
-inventory is available from the CLI, the daemon RPC surface, and snapshots;
-snapshot diffs and recommendation rules consume the same data.
+inventory is available from the CLI and snapshots; snapshot diffs and
+recommendation rules consume the same data.
 
 The "diff my Mac vs your Mac" feature for engineers stands or falls
 on toolchain inventory. Two engineers debugging a flaky JVM test need
@@ -22,15 +22,6 @@ spectra toolchain jdks --json
 spectra snapshot create --baseline pre-debug
 spectra diff baseline pre-debug live
 ```
-
-Daemon methods:
-
-- `toolchain.scan`
-- `toolchain.brew`
-- `toolchain.runtimes`
-- `toolchain.build_tools`
-- `jdk.list`
-- `jdk.scan`
 
 ## Subsystems
 

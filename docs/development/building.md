@@ -53,7 +53,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
 On Linux, the host-aware collectors use native sources — `/etc/os-release`
 and `/proc` for host facts, `/proc` for processes, `ip`/`ss`/`/proc/net`
 for network state, `df`/`/proc/mounts` for storage, `/sys` for power — and
-the daemon/helper install via systemd. App-bundle inspection
+the optional helper install via systemd. App-bundle inspection
 (`.app`/Mach-O/`codesign`/TCC) has no Linux equivalent and is refused with
 a clear message. The `internal/hostos` package is the OS-selection layer
 every collector consults.

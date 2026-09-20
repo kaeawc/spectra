@@ -355,8 +355,7 @@ func (s *Server) toolCache(raw json.RawMessage) ToolResult {
 	}
 }
 
-// toolMetrics reads stored process metrics and app-churn aggregates persisted
-// by a running spectra daemon.
+// toolMetrics reads locally stored process metrics and app-churn aggregates.
 func (s *Server) toolMetrics(raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
@@ -411,22 +410,4 @@ func (s *Server) toolMetrics(raw json.RawMessage) ToolResult {
 	default:
 		return toolError("unknown metrics operation: " + p.Operation)
 	}
-}
-
-// toolRemoteHosts lists hosts known from stored snapshots.
-func (s *Server) toolRemoteHosts() ToolResult {
-	db, err := openStore()
-	if err != nil {
-		return toolError(err.Error())
-	}
-	defer db.Close()
-	rows, err := db.ListHosts(context.Background())
-	if err != nil {
-		return toolError(err.Error())
-	}
-	return toolText(toolEnvelope{
-		Summary:   fmt.Sprintf("found %d known host(s)", len(rows)),
-		Raw:       rows,
-		Timestamp: s.now(),
-	})
 }

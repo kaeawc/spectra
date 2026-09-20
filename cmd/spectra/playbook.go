@@ -218,9 +218,6 @@ func printPlaybook(w io.Writer, pb playbook.Playbook) {
 		}
 		for _, cmd := range step.Commands {
 			fmt.Fprintf(w, "   $ spectra %s", strings.Join(cmd.Args, " "))
-			if cmd.Remote {
-				fmt.Fprint(w, "  # remote")
-			}
 			if cmd.Destructive {
 				fmt.Fprint(w, "  # capture/pausing action")
 			}

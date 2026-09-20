@@ -1,8 +1,7 @@
 # Spectra
 
-A diagnostic agent for macOS that combines deep static inspection of installed
-apps with live process state, JVM toolchain awareness, and engineer-to-engineer
-remote debugging over Tailscale.
+A local diagnostic tool for macOS that combines deep static inspection of
+installed apps with live process state and JVM toolchain awareness.
 
 Spectra exists to answer questions Activity Monitor structurally cannot:
 
@@ -10,26 +9,21 @@ Spectra exists to answer questions Activity Monitor structurally cannot:
   Desktop, Mac Catalyst, custom Swift+WebKit?"
 - "What entitlements has it declared, what permissions has the user granted,
   and which is it actively using right now?"
-- "Why is my Mac and my teammate's Mac behaving differently — what JDK
-  versions, brew formulae, and toolchain drift exists between them?"
 - "What is this app's storage footprint across the eight `~/Library`
   locations apps spread state into — including sparse files like Docker's
   VM disk?"
-- "Which engineers on my tailnet have Slack running right now, with how much
-  RSS, talking to which hosts?"
 
 ## What's Here Today
 
-The current implementation is a CLI (`spectra`) plus an optional daemon
-and privileged helper. It does deep single-host inspection of `.app`
-bundles, live process/network/storage/toolchain inventory, snapshots,
-baseline diffs, recommendations, and JSON-RPC calls to a local or explicit
-TCP daemon. See
+The current implementation is a local CLI (`spectra`) plus an optional
+privileged helper. It does deep single-host inspection of `.app` bundles,
+live process/network/storage/toolchain inventory, snapshots, baseline diffs,
+and recommendations. See
 [detection/overview.md](detection/overview.md) for the framework detection
 model, [inspection/metadata.md](inspection/metadata.md) for what we
 extract from each bundle, and
-[design/architecture.md](design/architecture.md) for the daemon, helper,
-and client model.
+[design/architecture.md](design/architecture.md) for the local CLI and helper
+model.
 
 ```
 ./spectra /Applications/Slack.app           # one app, terse table
@@ -38,33 +32,19 @@ and client model.
 ./spectra --json --network /Applications/*  # JSON, with embedded URL hosts
 ./spectra snapshot --baseline pre-incident  # save a baseline
 ./spectra diff baseline pre-incident live   # compare baseline to now
-./spectra serve --tcp 127.0.0.1:7878        # opt-in TCP JSON-RPC
-./spectra connect 127.0.0.1:7878            # health check over RPC
 ```
 
 ## Implemented And Planned
 
-- **tsnet remote portal** — `spectra serve --tsnet` exposes a managed
-  tailnet daemon, and `spectra connect work-mac` can inspect it through
-  MagicDNS without manually exposing a TCP listener. See
-  [design/remote-portal.md](design/remote-portal.md).
-- **Remote fan-out** — `spectra fan --hosts ...` runs one typed remote
-  call across multiple explicit daemon targets; `spectra hosts` lists
-  locally known hosts from snapshots and `--discover-daemons` probes
-  reachable Spectra daemons discovered through Tailscale.
-- **TUI client** — Bubble Tea UI against the same local-or-remote daemon
-  RPC surface.
-- **Release packaging** — the user LaunchAgent installer exists;
-  Homebrew formula, prebuilt binaries, signing, and notarization are
-  still planned. See [operations/daemon.md](operations/daemon.md) and
-  [operations/remote.md](operations/remote.md) for implemented service
-  and remote operation details.
+- **Cross-machine diagnostics** — use the separately distributed Spectra
+  Remote project; the core Spectra binary has no listener or remote transport.
+- **Release packaging** — Homebrew, prebuilt binaries, signing, and
+  notarization are still planned.
 
 ## Distribution
 
-Spectra currently installs from source with an optional `sudo` helper
-install for root-only telemetry (system TCC, firewall rules, and
-`powermetrics`) and a per-user `spectra install-daemon` LaunchAgent for
-daemon lifecycle. Homebrew and prebuilt binaries are planned. The Mac
-App Store is incompatible with the live-monitoring features. See
+Spectra currently installs from source with an optional `sudo` helper install
+for root-only telemetry (system TCC, firewall rules, and `powermetrics`).
+Homebrew and prebuilt binaries are planned. The Mac App Store is incompatible
+with the live-monitoring features. See
 [design/distribution.md](design/distribution.md) for the full analysis.
