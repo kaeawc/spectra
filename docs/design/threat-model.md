@@ -6,7 +6,7 @@ privileged helper's narrowly scoped telemetry.
 
 ## Trust boundaries
 
-```
+```text
 Local CLI ── local collectors ── local files and system tools
      │
      └── optional privileged helper over a local Unix socket

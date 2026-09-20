@@ -143,7 +143,7 @@ func jvmMemory() Playbook {
 		References: []Reference{
 			{Title: "JVM inspection", Path: "docs/inspection/jvm.md"},
 			{Title: "Toolchains", Path: "docs/inspection/toolchains.md"},
-			{Title: "Remote operations", Path: "docs/operations/remote.md"},
+			{Title: "Privileged helper", Path: "docs/design/privileged-helper.md"},
 		},
 	}
 }
@@ -325,7 +325,7 @@ func toolchainDrift() Playbook {
 		ID:          "toolchain-drift",
 		Title:       "Toolchain drift",
 		Symptom:     "A build, test, JVM, package manager, or language runtime works on one Mac but fails on another.",
-		Description: "Collect local inventory and compare saved snapshots to interpret version, vendor, manager, and PATH differences.",
+		Description: "Collect local inventory and compare locally stored snapshots to interpret version, vendor, manager, and PATH differences.",
 		Steps: []Step{
 			{
 				ID:      "local",
@@ -344,11 +344,11 @@ func toolchainDrift() Playbook {
 			},
 			{
 				ID:      "compare",
-				Title:   "Compare machines",
-				Purpose: "Use snapshots when drift matters over time.",
+				Title:   "Compare stored snapshots",
+				Purpose: "Compare the local registry's saved snapshots for the two machines.",
 				Commands: []Command{
-					{Args: []string{"snapshot", "--baseline", "before-upgrade"}, Description: "Save a pre-change baseline"},
-					{Args: []string{"diff", "baseline", "before-upgrade", "live"}, Description: "Compare a baseline with live state"},
+					{Args: []string{"reconcile", "--from", "alice-laptop", "bob-laptop"}, Description: "Create an advisory plan from locally stored snapshots"},
+					{Args: []string{"fleet", "drift", "--jdk"}, Description: "Summarize JDK drift across locally stored snapshots"},
 				},
 			},
 		},

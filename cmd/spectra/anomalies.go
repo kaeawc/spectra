@@ -44,7 +44,7 @@ func runAnomaliesWithIO(args []string, stdout, stderr io.Writer, loadMetrics met
 		return 1
 	}
 	if len(rows) == 0 {
-		fmt.Fprintln(stderr, "no process metrics stored — run `spectra serve` to sample processes over time")
+		fmt.Fprintln(stderr, "no process metrics stored — process anomaly analysis is unavailable in the local-only core")
 		return 1
 	}
 	findings := anomaly.Detect(buildRSSSeries(rows), *minSamples, *z)

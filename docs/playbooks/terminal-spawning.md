@@ -56,7 +56,6 @@ Use the suspect app path from the process table:
 
 ```bash
 spectra -v /Applications/Claude.app
-spectra connect local process-tree /Applications/Claude.app
 spectra snapshot --baseline terminal-spawning-before
 ```
 

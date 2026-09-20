@@ -1,7 +1,7 @@
 # Power and thermal inspection
 
-Spectra treats power and thermal state as host inspection data. It is separate
-from app bundle detection and separate from remote fan-out.
+Spectra treats power and thermal state as host inspection data, separate from
+app bundle detection.
 
 The local command is:
 
@@ -9,16 +9,6 @@ The local command is:
 spectra power
 spectra power --json
 ```
-
-Remote callers use the same collector through the daemon RPC method:
-
-```bash
-spectra connect work-mac power
-spectra fan --hosts work-mac,alice-laptop power
-```
-
-`spectra fan` means fan-out across remote Spectra daemons. It does not control,
-query, or tune hardware fans.
 
 ## Data model
 

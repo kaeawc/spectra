@@ -67,20 +67,7 @@ spectra jvm jfr summary ~/Desktop/incident.jfr
 spectra jvm flamegraph --event cpu --duration 30 --out ~/Desktop/cpu.html <pid>
 ```
 
-## Remote target
-
-Run the same flow against a daemon target when the sick JVM is on another
-Mac:
-
-```bash
-spectra connect work-mac jvm
-spectra connect work-mac jvm-explain <pid>
-spectra connect work-mac jvm-vm-memory <pid>
-spectra connect work-mac jvm-threads <pid>
-```
-
 ## References
 
 - [JVM inspection](../inspection/jvm.md)
 - [Toolchains](../inspection/toolchains.md)
-- [Remote operations](../operations/remote.md)

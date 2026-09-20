@@ -144,24 +144,16 @@ returning key/type/TTL/bounded-value rows.
 Schema and stats are structural. Row samples are not: they can contain
 customer PII and secrets. `sample` is therefore treated like a heap dump —
 it is recorded in the artifact manifest at `very-high` sensitivity, and the
-daemon RPC and MCP operations refuse it without
+MCP operations refuse it without
 `{"confirm_sensitive": true}`, subject to the same
 [artifact policy](../operations/artifacts.md) as `jvm.heap_dump`.
 
-## Daemon RPC and MCP
+## MCP
 
-The daemon registers `db.discover`, `db.overview`, `db.schema`,
-`db.relations`, `db.stats`, and `db.sample`, so a remote engineer can
-inspect through an existing `spectra serve` session:
-
-```bash
-spectra connect work-mac db.overview '{"dsn": "postgres://app@10.0.0.5/orders"}'
-```
-
-The MCP server exposes the same operations on the `db` tool
+The local MCP server exposes the same operations on the `db` tool
 (`operation: discover | overview | schema | relations | stats | sample`),
-so an agent can go from "this process holds a socket to 10.0.0.5:5432" to a
-schema map in two calls.
+so a local agent can go from "this process holds a socket to 10.0.0.5:5432"
+to a schema map in two calls.
 
 ## See also
 

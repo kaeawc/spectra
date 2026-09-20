@@ -31,8 +31,7 @@ depending on the protocol and capture filter.
 
 ## Creation
 
-Artifacts are created only by explicit diagnostic commands or daemon RPC
-methods. Routine app inspection does not create heap dumps, JFR
+Artifacts are created only by explicit diagnostic commands. Routine app inspection does not create heap dumps, JFR
 recordings, or packet captures.
 
 ```bash
@@ -47,10 +46,10 @@ spectra network capture stop ...
 ```
 
 For local CLI commands, the person running the command is responsible
-for choosing whether the target process may be inspected. For daemon RPC
-calls, sensitive write methods require an explicit consent parameter
-such as `confirm_sensitive: true`; callers should surface that consent
-in their own UI instead of hiding it behind a default.
+for choosing whether the target process may be inspected. Sensitive operations
+require an explicit consent parameter such as `confirm_sensitive: true`; local
+callers should surface that consent in their own UI instead of hiding it behind
+a default.
 
 ## Storage
 
@@ -63,7 +62,7 @@ Spectra uses two storage roots:
   `spectra cache`.
 
 Both roots are per-user. Spectra does not write shared system-wide
-artifact stores for normal CLI or daemon operation. The privileged
+artifact stores for normal CLI operation. The privileged
 helper may create root-only packet-capture files while a capture is
 active; those are bounded by helper validation and should be treated as
 high-sensitivity artifacts once returned to the user.
@@ -176,23 +175,6 @@ frames, and file paths can all identify systems or users.
 Do not assume that a derived summary is safe for public posting without
 review.
 
-## Remote access
-
-Remote debugging over TCP or Tailscale delegates meaningful diagnostic
-power to the peer. A peer who can request heap dumps, JFR dumps, process
-samples, or packet captures may obtain sensitive data from the machine.
-
-Remote clients should:
-
-- require explicit consent for each high-sensitivity artifact,
-- show the destination path and estimated scope before capture,
-- avoid serving raw artifacts by default,
-- prefer summaries and bounded excerpts,
-- record artifact creation in the daemon audit log or future artifact
-  manifest.
-
-This complements the security posture in the
-[Threat model](../design/threat-model.md).
 
 ## Incident handling
 

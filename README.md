@@ -53,7 +53,7 @@ test suite catches up.
 Full living docs at [`docs/`](docs/index.md):
 
 - [Quickstart](docs/quickstart.md) — common commands and outputs
-- [Architecture](docs/design/architecture.md) — daemon, helper, and clients
+- [Architecture](docs/design/architecture.md) — local CLI and privileged helper
 - [Distribution](docs/design/distribution.md) — why MAS is out, why Homebrew
 - [Storage stack](docs/design/storage.md) — SQLite + sharded blob store
 - [Detection model](docs/detection/overview.md) — the three-layer classifier
@@ -70,7 +70,7 @@ make docs-serve     # http://127.0.0.1:8080
 
 - macOS or Linux. Spectra is host-OS-aware: on Linux it uses native
   sources (`/etc/os-release`, `/proc`, `/sys`, `ip`/`ss`, `df`) and installs
-  the daemon/helper via systemd. App-bundle inspection is macOS-only — it
+  the optional helper via the platform-specific installer. App-bundle inspection is macOS-only — it
   shells out to `plutil`, `otool`, `codesign`, `file`, and `sqlite3`, and is
   refused with a clear message on Linux.
 - Go 1.26+ for source builds

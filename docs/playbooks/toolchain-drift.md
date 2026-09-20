@@ -18,13 +18,14 @@ Pay attention to version, vendor, install path, manager, and `$PATH` order.
 The same version at a different path may be harmless; a different vendor,
 major version, or shadowed binary is more likely to explain drift.
 
-## Compare machines
+## Compare stored machines
 
-Use fan-out when the question spans multiple Macs:
+Store a snapshot from each Mac in the same local registry, then compare their
+toolchains without connecting to either machine:
 
 ```bash
-spectra fan --hosts alice-laptop,bob-laptop toolchains
-spectra fan --hosts alice-laptop,bob-laptop jdk
+spectra reconcile --from alice-laptop bob-laptop
+spectra fleet drift --jdk
 ```
 
 Use snapshots and diffs when the drift is temporal:

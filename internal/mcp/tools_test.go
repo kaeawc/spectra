@@ -94,7 +94,6 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 		"db",
 		"toolchain",
 		"issues",
-		"remote",
 		"power",
 		"memory",
 		"storage",
@@ -112,6 +111,9 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 			t.Fatalf("missing tool definition %q", name)
 		}
 	}
+	if got["remote"] {
+		t.Fatal("local MCP server must not expose remote access")
+	}
 }
 
 func TestInspectAppRequiresPaths(t *testing.T) {
@@ -122,17 +124,6 @@ func TestInspectAppRequiresPaths(t *testing.T) {
 	}
 	if len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, "paths is required") {
 		t.Fatalf("unexpected error content: %+v", result.Content)
-	}
-}
-
-func TestRemoteHealthDefaultsToTCP(t *testing.T) {
-	schema := operationToolDef("remote", "remote", []string{"health"})
-	raw, err := json.Marshal(schema.InputSchema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "operation") {
-		t.Fatalf("remote schema does not expose operation: %s", raw)
 	}
 }
 

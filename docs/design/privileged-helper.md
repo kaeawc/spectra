@@ -14,9 +14,9 @@ require root:
 3. **`powermetrics`** — root-only energy attribution.
 
 Spectra splits these out into a separately-installed LaunchDaemon helper.
-The unprivileged daemon talks to it over a local Unix socket when (and only
-when) it needs root data. Users who don't install the helper still get every
-other capability.
+The local CLI talks to it over a local Unix socket when (and only when) it
+needs root data. Users who don't install the helper still get every other
+capability.
 
 ## Why two processes
 
@@ -24,10 +24,10 @@ A single binary that auto-elevates would either be setuid (a trust
 nightmare on macOS, strongly discouraged) or would prompt for sudo
 on every invocation (hostile UX). The right pattern on macOS is:
 
-- An **unprivileged** long-running daemon that owns user-scoped data.
+- An **unprivileged** local CLI that owns user-scoped data.
 - A **privileged** long-running helper that owns root-scoped data,
   installed once with a single password prompt.
-- A clearly-defined IPC boundary between them so the unprivileged tier
+- A clearly-defined IPC boundary so the unprivileged tier
   can be reviewed independently and the privileged tier stays small.
 
 This is the pattern Tailscale, Docker Desktop, 1Password, and the
@@ -137,7 +137,7 @@ streams: framing makes recovery from partial reads trivial.
   The installed helper allows 120 requests per minute per UID before
   returning a JSON-RPC rate-limit error.
 
-## What the unprivileged daemon does without the helper
+## What the local CLI does without the helper
 
 Everything currently implemented today, plus:
 
@@ -154,26 +154,24 @@ doesn't gate the core experience.
 ## Security boundary
 
 ```
-Unprivileged daemon (your user)              Privileged helper (root)
+Local CLI (your user)                        Privileged helper (root)
 └── reads ~/Library/...                      └── reads /Library/...
 └── runs ps/lsof/jcmd as user                └── runs fs_usage/powermetrics
 └── writes ~/.spectra/                       └── writes nothing user-visible
-└── exposes RPC over tsnet/Unix sock         └── exposes RPC over local sock only
+└── reaches the helper over a local socket   └── exposes RPC over local sock only
                                                 └── never reachable from the network
                 ↓ JSON-RPC over Unix socket ↑
                   caller-authenticated, method allowlisted
 ```
 
-The helper is **not** reachable over Tailscale. Remote clients always
-go through the unprivileged daemon; if they need root data, the
-unprivileged daemon mediates with the helper locally and applies its
-own access control on the remote-facing side.
+The helper is not reachable from the network. It accepts only authenticated
+local callers over its Unix socket.
 
 ## Code layout
 
 ```
 cmd/
-  spectra/                # CLI client + unprivileged daemon
+  spectra/                # local CLI
   spectra-helper/         # privileged helper, separate main package
 internal/
   helper/
@@ -181,7 +179,7 @@ internal/
     framing.go            # length-prefixed JSON-RPC framing
     peeruid_darwin.go     # getpeereid
     methods.go            # TCC, powermetrics, fs_usage, process tree
-  helperclient/           # used by the unprivileged daemon
+  helperclient/           # used by local callers
     client.go
     fallback.go           # graceful "no helper installed" path
 ```
@@ -199,7 +197,7 @@ summary without recording request parameters.
 ```
 
 Users running with the helper installed can audit what got asked of
-it. The unprivileged daemon never writes to this log directly.
+it. The local CLI never writes to this log directly.
 `spectra install-helper` also installs
 `/etc/newsyslog.d/spectra-helper.conf`, which keeps seven compressed
 rotations and rolls the helper audit log after it reaches 1 MiB.

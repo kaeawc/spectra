@@ -117,7 +117,7 @@ classifies each by language (Rust / Swift / C++). See
 
 <a id="privileged-helper"></a>**Privileged helper.** The optional root-running LaunchDaemon
 installed via `sudo spectra install-helper`. Exposes a narrow RPC
-surface to the unprivileged daemon over a local Unix socket. See
+surface to local Spectra callers over a Unix socket. See
 [../design/privileged-helper.md](../design/privileged-helper.md).
 
 <a id="recommendations-engine"></a>**Recommendations engine.** The CEL-rules-driven evaluation layer
