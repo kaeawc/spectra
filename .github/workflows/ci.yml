@@ -255,6 +255,17 @@ jobs:
       - name: Validate workflows + shell scripts
         run: ./scripts/validate-workflows.sh
 
+  core-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Check core remote boundary
+        run: bash scripts/check_no_remote.sh
+
   docs:
     runs-on: ubuntu-latest
     steps:
