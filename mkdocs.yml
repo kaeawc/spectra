@@ -118,7 +118,9 @@ nav:
       - Snapshots and hosts: operations/snapshots-and-hosts.md
       - Caching: operations/caching.md
       - Artifact lifecycle: operations/artifacts.md
+      - Releasing: operations/releasing.md
   - Reference:
+      - Capabilities: reference/capabilities.md
       - Result schema: reference/result-schema.md
       - Glossary: reference/glossary.md
   - Development:

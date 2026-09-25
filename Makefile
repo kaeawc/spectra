@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all \
+.PHONY: build build-mcp build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
 	release-check validate-workflows \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
@@ -62,7 +62,10 @@ licenses:
 tidy:
 	go mod tidy
 
-ci: vet test complexity lint security licenses docs-validate
+core-boundary:
+	bash scripts/check_no_remote.sh
+
+ci: vet test complexity lint security licenses docs-validate core-boundary
 
 release-check:
 	bash scripts/release-check.sh

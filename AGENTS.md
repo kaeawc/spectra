@@ -8,8 +8,8 @@ product framing.
 ## Working Rules
 
 - Keep code in Go. Standard library first; only add dependencies for clear
-  value. The CLI today has zero third-party deps and we keep it that way
-  unless a feature requires otherwise.
+  value. `github.com/kaeawc/spectra-protocol` is an intentionally minimal,
+  standard-library-only dependency used for the capabilities contract.
 - Detection logic lives in `internal/detect/`. Per-collector functions are
   short and single-purpose; new sub-detections add their own functions
   rather than overloading existing ones.
@@ -59,6 +59,8 @@ For docs changes: `make docs-validate` (mkdocs nav + lychee link check).
 
 - `cmd/spectra/` — CLI entry point. Flag parsing, parallel scan worker pool,
   table + JSON output.
+- `internal/capabilities/` — builds the capabilities manifest using the shared
+  protocol types.
 - `internal/detect/` — the entire static-inspection engine: framework
   classifier, sub-detections, metadata collectors, security/storage/network
   inspections, helpers, login items, processes, TCC reads.

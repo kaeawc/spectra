@@ -17,7 +17,9 @@ root-only telemetry. It is not reachable over the network.
 
 Cross-machine diagnostics belong to the separately installed Spectra Remote
 agent and controller. Their versioned typed request contract lives in the
-`spectra-protocol` module, which has no transport dependencies.
+`spectra-protocol` module, which has no transport dependencies. Core uses its
+shared capabilities type and schema constants; remote transports remain in the
+separately installed agent and controller.
 
 ## Local collection
 
