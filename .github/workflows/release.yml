@@ -64,13 +64,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v7
+      # This job holds the signing key: actions are pinned to commits, the
+      # checkout credential is not persisted, and no shared cache is restored.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+          cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist-unsigned
           path: dist
@@ -79,7 +83,7 @@ jobs:
           SPECTRA_RELEASE_ED25519_KEY: ${{ secrets.SPECTRA_RELEASE_ED25519_KEY }}
           VERSION: ${{ github.ref_name }}
         run: bash scripts/release-manifest.sh "$VERSION" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist/
