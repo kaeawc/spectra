@@ -91,6 +91,9 @@ matches the implemented code path and keeps root installation explicit.
 
 ## Signed release path
 
+Tag-driven archive publication and manifest verification are documented in
+[Releasing Spectra](../operations/releasing.md).
+
 `make release-check` remains usable for source-build readiness without Apple
 credentials. When `SPECTRA_SIGN_IDENTITY` is set, it signs `spectra` and
 `spectra-helper` with hardened runtime and verifies the helper's Developer ID

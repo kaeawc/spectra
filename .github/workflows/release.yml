@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to build (for example v1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Select and validate version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            VERSION="$REF_NAME"
+            if [[ "$VERSION" != "$REF_NAME" ]]; then
+              echo "tag version does not match pushed ref" >&2
+              exit 1
+            fi
+          else
+            VERSION="$INPUT_VERSION"
+            if [[ -n "$REF_NAME" && "$REF_NAME" == v* && "$VERSION" != "$REF_NAME" ]]; then
+              echo "dispatch version does not match ref" >&2
+              exit 1
+            fi
+          fi
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "version must be vX.Y.Z or vX.Y.Z-<pre>" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build archives
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CODESIGN_ID: ${{ secrets.CODESIGN_ID }}
+        run: VERSION="$VERSION" bash scripts/dist.sh
+      - name: Create and verify signed release manifest
+        env:
+          SPECTRA_RELEASE_ED25519_KEY: ${{ secrets.SPECTRA_RELEASE_ED25519_KEY }}
+        run: bash scripts/release-manifest.sh "${{ steps.version.outputs.version }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          args=("$TAG" dist/spectra_*.tar.gz dist/checksums.txt dist/spectra-release.json dist/spectra-release.json.sig --verify-tag --title "Spectra $TAG" --generate-notes)
+          if [[ "$TAG" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
