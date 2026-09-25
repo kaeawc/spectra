@@ -5,6 +5,10 @@ JSON output via `--json` serializes this struct directly.
 
 Source of truth: `internal/detect/detect.go`.
 
+The [capabilities manifest](capabilities.md) advertises the inspect result
+schema version and the other machine-readable CLI interfaces. Consumers should
+check `result_schema` before decoding JSON.
+
 ## Top-level fields
 
 | Field | Type | Description |

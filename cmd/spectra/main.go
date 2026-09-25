@@ -79,6 +79,7 @@ func subcommandList() []subcommand {
 		{"whatswrong", "Ranked whole-system triage: why is this Mac slow right now?", runWhatswrong},
 		{"cache", "Manage the local blob cache (stats, clear)", runCache},
 		{"version", "Print Spectra version and exit", runVersion},
+		{"capabilities", "Describe the machine-readable interfaces this build supports", runCapabilities},
 		{"help", "Show this help text", runHelpCmd},
 	}
 }
