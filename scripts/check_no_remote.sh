@@ -23,8 +23,12 @@ if grep -Eq "$pattern" <<< "$deps"; then
     exit 1
 fi
 
+if ! module_graph="$(go mod graph)"; then
+    echo 'core boundary: could not inspect Go module graph' >&2
+    exit 1
+fi
 # The go@ edge records the dependency's minimum toolchain, not a module dependency.
-if go mod graph | awk '$1 ~ /^github.com\/kaeawc\/spectra-protocol@/ && $2 !~ /^go@/ { found = 1 } END { exit !found }'; then
+if printf '%s\n' "$module_graph" | awk '$1 ~ /^github.com\/kaeawc\/spectra-protocol@/ && $2 !~ /^go@/ { found = 1 } END { exit !found }'; then
     echo 'core boundary: spectra-protocol must not have transitive module dependencies' >&2
     exit 1
 fi
