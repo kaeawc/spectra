@@ -56,8 +56,11 @@ Successful verification prints `ok <version> <keyid>`.
 ## Key rotation
 
 Generate a new key pair and ship its public key in Spectra Proxy's trusted
-keys list before switching the `SPECTRA_RELEASE_ED25519_KEY` secret. This
-lets in-flight verifications accept signatures during the transition. Give
-the new key a distinct key id.
+keys list first, so installed proxies accept signatures from either key during
+the transition. Then, in one change before the next tag, commit the new public
+key to `packaging/release/spectra-release.pub` (the release script embeds its
+key id in the manifest and verifies against it) and replace the `release`
+environment's `SPECTRA_RELEASE_ED25519_KEY` secret. Each key has a distinct
+key id.
 
 The Homebrew formula, if present, is unchanged by this release pipeline.
