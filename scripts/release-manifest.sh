@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROTOCOL_TOOL="${SPECTRA_RELEASE_TOOL:-github.com/kaeawc/spectra-protocol/cmd/spectra-release@v0.2.0}"
+PROTOCOL_TOOL="${SPECTRA_RELEASE_TOOL:-}"
 
 usage() {
     echo "Usage: $0 <version> <dist_dir>" >&2
@@ -33,12 +33,14 @@ if [[ ! -f "${archives[0]}" ]]; then
 fi
 
 run_tool() {
-    if [[ -d "$PROTOCOL_TOOL" ]]; then
+	if [[ -z "$PROTOCOL_TOOL" ]]; then
+		go tool spectra-release "$@"
+	elif [[ -d "$PROTOCOL_TOOL" ]]; then
         # Run the local checkout's command package in its module context; this
         # keeps dry runs independent of a published protocol module version.
         (cd "$PROTOCOL_TOOL" && go run . "$@")
-    else
-        go run "$PROTOCOL_TOOL" "$@"
+	else
+		go run "$PROTOCOL_TOOL" "$@"
     fi
 }
 

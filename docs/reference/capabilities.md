@@ -2,6 +2,10 @@
 
 `spectra capabilities --json` emits one JSON object describing the CLI interfaces this build supports. `spectra capabilities` prints a short human-readable table. The manifest is local and requires no host inspection.
 
+The manifest uses `SpectraCapabilities` from the standard-library-only
+`github.com/kaeawc/spectra-protocol/protocol/v1` package. Its decoder validates
+the emitted document and its result-schema advertisements.
+
 ```json
 {
   "schema": {"name": "spectra.capabilities", "version": 1},

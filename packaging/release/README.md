@@ -7,10 +7,12 @@ manifest and must never be committed to this repository.
 Generate a key pair out of band with the pinned protocol tool:
 
 ```bash
-go run github.com/kaeawc/spectra-protocol/cmd/spectra-release@v0.2.0 keygen \
+go tool spectra-release keygen \
   --private-out ~/spectra-release.key \
   --public-out packaging/release/spectra-release.pub
 ```
+
+The release tool version is pinned by the `tool` directive in `go.mod`.
 
 A maintainer must review and commit `spectra-release.pub` before enabling
 releases. Store the private key file's contents as the `SPECTRA_RELEASE_ED25519_KEY`

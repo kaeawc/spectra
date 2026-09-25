@@ -5,10 +5,12 @@
 Generate the signing key pair with the pinned protocol tool:
 
 ```bash
-go run github.com/kaeawc/spectra-protocol/cmd/spectra-release@v0.2.0 keygen \
+go tool spectra-release keygen \
   --private-out ~/spectra-release.key \
   --public-out packaging/release/spectra-release.pub
 ```
+
+The release tool version is pinned by the `tool` directive in `go.mod`.
 
 Review and commit `packaging/release/spectra-release.pub`. Create a GitHub
 environment named `release` with required reviewers and a deployment rule that
@@ -44,7 +46,7 @@ the protocol verifier with the archive directory so it also checks artifact
 hashes:
 
 ```bash
-go run github.com/kaeawc/spectra-protocol/cmd/spectra-release@v0.2.0 verify \
+go tool spectra-release verify \
   --manifest dist/spectra-release.json \
   --signature dist/spectra-release.json.sig \
   --trusted-key "$(cat packaging/release/spectra-release.pub)" \
