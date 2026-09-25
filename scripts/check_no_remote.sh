@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-pattern='tailscale\.com|github\.com/slackhq/nebula|github\.com/kaeawc/spectra-proxy|github\.com/kaeawc/spectra-protocol'
+pattern='tailscale\.com|github\.com/slackhq/nebula|github\.com/kaeawc/spectra-proxy'
 if grep -Eq "$pattern" go.mod go.sum; then
     echo 'core boundary: remote dependency found in go.mod or go.sum' >&2
     exit 1
@@ -20,5 +20,11 @@ done
 deps="$(go list -deps ./cmd/...)"
 if grep -Eq "$pattern" <<< "$deps"; then
     echo 'core boundary: remote package found in command dependencies' >&2
+    exit 1
+fi
+
+# The go@ edge records the dependency's minimum toolchain, not a module dependency.
+if go mod graph | awk '$1 ~ /^github.com\/kaeawc\/spectra-protocol@/ && $2 !~ /^go@/ { found = 1 } END { exit !found }'; then
+    echo 'core boundary: spectra-protocol must not have transitive module dependencies' >&2
     exit 1
 fi

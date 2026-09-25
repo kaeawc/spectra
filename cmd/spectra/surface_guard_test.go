@@ -28,7 +28,7 @@ func TestNoRemoteImports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forbidden := []string{"tailscale.com", "slackhq/nebula", "github.com/kaeawc/spectra-protocol", "github.com/kaeawc/spectra-proxy", "/internal/serve", "/internal/rpc"}
+	forbidden := []string{"tailscale.com", "slackhq/nebula", "github.com/kaeawc/spectra-proxy", "/internal/serve", "/internal/rpc"}
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
