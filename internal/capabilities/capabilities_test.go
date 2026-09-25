@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	protocol "github.com/kaeawc/spectra-protocol/protocol/v1"
 )
 
 func TestBuild(t *testing.T) {
@@ -18,6 +20,9 @@ func TestBuild(t *testing.T) {
 	var shape map[string]any
 	if err := json.Unmarshal(data, &shape); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := protocol.DecodeSpectraCapabilities(data); err != nil {
+		t.Fatalf("protocol rejected built capabilities: %v", err)
 	}
 	if len(shape) != 5 {
 		t.Fatalf("manifest keys = %v", shape)

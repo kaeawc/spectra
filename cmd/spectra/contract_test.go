@@ -2,15 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/kaeawc/spectra/internal/capabilities"
+	protocol "github.com/kaeawc/spectra-protocol/protocol/v1"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
@@ -25,31 +23,35 @@ func TestCapabilitiesContract(t *testing.T) {
 			t.Fatalf("capabilities exit = %d", code)
 		}
 	})
-	var got capabilities.Manifest
-	decoder := json.NewDecoder(strings.NewReader(output))
-	if err := decoder.Decode(&got); err != nil {
+	got, err := protocol.DecodeSpectraCapabilities([]byte(output))
+	if err != nil {
 		t.Fatalf("decode capabilities: %v", err)
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatalf("expected exactly one JSON object, trailing decode = %v", err)
-	}
-	if got.Schema != (capabilities.SchemaRef{Name: "spectra.capabilities", Version: 1}) || got.SpectraVersion != strings.TrimSpace(versionOutput) {
+	if got.Schema != (protocol.SchemaRef{Name: protocol.SchemaCapabilities, Version: protocol.CapabilitiesSchemaVersion}) || got.SpectraVersion != strings.TrimSpace(versionOutput) {
 		t.Fatalf("schema/version = %+v; version output = %q", got, versionOutput)
 	}
 	if got.OS != runtime.GOOS || got.Arch != runtime.GOARCH {
 		t.Fatalf("platform = %s/%s", got.OS, got.Arch)
 	}
-	want := []capabilities.Interface{{Name: "version", Argv: []string{"version"}, Output: "text"}}
-	if runtime.GOOS == "darwin" {
-		want = append(want, capabilities.Interface{Name: "inspect", Argv: []string{"--json", "<app_path>..."}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.inspect", Version: 1}})
+	assertResultSchema := func(op protocol.Operation, name string) {
+		t.Helper()
+		gotSchema, err := got.ResultSchemaFor(op)
+		if err != nil {
+			t.Fatalf("result schema for %s: %v", op, err)
+		}
+		version, ok := protocol.SupportedResultSchemaVersion(name)
+		if !ok || gotSchema != (protocol.SchemaRef{Name: name, Version: version}) {
+			t.Fatalf("result schema for %s = %+v; supported version = %d (known=%t)", op, gotSchema, version, ok)
+		}
 	}
-	want = append(want, []capabilities.Interface{
-		{Name: "snapshot", Argv: []string{"snapshot", "--json", "[--no-apps]"}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.snapshot", Version: 1}},
-		{Name: "capabilities", Argv: []string{"capabilities", "--json"}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.capabilities", Version: 1}},
-	}...)
-	if !reflect.DeepEqual(got.Interfaces, want) {
-		t.Fatalf("interfaces = %+v, want %+v", got.Interfaces, want)
+	assertResultSchema(protocol.OperationSnapshotCreate, protocol.SchemaSnapshot)
+	if runtime.GOOS == "darwin" {
+		assertResultSchema(protocol.OperationInspect, protocol.SchemaInspect)
+	} else {
+		_, err := got.ResultSchemaFor(protocol.OperationInspect)
+		if err == nil || protocol.CodeOf(err) != protocol.CodeIncompatibleSpectra {
+			t.Fatalf("inspect result schema error = %v, code = %q", err, protocol.CodeOf(err))
+		}
 	}
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(output), &raw); err != nil {

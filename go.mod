@@ -6,6 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/cel-go v0.30.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/kaeawc/spectra-protocol v0.3.0
 	github.com/redis/go-redis/v9 v9.22.0
 	go.mongodb.org/mongo-driver/v2 v2.9.1
 	golang.org/x/sys v0.48.0
@@ -48,3 +49,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+tool github.com/kaeawc/spectra-protocol/cmd/spectra-release
