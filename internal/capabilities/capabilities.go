@@ -27,16 +27,20 @@ type Manifest struct {
 }
 
 func Build(spectraVersion, goos, goarch string) Manifest {
+	interfaces := []Interface{{Name: "version", Argv: []string{"version"}, Output: "text"}}
+	// App inspection is macOS-only; other builds exit before emitting JSON.
+	if goos == "darwin" {
+		interfaces = append(interfaces, Interface{Name: "inspect", Argv: []string{"--json", "<app_path>..."}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.inspect", Version: InspectSchemaVersion}})
+	}
+	interfaces = append(interfaces,
+		Interface{Name: "snapshot", Argv: []string{"snapshot", "--json", "[--no-apps]"}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.snapshot", Version: SnapshotSchemaVersion}},
+		Interface{Name: "capabilities", Argv: []string{"capabilities", "--json"}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.capabilities", Version: CapabilitiesSchemaVersion}},
+	)
 	return Manifest{
 		Schema:         SchemaRef{Name: "spectra.capabilities", Version: CapabilitiesSchemaVersion},
 		SpectraVersion: spectraVersion,
 		OS:             goos,
 		Arch:           goarch,
-		Interfaces: []Interface{
-			{Name: "version", Argv: []string{"version"}, Output: "text"},
-			{Name: "inspect", Argv: []string{"--json", "<app_path>..."}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.inspect", Version: InspectSchemaVersion}},
-			{Name: "snapshot", Argv: []string{"snapshot", "--json", "[--no-apps]"}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.snapshot", Version: SnapshotSchemaVersion}},
-			{Name: "capabilities", Argv: []string{"capabilities", "--json"}, Output: "json", ResultSchema: &SchemaRef{Name: "spectra.capabilities", Version: CapabilitiesSchemaVersion}},
-		},
+		Interfaces:     interfaces,
 	}
 }

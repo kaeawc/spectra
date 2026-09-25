@@ -34,3 +34,11 @@ func TestBuild(t *testing.T) {
 		t.Fatalf("inspect argv = %v", got.Interfaces[1].Argv)
 	}
 }
+
+func TestBuildOmitsInspectOffMacOS(t *testing.T) {
+	for _, iface := range Build("test-version", "linux", "amd64").Interfaces {
+		if iface.Name == "inspect" {
+			t.Fatal("linux manifest advertises inspect")
+		}
+	}
+}

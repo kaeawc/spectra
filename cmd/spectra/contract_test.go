@@ -40,12 +40,14 @@ func TestCapabilitiesContract(t *testing.T) {
 	if got.OS != runtime.GOOS || got.Arch != runtime.GOARCH {
 		t.Fatalf("platform = %s/%s", got.OS, got.Arch)
 	}
-	want := []capabilities.Interface{
-		{Name: "version", Argv: []string{"version"}, Output: "text"},
-		{Name: "inspect", Argv: []string{"--json", "<app_path>..."}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.inspect", Version: 1}},
+	want := []capabilities.Interface{{Name: "version", Argv: []string{"version"}, Output: "text"}}
+	if runtime.GOOS == "darwin" {
+		want = append(want, capabilities.Interface{Name: "inspect", Argv: []string{"--json", "<app_path>..."}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.inspect", Version: 1}})
+	}
+	want = append(want, []capabilities.Interface{
 		{Name: "snapshot", Argv: []string{"snapshot", "--json", "[--no-apps]"}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.snapshot", Version: 1}},
 		{Name: "capabilities", Argv: []string{"capabilities", "--json"}, Output: "json", ResultSchema: &capabilities.SchemaRef{Name: "spectra.capabilities", Version: 1}},
-	}
+	}...)
 	if !reflect.DeepEqual(got.Interfaces, want) {
 		t.Fatalf("interfaces = %+v, want %+v", got.Interfaces, want)
 	}

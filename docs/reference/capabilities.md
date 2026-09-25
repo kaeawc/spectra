@@ -17,7 +17,7 @@
 }
 ```
 
-`spectra_version` is the exact text printed by `spectra version`, without its trailing newline. `os` and `arch` are the build's Go runtime platform. The inspect interface returns an array of [result objects](result-schema.md); snapshot and capabilities return single objects. The version interface is plain text and therefore omits `result_schema`.
+`spectra_version` is the exact text printed by `spectra version`, without its trailing newline. `os` and `arch` are the build's Go runtime platform. The `inspect` interface is advertised only on macOS builds, where app inspection is available. It returns an array of [result objects](result-schema.md); snapshot and capabilities return single objects. The version interface is plain text and therefore omits `result_schema`.
 
 The `argv` values describe supported invocation shapes. Angle brackets mark an absolute app path supplied by the caller; the ellipsis permits multiple paths. Square brackets mark an optional flag. A snapshot caller may also pass `--no-store` to avoid local persistence.
 
