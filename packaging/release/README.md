@@ -13,5 +13,6 @@ go run github.com/kaeawc/spectra-protocol/cmd/spectra-release@v0.2.0 keygen \
 ```
 
 A maintainer must review and commit `spectra-release.pub` before enabling
-releases. Store the private key file's contents in the repository secret
-`SPECTRA_RELEASE_ED25519_KEY`, and keep an offline backup of the private key.
+releases. Store the private key file's contents as the `SPECTRA_RELEASE_ED25519_KEY`
+secret of the protected `release` environment (not a repository secret; see
+docs/operations/releasing.md), and keep an offline backup of the private key.
