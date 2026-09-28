@@ -1,6 +1,7 @@
 package hostwatch
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 )
 
 type Config struct {
+	set  bool
 	Load struct {
 		WarnMultiple       float64 `yaml:"warn_multiple"`
 		CriticalMultiple   float64 `yaml:"critical_multiple"`
@@ -43,7 +45,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	var c Config
+	c := Config{set: true}
 	c.Load.WarnMultiple = 1.5
 	c.Load.CriticalMultiple = 3
 	c.Load.Sustain = 2
@@ -82,5 +84,50 @@ func LoadConfig(path string, readFile func(string) ([]byte, error)) (Config, err
 	if err = dec.Decode(&c); err != nil {
 		return DefaultConfig(), fmt.Errorf("watch config: %w", err)
 	}
-	return c, nil
+	return validateConfig(c)
+}
+
+func validateConfig(c Config) (Config, error) {
+	d := DefaultConfig()
+	var problems []error
+	for _, field := range []struct {
+		name            string
+		value, fallback *float64
+	}{
+		{"load.warn_multiple", &c.Load.WarnMultiple, &d.Load.WarnMultiple},
+		{"load.critical_multiple", &c.Load.CriticalMultiple, &d.Load.CriticalMultiple},
+		{"load.trend_slope_multiple", &c.Load.TrendSlopeMultiple, &d.Load.TrendSlopeMultiple},
+		{"memory.swap_growth_mb", &c.Memory.SwapGrowthMB, &d.Memory.SwapGrowthMB},
+		{"limits.warn_pct", &c.Limits.WarnPct, &d.Limits.WarnPct},
+		{"limits.critical_pct", &c.Limits.CriticalPct, &d.Limits.CriticalPct},
+		{"disk.warn_gb", &c.Disk.WarnGB, &d.Disk.WarnGB},
+		{"disk.critical_gb", &c.Disk.CriticalGB, &d.Disk.CriticalGB},
+		{"kinds.cpu_pct", &c.Kinds.CPUPct, &d.Kinds.CPUPct},
+	} {
+		if !(*field.value > 0) {
+			problems = append(problems, fmt.Errorf("%s must be positive", field.name))
+			*field.value = *field.fallback
+		}
+	}
+	for _, field := range []struct {
+		name            string
+		value, fallback *int
+	}{
+		{"load.sustain", &c.Load.Sustain, &d.Load.Sustain},
+		{"load.trend_minutes", &c.Load.TrendMinutes, &d.Load.TrendMinutes},
+		{"memory.warn_sustain", &c.Memory.WarnSustain, &d.Memory.WarnSustain},
+		{"thermal.sustain", &c.Thermal.Sustain, &d.Thermal.Sustain},
+		{"kinds.cpu_sustain", &c.Kinds.CPUSustain, &d.Kinds.CPUSustain},
+		{"kinds.count_sustain", &c.Kinds.CountSustain, &d.Kinds.CountSustain},
+		{"kinds.gradle", &c.Kinds.Gradle, &d.Kinds.Gradle},
+		{"kinds.simulator", &c.Kinds.Simulator, &d.Kinds.Simulator},
+		{"kinds.qemu", &c.Kinds.QEMU, &d.Kinds.QEMU},
+		{"kinds.agents", &c.Kinds.Agents, &d.Kinds.Agents},
+	} {
+		if *field.value <= 0 {
+			problems = append(problems, fmt.Errorf("%s must be positive", field.name))
+			*field.value = *field.fallback
+		}
+	}
+	return c, errors.Join(problems...)
 }

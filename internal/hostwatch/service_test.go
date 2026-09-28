@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,6 +55,48 @@ func TestCollectorSinglePSAndProcessMetrics(t *testing.T) {
 	}
 	if fake.CallCount() != 1 || s.Kinds["gradle"].Count != 1 || len(s.TopCPU) != 2 || len(m.Recent(42, 10)) != 1 || s.NCPU != 8 {
 		t.Fatalf("sample %+v calls %d", s, fake.CallCount())
+	}
+}
+
+func TestCollectorJavaArguments(t *testing.T) {
+	const java = "/opt/homebrew/Cellar/openjdk@21/21.0.5/bin/java"
+	bulk := strings.Join([]string{
+		"42 1 1024 95.0 " + java,
+		"43 1 2048 5.0 " + java,
+		"44 1 4096 3.0 " + java,
+		"45 1 512 1.0 " + java,
+	}, "\n") + "\n"
+	argv := strings.Join([]string{
+		"42 " + java + " org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.7.1",
+		"43 " + java + " org.jetbrains.kotlin.daemon.KotlinCompileDaemon",
+		"44 " + java + " org.gradle.wrapper.GradleWrapperMain",
+		"45 " + java + " -jar app.jar",
+	}, "\n") + "\n"
+	fake := proc.NewFake().
+		OnExact("ps", []string{"-eo", "pid=,ppid=,rss=,%cpu=,comm="}, proc.Response{Result: proc.Result{Stdout: []byte(bulk)}}).
+		OnExact("ps", []string{"-o", "pid=,args=", "-p", "42,43,44,45"}, proc.Response{Result: proc.Result{Stdout: []byte(argv)}})
+	c := &Collector{OS: hostos.Linux, Runner: fake,
+		Load:    func() ([3]float64, error) { return [3]float64{}, nil },
+		Memory:  func() (string, float64, float64, error) { return "normal", 0, 50, nil },
+		Limits:  func(int) map[string]LimitUsage { return map[string]LimitUsage{} },
+		Disk:    func() (float64, error) { return 100, nil },
+		Thermal: func(context.Context) (bool, error) { return false, nil },
+		CPUTime: func() (time.Duration, error) { return 0, nil },
+	}
+	s, err := c.Collect(context.Background())
+	if err != nil || fake.CallCount() != 2 || s.Kinds["gradle"].Count != 2 || s.Kinds["kotlin-daemon"].Count != 1 || s.Kinds["java"].Count != 1 {
+		t.Fatalf("calls=%d kinds=%+v err=%v", fake.CallCount(), s.Kinds, err)
+	}
+}
+
+func TestCollectorJavaArgumentsFailureFallsBack(t *testing.T) {
+	fake := proc.NewFake().OnExact("ps", []string{"-eo", "pid=,ppid=,rss=,%cpu=,comm="}, proc.Response{Result: proc.Result{Stdout: []byte("42 1 1024 5.0 /usr/bin/java\n")}})
+	log := logger.NewCapture(slog.LevelDebug)
+	s := Sample{Kinds: map[string]KindStat{}}
+	c := &Collector{OS: hostos.Linux, Runner: fake, Logger: log}
+	_, err := c.collectPS(context.Background(), hostos.Linux, &s)
+	if err != nil || s.Kinds["java"].Count != 1 || !log.HasMessage("java arguments unavailable") {
+		t.Fatalf("kinds=%+v err=%v logs=%+v", s.Kinds, err, log.Records())
 	}
 }
 
@@ -128,6 +171,104 @@ func TestServiceSkipsSlowCollector(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("run stuck")
 	}
+}
+
+type blockingSampleStore struct {
+	*store.DB
+	started, release, written chan struct{}
+}
+
+func (s *blockingSampleStore) SaveHostSample(_ context.Context, at time.Time, data []byte) error {
+	close(s.started)
+	<-s.release
+	err := s.DB.SaveHostSample(context.Background(), at, data)
+	close(s.written)
+	return err
+}
+
+func TestServiceCancellationWaitsForStoreWrite(t *testing.T) {
+	st := &blockingSampleStore{DB: testDB(t), started: make(chan struct{}), release: make(chan struct{}), written: make(chan struct{})}
+	log := logger.NewCapture(slog.LevelDebug)
+	svc := NewService(ServiceOptions{Store: st, Collector: &sequenceCollector{samples: []Sample{baseSample(time.Now())}}, Interval: 10 * time.Millisecond, Logger: log})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	select {
+	case <-st.started:
+	case <-time.After(time.Second):
+		t.Fatal("store write did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+		t.Fatal("Run returned before tick finished")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(st.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not wait for tick")
+	}
+	select {
+	case <-st.written:
+	default:
+		t.Fatal("Run returned before store write completed")
+	}
+	if log.HasMessage("watch tick timed out") {
+		t.Fatalf("shutdown logged timeout: %+v", log.Records())
+	}
+}
+
+func TestServiceCollectorTimeoutContinues(t *testing.T) {
+	c := &slowCollector{release: make(chan struct{})}
+	log := logger.NewCapture(slog.LevelDebug)
+	svc := NewService(ServiceOptions{Store: testDB(t), Collector: c, Interval: 15 * time.Millisecond, Logger: log})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	deadline := time.After(time.Second)
+	for !log.HasMessage("watch tick timed out") {
+		select {
+		case <-deadline:
+			t.Fatal("genuine collector timeout not logged")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	close(c.release)
+	for c.calls.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatal("loop did not continue")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostwatchLive(t *testing.T) {
+	if os.Getenv("SPECTRA_HOSTWATCH_LIVE") != "1" {
+		t.Skip("set SPECTRA_HOSTWATCH_LIVE=1 for a real host sample")
+	}
+	log := logger.NewCapture(slog.LevelDebug)
+	s, err := (&Collector{Logger: log}).Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range log.Records() {
+		if record.Msg == "watch process sample unavailable" {
+			t.Skipf("real host process sample unavailable: %v", record.Attrs["error"])
+		}
+	}
+	t.Logf("live process kinds: gradle=%d kotlin-daemon=%d java=%d", s.Kinds["gradle"].Count, s.Kinds["kotlin-daemon"].Count, s.Kinds["java"].Count)
 }
 func TestRPCSubscriptionAndHistory(t *testing.T) {
 	dir, err := os.MkdirTemp("/tmp", "spw-")

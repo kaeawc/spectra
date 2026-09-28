@@ -18,11 +18,25 @@ import (
 type Sampler interface {
 	Collect(context.Context) (Sample, error)
 }
+type SampleStore interface {
+	ListAlerts(context.Context, string, int) ([]store.AlertRow, error)
+	SaveHostSample(context.Context, time.Time, []byte) error
+	UpsertAlert(context.Context, store.AlertRow) error
+	SaveProcessMetrics(context.Context, []store.ProcessMetricRow) error
+	PruneHostSamples(context.Context, int) (int64, error)
+	PruneResolvedAlerts(context.Context, int) (int64, error)
+	PruneJVMSamples(context.Context, int) (int64, error)
+	PruneFDSamples(context.Context, int) (int64, error)
+	ListHostSamples(context.Context, time.Time, int) ([]store.HostSampleRow, error)
+	GetProcessMetrics(context.Context, int, int) ([]store.ProcessMetricRow, error)
+	AckAlert(context.Context, string, time.Time) (store.AlertRow, error)
+}
 type ServiceOptions struct {
 	Collector Sampler
-	Store     *store.DB
+	Store     SampleStore
 	Metrics   *metrics.Collector
 	Config    Config
+	ConfigSet bool
 	Interval  time.Duration
 	Clock     clock.Clock
 	IDs       idgen.Generator
@@ -60,7 +74,7 @@ func NewService(opts ServiceOptions) *Service {
 	if opts.Interval <= 0 {
 		opts.Interval = 15 * time.Second
 	}
-	if opts.Config.Load.WarnMultiple == 0 {
+	if !opts.ConfigSet && !opts.Config.set {
 		opts.Config = DefaultConfig()
 	}
 	if opts.Metrics == nil {
@@ -89,29 +103,44 @@ func (s *Service) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.engine.Restore(restored)
 	s.mu.Unlock()
-	busy := make(chan struct{}, 1)
+	var inFlight <-chan error
 	timer := time.NewTimer(s.interval)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			s.waitForTick(inFlight)
 			return nil
 		case <-timer.C:
-			select {
-			case busy <- struct{}{}:
+			if inFlight != nil {
+				select {
+				case <-inFlight:
+					inFlight = nil
+				default:
+				}
+			}
+			if ctx.Err() != nil {
+				s.waitForTick(inFlight)
+				return nil
+			}
+			if inFlight == nil {
 				tickCtx, cancel := context.WithTimeout(ctx, s.interval)
 				done := make(chan error, 1)
-				go func() { defer func() { <-busy }(); done <- s.Tick(tickCtx) }()
+				inFlight = done
+				go func() { done <- s.Tick(tickCtx) }()
 				select {
 				case err := <-done:
+					inFlight = nil
 					if err != nil {
 						s.opts.Logger.Warn("watch tick failed", "error", err)
 					}
 				case <-tickCtx.Done():
-					s.opts.Logger.Warn("watch tick timed out")
+					if ctx.Err() == nil {
+						s.opts.Logger.Warn("watch tick timed out")
+					}
 				}
 				cancel()
-			default:
+			} else {
 				s.opts.Logger.Warn("watch tick skipped: collector still busy")
 			}
 			s.mu.RLock()
@@ -119,6 +148,18 @@ func (s *Service) Run(ctx context.Context) error {
 			s.mu.RUnlock()
 			timer.Reset(interval)
 		}
+	}
+}
+func (s *Service) waitForTick(done <-chan error) {
+	if done == nil {
+		return
+	}
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		s.opts.Logger.Warn("watch tick still running after shutdown wait")
 	}
 }
 func (s *Service) Tick(ctx context.Context) error {

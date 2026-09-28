@@ -40,8 +40,10 @@ notifications for future subscriptions.
 
 `daemon run` samples host health every 15 seconds. `--watch-interval 2s` changes
 the interval and `--no-notify` disables desktop notifications. The watch uses
-one `ps` call per tick for process counts, CPU, RSS, top processes, and process
-history. It also reads load average, memory pressure and swap, kernel limits,
+one bulk `ps` call per tick for process counts, CPU, RSS, top processes, and process
+history. When Java processes are present, one additional `ps` call fetches the
+arguments for up to 64 Java PIDs so Gradle and Kotlin daemons can be classified.
+It also reads load average, memory pressure and swap, kernel limits,
 free space on the data volume, thermal state, and its own CPU time. It does not
 scan apps, collect snapshots, or inspect protected paths. On macOS, thermal
 state requires one `pmset -g therm` call; on Linux, thermal throttling is not
@@ -63,6 +65,8 @@ Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
 `load`, `memory`, `limits`, `disk`, `thermal`, and `kinds`; field names are the
 snake case names in the defaults, such as `load.warn_multiple` or
 `disk.critical_gb`. An unknown YAML key logs an error and keeps all defaults.
+Non-positive thresholds log an error and use the default for that field while
+preserving other valid settings.
 
 The watch stores JSON samples for seven days and resolved alerts for 30 days
 in the Spectra SQLite database. `SPECTRA_WATCH_DB` overrides the database path
