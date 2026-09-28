@@ -61,6 +61,7 @@ func subcommandList() []subcommand {
 		{"anomalies", "Flag processes deviating from their rolling RSS baseline", runAnomalies},
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
 		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
+		{"daemon", "Manage the local per-user diagnostic daemon", runDaemon},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
 		{"spindump", "Capture and summarize a per-thread stack report (heaviest stacks)", runSpindump},

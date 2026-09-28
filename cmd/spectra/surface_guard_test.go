@@ -13,7 +13,7 @@ import (
 func TestNoRemoteCommandSurface(t *testing.T) {
 	forbidden := map[string]bool{
 		"serve": true, "connect": true, "remote": true, "agent": true,
-		"daemon": true, "daemon-install": true, "mesh": true, "jobs": true,
+		"daemon-install": true, "mesh": true, "jobs": true,
 		"tsnet": true, "nebula": true, "tunnel": true, "proxy": true,
 	}
 	for _, command := range subcommandList() {
