@@ -25,6 +25,10 @@ Linux, it uses `$XDG_RUNTIME_DIR/spectra` when available and falls back to
 directory is mode 0700 and the socket is mode 0600. Each connection is checked
 against the kernel's peer UID before a request is accepted.
 `SPECTRA_DAEMON_LOG` overrides the log file location for isolated runs.
+`daemon stop` asks a reachable daemon to shut down over the socket. If the
+socket is unavailable, it checks the lock before using the PID file. A free
+lock means no daemon is running; stop removes stale PID and socket files and
+does not signal that PID. A held lock permits a bounded SIGTERM fallback.
 
 The transport is newline-delimited JSON-RPC 2.0. `daemon.status` reports the
 protocol, version, PID, start time, socket, and methods. `daemon.shutdown`

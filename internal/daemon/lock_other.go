@@ -9,3 +9,4 @@ import (
 
 func lockFile(_ *os.File) error { return peercred.ErrUnsupported }
 func unlockFile(_ *os.File)     {}
+func lockHeld(error) bool       { return false }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,23 +10,27 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/daemon"
+	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/fsutil"
 )
 
 type daemonDeps struct {
-	paths      func() (daemon.Paths, error)
-	executable func() (string, error)
-	home       func() (string, error)
-	goos       string
-	uid        func() int
-	mkdirAll   func(string, os.FileMode) error
-	writeFile  func(string, []byte, os.FileMode) error
-	remove     func(string) error
-	readFile   func(string) ([]byte, error)
-	run        func(name string, args ...string) error
-	output     func(name string, args ...string) ([]byte, error)
-	signal     func(int, os.Signal) error
-	sleep      func(time.Duration)
+	paths         func() (daemon.Paths, error)
+	executable    func() (string, error)
+	home          func() (string, error)
+	goos          string
+	uid           func() int
+	mkdirAll      func(string, os.FileMode) error
+	writeFile     func(string, []byte, os.FileMode) error
+	remove        func(string) error
+	readFile      func(string) ([]byte, error)
+	run           func(name string, args ...string) error
+	output        func(name string, args ...string) ([]byte, error)
+	signal        func(int, os.Signal) error
+	sleep         func(time.Duration)
+	probe         func(daemon.Paths) (bool, int, error)
+	discover      func(daemon.Paths) (*daemonclient.Client, bool)
+	ensureRunning func(context.Context, daemon.Paths, daemonclient.SpawnOptions) (*daemonclient.Client, error)
 }
 
 func defaultDaemonDeps() daemonDeps {
@@ -50,7 +55,10 @@ func defaultDaemonDeps() daemonDeps {
 			}
 			return p.Signal(sig)
 		},
-		sleep: time.Sleep,
+		sleep:         time.Sleep,
+		probe:         daemon.Probe,
+		discover:      daemonclient.Discover,
+		ensureRunning: daemonclient.EnsureRunning,
 	}
 }
 

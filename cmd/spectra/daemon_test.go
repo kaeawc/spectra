@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/daemon"
+	"github.com/kaeawc/spectra/internal/daemonclient"
+	"golang.org/x/sys/unix"
 )
 
 func fakeDaemonDeps(goos string) (daemonDeps, *[]string) {
@@ -90,5 +94,194 @@ func TestDaemonLogsTail(t *testing.T) {
 	}
 	if out.String() != "b\nc\n" {
 		t.Fatal(out.String())
+	}
+}
+
+func testRunningDaemon(t *testing.T, daemonVersion string) (daemon.Paths, func()) {
+	t.Helper()
+	// A short /tmp path stays within the 104-byte Unix socket sun_path limit.
+	dir, err := os.MkdirTemp("/tmp", "spd-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := daemon.Paths{Dir: dir, Socket: filepath.Join(dir, "daemon.sock"), Lock: filepath.Join(dir, "daemon.lock"), PID: filepath.Join(dir, "daemon.pid")}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- daemon.New(daemon.Options{Paths: paths, Version: daemonVersion}).Run(ctx) }()
+	for i := 0; i < 100; i++ {
+		if c, ok := daemonclient.Discover(paths); ok {
+			c.Close()
+			return paths, func() { cancel(); <-done; os.RemoveAll(dir) }
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	os.RemoveAll(dir)
+	t.Fatal("daemon did not start")
+	return daemon.Paths{}, nil
+}
+
+func TestDaemonStartAlreadyRunningAndSpawned(t *testing.T) {
+	paths, cleanup := testRunningDaemon(t, "dev")
+	defer cleanup()
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = daemonclient.Discover
+	deps.ensureRunning = func(context.Context, daemon.Paths, daemonclient.SpawnOptions) (*daemonclient.Client, error) {
+		t.Fatal("spawned an already running daemon")
+		return nil, nil
+	}
+	var out bytes.Buffer
+	if err := daemonStart(paths, &out, deps); err != nil || !strings.Contains(out.String(), "already running") {
+		t.Fatalf("already running: %q, %v", out.String(), err)
+	}
+	out.Reset()
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	spawned := false
+	deps.ensureRunning = func(ctx context.Context, got daemon.Paths, opts daemonclient.SpawnOptions) (*daemonclient.Client, error) {
+		spawned = true
+		if got.Socket != paths.Socket || opts.Exe == "" || strings.Join(opts.Args, " ") != "daemon run" {
+			t.Fatalf("spawn options: %+v", opts)
+		}
+		return daemonclient.Dial(ctx, paths.Socket)
+	}
+	if err := daemonStart(paths, &out, deps); err != nil || !spawned || !strings.Contains(out.String(), "started") {
+		t.Fatalf("spawned: %q, %v", out.String(), err)
+	}
+}
+
+func TestDaemonStatusFormatsAndMismatch(t *testing.T) {
+	paths, cleanup := testRunningDaemon(t, "2")
+	defer cleanup()
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = daemonclient.Discover
+	oldVersion := version
+	version = "2"
+	defer func() { version = oldVersion }()
+	var out bytes.Buffer
+	if err := daemonStatus(nil, paths, &out, deps); err != nil || !strings.Contains(out.String(), "daemon running") {
+		t.Fatalf("text: %q, %v", out.String(), err)
+	}
+	out.Reset()
+	if err := daemonStatus([]string{"--json"}, paths, &out, deps); err != nil || !strings.Contains(out.String(), `"version":"2"`) {
+		t.Fatalf("json: %q, %v", out.String(), err)
+	}
+	version = "3"
+	if err := daemonStatus(nil, paths, &out, deps); !errors.Is(err, daemonclient.ErrVersionMismatch) {
+		t.Fatalf("mismatch: %v", err)
+	}
+	deps.paths = func() (daemon.Paths, error) { return paths, nil }
+	var stderr bytes.Buffer
+	if got := runDaemonWithIO([]string{"status"}, &out, &stderr, deps); got != 1 {
+		t.Fatalf("version mismatch exit = %d, stderr %q", got, stderr.String())
+	}
+}
+
+func TestDaemonStopRPCAndStaleFiles(t *testing.T) {
+	paths, cleanup := testRunningDaemon(t, "dev")
+	defer cleanup()
+	deps := defaultDaemonDeps()
+	var out bytes.Buffer
+	if err := daemonStop(paths, &out, deps); err != nil || !strings.Contains(out.String(), "stopping") {
+		t.Fatalf("RPC stop: %q, %v", out.String(), err)
+	}
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(paths.PID); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	dir := t.TempDir()
+	stale := daemon.Paths{Dir: dir, Lock: filepath.Join(dir, "lock"), PID: filepath.Join(dir, "pid"), Socket: filepath.Join(dir, "sock")}
+	if err := os.WriteFile(stale.PID, []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", stale.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	deps.signal = func(int, os.Signal) error { t.Fatal("signaled stale PID"); return nil }
+	out.Reset()
+	if err := daemonStop(stale, &out, deps); err != nil || !strings.Contains(out.String(), "cleaned stale files") {
+		t.Fatalf("stale stop: %q, %v", out.String(), err)
+	}
+	for _, path := range []string{stale.PID, stale.Socket} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale file remains %s: %v", path, err)
+		}
+	}
+}
+
+func TestDaemonStopLockedFallbackAndTimeout(t *testing.T) {
+	// A short /tmp path stays within the 104-byte Unix socket sun_path limit.
+	dir, err := os.MkdirTemp("/tmp", "spd-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	paths := daemon.Paths{Dir: dir, Lock: filepath.Join(dir, "lock"), PID: filepath.Join(dir, "pid"), Socket: filepath.Join(dir, "sock")}
+	if err := os.WriteFile(paths.PID, []byte("1234\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", paths.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	lock, err := os.OpenFile(paths.Lock, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
+	deps := defaultDaemonDeps()
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	var signals []os.Signal
+	deps.signal = func(_ int, sig os.Signal) error {
+		signals = append(signals, sig)
+		if sig == daemonTermSignal {
+			return os.Remove(paths.PID)
+		}
+		return nil
+	}
+	deps.sleep = func(time.Duration) {}
+	var out bytes.Buffer
+	if err := daemonStop(paths, &out, deps); err != nil || !strings.Contains(out.String(), "stopped") || len(signals) != 2 {
+		t.Fatalf("locked fallback: %q, %v, signals %v", out.String(), err, signals)
+	}
+	if err := os.WriteFile(paths.PID, []byte("1234\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps.signal = func(_ int, sig os.Signal) error { signals = append(signals, sig); return nil }
+	if err := daemonStop(paths, &out, deps); err == nil || !strings.Contains(err.Error(), "within 5s") {
+		t.Fatalf("timeout: %v", err)
+	}
+}
+
+func TestRunDaemonWithIOExitCodes(t *testing.T) {
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{nil, 2}, {[]string{"start", "extra"}, 2}, {[]string{"unknown"}, 2}, {[]string{"status"}, 1},
+	} {
+		var out, stderr bytes.Buffer
+		if got := runDaemonWithIO(tc.args, &out, &stderr, deps); got != tc.want {
+			t.Fatalf("%v: exit %d, want %d; stderr %q", tc.args, got, tc.want, stderr.String())
+		}
+	}
+}
+
+func TestDaemonUnitEscaping(t *testing.T) {
+	unit := daemonUnit(`/opt/Spectra % "Tools"\spectra`)
+	if !strings.Contains(unit, `ExecStart="/opt/Spectra %% \"Tools\"\\spectra" daemon run`) {
+		t.Fatal(unit)
 	}
 }

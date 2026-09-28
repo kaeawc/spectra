@@ -10,6 +10,7 @@ import (
 )
 
 func TestPeerUID(t *testing.T) {
+	// A short /tmp path stays within the 104-byte Unix socket sun_path limit.
 	dir, err := os.MkdirTemp("/tmp", "spd-")
 	if err != nil {
 		t.Fatal(err)

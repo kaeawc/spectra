@@ -18,6 +18,7 @@ import (
 
 func testPaths(t *testing.T) Paths {
 	t.Helper()
+	// A short /tmp path stays within the 104-byte Unix socket sun_path limit.
 	dir, err := os.MkdirTemp("/tmp", "spd-")
 	if err != nil {
 		t.Fatal(err)

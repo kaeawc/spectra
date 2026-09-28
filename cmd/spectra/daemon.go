@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -53,7 +52,7 @@ func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int 
 	case "stop":
 		actionErr = daemonStop(paths, out, deps)
 	case "status":
-		actionErr = daemonStatus(args[1:], paths, out)
+		actionErr = daemonStatus(args[1:], paths, out, deps)
 	case "install":
 		actionErr = daemonInstall(paths, out, deps)
 	case "uninstall":
@@ -106,7 +105,7 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 }
 
 func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
-	if c, ok := daemonclient.Discover(paths); ok {
+	if c, ok := deps.discover(paths); ok {
 		defer c.Close()
 		st, err := c.Status(context.Background())
 		if err != nil {
@@ -121,7 +120,7 @@ func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	c, err := daemonclient.EnsureRunning(ctx, paths, daemonclient.SpawnOptions{Exe: exe, Args: []string{"daemon", "run"}, Wait: 5 * time.Second, LogPath: paths.Log})
+	c, err := deps.ensureRunning(ctx, paths, daemonclient.SpawnOptions{Exe: exe, Args: []string{"daemon", "run"}, Wait: 5 * time.Second, LogPath: paths.Log})
 	if err != nil {
 		return err
 	}
@@ -135,7 +134,7 @@ func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 }
 
 func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
-	if c, ok := daemonclient.Discover(paths); ok {
+	if c, ok := deps.discover(paths); ok {
 		defer c.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -151,17 +150,13 @@ func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 		fmt.Fprintln(out, "daemon stopping")
 		return nil
 	}
-	data, err := deps.readFile(paths.PID)
-	if errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintln(out, "daemon not running")
-		return nil
-	}
+	running, pid, err := deps.probe(paths)
 	if err != nil {
-		return fmt.Errorf("read daemon pid: %w", err)
+		return fmt.Errorf("probe daemon: %w", err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return fmt.Errorf("invalid daemon pid file")
+	if !running {
+		fmt.Fprintln(out, "daemon not running (cleaned stale files)")
+		return nil
 	}
 	if err := deps.signal(pid, syscall.Signal(0)); err != nil {
 		fmt.Fprintln(out, "daemon not running")
@@ -180,7 +175,7 @@ func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	return fmt.Errorf("daemon pid %d did not stop within 5s", pid)
 }
 
-func daemonStatus(args []string, paths daemon.Paths, out io.Writer) error {
+func daemonStatus(args []string, paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	fs := flag.NewFlagSet("daemon status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
@@ -189,7 +184,7 @@ func daemonStatus(args []string, paths daemon.Paths, out io.Writer) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("usage: spectra daemon status [--json]")
 	}
-	c, ok := daemonclient.Discover(paths)
+	c, ok := deps.discover(paths)
 	if !ok {
 		return fmt.Errorf("daemon not running")
 	}
@@ -357,5 +352,6 @@ func daemonPlist(exe, stdout, stderr string) string {
 }
 
 func daemonUnit(exe string) string {
-	return fmt.Sprintf("[Unit]\nDescription=Spectra local daemon\n\n[Service]\nType=simple\nExecStart=%s daemon run\nRestart=on-failure\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\n\n[Install]\nWantedBy=default.target\n", strconv.Quote(exe))
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(exe)
+	return fmt.Sprintf("[Unit]\nDescription=Spectra local daemon\n\n[Service]\nType=simple\nExecStart=\"%s\" daemon run\nRestart=on-failure\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\n\n[Install]\nWantedBy=default.target\n", escaped)
 }
