@@ -80,7 +80,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := os.MkdirAll(p.Dir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create directory: %w", err)
 	}
-	if err := os.Chmod(p.Dir, 0o700); err != nil {
+	if err := os.Chmod(p.Dir, 0o700); err != nil { // #nosec G302 -- directory must be owner-searchable; 0700 is the most restrictive usable mode.
 		return fmt.Errorf("daemon: secure directory: %w", err)
 	}
 	lock, err := acquireLock(p.Lock, p.PID)

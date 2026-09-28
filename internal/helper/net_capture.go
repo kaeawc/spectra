@@ -206,7 +206,7 @@ func ensureCaptureDir(base, path string, ownerUID int) error {
 }
 
 func ensureSingleCaptureDir(path string, ownerUID int) error {
-	if err := os.Mkdir(path, 0o711); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(path, 0o711); err != nil && !os.IsExist(err) { // #nosec G301 -- search-only so owners can open their random-named capture; not listable or writable by others.
 		return fmt.Errorf("create: %w", err)
 	}
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
