@@ -35,6 +35,15 @@ type Client struct {
 	onNotification func(string, json.RawMessage)
 	closed         chan struct{}
 	closeOnce      sync.Once
+	notifyMu       sync.Mutex
+	notifyCond     *sync.Cond
+	notifications  []notification
+}
+
+type notification struct {
+	fn     func(string, json.RawMessage)
+	method string
+	params json.RawMessage
 }
 
 func Dial(ctx context.Context, socket string) (*Client, error) {
@@ -43,6 +52,8 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 		return nil, fmt.Errorf("daemon client dial: %w", err)
 	}
 	c := &Client{conn: conn, pending: make(map[uint64]chan reply), closed: make(chan struct{})}
+	c.notifyCond = sync.NewCond(&c.notifyMu)
+	go c.dispatchNotifications()
 	go c.readLoop()
 	return c, nil
 }
@@ -114,8 +125,33 @@ func (c *Client) Status(ctx context.Context) (daemon.StatusResult, error) {
 }
 
 func (c *Client) Close() error {
-	c.closeOnce.Do(func() { close(c.closed); _ = c.conn.Close() })
+	c.closeOnce.Do(func() {
+		close(c.closed)
+		_ = c.conn.Close()
+		c.notifyCond.Broadcast()
+	})
 	return nil
+}
+
+// Notifications are delivered in read order; callbacks may still be running when Call returns.
+func (c *Client) dispatchNotifications() {
+	for {
+		c.notifyMu.Lock()
+		for len(c.notifications) == 0 {
+			select {
+			case <-c.closed:
+				c.notifyMu.Unlock()
+				return
+			default:
+			}
+			c.notifyCond.Wait()
+		}
+		n := c.notifications[0]
+		c.notifications[0] = notification{}
+		c.notifications = c.notifications[1:]
+		c.notifyMu.Unlock()
+		n.fn(n.method, n.params)
+	}
 }
 
 func (c *Client) readLoop() {
@@ -141,7 +177,10 @@ func (c *Client) readLoop() {
 			fn := c.onNotification
 			c.mu.Unlock()
 			if fn != nil {
-				go fn(msg.Method, msg.Params)
+				c.notifyMu.Lock()
+				c.notifications = append(c.notifications, notification{fn, msg.Method, msg.Params})
+				c.notifyCond.Signal()
+				c.notifyMu.Unlock()
 			}
 			continue
 		}
