@@ -124,7 +124,45 @@ func (c *Collector) collectPS(ctx context.Context, kind hostos.Kind, s *Sample) 
 	if err != nil {
 		return 0, fmt.Errorf("hostwatch ps: %w", err)
 	}
-	return parseProcesses(out, s, c.Metrics), nil
+	javaArgs := c.javaArguments(ctx, out)
+	return parseProcesses(out, javaArgs, s, c.Metrics), nil
+}
+
+func (c *Collector) javaArguments(ctx context.Context, out []byte) map[int]string {
+	var pids []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 5 || strings.ToLower(filepath.Base(strings.Join(f[4:], " "))) != "java" {
+			continue
+		}
+		if pid, err := strconv.Atoi(f[0]); err == nil && pid > 0 {
+			pids = append(pids, f[0])
+		}
+		if len(pids) == 64 {
+			break
+		}
+	}
+	if len(pids) == 0 {
+		return nil
+	}
+	argv, err := proc.Output(ctx, c.runner(), "ps", "-o", "pid=,args=", "-p", strings.Join(pids, ","))
+	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Debug("watch java arguments unavailable", "error", fmt.Errorf("hostwatch java ps: %w", err))
+		}
+		return nil
+	}
+	result := make(map[int]string, len(pids))
+	for _, line := range strings.Split(string(argv), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		if pid, err := strconv.Atoi(f[0]); err == nil {
+			result[pid] = strings.TrimSpace(line[len(f[0]):])
+		}
+	}
+	return result
 }
 func (c *Collector) collectLoadMemory(kind hostos.Kind, s *Sample) {
 	load := c.Load
@@ -189,7 +227,7 @@ func (c *Collector) collectSelf(s *Sample) {
 	}
 	c.lastAt, c.lastCPU = s.At, v
 }
-func parseProcesses(out []byte, s *Sample, m *metrics.Collector) int {
+func parseProcesses(out []byte, javaArgs map[int]string, s *Sample, m *metrics.Collector) int {
 	var top []ProcStat
 	count := 0
 	for _, line := range strings.Split(string(out), "\n") {
@@ -206,7 +244,7 @@ func parseProcesses(out []byte, s *Sample, m *metrics.Collector) int {
 		count++
 		command := strings.Join(f[4:], " ")
 		name := filepath.Base(command)
-		kind := Classify(command)
+		kind := Classify(command, javaArgs[pid])
 		k := s.Kinds[kind]
 		k.Count++
 		k.CPUPct += cpu
