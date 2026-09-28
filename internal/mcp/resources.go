@@ -4,6 +4,7 @@ import "fmt"
 
 func resourceDefinitions() []ResourceDefinition {
 	return []ResourceDefinition{
+		{URI: "spectra://alerts/firing", Name: "Firing Alerts", Description: "Current daemon alerts in JSON.", MimeType: "application/json"},
 		{
 			URI:         "spectra://capabilities",
 			Name:        "Capabilities",
