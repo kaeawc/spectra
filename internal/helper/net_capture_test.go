@@ -26,15 +26,24 @@ func (p *fakeNetCaptureProcess) Wait() error {
 func TestNetCaptureStartBuildsBoundedTCPDump(t *testing.T) {
 	var gotName string
 	var gotArgs []string
+	var gotWriterPath string
 	proc := &fakeNetCaptureProcess{done: make(chan error, 1)}
 	baseDir := t.TempDir()
 	if err := os.Chmod(baseDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	uid := uint32(os.Getuid())
-	m := newNetCaptureManager(func(_ context.Context, _, _ io.Writer, name string, args ...string) (netCaptureProcess, error) {
+	m := newNetCaptureManager(func(_ context.Context, stdout, stderr io.Writer, name string, args ...string) (netCaptureProcess, error) {
 		gotName = name
 		gotArgs = append([]string(nil), args...)
+		file, ok := stdout.(*os.File)
+		if !ok || file.Name() == "" || stderr == stdout {
+			t.Fatalf("stdout = %T, stderr shares stdout = %v", stdout, stderr == stdout)
+		}
+		gotWriterPath = file.Name()
+		if _, err := stdout.Write([]byte("pcap")); err != nil {
+			t.Fatal(err)
+		}
 		return proc, nil
 	}, baseDir)
 	m.ownerUID = os.Geteuid()
@@ -54,21 +63,35 @@ func TestNetCaptureStartBuildsBoundedTCPDump(t *testing.T) {
 		t.Fatalf("command = %q, want tcpdump", gotName)
 	}
 	output := res["output_path"].(string)
+	if gotWriterPath != output {
+		t.Fatalf("stdout file = %q, want pre-created %q", gotWriterPath, output)
+	}
 	if matched, _ := regexp.MatchString(`^netcap-1-[0-9a-f]{32}\.pcap$`, filepath.Base(output)); !matched {
 		t.Fatalf("output = %q, want randomized capture name", output)
 	}
 	if filepath.Dir(output) != filepath.Join(baseDir, fmt.Sprint(uid)) {
 		t.Fatalf("output = %q, want per-UID directory", output)
 	}
-	wantArgs := []string{"-i", "en0", "-n", "-s", "4096", "-w", output, "tcp", "and", "host", "api.example.com", "and", "port", "443"}
+	wantArgs := []string{"-i", "en0", "-n", "-s", "4096", "-U", "-w", "-", "tcp", "and", "host", "api.example.com", "and", "port", "443"}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("args = %v, want %v", gotArgs, wantArgs)
 	}
 	if res["handle"] != "netcap-1" || res["output_path"] != output {
 		t.Fatalf("result = %+v", res)
 	}
+	data, err := os.ReadFile(output)
+	if err != nil || string(data) != "pcap" {
+		t.Fatalf("capture bytes = %q, %v", data, err)
+	}
+	info, err := os.Stat(output)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("capture mode = %v, %v", info, err)
+	}
 
 	proc.done <- nil
+	if _, err := m.stop(uid, netCaptureStopParams{Handle: "netcap-1"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNetCapturePrecreatesPrivateFiles(t *testing.T) {
@@ -100,6 +123,9 @@ func TestNetCapturePrecreatesPrivateFiles(t *testing.T) {
 					t.Fatalf("precreated file = %v, %v", info, err)
 				}
 				proc.done <- nil
+				if _, err := m.stop(uint32(os.Getuid()), netCaptureStopParams{Handle: res["handle"].(string)}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			namePattern := regexp.MustCompile(`^netcap-[0-9]+-([0-9a-f]{32})\.pcap$`)
 			first := namePattern.FindStringSubmatch(filepath.Base(outputs[0]))
@@ -144,14 +170,16 @@ func TestPrecreateCaptureFileRejectsExistingPaths(t *testing.T) {
 	if err := os.WriteFile(regular, []byte("existing"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := precreateCaptureFile(regular); err == nil {
+	if file, err := precreateCaptureFile(regular); err == nil {
+		file.Close()
 		t.Fatal("existing file was replaced")
 	}
 	link := filepath.Join(dir, "link.pcap")
 	if err := os.Symlink(regular, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := precreateCaptureFile(link); err == nil {
+	if file, err := precreateCaptureFile(link); err == nil {
+		file.Close()
 		t.Fatal("symlink was accepted")
 	}
 	data, err := os.ReadFile(regular)
@@ -294,12 +322,50 @@ func TestCaptureFinalizationRejectsSymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := makeCaptureReadableByOwner(link, uint32(os.Getuid()), os.Geteuid()); err == nil {
+	file, err := os.OpenFile(link, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err == nil {
+		defer file.Close()
+	}
+	if err == nil {
 		t.Fatal("symlink was accepted")
 	}
 	info, err := os.Stat(target)
 	if err != nil || info.Mode().Perm() != 0o644 {
 		t.Fatalf("target changed: %v, %v", info, err)
+	}
+}
+
+func TestCaptureFinalizationUsesOriginalDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "capture.pcap")
+	target := filepath.Join(dir, "target")
+	file, err := precreateCaptureFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write([]byte("pcap")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeCaptureReadableByOwner(file, uint32(os.Getuid()), os.Geteuid()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path + ".moved")
+	if err != nil || string(data) != "pcap" {
+		t.Fatalf("original bytes = %q, %v", data, err)
+	}
+	data, err = os.ReadFile(target)
+	if err != nil || string(data) != "safe" {
+		t.Fatalf("symlink target bytes = %q, %v", data, err)
 	}
 }
 
@@ -353,7 +419,12 @@ func TestCaptureFinalizationRejectsWidenedMode(t *testing.T) {
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := makeCaptureReadableByOwner(path, uint32(os.Getuid()), os.Geteuid()); err == nil {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := makeCaptureReadableByOwner(file, uint32(os.Getuid()), os.Geteuid()); err == nil {
 		t.Fatal("widened mode was accepted")
 	}
 	info, err := os.Stat(path)

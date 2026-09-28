@@ -39,6 +39,17 @@ func TestBuildTCPDumpArgsWithFilter(t *testing.T) {
 	}
 }
 
+func TestBuildTCPDumpArgsStdoutPacketBuffered(t *testing.T) {
+	args, err := BuildTCPDumpArgs(Options{Interface: "en0", Output: "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-i", "en0", "-n", "-s", "262144", "-U", "-w", "-"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
 func TestBuildTCPDumpArgsRejectsInvalidOptions(t *testing.T) {
 	tests := []Options{
 		{Output: "/tmp/out.pcap"},

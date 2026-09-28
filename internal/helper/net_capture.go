@@ -42,10 +42,16 @@ type netCaptureManager struct {
 
 type netCaptureSession struct {
 	cancel context.CancelFunc
-	done   chan error
+	done   chan netCaptureResult
 	output string
 	uid    uint32
 	buf    lockedBuffer
+}
+
+type netCaptureResult struct {
+	waitErr error
+	fileErr error
+	size    int64
 }
 
 type netCaptureStartParams struct {
@@ -89,7 +95,7 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	output := filepath.Join(outputDir, handle+"-"+hex.EncodeToString(suffix[:])+".pcap")
 	opts := netcap.Options{
 		Interface: p.Interface,
-		Output:    output,
+		Output:    "-",
 		Duration:  duration,
 		SnapLen:   p.SnapLen,
 		Host:      p.Host,
@@ -103,22 +109,30 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	if err := ensureCaptureDir(m.baseDir, outputDir, m.ownerUID); err != nil {
 		return nil, fmt.Errorf("create capture dir: %w", err)
 	}
-	if err := precreateCaptureFile(output); err != nil {
+	file, err := precreateCaptureFile(output)
+	if err != nil {
 		return nil, fmt.Errorf("create capture file: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
-	sess := &netCaptureSession{cancel: cancel, done: make(chan error, 1), output: output, uid: uid}
-	proc, err := m.starter(ctx, &sess.buf, &sess.buf, "tcpdump", args...)
+	sess := &netCaptureSession{cancel: cancel, done: make(chan netCaptureResult, 1), output: output, uid: uid}
+	proc, err := m.starter(ctx, file, &sess.buf, "tcpdump", args...)
 	if err != nil {
 		cancel()
-		return nil, errors.Join(fmt.Errorf("tcpdump start: %w", err), os.Remove(output))
+		return nil, errors.Join(fmt.Errorf("tcpdump start: %w", err), file.Close(), os.Remove(output))
 	}
 	m.mu.Lock()
 	m.sessions[handle] = sess
 	m.mu.Unlock()
 	go func() {
-		sess.done <- proc.Wait()
+		waitErr := proc.Wait()
+		fileErr := makeCaptureReadableByOwner(file, sess.uid, m.ownerUID)
+		info, statErr := file.Stat()
+		var size int64
+		if statErr == nil {
+			size = info.Size()
+		}
+		sess.done <- netCaptureResult{waitErr: waitErr, fileErr: errors.Join(fileErr, statErr, file.Close()), size: size}
 		if ctx.Err() == context.DeadlineExceeded {
 			m.forget(handle)
 		}
@@ -132,10 +146,10 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	}, nil
 }
 
-func precreateCaptureFile(path string) (err error) {
+func precreateCaptureFile(path string) (file *os.File, err error) {
 	fd, err := unix.Open(path, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
-		return fmt.Errorf("open capture: %w", err)
+		return nil, fmt.Errorf("open capture: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -145,12 +159,9 @@ func precreateCaptureFile(path string) (err error) {
 	f := os.NewFile(uintptr(fd), path)
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("chmod capture: %w", err)
+		return nil, fmt.Errorf("chmod capture: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close capture: %w", err)
-	}
-	return nil
+	return f, nil
 }
 
 func (m *netCaptureManager) stop(uid uint32, p netCaptureStopParams) (map[string]any, error) {
@@ -171,27 +182,20 @@ func (m *netCaptureManager) stop(uid uint32, p netCaptureStopParams) (map[string
 	}
 
 	sess.cancel()
-	waitErr := waitNetCapture(sess.done)
-	ownerErr := makeCaptureReadableByOwner(sess.output, sess.uid, m.ownerUID)
-	info, statErr := os.Lstat(sess.output)
-	size := int64(0)
-	if statErr == nil {
-		size = info.Size()
-	}
+	finished, timedOut := waitNetCapture(sess.done)
 	result := map[string]any{
 		"handle":      p.Handle,
 		"output_path": sess.output,
 		"stopped":     true,
-		"size_bytes":  size,
+		"size_bytes":  finished.size,
 	}
-	if waitErr != "" {
-		result["wait_error"] = waitErr
+	if timedOut {
+		result["wait_error"] = "timeout waiting for tcpdump to stop"
+	} else if finished.waitErr != nil {
+		result["wait_error"] = finished.waitErr.Error()
 	}
-	if statErr != nil && !os.IsNotExist(statErr) {
-		result["stat_error"] = statErr.Error()
-	}
-	if ownerErr != nil && !errors.Is(ownerErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("finalize capture: %w", ownerErr)
+	if finished.fileErr != nil {
+		return nil, fmt.Errorf("finalize capture: %w", finished.fileErr)
 	}
 	return result, nil
 }
@@ -241,13 +245,7 @@ func verifyCaptureDir(info os.FileInfo, ownerUID int) error {
 	return nil
 }
 
-func makeCaptureReadableByOwner(path string, uid uint32, ownerUID int) error {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return fmt.Errorf("open capture: %w", err)
-	}
-	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
+func makeCaptureReadableByOwner(f *os.File, uid uint32, ownerUID int) error {
 	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("stat capture: %w", err)
@@ -270,16 +268,13 @@ func makeCaptureReadableByOwner(path string, uid uint32, ownerUID int) error {
 	return nil
 }
 
-func waitNetCapture(done <-chan error) string {
+func waitNetCapture(done <-chan netCaptureResult) (netCaptureResult, bool) {
 	select {
-	case err := <-done:
-		if err != nil {
-			return err.Error()
-		}
+	case result := <-done:
+		return result, false
 	case <-time.After(netCaptureStopWait):
-		return "timeout waiting for tcpdump to stop"
+		return netCaptureResult{}, true
 	}
-	return ""
 }
 
 func (m *netCaptureManager) forget(handle string) {

@@ -61,8 +61,11 @@ func BuildTCPDumpArgs(opts Options) ([]string, error) {
 		"-i", opts.Interface,
 		"-n",
 		"-s", strconv.Itoa(snapLen),
-		"-w", opts.Output,
 	}
+	if opts.Output == "-" {
+		args = append(args, "-U")
+	}
+	args = append(args, "-w", opts.Output)
 	if len(filter) > 0 {
 		args = append(args, filter...)
 	}

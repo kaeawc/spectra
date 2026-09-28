@@ -99,9 +99,10 @@ structured duration, snap length, host, port, and TCP/UDP protocol
 filters. The helper generates unguessable output paths under a per-caller-UID
 directory in `/var/tmp/spectra-netcap`. Both directories are root-owned and
 search-only for other users (mode `0711`). The helper pre-creates each pcap
-root-owned at mode `0600` before starting tcpdump, then changes ownership
-of a verified completed pcap through its open file
-descriptor. It never accepts a caller-supplied output path. This keeps the
+root-owned at mode `0600` before starting tcpdump. Tcpdump writes packet-buffered
+pcap data to stdout; the helper directs stdout to that already-open file descriptor
+and changes ownership of the verified completed pcap through the same descriptor.
+It never accepts a caller-supplied output path. This keeps the
 method from becoming a root arbitrary-file writer.
 Captures are capped at 60 seconds. `helper.net_capture.stop` returns the
 generated path and file size, not packet contents.

@@ -157,7 +157,7 @@ Suggested cleanup after packet capture work:
 
 ```bash
 spectra cache clear --kind netcap
-sudo rm -f /var/tmp/spectra-netcap/"$(id -u)"/*.pcap
+sudo sh -c 'rm -f /var/tmp/spectra-netcap/"$1"/*.pcap' _ "$(id -u)"
 spectra cache stats
 ```
 
@@ -167,6 +167,7 @@ before removing files under `/var/tmp/spectra-netcap/`.
 The helper keeps the base and per-UID directories root-owned at mode `0711`.
 Capture names have a random suffix and cannot be listed by other users;
 removal requires sudo.
+The root shell expands the glob because your shell cannot list the root-owned `0711` directory.
 
 ## Redaction limits
 
