@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/jsonrpc"
 	"github.com/kaeawc/spectra/internal/logger"
@@ -27,6 +28,7 @@ type Server struct {
 	collect       Collectors
 	daemon        daemonWatchClient
 	connectDaemon func(context.Context) (daemonWatchClient, bool)
+	daemonTimeout time.Duration
 }
 
 // NewServer returns a configured MCP server from stdin/stdout handles.

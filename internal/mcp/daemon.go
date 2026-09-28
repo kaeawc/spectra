@@ -17,6 +17,18 @@ import (
 )
 
 var errDaemonUnavailable = errors.New("spectra daemon is not running")
+var errDaemonTimeout = errors.New("spectra daemon call timed out")
+
+const defaultDaemonCallTimeout = 2 * time.Second
+
+func (s *Server) setDaemonCallTimeout(timeout time.Duration) { s.daemonTimeout = timeout }
+
+func (s *Server) daemonCallTimeout() time.Duration {
+	if s.daemonTimeout > 0 {
+		return s.daemonTimeout
+	}
+	return defaultDaemonCallTimeout
+}
 
 type daemonWatchClient interface {
 	Current(context.Context) (hostwatch.Sample, []hostwatch.Alert, error)
@@ -43,8 +55,10 @@ func (s *Server) SetDaemonConnector(fn func(context.Context) (daemonWatchClient,
 	s.connectDaemon = fn
 }
 
+// The lazily connected daemon client relies on the MCP server's single-threaded request dispatch; concurrent dispatch needs a lock here.
 func (s *Server) withDaemon(fn func(context.Context, daemonWatchClient) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	parentCtx := context.Background()
+	ctx, cancel := context.WithTimeout(parentCtx, s.daemonCallTimeout())
 	defer cancel()
 	for attempt := 0; attempt < 2; attempt++ {
 		if s.daemon == nil {
@@ -62,6 +76,11 @@ func (s *Server) withDaemon(fn func(context.Context, daemonWatchClient) error) e
 		if err == nil {
 			return nil
 		}
+		if errors.Is(err, context.DeadlineExceeded) && parentCtx.Err() == nil {
+			_ = s.daemon.Close()
+			s.daemon = nil
+			return errDaemonTimeout
+		}
 		if !daemonclient.IsUnavailable(err) {
 			return err
 		}
@@ -72,6 +91,9 @@ func (s *Server) withDaemon(fn func(context.Context, daemonWatchClient) error) e
 }
 
 func daemonToolError(err error) ToolResult {
+	if errors.Is(err, errDaemonTimeout) {
+		return toolTextError(map[string]string{"error": "daemon_timeout", "message": "the spectra daemon did not respond within 2s; check `spectra daemon status` / `spectra daemon logs`"})
+	}
 	if !errors.Is(err, errDaemonUnavailable) {
 		return toolTextError(map[string]string{"error": "daemon_error", "message": err.Error()})
 	}
@@ -170,6 +192,9 @@ func (s *Server) toolProcessHistory(pid, limit int) ToolResult {
 		return callErr
 	})
 	if err != nil {
+		if errors.Is(err, errDaemonTimeout) {
+			return daemonToolError(err)
+		}
 		if !errors.Is(err, errDaemonUnavailable) {
 			return toolError(err.Error())
 		}
