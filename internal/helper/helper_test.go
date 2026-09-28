@@ -53,6 +53,20 @@ func TestFramingOversized(t *testing.T) {
 
 // --- dispatcher ---
 
+func TestDispatcherRejectsUnknownPeerCredentials(t *testing.T) {
+	d := NewDispatcher()
+	called := false
+	d.Register("test.call", func(uint32, json.RawMessage) (any, error) { called = true; return true, nil })
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { d.Serve(server); close(done) }()
+	defer client.Close()
+	<-done
+	if called {
+		t.Fatal("handler called without verified peer UID")
+	}
+}
+
 func TestDispatcherHealth(t *testing.T) {
 	d := NewDispatcher()
 	RegisterAll(d, func(name string, args ...string) ([]byte, error) {

@@ -157,13 +157,16 @@ Suggested cleanup after packet capture work:
 
 ```bash
 spectra cache clear --kind netcap
-rm -f /var/tmp/spectra-netcap/*/*.pcap
+sudo rm -f /var/tmp/spectra-netcap/"$(id -u)"/*.pcap
 spectra cache stats
 ```
 
 Only remove packet captures from helper-managed paths that belong to
 your investigation. On shared systems, coordinate with the machine owner
 before removing files under `/var/tmp/spectra-netcap/`.
+The helper keeps the base and per-UID directories root-owned at mode `0711`.
+Capture names have a random suffix and cannot be listed by other users;
+removal requires sudo.
 
 ## Redaction limits
 

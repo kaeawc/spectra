@@ -6,10 +6,4 @@ import (
 	"github.com/kaeawc/spectra/internal/peercred"
 )
 
-func peerUID(conn net.Conn) uint32 {
-	uid, err := peercred.PeerUID(conn)
-	if err != nil {
-		return 0
-	}
-	return uid
-}
+func peerUID(conn net.Conn) (uint32, error) { return peercred.PeerUID(conn) }

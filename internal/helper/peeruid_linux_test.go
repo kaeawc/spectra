@@ -43,8 +43,8 @@ func TestPeerUIDReadsSocketpairCredentials(t *testing.T) {
 	}
 	defer a.conn.Close()
 
-	got := peerUID(a.conn)
-	if got != uint32(os.Getuid()) {
-		t.Fatalf("peerUID = %d, want %d (own uid)", got, os.Getuid())
+	got, err := peerUID(a.conn)
+	if err != nil || got != uint32(os.Getuid()) {
+		t.Fatalf("peerUID = %d, %v; want %d (own uid)", got, err, os.Getuid())
 	}
 }
