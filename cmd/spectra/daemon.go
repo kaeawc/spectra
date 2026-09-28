@@ -19,7 +19,10 @@ import (
 
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
+	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/logger"
+	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/store"
 )
 
 const daemonAgentLabel = "dev.spectra.daemon"
@@ -85,11 +88,13 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	fs := flag.NewFlagSet("daemon run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idle := fs.Duration("idle-timeout", 0, "stop after inactivity")
+	watchInterval := fs.Duration("watch-interval", 15*time.Second, "host monitoring interval")
+	noNotify := fs.Bool("no-notify", false, "disable desktop notifications")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || *idle < 0 {
-		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration]")
+	if fs.NArg() != 0 || *idle < 0 || *watchInterval <= 0 {
+		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration] [--watch-interval duration] [--no-notify]")
 	}
 	if err := os.MkdirAll(filepath.Dir(paths.Log), 0o700); err != nil {
 		return fmt.Errorf("daemon log directory: %w", err)
@@ -101,7 +106,43 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	defer logFile.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, daemonTermSignal)
 	defer stop()
-	return daemon.New(daemon.Options{Paths: paths, Version: version, Logger: logger.New(logger.Config{Writer: logFile, Format: logger.FormatJSON, Level: slog.LevelInfo}), IdleTimeout: *idle}).Run(ctx)
+	log := logger.New(logger.Config{Writer: logFile, Format: logger.FormatJSON, Level: slog.LevelInfo})
+	dbPath := os.Getenv("SPECTRA_WATCH_DB")
+	if dbPath == "" {
+		dbPath, err = store.DefaultPath()
+		if err != nil {
+			return fmt.Errorf("watch database path: %w", err)
+		}
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("watch database: %w", err)
+	}
+	defer db.Close()
+	cfg, err := hostwatch.LoadConfig(filepath.Join(paths.Dir, "watch.yml"), nil)
+	if err != nil {
+		log.Warn("watch config invalid; using defaults", "error", err)
+	}
+	processMetrics := metrics.NewCollector()
+	var notifier hostwatch.Notifier = hostwatch.NoopNotifier{}
+	if !*noNotify {
+		notifier = &hostwatch.RateLimitedNotifier{Inner: hostwatch.DesktopNotifier{}}
+	}
+	watch := hostwatch.NewService(hostwatch.ServiceOptions{Store: db, Metrics: processMetrics, Collector: &hostwatch.Collector{Metrics: processMetrics, Logger: log}, Config: cfg, Interval: *watchInterval, Logger: log, Notifier: notifier})
+	server := daemon.New(daemon.Options{Paths: paths, Version: version, Logger: log, IdleTimeout: *idle})
+	hostwatch.RegisterMethods(server, watch)
+	watchCtx, cancelWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		if err := watch.Run(watchCtx); err != nil {
+			log.Error("watch stopped", "error", err)
+		}
+	}()
+	err = server.Run(ctx)
+	cancelWatch()
+	<-watchDone
+	return err
 }
 
 func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {

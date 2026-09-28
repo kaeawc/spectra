@@ -275,6 +275,24 @@ CREATE TABLE IF NOT EXISTS fd_samples (
 
 CREATE INDEX IF NOT EXISTS idx_fd_samples_pid ON fd_samples(pid, at_nano DESC);
 
+CREATE TABLE IF NOT EXISTS host_samples (
+    at_nano INTEGER PRIMARY KEY,
+    sample_json BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS alerts (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    state TEXT NOT NULL,
+    fired_at_nano INTEGER NOT NULL,
+    resolved_at_nano INTEGER,
+    acked_at_nano INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_state ON alerts(state, fired_at_nano DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_resolved ON alerts(resolved_at_nano);
+
 CREATE TABLE IF NOT EXISTS issues (
     id                     TEXT PRIMARY KEY,
     rule_id                TEXT NOT NULL,
