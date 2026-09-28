@@ -1,9 +1,7 @@
 # Local daemon
 
 Spectra has a local, per-user daemon over a Unix socket; no network listener;
-cross-machine access remains in Spectra Remote. The daemon currently provides
-lifecycle and status RPCs. Diagnostic data integration and background monitoring
-will follow in separate changes.
+cross-machine access remains in Spectra Remote.
 
 ```bash
 spectra daemon start
@@ -37,3 +35,43 @@ The transport is newline-delimited JSON-RPC 2.0. `daemon.status` reports the
 protocol, version, PID, start time, socket, and methods. `daemon.shutdown`
 responds before stopping. A persistent connection can receive server-to-client
 notifications for future subscriptions.
+
+## Monitoring and alerts
+
+`daemon run` samples host health every 15 seconds. `--watch-interval 2s` changes
+the interval and `--no-notify` disables desktop notifications. The watch uses
+one `ps` call per tick for process counts, CPU, RSS, top processes, and process
+history. It also reads load average, memory pressure and swap, kernel limits,
+free space on the data volume, thermal state, and its own CPU time. It does not
+scan apps, collect snapshots, or inspect protected paths. On macOS, thermal
+state requires one `pmset -g therm` call; on Linux, thermal throttling is not
+reported where the kernel has no common direct signal. Limits without a cheap
+current-usage counter are reported with a zero limit percentage and do not
+trigger an alert. If the daemon averages more than 2% CPU over ten ticks, the
+watch doubles its interval up to four times the base; it returns to the base
+below 0.5%.
+
+Warnings include load above 1.5 times CPU count for two samples, rising load,
+memory pressure for two samples, swap growth above 1 GB in five minutes,
+resource limits above 70%, less than 20 GB free, thermal throttling for two
+samples, a process kind above 600% CPU for three samples, and high Gradle,
+simulator, emulator, or Codex plus Claude counts. Critical alerts cover load
+above three times CPU count for two samples, critical memory pressure, limits
+above 90%, and less than 5 GB free. Alerts clear after two healthy evaluations.
+
+Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
+`load`, `memory`, `limits`, `disk`, `thermal`, and `kinds`; field names are the
+snake case names in the defaults, such as `load.warn_multiple` or
+`disk.critical_gb`. An unknown YAML key logs an error and keeps all defaults.
+
+The watch stores JSON samples for seven days and resolved alerts for 30 days
+in the Spectra SQLite database. `SPECTRA_WATCH_DB` overrides the database path
+for isolated runs. Process metrics are aggregated each minute. The RPC methods
+are `watch.current`, `watch.samples` (`since`, `limit`), `alerts.list` (`state`,
+`limit`), `alerts.ack` (`id`), `alerts.subscribe` (`samples`), and
+`process.history` (`pid`, `limit`). A subscription sends `alerts.event`
+notifications and optionally `watch.sample` notifications until its connection
+closes. Slow subscribers can miss events; clients can recover from the stored
+history. Desktop notifications are best effort, capped at six per hour and
+cooled down per alert key for 15 minutes. LaunchAgent sessions may lack desktop
+notification permission.
