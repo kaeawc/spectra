@@ -62,6 +62,7 @@ func subcommandList() []subcommand {
 		{"install-helper", "Install the privileged helper daemon (requires sudo)", runInstallHelperCmd},
 		{"schedule", "Schedule periodic snapshot capture via a launchd agent", runSchedule},
 		{"daemon", "Manage the local per-user diagnostic daemon", runDaemon},
+		{"alerts", "List, acknowledge, watch, and summarize daemon alerts", runAlerts},
 		{"sample", "Collect a user-space CPU sample of a running process", runSample},
 		{"symbolicate", "Resolve raw stack addresses to symbol + file:line via atos", runSymbolicate},
 		{"spindump", "Capture and summarize a per-thread stack report (heaviest stacks)", runSpindump},
@@ -144,6 +145,7 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  --verbose, --debug   Log enhancement/collection failures to stderr (or set SPECTRA_DEBUG)")
+	fmt.Fprintln(w, "  --no-daemon         Disable daemon enrichment for alerts and whatswrong")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {

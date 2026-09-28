@@ -114,6 +114,7 @@ nav:
       - Issues: operations/issues.md
       - Install services: operations/install-services.md
       - Background service: operations/daemon.md
+      - MCP tools: operations/mcp.md
       - Remote separation: operations/remote.md
       - Snapshots and hosts: operations/snapshots-and-hosts.md
       - Caching: operations/caching.md

@@ -3,11 +3,13 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/jsonrpc"
 	"github.com/kaeawc/spectra/internal/logger"
@@ -17,13 +19,16 @@ const protocolVersion = "2024-11-05"
 
 // Server routes MCP JSON-RPC calls.
 type Server struct {
-	reader  *bufio.Reader
-	writer  io.Writer
-	mu      sync.Mutex
-	Version string
-	Verbose bool
-	log     logger.Logger
-	collect Collectors
+	reader        *bufio.Reader
+	writer        io.Writer
+	mu            sync.Mutex
+	Version       string
+	Verbose       bool
+	log           logger.Logger
+	collect       Collectors
+	daemon        daemonWatchClient
+	connectDaemon func(context.Context) (daemonWatchClient, bool)
+	daemonTimeout time.Duration
 }
 
 // NewServer returns a configured MCP server from stdin/stdout handles.
@@ -252,6 +257,8 @@ func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
 		"cache":       s.toolCache,
 		"core":        s.toolCore,
 		"metrics":     s.toolMetrics,
+		"host_health": s.toolHostHealth,
+		"alerts":      s.toolAlerts,
 	}
 }
 
@@ -265,6 +272,10 @@ func (s *Server) handleResourcesRead(req Request) {
 	var params ResourceReadParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
+		return
+	}
+	if params.URI == "spectra://alerts/firing" {
+		s.readFiringAlerts(req)
 		return
 	}
 	content, mimeType, err := readResource(params.URI)

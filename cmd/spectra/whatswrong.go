@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
+	"time"
 
+	"github.com/kaeawc/spectra/internal/daemon"
+	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/sysload"
+	"github.com/kaeawc/spectra/internal/watchclient"
 )
 
 type slowSignals struct {
@@ -27,9 +32,17 @@ type slowCause struct {
 }
 
 type slowDeps struct {
-	load  func() sysload.Load
-	power func() sysinfo.PowerState
-	procs func() []process.Info
+	load    func() sysload.Load
+	power   func() sysinfo.PowerState
+	procs   func() []process.Info
+	connect func(context.Context) (slowWatchClient, bool)
+	now     func() time.Time
+}
+
+type slowWatchClient interface {
+	Current(context.Context) (hostwatch.Sample, []hostwatch.Alert, error)
+	Samples(context.Context, time.Time, int) ([]hostwatch.Sample, error)
+	Close() error
 }
 
 func defaultSlowDeps() slowDeps {
@@ -37,6 +50,14 @@ func defaultSlowDeps() slowDeps {
 		load:  func() sysload.Load { return sysload.Collect(sysload.DefaultRunner) },
 		power: func() sysinfo.PowerState { return sysinfo.CollectPower(sysinfo.DefaultRunner) },
 		procs: func() []process.Info { return process.CollectAll(context.Background(), process.CollectOptions{}) },
+		connect: func(ctx context.Context) (slowWatchClient, bool) {
+			paths, err := daemon.DefaultPaths(os.Getenv, os.UserHomeDir, runtime.GOOS)
+			if err != nil {
+				return nil, false
+			}
+			return watchclient.Connect(ctx, os.Getenv, paths)
+		},
+		now: time.Now,
 	}
 }
 
@@ -48,21 +69,55 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 	fs := flag.NewFlagSet("whatswrong", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
+	noDaemon := fs.Bool("no-daemon", false, "disable daemon enrichment")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	sig := slowSignals{Load: deps.load(), Power: deps.power(), Procs: deps.procs()}
 	causes := rankSlowCauses(sig)
+	var daemonAlerts []hostwatch.Alert
+	var trend string
+	if !*noDaemon && deps.connect != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		if client, ok := deps.connect(ctx); ok {
+			func() {
+				defer client.Close()
+				_, alerts, err := client.Current(ctx)
+				if err != nil {
+					cliLogger.Debug("whatswrong daemon current unavailable", "error", err)
+					return
+				}
+				clockNow := deps.now
+				if clockNow == nil {
+					clockNow = time.Now
+				}
+				now := clockNow()
+				samples, err := client.Samples(ctx, now.Add(-5*time.Minute), 240)
+				if err != nil {
+					cliLogger.Debug("whatswrong daemon samples unavailable", "error", err)
+					return
+				}
+				daemonAlerts = alerts
+				trend = summarizeTrend(samples)
+			}()
+		} else {
+			cliLogger.Debug("whatswrong daemon unavailable")
+		}
+		cancel()
+	}
+	causes = mergeDaemonCauses(causes, daemonAlerts)
 	if *asJSON {
 		out := struct {
-			Causes  []slowCause `json:"causes"`
-			Signals struct {
+			Causes       []slowCause       `json:"causes"`
+			DaemonAlerts []hostwatch.Alert `json:"daemon_alerts,omitempty"`
+			Trend        string            `json:"trend,omitempty"`
+			Signals      struct {
 				Load   sysload.Load       `json:"load"`
 				Power  sysinfo.PowerState `json:"power"`
 				TopCPU *process.Info      `json:"top_cpu,omitempty"`
 				TopRSS *process.Info      `json:"top_rss,omitempty"`
 			} `json:"signals"`
-		}{Causes: causes}
+		}{Causes: causes, DaemonAlerts: daemonAlerts, Trend: trend}
 		out.Signals.Load = sig.Load
 		out.Signals.Power = sig.Power
 		if p, ok := topByCPU(sig.Procs); ok {
@@ -80,7 +135,54 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 		return 0
 	}
 	renderWhatswrong(stdout, causes)
+	if trend != "" {
+		fmt.Fprintln(stdout, "Trend:", trend)
+	}
 	return 0
+}
+
+func mergeDaemonCauses(causes []slowCause, alerts []hostwatch.Alert) []slowCause {
+	seen := make(map[string]bool, len(causes))
+	for _, c := range causes {
+		seen[c.Title] = true
+	}
+	for _, a := range alerts {
+		if seen[a.Title] {
+			continue
+		}
+		severity := "medium"
+		if a.Severity == "critical" {
+			severity = "high"
+		}
+		causes = append(causes, slowCause{Severity: severity, Title: a.Title, Detail: a.Detail})
+		seen[a.Title] = true
+	}
+	sort.SliceStable(causes, func(i, j int) bool { return severityRank(causes[i].Severity) < severityRank(causes[j].Severity) })
+	return causes
+}
+
+func summarizeTrend(samples []hostwatch.Sample) string {
+	if len(samples) == 0 {
+		return ""
+	}
+	latest := samples[0]
+	for _, s := range samples {
+		if s.At.After(latest.At) {
+			latest = s
+		}
+	}
+	elevated := false
+	for _, s := range samples {
+		if s.MemoryPressure == "warn" || s.MemoryPressure == "critical" {
+			elevated = true
+			break
+		}
+	}
+	pressure := "normal"
+	if elevated {
+		pressure = "elevated in the last 5 min"
+	}
+	return fmt.Sprintf("load %.2f/%.2f/%.2f; memory pressure %s", latest.Load1, latest.Load5, latest.Load15, pressure)
 }
 
 func rankSlowCauses(s slowSignals) []slowCause {
