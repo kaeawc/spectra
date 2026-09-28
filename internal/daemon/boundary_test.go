@@ -26,15 +26,15 @@ var netCalls = map[string]bool{
 }
 
 func TestLocalTransportBoundary(t *testing.T) {
-	packages := map[string][]*ast.File{}
-	importsDaemon := map[string]bool{}
 	fset := token.NewFileSet()
+	checked := 0
+	selectedPaths := map[string]bool{}
 	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" || path == "../../cmd" {
+			if entry.Name() == ".git" || entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -46,32 +46,43 @@ func TestLocalTransportBoundary(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		dir := filepath.Dir(path)
-		packages[dir] = append(packages[dir], file)
-		for _, imp := range file.Imports {
-			name, _ := strconv.Unquote(imp.Path.Value)
-			importsDaemon[dir] = importsDaemon[dir] || name == daemonImport
+		if localTransportFile(path, file) {
+			checked++
+			selectedPaths[path] = true
+			for _, problem := range checkLocalTransport(file, fset) {
+				t.Error(problem)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	checked := 0
-	for dir, files := range packages {
-		if dir != "../../internal/daemon" && dir != "../../internal/daemonclient" && dir != "../../internal/peercred" && !importsDaemon[dir] {
-			continue
-		}
-		for _, file := range files {
-			checked++
-			for _, problem := range checkLocalTransport(file, fset) {
-				t.Error(problem)
-			}
-		}
-	}
 	if checked == 0 {
 		t.Fatal("no local transport files checked")
 	}
+	for _, path := range []string{"../../cmd/spectra/daemon.go", "../../cmd/spectra/daemon_deps.go"} {
+		if !selectedPaths[path] {
+			t.Errorf("daemon entry point %s was not checked", path)
+		}
+	}
+	if selectedPaths["../../cmd/spectra/network_captive.go"] {
+		t.Error("unrelated captive portal CLI file was checked")
+	}
+}
+
+func localTransportFile(path string, file *ast.File) bool {
+	dir := filepath.Dir(path)
+	if dir == "../../internal/daemon" || dir == "../../internal/daemonclient" || dir == "../../internal/peercred" {
+		return true
+	}
+	for _, imp := range file.Imports {
+		name, _ := strconv.Unquote(imp.Path.Value)
+		if name == daemonImport || name == daemonImport+"client" {
+			return true
+		}
+	}
+	return false
 }
 
 func checkLocalTransport(file *ast.File, fset *token.FileSet) []error {
