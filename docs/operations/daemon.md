@@ -84,9 +84,12 @@ notification permission.
 
 The CLI and stdio MCP server discover the running local daemon through its Unix
 socket. They never start it automatically. Run `spectra daemon start` or install
-the per-user service before using alert and host-health commands. Set
-`SPECTRA_NO_DAEMON=1` to disable daemon access; `spectra alerts` and
-`spectra whatswrong` also accept `--no-daemon`. The CLI warns about a daemon
+the per-user service before using alert and host-health commands.
+`SPECTRA_NO_DAEMON=1` and `--no-daemon` apply to daemon-consuming commands:
+`spectra alerts`, `spectra whatswrong` enrichment, and the MCP `host_health`,
+`alerts`, and process-history tools. The `spectra daemon start|stop|status|logs`
+subcommands ignore this flag and environment variable because they manage the
+daemon itself rather than acting as its clients. The CLI warns about a daemon
 version mismatch and continues; `whatswrong` keeps its local diagnosis if the
 daemon is unavailable or does not answer within one second.
 

@@ -16,8 +16,13 @@ import (
 
 type Client struct{ c *daemonclient.Client }
 
+// Disabled reports whether daemon access is disabled by the supplied environment lookup.
+func Disabled(env func(string) string) bool {
+	return env != nil && (env("SPECTRA_NO_DAEMON") == "1" || strings.EqualFold(env("SPECTRA_NO_DAEMON"), "true"))
+}
+
 func Connect(ctx context.Context, env func(string) string, paths daemon.Paths) (*Client, bool) {
-	if env != nil && (env("SPECTRA_NO_DAEMON") == "1" || strings.EqualFold(env("SPECTRA_NO_DAEMON"), "true")) {
+	if Disabled(env) {
 		return nil, false
 	}
 	if paths.Socket == "" {

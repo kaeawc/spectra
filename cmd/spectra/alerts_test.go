@@ -125,9 +125,34 @@ func TestAlertsWatch(t *testing.T) {
 
 func TestAlertsUnavailable(t *testing.T) {
 	deps := defaultAlertDeps()
+	deps.disabled = func() bool { return false }
 	deps.connect = func(context.Context) (alertClient, bool) { return nil, false }
 	var out, stderr bytes.Buffer
 	if code := runAlertsWithIO(nil, &out, &stderr, deps); code != 1 || strings.TrimSpace(stderr.String()) != daemonNotRunning {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestAlertsDaemonDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		disabled bool
+	}{
+		{name: "flag", args: []string{"--no-daemon"}},
+		{name: "environment", disabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := defaultAlertDeps()
+			deps.disabled = func() bool { return tc.disabled }
+			deps.connect = func(context.Context) (alertClient, bool) {
+				t.Fatal("connect called while daemon access is disabled")
+				return nil, false
+			}
+			var out, stderr bytes.Buffer
+			if code := runAlertsWithIO(tc.args, &out, &stderr, deps); code != 1 || strings.TrimSpace(stderr.String()) != daemonAccessDisabled {
+				t.Fatalf("code=%d stderr=%q", code, stderr.String())
+			}
+		})
 	}
 }

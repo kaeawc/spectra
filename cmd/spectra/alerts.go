@@ -20,6 +20,7 @@ import (
 )
 
 const daemonNotRunning = "spectra daemon is not running (start it with `spectra daemon start` or install it with `spectra daemon install`)"
+const daemonAccessDisabled = "daemon access is disabled (--no-daemon or SPECTRA_NO_DAEMON); `spectra alerts` requires the daemon"
 
 type alertClient interface {
 	CheckVersion(context.Context, string) error
@@ -31,9 +32,10 @@ type alertClient interface {
 }
 
 type alertDeps struct {
-	connect func(context.Context) (alertClient, bool)
-	context func() (context.Context, context.CancelFunc)
-	now     func() time.Time
+	connect  func(context.Context) (alertClient, bool)
+	disabled func() bool
+	context  func() (context.Context, context.CancelFunc)
+	now      func() time.Time
 }
 
 func defaultAlertDeps() alertDeps {
@@ -45,6 +47,7 @@ func defaultAlertDeps() alertDeps {
 			}
 			return watchclient.Connect(ctx, os.Getenv, paths)
 		},
+		disabled: func() bool { return watchclient.Disabled(os.Getenv) },
 		context: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt)
 		},
@@ -109,8 +112,8 @@ func runAlertsWithIO(args []string, out, stderr io.Writer, deps alertDeps) int {
 	if !ok {
 		return 2
 	}
-	if opt.noDaemon {
-		fmt.Fprintln(stderr, daemonNotRunning)
+	if opt.noDaemon || deps.disabled != nil && deps.disabled() {
+		fmt.Fprintln(stderr, daemonAccessDisabled)
 		return 1
 	}
 	ctx, cancel := deps.context()
