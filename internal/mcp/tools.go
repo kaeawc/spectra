@@ -58,6 +58,8 @@ func toolDefinitions() []ToolDefinition {
 		cacheToolDef(),
 		coreToolDef(),
 		metricsToolDef(),
+		{Name: "host_health", Description: "Current daemon host health and optional recent samples.", InputSchema: objectSchema(map[string]interface{}{"samples": integerProp("Recent samples to include (0..240).")}, nil)},
+		{Name: "alerts", Description: "List or acknowledge daemon alerts.", InputSchema: objectSchema(map[string]interface{}{"action": enumProp([]string{"list", "ack"}, "list"), "state": enumProp([]string{"firing", "resolved", "all"}, "firing"), "limit": integerProp("Maximum alerts (1..2000)."), "id": stringProp("Alert ID for ack.")}, nil)},
 	}
 }
 
@@ -796,7 +798,7 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
 	case "history":
-		return toolError("process history is unavailable in the local-only MCP server")
+		return s.toolProcessHistory(p.PID, p.Limit)
 	default:
 		return toolError("unknown process operation: " + p.Operation)
 	}

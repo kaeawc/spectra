@@ -2,6 +2,9 @@ package helper
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +12,11 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/netcap"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -30,15 +35,23 @@ type netCaptureManager struct {
 	next     atomic.Uint64
 	starter  netCaptureStarter
 	baseDir  string
+	ownerUID int
+	random   io.Reader
 	sessions map[string]*netCaptureSession
 }
 
 type netCaptureSession struct {
 	cancel context.CancelFunc
-	done   chan error
+	done   chan netCaptureResult
 	output string
 	uid    uint32
 	buf    lockedBuffer
+}
+
+type netCaptureResult struct {
+	waitErr error
+	fileErr error
+	size    int64
 }
 
 type netCaptureStartParams struct {
@@ -54,14 +67,18 @@ type netCaptureStopParams struct {
 	Handle string `json:"handle"`
 }
 
-func newNetCaptureManager(starter netCaptureStarter, baseDir string) *netCaptureManager {
+func newNetCaptureManager(starter netCaptureStarter, baseDir string, geteuid ...func() int) *netCaptureManager {
 	if starter == nil {
 		starter = startNetCaptureProcess
 	}
 	if baseDir == "" {
 		baseDir = defaultNetCaptureDir
 	}
-	return &netCaptureManager{starter: starter, baseDir: baseDir, sessions: make(map[string]*netCaptureSession)}
+	currentEUID := os.Geteuid
+	if len(geteuid) != 0 {
+		currentEUID = geteuid[0]
+	}
+	return &netCaptureManager{starter: starter, baseDir: baseDir, ownerUID: currentEUID(), random: rand.Reader, sessions: make(map[string]*netCaptureSession)}
 }
 
 func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[string]any, error) {
@@ -71,10 +88,14 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	}
 	handle := fmt.Sprintf("netcap-%d", m.next.Add(1))
 	outputDir := filepath.Join(m.baseDir, fmt.Sprint(uid))
-	output := filepath.Join(outputDir, handle+".pcap")
+	var suffix [16]byte
+	if _, err := io.ReadFull(m.random, suffix[:]); err != nil {
+		return nil, fmt.Errorf("generate capture name: %w", err)
+	}
+	output := filepath.Join(outputDir, handle+"-"+hex.EncodeToString(suffix[:])+".pcap")
 	opts := netcap.Options{
 		Interface: p.Interface,
-		Output:    output,
+		Output:    "-",
 		Duration:  duration,
 		SnapLen:   p.SnapLen,
 		Host:      p.Host,
@@ -85,22 +106,33 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	if err != nil {
 		return nil, fmt.Errorf("helper.net_capture.start: %w", err)
 	}
-	if err := ensureCaptureDir(outputDir, uid); err != nil {
+	if err := ensureCaptureDir(m.baseDir, outputDir, m.ownerUID); err != nil {
 		return nil, fmt.Errorf("create capture dir: %w", err)
+	}
+	file, err := precreateCaptureFile(output)
+	if err != nil {
+		return nil, fmt.Errorf("create capture file: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
-	sess := &netCaptureSession{cancel: cancel, done: make(chan error, 1), output: output, uid: uid}
-	proc, err := m.starter(ctx, &sess.buf, &sess.buf, "tcpdump", args...)
+	sess := &netCaptureSession{cancel: cancel, done: make(chan netCaptureResult, 1), output: output, uid: uid}
+	proc, err := m.starter(ctx, file, &sess.buf, "tcpdump", args...)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("tcpdump start: %w", err)
+		return nil, errors.Join(fmt.Errorf("tcpdump start: %w", err), file.Close(), os.Remove(output))
 	}
 	m.mu.Lock()
 	m.sessions[handle] = sess
 	m.mu.Unlock()
 	go func() {
-		sess.done <- proc.Wait()
+		waitErr := proc.Wait()
+		fileErr := makeCaptureReadableByOwner(file, sess.uid, m.ownerUID)
+		info, statErr := file.Stat()
+		var size int64
+		if statErr == nil {
+			size = info.Size()
+		}
+		sess.done <- netCaptureResult{waitErr: waitErr, fileErr: errors.Join(fileErr, statErr, file.Close()), size: size}
 		if ctx.Err() == context.DeadlineExceeded {
 			m.forget(handle)
 		}
@@ -114,77 +146,135 @@ func (m *netCaptureManager) start(uid uint32, p netCaptureStartParams) (map[stri
 	}, nil
 }
 
-func (m *netCaptureManager) stop(p netCaptureStopParams) (map[string]any, error) {
+func precreateCaptureFile(path string) (file *os.File, err error) {
+	fd, err := unix.Open(path, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open capture: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, os.Remove(path))
+		}
+	}()
+	f := os.NewFile(uintptr(fd), path)
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("chmod capture: %w", err)
+	}
+	return f, nil
+}
+
+func (m *netCaptureManager) stop(uid uint32, p netCaptureStopParams) (map[string]any, error) {
 	if p.Handle == "" {
 		return nil, fmt.Errorf("helper.net_capture.stop requires {\"handle\": \"...\"}")
 	}
 	m.mu.Lock()
 	sess, ok := m.sessions[p.Handle]
-	if ok {
+	if ok && (uid == 0 || uid == sess.uid) {
 		delete(m.sessions, p.Handle)
 	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("helper.net_capture.stop unknown handle %q", p.Handle)
 	}
+	if uid != 0 && uid != sess.uid {
+		return nil, fmt.Errorf("helper.net_capture.stop handle %q belongs to another UID", p.Handle)
+	}
 
 	sess.cancel()
-	waitErr := waitNetCapture(sess.done)
-	ownerErr := makeCaptureReadableByOwner(sess.output, sess.uid)
-	info, statErr := os.Stat(sess.output)
-	size := int64(0)
-	if statErr == nil {
-		size = info.Size()
-	}
+	finished, timedOut := waitNetCapture(sess.done)
 	result := map[string]any{
 		"handle":      p.Handle,
 		"output_path": sess.output,
 		"stopped":     true,
-		"size_bytes":  size,
+		"size_bytes":  finished.size,
 	}
-	if waitErr != "" {
-		result["wait_error"] = waitErr
+	if timedOut {
+		result["wait_error"] = "timeout waiting for tcpdump to stop"
+	} else if finished.waitErr != nil {
+		result["wait_error"] = finished.waitErr.Error()
 	}
-	if statErr != nil && !os.IsNotExist(statErr) {
-		result["stat_error"] = statErr.Error()
-	}
-	if ownerErr != nil && !os.IsNotExist(ownerErr) {
-		result["owner_error"] = ownerErr.Error()
+	if finished.fileErr != nil {
+		return nil, fmt.Errorf("finalize capture: %w", finished.fileErr)
 	}
 	return result, nil
 }
 
-func ensureCaptureDir(path string, uid uint32) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	if os.Geteuid() == 0 || int(uid) != os.Getuid() {
-		if err := os.Chown(path, int(uid), -1); err != nil {
-			return err
+func ensureCaptureDir(base, path string, ownerUID int) error {
+	for _, dir := range []string{base, path} {
+		if err := ensureSingleCaptureDir(dir, ownerUID); err != nil {
+			return fmt.Errorf("capture directory %s: %w", dir, err)
 		}
 	}
-	return os.Chmod(path, 0o700) // #nosec G302 -- capture directory should be private to owner.
+	return nil
 }
 
-func makeCaptureReadableByOwner(path string, uid uint32) error {
-	if os.Geteuid() == 0 || int(uid) != os.Getuid() {
-		if err := os.Chown(path, int(uid), -1); err != nil {
-			return err
+func ensureSingleCaptureDir(path string, ownerUID int) error {
+	if err := os.Mkdir(path, 0o711); err != nil && !os.IsExist(err) { // #nosec G301 -- search-only so owners can open their random-named capture; not listable or writable by others.
+		return fmt.Errorf("create: %w", err)
+	}
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || int(stat.Uid) != ownerUID || info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("unsafe directory ownership or permissions")
+	}
+	if err := f.Chmod(0o711); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+	info, err = f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat after chmod: %w", err)
+	}
+	return verifyCaptureDir(info, ownerUID)
+}
+
+func verifyCaptureDir(info os.FileInfo, ownerUID int) error {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || int(stat.Uid) != ownerUID || info.Mode().Perm()&0o022 != 0 || info.Mode().Perm()&0o001 == 0 {
+		return fmt.Errorf("must be an owner-controlled searchable directory without group or world write access")
+	}
+	return nil
+}
+
+func makeCaptureReadableByOwner(f *os.File, uid uint32, ownerUID int) error {
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat capture: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() || stat.Nlink != 1 || int(stat.Uid) != ownerUID {
+		return fmt.Errorf("capture is not a singly-linked regular file owned by the helper")
+	}
+	if info.Mode()&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky)&^os.FileMode(0o600) != 0 {
+		return fmt.Errorf("capture permissions were widened before finalization")
+	}
+	if int(uid) != ownerUID {
+		if err := f.Chown(int(uid), int(stat.Gid)); err != nil {
+			return fmt.Errorf("chown capture: %w", err)
 		}
 	}
-	return os.Chmod(path, 0o600)
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod capture: %w", err)
+	}
+	return nil
 }
 
-func waitNetCapture(done <-chan error) string {
+func waitNetCapture(done <-chan netCaptureResult) (netCaptureResult, bool) {
 	select {
-	case err := <-done:
-		if err != nil {
-			return err.Error()
-		}
+	case result := <-done:
+		return result, false
 	case <-time.After(netCaptureStopWait):
-		return "timeout waiting for tcpdump to stop"
+		return netCaptureResult{}, true
 	}
-	return ""
 }
 
 func (m *netCaptureManager) forget(handle string) {

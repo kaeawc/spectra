@@ -136,12 +136,12 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 		return netCapture.start(uid, p)
 	})
 
-	d.Register("helper.net_capture.stop", func(_ uint32, params json.RawMessage) (any, error) {
+	d.Register("helper.net_capture.stop", func(uid uint32, params json.RawMessage) (any, error) {
 		var p netCaptureStopParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("helper.net_capture.stop invalid params: %w", err)
 		}
-		return netCapture.stop(p)
+		return netCapture.stop(uid, p)
 	})
 
 	d.Register("helper.tcc.system.query", func(_ uint32, params json.RawMessage) (any, error) {

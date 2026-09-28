@@ -98,7 +98,10 @@ func (d *Dispatcher) SetRateLimit(maxRequests int, window time.Duration) {
 // Serve handles one connection using the length-framed protocol.
 func (d *Dispatcher) Serve(conn net.Conn) {
 	defer conn.Close()
-	uid := peerUID(conn)
+	uid, err := peerUID(conn)
+	if err != nil {
+		return
+	}
 	for {
 		raw, err := ReadMessage(conn)
 		if err != nil {

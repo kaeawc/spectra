@@ -1,14 +1,16 @@
 # Architecture
 
-Spectra is a local macOS diagnostic CLI. It inspects installed applications,
-collects live host state on demand, and stores local snapshots. It does not
-listen on network sockets or embed a remote transport.
+Spectra is a local macOS and Linux diagnostic CLI. It inspects installed
+applications where supported, collects live host state on demand, and stores
+local snapshots. Its per-user daemon listens only on a Unix socket. It has no
+network listener or embedded remote transport.
 
 ```text
 spectra CLI
   ├── app inspection and framework classification
   ├── process, JVM, network, storage, power, and toolchain collectors
   ├── local snapshot, baseline, rules, and issue storage
+  ├── per-user daemon: local JSON-RPC status and lifecycle
   └── optional local privileged helper over a Unix socket
 ```
 
@@ -26,3 +28,5 @@ separately installed agent and controller.
 Most CLI commands execute their collector directly and render a table or JSON.
 Snapshots persist only local state in SQLite. This keeps the main Spectra
 binary suitable for environments that prohibit remote-access tools.
+The daemon skeleton establishes a shared local backend for future CLI, MCP,
+and LSP clients; collection through it and subscriptions are separate phases.

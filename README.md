@@ -38,11 +38,15 @@ also extracts every URL host referenced in the binary and `app.asar`.
 
 ## Status
 
-Today: a Go CLI plus an optional local privileged helper. Spectra does
+Today: a Go CLI, a local per-user daemon, and an optional local privileged helper. Spectra does
 deep `.app` inspection, live process/network/storage/power inventory,
 JVM and toolchain diagnostics, SQLite-backed snapshots and diffs,
 recommendation rules, and issue tracking. Cross-machine operation lives in
 the separately distributed Spectra Remote project.
+
+The daemon currently exposes status and lifecycle over a Unix socket; it has
+no network listener. Run `spectra daemon start` and `spectra daemon status` to
+inspect it. CLI and MCP diagnostic data integration is planned separately.
 
 Implemented code with passing tests is treated as complete in the docs.
 Code whose tests are failing or absent is documented as partial until the
@@ -53,7 +57,7 @@ test suite catches up.
 Full living docs at [`docs/`](docs/index.md):
 
 - [Quickstart](docs/quickstart.md) — common commands and outputs
-- [Architecture](docs/design/architecture.md) — local CLI and privileged helper
+- [Architecture](docs/design/architecture.md) — local CLI, daemon, and privileged helper
 - [Distribution](docs/design/distribution.md) — why MAS is out, why Homebrew
 - [Storage stack](docs/design/storage.md) — SQLite + sharded blob store
 - [Detection model](docs/detection/overview.md) — the three-layer classifier
