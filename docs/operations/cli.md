@@ -16,6 +16,9 @@ The principal commands are `inspect`, `list`, `snapshot`, `diff`, `jvm`,
 `network`, `power`, `storage`, `process`, `toolchain`, `rules`, `issues`, and
 `playbook`. Run `spectra help` for the installed command list.
 
+`spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
+the local per-user daemon. `spectra daemon run` runs it in the foreground.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.

@@ -9,12 +9,18 @@ privileged helper's narrowly scoped telemetry.
 ```text
 Local CLI ── local collectors ── local files and system tools
      │
+     ├── per-user daemon over a local Unix socket
+     │
      └── optional privileged helper over a local Unix socket
 ```
 
 The core binary opens no network listeners, includes no remote transport, and
 cannot install or update software on another machine. Cross-machine trust,
 transport, provisioning, and auditing are responsibilities of Spectra Remote.
+The per-user daemon restricts its socket directory and socket permissions,
+authenticates each peer UID using the kernel, and rejects other users before
+reading requests. A nonblocking lock prevents two servers owning the socket;
+the daemon stops if its socket is removed or replaced.
 
 ## Primary protections
 

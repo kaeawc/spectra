@@ -1,8 +1,8 @@
 # Spectra
 
-A diagnostic agent for macOS that combines deep static inspection of installed
-apps with live process state, JVM toolchain awareness, and engineer-to-engineer
-remote debugging over Tailscale. See [docs/index.md](docs/index.md) for the
+A diagnostic agent for macOS and Linux that combines static inspection of installed
+apps with live process state and JVM toolchain awareness. Cross-machine access
+belongs to Spectra Remote. See [docs/index.md](docs/index.md) for the
 product framing.
 
 ## Working Rules
@@ -13,8 +13,8 @@ product framing.
 - Detection logic lives in `internal/detect/`. Per-collector functions are
   short and single-purpose; new sub-detections add their own functions
   rather than overloading existing ones.
-- New entry points go under `cmd/<name>/`. Today there's only `cmd/spectra/`.
-  The planned daemon and helper get their own.
+- New entry points go under `cmd/<name>/`. `cmd/spectra/` owns the CLI and
+  local per-user daemon management commands; the helper has its own entry point.
 - Internal packages (not part of any public API) live under `internal/`.
 - Filesystem writes that must survive crashes go through
   `internal/fsutil.WriteFileAtomic`.
@@ -61,6 +61,12 @@ For docs changes: `make docs-validate` (mkdocs nav + lychee link check).
   table + JSON output.
 - `internal/capabilities/` — builds the capabilities manifest using the shared
   protocol types.
+- `internal/daemon/` — local Unix-socket JSON-RPC server and lifecycle.
+- `internal/daemonclient/` — persistent local client and detached startup.
+- `internal/peercred/` — kernel-authenticated Unix peer UID checks.
+- `cmd/spectra-helper/` — privileged helper entry point.
+- `internal/cache/` — sharded blob store and async writer.
+- `internal/snapshot/` — system-inventory collectors and SQLite persistence.
 - `internal/detect/` — the entire static-inspection engine: framework
   classifier, sub-detections, metadata collectors, security/storage/network
   inspections, helpers, login items, processes, TCC reads.
@@ -70,12 +76,6 @@ For docs changes: `make docs-validate` (mkdocs nav + lychee link check).
 
 Planned (per [docs/design/](docs/design/)):
 
-- `cmd/spectra-helper/` — privileged helper, separate `main`.
-- `internal/cache/` — sharded blob store + async writer (krit/cacheutil
-  pattern; see [docs/operations/caching.md](docs/operations/caching.md)).
-- `internal/snapshot/` — system-inventory collectors and SQLite persistence.
-- `internal/rpc/` — JSON-RPC dispatcher used by both Unix-socket local
-  clients and tsnet remote clients.
 - `internal/tui/` — Bubble Tea TUI (Phase pattern lifted from golang-build
   when the daemon RPC stabilizes).
 

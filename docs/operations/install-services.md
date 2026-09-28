@@ -1,6 +1,6 @@
 # Install services
 
-Spectra's only optional background service is `spectra-helper`, a local
+Spectra has an optional per-user daemon and an optional `spectra-helper`, a local
 privileged LaunchDaemon for root-only diagnostic data such as system TCC,
 `powermetrics`, firewall rules, and bounded capture helpers.
 
@@ -20,5 +20,7 @@ To remove it:
 sudo spectra install-helper uninstall
 ```
 
-There is no `spectra install-daemon`; background remote operation is owned by
-the separately distributed Spectra Remote agent.
+Install the local per-user daemon with `spectra daemon install` and remove it
+with `spectra daemon uninstall`. On macOS this installs a LaunchAgent; on Linux
+it installs a systemd user unit. Both run `spectra daemon run`. The daemon has
+no network listener. Cross-machine operation remains in Spectra Remote.

@@ -28,6 +28,7 @@ Security reports are especially relevant for:
 
 - privileged helper installation and IPC boundaries
 - JSON-RPC request parsing and authorization
+- per-user daemon socket permissions, peer credentials, and lifecycle cleanup
 - local snapshot storage permissions
 - handling of app bundles, process data, and user-controlled paths
 - the separately distributed Spectra Remote transport boundary

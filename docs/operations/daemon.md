@@ -1,8 +1,32 @@
-# Background service
+# Local daemon
 
-Spectra has no user daemon or network listener. Local diagnostics run directly
-from the CLI.
+Spectra has a local, per-user daemon over a Unix socket; no network listener;
+cross-machine access remains in Spectra Remote. The daemon currently provides
+lifecycle and status RPCs. Diagnostic data integration and background monitoring
+will follow in separate changes.
 
-For optional root-only telemetry, install the local `spectra-helper` as
-described in [Install services](install-services.md). Cross-machine operation
-is owned by Spectra Remote.
+```bash
+spectra daemon start
+spectra daemon status --json
+spectra daemon logs -n 50
+spectra daemon stop
+```
+
+`spectra daemon run` is the sole foreground server entry point. `start` launches
+that command in a detached session. `install` configures a macOS LaunchAgent or
+Linux systemd user service to launch the same command. `uninstall` removes the
+service, and `print-plist` prints the macOS agent configuration without installing
+it. `run --idle-timeout 10m` can stop an unmanaged daemon after inactivity; the
+default is no idle timeout.
+
+The daemon keeps its socket, lock, and PID file in `~/.spectra` on macOS. On
+Linux, it uses `$XDG_RUNTIME_DIR/spectra` when available and falls back to
+`~/.spectra`. `SPECTRA_DAEMON_DIR` overrides the socket directory. The socket
+directory is mode 0700 and the socket is mode 0600. Each connection is checked
+against the kernel's peer UID before a request is accepted.
+`SPECTRA_DAEMON_LOG` overrides the log file location for isolated runs.
+
+The transport is newline-delimited JSON-RPC 2.0. `daemon.status` reports the
+protocol, version, PID, start time, socket, and methods. `daemon.shutdown`
+responds before stopping. A persistent connection can receive server-to-client
+notifications for future subscriptions.
