@@ -79,3 +79,24 @@ closes. Slow subscribers can miss events; clients can recover from the stored
 history. Desktop notifications are best effort, capped at six per hour and
 cooled down per alert key for 15 minutes. LaunchAgent sessions may lack desktop
 notification permission.
+
+## Clients
+
+The CLI and stdio MCP server discover the running local daemon through its Unix
+socket. They never start it automatically. Run `spectra daemon start` or install
+the per-user service before using alert and host-health commands. Set
+`SPECTRA_NO_DAEMON=1` to disable daemon access; `spectra alerts` and
+`spectra whatswrong` also accept `--no-daemon`. The CLI warns about a daemon
+version mismatch and continues; `whatswrong` keeps its local diagnosis if the
+daemon is unavailable or does not answer within one second.
+
+`spectra alerts` lists firing alerts by default. Use `--state all` or
+`--state resolved` and `--limit N` to adjust the list, `ack <id>` to acknowledge,
+`health` for the current host sample, and `watch --samples` for alert events and
+optional samples. `--json` emits JSON, including one JSON object per line for
+`watch`. Ctrl-C exits the watch cleanly.
+
+The MCP server connects lazily and reconnects once if the socket closes. Its
+`host_health` and `alerts` tools and `process` history operation require the
+daemon; other local collector operations continue without it. See the
+[MCP tool reference](mcp.md).
