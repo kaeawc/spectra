@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
@@ -207,14 +208,36 @@ func (s *Server) idle() bool {
 }
 
 func (s *Server) accept(ctx context.Context, ln net.Listener, errorsOut chan<- error) {
+	var delay time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
-				errorsOut <- fmt.Errorf("daemon: accept: %w", err)
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if retryableAcceptError(err) {
+				if delay == 0 {
+					delay = 5 * time.Millisecond
+				} else {
+					delay = min(delay*2, time.Second)
+				}
+				s.opts.Logger.Warn("daemon accept temporarily failed", "error", err, "retry_in", delay)
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+				continue
+			}
+			select {
+			case errorsOut <- fmt.Errorf("daemon: accept: %w", err):
+			case <-ctx.Done():
 			}
 			return
 		}
+		delay = 0
 		uid, err := peercred.PeerUID(c)
 		if err != nil || !s.opts.AllowUID(uid) {
 			s.opts.Logger.Warn("daemon peer rejected", "uid", uid, "error", err)
@@ -227,6 +250,10 @@ func (s *Server) accept(ctx context.Context, ln net.Listener, errorsOut chan<- e
 		s.connWG.Add(1)
 		go s.serveConn(ctx, c, uid)
 	}
+}
+
+func retryableAcceptError(err error) bool {
+	return errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE) || errors.Is(err, syscall.ECONNABORTED)
 }
 
 func (s *Server) closeConnections() {

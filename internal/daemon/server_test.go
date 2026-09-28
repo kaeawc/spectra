@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -174,5 +176,76 @@ func TestIdleTimeout(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("idle timeout did not stop server")
+	}
+}
+
+type flakyListener struct {
+	net.Listener
+	attempts atomic.Int32
+	accepted chan struct{}
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	if l.attempts.Add(1) <= 2 {
+		return nil, syscall.EMFILE
+	}
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.accepted <- struct{}{}
+	}
+	return c, err
+}
+
+func TestAcceptRetriesTemporaryErrors(t *testing.T) {
+	path := filepath.Join(testPaths(t).Dir, "retry.sock")
+	base, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.Close()
+	ln := &flakyListener{Listener: base, accepted: make(chan struct{}, 1)}
+	s := New(Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errorsOut := make(chan error, 1)
+	done := make(chan struct{})
+	go func() { s.accept(ctx, ln, errorsOut); close(done) }()
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	select {
+	case <-ln.accepted:
+	case <-time.After(time.Second):
+		t.Fatal("accept did not retry and accept the connection")
+	}
+	if ln.attempts.Load() < 3 {
+		t.Fatalf("accept attempts = %d", ln.attempts.Load())
+	}
+	select {
+	case err := <-errorsOut:
+		t.Fatalf("temporary accept error escaped: %v", err)
+	default:
+	}
+	cancel()
+	base.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("accept did not stop after close")
+	}
+}
+
+func TestProbeHeldLockWithoutPID(t *testing.T) {
+	p := testPaths(t)
+	lock, err := acquireLock(p.Lock, p.PID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { unlockFile(lock); lock.Close() }()
+	running, pid, err := Probe(p)
+	if err != nil || !running || pid != 0 {
+		t.Fatalf("Probe = %v, %d, %v", running, pid, err)
 	}
 }
