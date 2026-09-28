@@ -28,7 +28,10 @@ against the kernel's peer UID before a request is accepted.
 `daemon stop` asks a reachable daemon to shut down over the socket. If the
 socket is unavailable, it checks the lock before using the PID file. A free
 lock means no daemon is running; stop removes stale PID and socket files and
-does not signal that PID. A held lock permits a bounded SIGTERM fallback.
+does not signal that PID. A held lock with no PID file means startup is still
+in progress; stop waits and rechecks the lock without signaling PID 0. A held
+lock with a known PID permits a bounded SIGTERM fallback. Status reports a
+starting daemon when the lock is held but the PID file is not yet available.
 
 The transport is newline-delimited JSON-RPC 2.0. `daemon.status` reports the
 protocol, version, PID, start time, socket, and methods. `daemon.shutdown`

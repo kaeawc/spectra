@@ -27,6 +27,9 @@ func Probe(paths Paths) (bool, int, error) {
 			return false, 0, fmt.Errorf("daemon: probe lock: %w", err)
 		}
 		pid, err := readLockedPID(paths.PID)
+		if errors.Is(err, os.ErrNotExist) {
+			return true, 0, nil
+		}
 		return true, pid, err
 	}
 	defer unlockFile(f)

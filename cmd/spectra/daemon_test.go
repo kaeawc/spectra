@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ func fakeDaemonDeps(goos string) (daemonDeps, *[]string) {
 			return nil, errors.New("not loaded")
 		},
 		sleep: func(time.Duration) {},
+		probe: func(daemon.Paths) (bool, int, error) { return false, 0, nil },
 	}
 	return d, &calls
 }
@@ -260,6 +263,67 @@ func TestDaemonStopLockedFallbackAndTimeout(t *testing.T) {
 	deps.signal = func(_ int, sig os.Signal) error { signals = append(signals, sig); return nil }
 	if err := daemonStop(paths, &out, deps); err == nil || !strings.Contains(err.Error(), "within 5s") {
 		t.Fatalf("timeout: %v", err)
+	}
+}
+
+func TestDaemonStopSignalLivenessErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		wantError bool
+	}{
+		{"permission", syscall.EPERM, true},
+		{"missing", syscall.ESRCH, false},
+		{"unexpected", syscall.EIO, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _ := fakeDaemonDeps("darwin")
+			deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+			deps.probe = func(daemon.Paths) (bool, int, error) { return true, 1234, nil }
+			calls := 0
+			deps.signal = func(pid int, sig os.Signal) error {
+				calls++
+				if pid != 1234 || sig != syscall.Signal(0) {
+					t.Fatalf("signal(%d, %v)", pid, sig)
+				}
+				return tc.err
+			}
+			var out bytes.Buffer
+			err := daemonStop(daemon.Paths{}, &out, deps)
+			if (err != nil) != tc.wantError || (tc.wantError && !errors.Is(err, tc.err)) || calls != 1 {
+				t.Fatalf("stop = %q, %v, calls %d", out.String(), err, calls)
+			}
+		})
+	}
+}
+
+func TestDaemonStopUnknownPIDNeverSignalsZero(t *testing.T) {
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	probes := 0
+	deps.probe = func(daemon.Paths) (bool, int, error) {
+		probes++
+		if probes == 1 {
+			return true, 0, nil
+		}
+		return false, 0, nil
+	}
+	deps.signal = func(pid int, _ os.Signal) error { t.Fatalf("signaled pid %d", pid); return nil }
+	var out bytes.Buffer
+	if err := daemonStop(daemon.Paths{}, &out, deps); err != nil || !strings.Contains(out.String(), "stopped") {
+		t.Fatalf("stop = %q, %v", out.String(), err)
+	}
+	if probes != 2 {
+		t.Fatalf("probes = %d", probes)
+	}
+}
+
+func TestDaemonStatusUnknownPID(t *testing.T) {
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	deps.probe = func(daemon.Paths) (bool, int, error) { return true, 0, nil }
+	if err := daemonStatus(nil, daemon.Paths{}, io.Discard, deps); err == nil || !strings.Contains(err.Error(), "starting") {
+		t.Fatalf("status = %v", err)
 	}
 }
 

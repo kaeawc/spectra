@@ -135,20 +135,7 @@ func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 
 func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	if c, ok := deps.discover(paths); ok {
-		defer c.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		var result struct {
-			OK bool `json:"ok"`
-		}
-		if err := c.Call(ctx, daemon.MethodShutdown, nil, &result); err != nil {
-			return err
-		}
-		if !result.OK {
-			return fmt.Errorf("daemon refused shutdown")
-		}
-		fmt.Fprintln(out, "daemon stopping")
-		return nil
+		return daemonStopRPC(c, out)
 	}
 	running, pid, err := deps.probe(paths)
 	if err != nil {
@@ -158,9 +145,40 @@ func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 		fmt.Fprintln(out, "daemon not running (cleaned stale files)")
 		return nil
 	}
+	if pid == 0 {
+		return daemonStopUnknownPID(paths, out, deps)
+	}
+	return daemonStopPID(paths, out, deps, pid)
+}
+
+func daemonStopUnknownPID(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
+	for i := 0; i < 200; i++ {
+		deps.sleep(25 * time.Millisecond)
+		if c, ok := deps.discover(paths); ok {
+			return daemonStopRPC(c, out)
+		}
+		running, pid, err := deps.probe(paths)
+		if err != nil {
+			return fmt.Errorf("probe daemon: %w", err)
+		}
+		if !running {
+			fmt.Fprintln(out, "daemon stopped")
+			return nil
+		}
+		if pid != 0 {
+			return daemonStopPID(paths, out, deps, pid)
+		}
+	}
+	return fmt.Errorf("daemon still starting; PID unavailable after 5s")
+}
+
+func daemonStopPID(paths daemon.Paths, out io.Writer, deps daemonDeps, pid int) error {
 	if err := deps.signal(pid, syscall.Signal(0)); err != nil {
-		fmt.Fprintln(out, "daemon not running")
-		return nil
+		if errors.Is(err, syscall.ESRCH) {
+			fmt.Fprintln(out, "daemon not running")
+			return nil
+		}
+		return fmt.Errorf("check daemon pid %d: %w", pid, err)
 	}
 	if err := deps.signal(pid, daemonTermSignal); err != nil {
 		return fmt.Errorf("signal daemon pid %d: %w", pid, err)
@@ -175,6 +193,23 @@ func daemonStop(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	return fmt.Errorf("daemon pid %d did not stop within 5s", pid)
 }
 
+func daemonStopRPC(c *daemonclient.Client, out io.Writer) error {
+	defer c.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.Call(ctx, daemon.MethodShutdown, nil, &result); err != nil {
+		return err
+	}
+	if !result.OK {
+		return fmt.Errorf("daemon refused shutdown")
+	}
+	fmt.Fprintln(out, "daemon stopping")
+	return nil
+}
+
 func daemonStatus(args []string, paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	fs := flag.NewFlagSet("daemon status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "print JSON")
@@ -186,6 +221,16 @@ func daemonStatus(args []string, paths daemon.Paths, out io.Writer, deps daemonD
 	}
 	c, ok := deps.discover(paths)
 	if !ok {
+		running, pid, err := deps.probe(paths)
+		if err != nil {
+			return fmt.Errorf("probe daemon: %w", err)
+		}
+		if running && pid == 0 {
+			return fmt.Errorf("daemon starting (PID unavailable)")
+		}
+		if running {
+			return fmt.Errorf("daemon running (pid %d), socket unavailable", pid)
+		}
 		return fmt.Errorf("daemon not running")
 	}
 	defer c.Close()
