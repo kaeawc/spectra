@@ -81,6 +81,26 @@ func TestAlertsModes(t *testing.T) {
 	}
 }
 
+func TestHealthShowsSpawnStateAndParents(t *testing.T) {
+	spawn := &hostwatch.SpawnState{ProcsTotal: 912, UID: 501, ProcsUID: 480, UIDLimit: 10666, NewPerSec: 3, TopParents: []hostwatch.SpawnParent{{PID: 1234, Comm: "go", ChildCount: 30, Argv: "go test ./..."}}}
+	sample := hostwatch.Sample{Spawn: spawn}
+	alerts := []hostwatch.Alert{{Key: "spawn.rate", State: "firing"}}
+	var out bytes.Buffer
+	if err := printHealth(&out, sample, alerts, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Processes: 912 total (uid 501: 480/10666, 4%) · spawn 3/s") || !strings.Contains(out.String(), "parent go (pid 1234): 30 children go test ./...") {
+		t.Fatalf("health: %s", out.String())
+	}
+	out.Reset()
+	if err := printHealth(&out, sample, alerts, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"spawn":{"at":`) || !strings.Contains(out.String(), `"top_parents"`) {
+		t.Fatalf("JSON health: %s", out.String())
+	}
+}
+
 type cancelWriter struct {
 	bytes.Buffer
 	cancel context.CancelFunc

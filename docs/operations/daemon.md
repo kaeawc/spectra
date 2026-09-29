@@ -53,6 +53,26 @@ trigger an alert. If the daemon averages more than 2% CPU over ten ticks, the
 watch doubles its interval up to four times the base; it returns to the base
 below 0.5%.
 
+An independent process-spawn probe runs every five seconds, including while a
+regular sample is blocked or backed off. On macOS it reads `kern.proc.all` and
+on Linux it reads `/proc`; neither backend forks. It counts new PIDs since the
+previous probe and the current user's processes. It keeps the latest 120 probes
+in memory. When a process condition fires or escalates, it stores one sample
+immediately and includes the five busiest parents and commands in the spawn
+payload. Parent arguments are read only for those five parents during an active
+condition. Desktop notification failures are logged without retrying the probe.
+The fast probe logs an overrun and skips a probe if collection exceeds its
+interval; a minute of probe work over 1% daemon CPU is logged without changing
+the fast interval.
+
+`spawn.rate` warns at 40 new PIDs/s for two consecutive probes and is critical
+at 120/s for one. `procs.uid` warns at 40% and is critical at 70% of
+`kern.maxprocperuid` (or the daemon's finite Linux `RLIMIT_NPROC`).
+`procs.total` warns at 50% and is critical at 80% of `kern.maxproc` (or Linux
+`threads-max`). All three resolve after three clear probes. `spectra alerts
+health` shows the latest process counts and spawn rate, including top parents
+while an alert is active.
+
 Warnings include load above 1.5 times CPU count for two samples, rising load,
 memory pressure for two samples, swap growth above 1 GB in five minutes,
 resource limits above 70%, less than 20 GB free, thermal throttling for two
@@ -62,9 +82,11 @@ above three times CPU count for two samples, critical memory pressure, limits
 above 90%, and less than 5 GB free. Alerts clear after two healthy evaluations.
 
 Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
-`load`, `memory`, `limits`, `disk`, `thermal`, and `kinds`; field names are the
+`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, and `spawn`; field names are the
 snake case names in the defaults, such as `load.warn_multiple` or
-`disk.critical_gb`. An unknown YAML key logs an error and keeps all defaults.
+`disk.critical_gb`. The `spawn` keys are `interval` (duration, minimum `1s`),
+`rate_warn`, `rate_critical`, `uid_warn_pct`, `uid_critical_pct`,
+`total_warn_pct`, and `total_critical_pct`. An unknown YAML key logs an error and keeps all defaults.
 Non-positive thresholds log an error and use the default for that field while
 preserving other valid settings.
 

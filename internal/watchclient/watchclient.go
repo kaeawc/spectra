@@ -47,10 +47,14 @@ func (w *Client) CheckVersion(ctx context.Context, version string) error {
 
 func (w *Client) Current(ctx context.Context) (hostwatch.Sample, []hostwatch.Alert, error) {
 	var result struct {
-		Sample       hostwatch.Sample  `json:"sample"`
-		ActiveAlerts []hostwatch.Alert `json:"active_alerts"`
+		Sample       hostwatch.Sample      `json:"sample"`
+		ActiveAlerts []hostwatch.Alert     `json:"active_alerts"`
+		Spawn        *hostwatch.SpawnState `json:"spawn"`
 	}
 	err := w.c.Call(ctx, "watch.current", nil, &result)
+	if result.Spawn != nil {
+		result.Sample.Spawn = result.Spawn
+	}
 	return result.Sample, result.ActiveAlerts, err
 }
 
