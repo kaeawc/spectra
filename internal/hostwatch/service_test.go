@@ -44,6 +44,29 @@ func testDB(t *testing.T) *store.DB {
 	t.Cleanup(func() { db.Close() })
 	return db
 }
+func TestCurrentRPCHasOnlyNestedSpawn(t *testing.T) {
+	svc := NewService(ServiceOptions{SpawnBackend: &fakeSpawnBackend{}})
+	svc.current = Sample{Spawn: &SpawnState{ProcsTotal: 7}}
+	result, err := svc.currentRPC(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["spawn"]; ok {
+		t.Fatalf("duplicated top-level spawn: %s", data)
+	}
+	var sample Sample
+	if err := json.Unmarshal(fields["sample"], &sample); err != nil || sample.Spawn == nil || sample.Spawn.ProcsTotal != 7 {
+		t.Fatalf("missing nested spawn: %s: %v", data, err)
+	}
+}
 func TestCollectorSinglePSAndProcessMetrics(t *testing.T) {
 	m := metrics.NewCollector()
 	fake := proc.NewFake().OnExact("ps", []string{"-eo", "pid=,ppid=,rss=,%cpu=,comm="}, proc.Response{Result: proc.Result{Stdout: []byte("42 1 1024 95.0 /usr/bin/gradle\n43 1 2048 5.0 node\n")}})

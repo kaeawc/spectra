@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,11 +129,64 @@ func TestSpawnAttributionAndDetail(t *testing.T) {
 type countingSpawnStore struct {
 	*store.DB
 	writes atomic.Int32
+	alerts atomic.Int32
 }
 
 func (s *countingSpawnStore) SaveHostSample(ctx context.Context, at time.Time, data []byte) error {
 	s.writes.Add(1)
 	return s.DB.SaveHostSample(ctx, at, data)
+}
+func (s *countingSpawnStore) UpsertAlert(ctx context.Context, row store.AlertRow) error {
+	s.alerts.Add(1)
+	return s.DB.UpsertAlert(ctx, row)
+}
+
+func TestSpawnDetailPersistenceIsThrottled(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	b := &fakeSpawnBackend{uidLimit: 10, totalLimit: 1000, argv: map[int]string{10: "parent"}}
+	st := &countingSpawnStore{DB: testDB(t)}
+	svc := NewService(ServiceOptions{Store: st, SpawnBackend: b, UID: func() int { return 501 }, Clock: clk})
+	t.Cleanup(svc.stopSpawnPersister)
+	for i := 0; i < 8; i++ {
+		rows := append([]SpawnProcess{{PID: 10, UID: 501, Comm: "parent"}}, spawnProcesses(100, 7, 10, "child"+strconv.Itoa(i))...)
+		b.set(rows)
+		if err := svc.TickSpawn(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(5 * time.Second)
+	}
+	deadline := time.Now().Add(time.Second)
+	for st.alerts.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if st.alerts.Load() != 2 || st.writes.Load() != 1 {
+		t.Fatalf("alert writes=%d sample writes=%d", st.alerts.Load(), st.writes.Load())
+	}
+}
+
+func TestSpawnRotatingParentPersistenceIsThrottled(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	b := &fakeSpawnBackend{uidLimit: 10, totalLimit: 1000, argv: map[int]string{}}
+	st := &countingSpawnStore{DB: testDB(t)}
+	svc := NewService(ServiceOptions{Store: st, SpawnBackend: b, UID: func() int { return 501 }, Clock: clk})
+	t.Cleanup(svc.stopSpawnPersister)
+	for i := 0; i < 8; i++ {
+		pid := 10 + i
+		b.argv[pid] = "argv " + strconv.Itoa(pid)
+		rows := append([]SpawnProcess{{PID: pid, UID: 501, Comm: "parent"}}, spawnProcesses(100, 7, pid, "child")...)
+		b.set(rows)
+		if err := svc.TickSpawn(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(5 * time.Second)
+	}
+	deadline := time.Now().Add(time.Second)
+	for st.alerts.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if st.alerts.Load() != 2 || st.writes.Load() != 1 {
+		t.Fatalf("alert writes=%d sample writes=%d", st.alerts.Load(), st.writes.Load())
+	}
 }
 
 func TestSpawnPersistsOnlyFireAndEscalation(t *testing.T) {
@@ -140,6 +194,7 @@ func TestSpawnPersistsOnlyFireAndEscalation(t *testing.T) {
 	b := &fakeSpawnBackend{uidLimit: 10, totalLimit: 1000}
 	st := &countingSpawnStore{DB: testDB(t)}
 	svc := NewService(ServiceOptions{Store: st, SpawnBackend: b, UID: func() int { return 501 }, Clock: clk})
+	t.Cleanup(svc.stopSpawnPersister)
 	for i, n := range []int{3, 4, 4, 7, 7, 3, 3, 3} {
 		b.set(spawnProcesses(100, n, 1, "test"))
 		if err := svc.TickSpawn(context.Background()); err != nil {
@@ -147,6 +202,10 @@ func TestSpawnPersistsOnlyFireAndEscalation(t *testing.T) {
 		}
 		clk.Advance(time.Second)
 		want := []int32{0, 1, 1, 2, 2, 2, 2, 2}[i]
+		deadline := time.Now().Add(time.Second)
+		for st.writes.Load() < want && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
 		if st.writes.Load() != want {
 			t.Fatalf("probe %d wrote %d samples, want %d", i, st.writes.Load(), want)
 		}
@@ -157,8 +216,8 @@ func TestSpawnPersistsOnlyFireAndEscalation(t *testing.T) {
 			}
 		}
 	}
-	if b.argvCalls != 2 {
-		t.Fatalf("argv reads = %d, want one per firing/escalation", b.argvCalls)
+	if b.argvCalls > 8 || len(svc.spawnTracker.argv) > 5 {
+		t.Fatalf("argv reads = %d, cache entries = %d", b.argvCalls, len(svc.spawnTracker.argv))
 	}
 	sample, alerts := svc.Current()
 	if sample.Spawn == nil || sample.Spawn.ProcsUID != 3 || len(alerts) != 0 || len(svc.spawnTracker.probes) != 8 {
@@ -182,6 +241,170 @@ func (n blockedNotifier) Notify(ctx context.Context, _ Alert) error {
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+type stuckSpawnBackend struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *stuckSpawnBackend) List() ([]SpawnProcess, error) {
+	close(b.entered)
+	<-b.release
+	return nil, nil
+}
+func (*stuckSpawnBackend) Argv(int) (string, error) { return "", nil }
+func (*stuckSpawnBackend) Limits() (int, int)       { return 0, 0 }
+
+func TestSpawnRunShutdownWaitIsBounded(t *testing.T) {
+	b := &stuckSpawnBackend{entered: make(chan struct{}), release: make(chan struct{})}
+	svc := NewService(ServiceOptions{Store: testDB(t), SpawnBackend: b, Interval: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	select {
+	case <-b.entered:
+	case <-time.After(time.Second):
+		t.Fatal("probe did not start")
+	}
+	started := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run waited indefinitely for List")
+	}
+	if elapsed := time.Since(started); elapsed < 1900*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("shutdown wait = %v", elapsed)
+	}
+	close(b.release)
+}
+
+type stuckSpawnStore struct {
+	*store.DB
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *stuckSpawnStore) UpsertAlert(ctx context.Context, row store.AlertRow) error {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return s.DB.UpsertAlert(ctx, row)
+}
+
+type countingNotifier struct{ calls atomic.Int32 }
+
+func (n *countingNotifier) Notify(context.Context, Alert) error { n.calls.Add(1); return nil }
+
+func TestSpawnBlockedPersistenceKeepsProbingAndEmitting(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	b := &fakeSpawnBackend{uidLimit: 10, totalLimit: 1000, argv: map[int]string{}}
+	st := &stuckSpawnStore{DB: testDB(t), entered: make(chan struct{}), release: make(chan struct{})}
+	notify := &countingNotifier{}
+	svc := NewService(ServiceOptions{Store: st, SpawnBackend: b, UID: func() int { return 501 }, Clock: clk, Notifier: notify})
+	defer func() { close(st.release); svc.stopSpawnPersister() }()
+	var received atomic.Int32
+	var lastDetail atomic.Value
+	stopSub := make(chan struct{})
+	defer close(stopSub)
+	svc.subscribe(stopSub, func(method string, value any) error {
+		if method == "alerts.event" {
+			lastDetail.Store(value.(Event).Alert.Detail)
+			received.Add(1)
+		}
+		return nil
+	}, false)
+	for i := 0; i < 22; i++ {
+		pid := 10 + i
+		b.argv[pid] = "parent argv " + strconv.Itoa(pid)
+		rows := append([]SpawnProcess{{PID: pid, UID: 501, Comm: "parent"}}, spawnProcesses(100, 7, pid, "child")...)
+		b.set(rows)
+		started := time.Now()
+		if err := svc.TickSpawn(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if time.Since(started) > 500*time.Millisecond {
+			t.Fatal("probe blocked on persistence")
+		}
+		if i == 0 {
+			select {
+			case <-st.entered:
+			case <-time.After(time.Second):
+				t.Fatal("persister did not enter store")
+			}
+		}
+		eventDeadline := time.Now().Add(time.Second)
+		for received.Load() < int32(i+1) && time.Now().Before(eventDeadline) {
+			runtime.Gosched()
+		}
+		if received.Load() != int32(i+1) {
+			t.Fatalf("probe %d subscriber events = %d", i, received.Load())
+		}
+		clk.Advance(5 * time.Second)
+	}
+	deadline := time.Now().Add(time.Second)
+	for received.Load() < 22 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if received.Load() != 22 {
+		t.Fatalf("subscriber events = %d", received.Load())
+	}
+	if !strings.Contains(lastDetail.Load().(string), "parent argv 31") {
+		t.Fatalf("stale subscriber payload: %s", lastDetail.Load())
+	}
+	current, alerts := svc.Current()
+	for i := 0; i < 20; i++ {
+		svc.enqueueSpawnPersistence(spawnPersistItem{state: *current.Spawn, events: []Event{{Type: "detail", Alert: alerts[0]}}})
+	}
+	if svc.spawnPersistDropped == 0 {
+		t.Fatal("expected persistence queue drops")
+	}
+	if len(alerts) != 1 || !strings.Contains(alerts[0].Detail, "parent argv 31") || current.Spawn.TopParents[0].PID != 31 {
+		t.Fatalf("latest attribution: %+v %+v", current.Spawn, alerts)
+	}
+	if len(svc.spawnTracker.argv) > 5 {
+		t.Fatalf("argv cache = %d", len(svc.spawnTracker.argv))
+	}
+	deadline = time.Now().Add(time.Second)
+	for notify.calls.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if notify.calls.Load() != 1 {
+		t.Fatalf("desktop notifications = %d", notify.calls.Load())
+	}
+}
+
+func TestSpawnPersisterShutdownWaitIsBounded(t *testing.T) {
+	b := &fakeSpawnBackend{uidLimit: 10, totalLimit: 1000, processes: spawnProcesses(100, 7, 1, "child")}
+	st := &stuckSpawnStore{DB: testDB(t), entered: make(chan struct{}), release: make(chan struct{})}
+	svc := NewService(ServiceOptions{Store: st, SpawnBackend: b, UID: func() int { return 501 }, Interval: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	select {
+	case <-st.entered:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("persister did not block in store")
+	}
+	started := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run waited indefinitely for store")
+	}
+	if elapsed := time.Since(started); elapsed < 1900*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("shutdown wait = %v", elapsed)
+	}
+	close(st.release)
 }
 
 func TestSpawnAlertWhileSlowCollectorBlockedAndNotifierNonblocking(t *testing.T) {

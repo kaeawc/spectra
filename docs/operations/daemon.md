@@ -57,10 +57,12 @@ An independent process-spawn probe runs every five seconds, including while a
 regular sample is blocked or backed off. On macOS it reads `kern.proc.all` and
 on Linux it reads `/proc`; neither backend forks. It counts new PIDs since the
 previous probe and the current user's processes. It keeps the latest 120 probes
-in memory. When a process condition fires or escalates, it stores one sample
-immediately and includes the five busiest parents and commands in the spawn
-payload. Parent arguments are read only for those five parents during an active
-condition. Desktop notification failures are logged without retrying the probe.
+in memory. When a process condition fires or escalates, it queues one sample
+for background storage and includes the five busiest parents and commands in the
+`sample.spawn` payload. A full storage queue drops new writes and logs a
+rate-limited warning; probing and subscriber events continue. Parent arguments
+are read only for those five parents during an active condition. Desktop
+notification failures are logged without retrying the probe.
 The fast probe logs an overrun and skips a probe if collection exceeds its
 interval; a minute of probe work over 1% daemon CPU is logged without changing
 the fast interval.

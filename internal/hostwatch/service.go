@@ -63,6 +63,13 @@ type Service struct {
 	spawnOverrun         bool
 	spawnCPUAt           time.Time
 	spawnCPU             time.Duration
+	spawnPersistMu       sync.Mutex
+	spawnPersistQueue    chan spawnPersistItem
+	spawnPersistDone     chan struct{}
+	spawnPersistCancel   context.CancelFunc
+	spawnPersistDropped  uint64
+	spawnPersistWarnAt   time.Time
+	spawnPersisted       map[string]spawnPersistRecord
 	window               []Sample
 	current              Sample
 	subscribers          map[*subscriber]struct{}
@@ -102,7 +109,7 @@ func NewService(opts ServiceOptions) *Service {
 	if opts.UID == nil {
 		opts.UID = currentUID
 	}
-	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval}
+	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()
@@ -134,7 +141,11 @@ func (s *Service) Run(ctx context.Context) error {
 	spawnCtx, cancelSpawn := context.WithCancel(ctx)
 	spawnDone := make(chan struct{})
 	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
-	defer func() { cancelSpawn(); <-spawnDone }()
+	defer func() {
+		cancelSpawn()
+		s.waitForSpawn(spawnDone)
+		s.stopSpawnPersister()
+	}()
 	var inFlight <-chan error
 	timer := time.NewTimer(s.interval)
 	defer timer.Stop()
@@ -192,6 +203,15 @@ func (s *Service) waitForTick(done <-chan error) {
 	case <-done:
 	case <-timer.C:
 		s.opts.Logger.Warn("watch tick still running after shutdown wait")
+	}
+}
+func (s *Service) waitForSpawn(done <-chan struct{}) {
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		s.opts.Logger.Warn("spawn probe still running after shutdown wait")
 	}
 }
 func (s *Service) Tick(ctx context.Context) error {

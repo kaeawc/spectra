@@ -56,6 +56,17 @@ type spawnTracker struct {
 	argv       map[int]string
 }
 
+type spawnPersistItem struct {
+	state  SpawnState
+	events []Event
+	sample bool
+}
+
+type spawnPersistRecord struct {
+	at     time.Time
+	detail string
+}
+
 func (t *spawnTracker) update(at time.Time, processes []SpawnProcess, uid, uidLimit, totalLimit int) SpawnState {
 	current := make(map[int]struct{}, len(processes))
 	s := SpawnState{At: at.UTC(), UID: uid, UIDLimit: uidLimit, TotalLimit: totalLimit}
@@ -163,18 +174,6 @@ func attributeSpawn(state *SpawnState, processes []SpawnProcess, backend SpawnBa
 	}
 }
 
-func (s *Service) spawnWillFire(conditions []Condition) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, condition := range conditions {
-		current, active := s.engine.active[condition.Key]
-		if !active || current.Severity != condition.Severity {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Service) spawnHasActive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -215,7 +214,7 @@ func spawnDetail(s SpawnState) string {
 
 func currentUID() int { return os.Getuid() }
 
-func (s *Service) TickSpawn(ctx context.Context) error {
+func (s *Service) TickSpawn(_ context.Context) error {
 	if s.opts.SpawnBackend == nil {
 		return nil
 	}
@@ -224,34 +223,72 @@ func (s *Service) TickSpawn(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("spawn process list: %w", err)
 	}
+	state, conditions := s.sampleSpawn(started, processes)
+	events, item, previous := s.publishSpawn(state, conditions)
+	for _, event := range events {
+		if event.Type == "fired" || event.Type == "updated" && previous[event.Alert.Key] != event.Alert.Severity {
+			s.notifySpawn(event.Alert)
+		}
+	}
+	s.enqueueSpawnPersistence(item)
+	return nil
+}
+
+func (s *Service) sampleSpawn(started time.Time, processes []SpawnProcess) (SpawnState, []Condition) {
 	uidLimit, totalLimit := s.opts.SpawnBackend.Limits()
-	uid := s.opts.UID()
 	s.spawnMu.Lock()
-	state := s.spawnTracker.update(started, processes, uid, uidLimit, totalLimit)
+	defer s.spawnMu.Unlock()
+	state := s.spawnTracker.update(started, processes, s.opts.UID(), uidLimit, totalLimit)
 	conditions := evaluateSpawn(s.opts.Config, &s.spawnTracker, state)
 	if len(conditions) > 0 || s.spawnHasActive() {
-		readArgv := s.spawnWillFire(conditions)
-		attributeSpawn(&state, processes, s.opts.SpawnBackend, readArgv)
-		if readArgv {
-			s.spawnTracker.argv = map[int]string{}
-		}
-		for i := range state.TopParents {
-			parent := &state.TopParents[i]
-			if readArgv {
-				s.spawnTracker.argv[parent.PID] = parent.Argv
-			} else {
-				parent.Argv = s.spawnTracker.argv[parent.PID]
-			}
-		}
+		attributeSpawn(&state, processes, s.opts.SpawnBackend, false)
+		s.fillSpawnArgv(&state)
 		for i := range conditions {
 			conditions[i].Detail = spawnDetail(state)
 		}
 	}
 	s.spawnTracker.probes[len(s.spawnTracker.probes)-1] = state
-	s.spawnMu.Unlock()
+	return state, conditions
+}
+
+func (s *Service) fillSpawnArgv(state *SpawnState) {
+	if s.spawnTracker.argv == nil {
+		s.spawnTracker.argv = map[int]string{}
+	}
+	present := make(map[int]bool, len(state.TopParents))
+	for _, parent := range state.TopParents {
+		present[parent.PID] = true
+	}
+	for pid := range s.spawnTracker.argv {
+		if !present[pid] {
+			delete(s.spawnTracker.argv, pid)
+		}
+	}
+	for i := range state.TopParents {
+		parent := &state.TopParents[i]
+		if _, ok := s.spawnTracker.argv[parent.PID]; !ok {
+			argv, err := s.opts.SpawnBackend.Argv(parent.PID)
+			if err == nil {
+				s.spawnTracker.argv[parent.PID] = truncateRunes(argv, 200)
+			}
+		}
+		parent.Argv = s.spawnTracker.argv[parent.PID]
+	}
+}
+
+func (s *Service) publishSpawn(state SpawnState, conditions []Condition) ([]Event, spawnPersistItem, map[string]string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.current.Spawn = &state
-	events := s.engine.EvaluateSpawn(state.At, conditions)
+	previous := make(map[string]string, len(conditions))
+	for _, c := range conditions {
+		previous[c.Key] = s.engine.active[c.Key].Severity
+	}
+	parentPID := 0
+	if len(state.TopParents) > 0 {
+		parentPID = state.TopParents[0].PID
+	}
+	events := s.engine.EvaluateSpawn(state.At, conditions, parentPID)
 	for _, condition := range conditions {
 		alert := s.engine.active[condition.Key]
 		alert.Spawn = &state
@@ -260,40 +297,61 @@ func (s *Service) TickSpawn(ctx context.Context) error {
 	for i := range events {
 		events[i].Alert.Spawn = &state
 	}
+	item := s.spawnPersistenceItem(state, events, previous)
 	s.fanoutLocked(notification{"watch.sample", s.current}, true)
 	for _, event := range events {
 		s.fanoutLocked(notification{"alerts.event", event}, false)
 	}
-	s.mu.Unlock()
-	for _, event := range events {
-		if event.Type != "resolved" {
-			s.notifySpawn(event.Alert)
-		}
-	}
-	if err := s.persistSpawn(ctx, state, events); err != nil {
-		return err
-	}
-	return nil
+	return events, item, previous
 }
 
-func (s *Service) persistSpawn(ctx context.Context, state SpawnState, events []Event) error {
-	if len(events) == 0 {
+func (s *Service) spawnPersistenceItem(state SpawnState, events []Event, previous map[string]string) spawnPersistItem {
+	item := spawnPersistItem{state: state}
+	for _, event := range events {
+		if event.Type == "resolved" {
+			delete(s.spawnPersisted, event.Alert.Key)
+			item.events = append(item.events, event)
+			continue
+		}
+		severityChanged := event.Type == "updated" && previous[event.Alert.Key] != event.Alert.Severity
+		if !severityChanged && event.Type == "updated" {
+			if prev, ok := s.spawnPersisted[event.Alert.Key]; ok && state.At.Sub(prev.at) < 30*time.Second {
+				continue
+			}
+		}
+		item.events = append(item.events, event)
+		s.spawnPersisted[event.Alert.Key] = spawnPersistRecord{state.At, event.Alert.Detail}
+		if event.Type == "fired" || severityChanged {
+			item.sample = true
+		}
+	}
+	for _, alert := range s.engine.Active() {
+		if !spawnKey(alert.Key) {
+			continue
+		}
+		prev, ok := s.spawnPersisted[alert.Key]
+		if ok && (prev.detail == alert.Detail || state.At.Sub(prev.at) < 30*time.Second) {
+			continue
+		}
+		item.events = append(item.events, Event{Type: "detail", Alert: alert})
+		s.spawnPersisted[alert.Key] = spawnPersistRecord{state.At, alert.Detail}
+	}
+	return item
+}
+
+func (s *Service) persistSpawn(ctx context.Context, item spawnPersistItem) error {
+	if len(item.events) == 0 {
 		return nil
 	}
-	for _, event := range events {
+	for _, event := range item.events {
 		if err := s.opts.Store.UpsertAlert(ctx, toRow(event.Alert)); err != nil {
 			s.opts.Logger.Error("spawn alert persistence failed", "error", err)
 		}
 	}
-	write := false
-	for _, event := range events {
-		if event.Type != "resolved" {
-			write = true
-		}
-	}
-	if !write {
+	if !item.sample {
 		return nil
 	}
+	state := item.state
 	sample := Sample{At: state.At, Spawn: &state, Limits: map[string]LimitUsage{"procs_per_uid": usage(state.ProcsUID, state.UIDLimit), "procs": usage(state.ProcsTotal, state.TotalLimit)}}
 	data, err := json.Marshal(sample)
 	if err != nil {
@@ -303,6 +361,56 @@ func (s *Service) persistSpawn(ctx context.Context, state SpawnState, events []E
 		return fmt.Errorf("spawn save sample: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) enqueueSpawnPersistence(item spawnPersistItem) {
+	if len(item.events) == 0 {
+		return
+	}
+	s.spawnPersistMu.Lock()
+	defer s.spawnPersistMu.Unlock()
+	if s.spawnPersistQueue == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.spawnPersistCancel = cancel
+		s.spawnPersistQueue = make(chan spawnPersistItem, 16)
+		s.spawnPersistDone = make(chan struct{})
+		go s.runSpawnPersister(ctx)
+	}
+	select {
+	case s.spawnPersistQueue <- item:
+	default:
+		s.spawnPersistDropped++
+		at := s.opts.Clock.Now()
+		if s.spawnPersistWarnAt.IsZero() || at.Sub(s.spawnPersistWarnAt) >= 30*time.Second {
+			s.opts.Logger.Warn("spawn persistence queue full", "dropped", s.spawnPersistDropped)
+			s.spawnPersistWarnAt = at
+		}
+	}
+}
+
+func (s *Service) runSpawnPersister(ctx context.Context) {
+	defer close(s.spawnPersistDone)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case item := <-s.spawnPersistQueue:
+			if err := s.persistSpawn(ctx, item); err != nil {
+				s.opts.Logger.Error("spawn sample persistence failed", "error", err)
+			}
+		}
+	}
+}
+
+func (s *Service) stopSpawnPersister() {
+	s.spawnPersistMu.Lock()
+	cancel, done := s.spawnPersistCancel, s.spawnPersistDone
+	s.spawnPersistMu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	s.waitForSpawn(done)
 }
 
 func (s *Service) notifySpawn(alert Alert) {
