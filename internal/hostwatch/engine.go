@@ -8,15 +8,16 @@ import (
 )
 
 type Alert struct {
-	ID         string     `json:"id"`
-	Key        string     `json:"key"`
-	Severity   string     `json:"severity"`
-	Title      string     `json:"title"`
-	Detail     string     `json:"detail"`
-	State      string     `json:"state"`
-	FiredAt    time.Time  `json:"fired_at"`
-	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
-	AckedAt    *time.Time `json:"acked_at,omitempty"`
+	ID         string      `json:"id"`
+	Key        string      `json:"key"`
+	Severity   string      `json:"severity"`
+	Title      string      `json:"title"`
+	Detail     string      `json:"detail"`
+	State      string      `json:"state"`
+	FiredAt    time.Time   `json:"fired_at"`
+	ResolvedAt *time.Time  `json:"resolved_at,omitempty"`
+	AckedAt    *time.Time  `json:"acked_at,omitempty"`
+	Spawn      *SpawnState `json:"spawn,omitempty"`
 }
 type Event struct {
 	Type  string `json:"type"`
@@ -35,9 +36,35 @@ func NewEngine(ids idgen.Generator) *Engine {
 	return &Engine{active: map[string]Alert{}, clears: map[string]int{}, IDs: ids}
 }
 func (e *Engine) Evaluate(at time.Time, conditions []Condition) []Event {
+	return e.evaluate(at, conditions, "", 2)
+}
+
+func (e *Engine) EvaluateSlow(at time.Time, conditions []Condition) []Event {
+	return e.evaluate(at, conditions, "slow", 2)
+}
+
+func (e *Engine) EvaluateSpawn(at time.Time, conditions []Condition) []Event {
+	return e.evaluate(at, conditions, "spawn", 3)
+}
+
+func spawnKey(key string) bool {
+	return key == "spawn.rate" || key == "procs.uid" || key == "procs.total"
+}
+
+func withinScope(scope, key string) bool {
+	if scope == "spawn" {
+		return spawnKey(key)
+	}
+	return scope != "slow" || !spawnKey(key)
+}
+
+func (e *Engine) evaluate(at time.Time, conditions []Condition, scope string, clearAfter int) []Event {
 	seen := map[string]bool{}
 	var out []Event
 	for _, c := range conditions {
+		if !withinScope(scope, c.Key) {
+			continue
+		}
 		seen[c.Key] = true
 		a, ok := e.active[c.Key]
 		e.clears[c.Key] = 0
@@ -56,11 +83,14 @@ func (e *Engine) Evaluate(at time.Time, conditions []Condition) []Event {
 		}
 	}
 	for key, a := range e.active {
+		if !withinScope(scope, key) {
+			continue
+		}
 		if seen[key] {
 			continue
 		}
 		e.clears[key]++
-		if e.clears[key] < 2 {
+		if e.clears[key] < clearAfter {
 			continue
 		}
 		t := at

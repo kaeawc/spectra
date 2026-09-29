@@ -21,9 +21,10 @@ func RegisterMethods(server *daemon.Server, svc *Service) {
 func (s *Service) currentRPC(_ context.Context, _ *daemon.Request) (any, error) {
 	sample, alerts := s.Current()
 	return struct {
-		Sample       Sample  `json:"sample"`
-		ActiveAlerts []Alert `json:"active_alerts"`
-	}{sample, alerts}, nil
+		Sample       Sample      `json:"sample"`
+		ActiveAlerts []Alert     `json:"active_alerts"`
+		Spawn        *SpawnState `json:"spawn,omitempty"`
+	}{sample, alerts, sample.Spawn}, nil
 }
 func (s *Service) samplesRPC(ctx context.Context, req *daemon.Request) (any, error) {
 	var p struct {

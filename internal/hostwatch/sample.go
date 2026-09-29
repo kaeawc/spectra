@@ -52,6 +52,7 @@ type Sample struct {
 	Kinds            map[string]KindStat   `json:"kinds"`
 	TopCPU           []ProcStat            `json:"top_cpu"`
 	SelfCPUPct       float64               `json:"self_cpu_pct"`
+	Spawn            *SpawnState           `json:"spawn,omitempty"`
 }
 type Collector struct {
 	OS       hostos.Kind
@@ -67,6 +68,7 @@ type Collector struct {
 	NCPU     func() int
 	Metrics  *metrics.Collector
 	Logger   logger.Logger
+	Spawn    func() *SpawnState
 	mu       sync.Mutex
 	lastCPU  time.Duration
 	lastAt   time.Time
@@ -181,9 +183,16 @@ func (c *Collector) collectLoadMemory(kind hostos.Kind, s *Sample) {
 	}
 }
 func (c *Collector) collectResources(ctx context.Context, kind hostos.Kind, count int, s *Sample) {
+	uidCount := 0
+	if c.Spawn != nil {
+		if spawn := c.Spawn(); spawn != nil {
+			uidCount = spawn.ProcsUID
+			s.Spawn = spawn
+		}
+	}
 	limits := c.Limits
 	if limits == nil {
-		limits = func(n int) map[string]LimitUsage { return platformLimits(kind, c.readFile(), n) }
+		limits = func(n int) map[string]LimitUsage { return platformLimits(kind, c.readFile(), n, uidCount) }
 	}
 	s.Limits = limits(count)
 	disk := c.Disk

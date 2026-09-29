@@ -33,12 +33,12 @@ func darwinLoad() ([3]float64, error) {
 	return out, nil
 }
 func darwinMemory() (string, float64, float64, error) { return collectDarwinMemory() }
-func darwinLimits(n int) map[string]LimitUsage {
+func darwinLimits(n, uidCount int) map[string]LimitUsage {
 	m := map[string]LimitUsage{}
 	get := func(k string) int { v, _ := unix.SysctlUint32(k); return int(v) }
 	m["files"] = usage(get("kern.num_files"), get("kern.maxfiles"))
 	m["procs"] = usage(n, get("kern.maxproc"))
-	m["procs_per_uid"] = usage(0, get("kern.maxprocperuid"))
+	m["procs_per_uid"] = usage(uidCount, get("kern.maxprocperuid"))
 	m["pty"] = usage(0, get("kern.tty.ptmx_max"))
 	return m
 }

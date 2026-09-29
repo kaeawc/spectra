@@ -32,16 +32,18 @@ type SampleStore interface {
 	AckAlert(context.Context, string, time.Time) (store.AlertRow, error)
 }
 type ServiceOptions struct {
-	Collector Sampler
-	Store     SampleStore
-	Metrics   *metrics.Collector
-	Config    Config
-	ConfigSet bool
-	Interval  time.Duration
-	Clock     clock.Clock
-	IDs       idgen.Generator
-	Logger    logger.Logger
-	Notifier  Notifier
+	Collector    Sampler
+	Store        SampleStore
+	Metrics      *metrics.Collector
+	Config       Config
+	ConfigSet    bool
+	Interval     time.Duration
+	Clock        clock.Clock
+	IDs          idgen.Generator
+	Logger       logger.Logger
+	Notifier     Notifier
+	SpawnBackend SpawnBackend
+	UID          func() int
 }
 type subscriber struct {
 	ch      chan notification
@@ -56,6 +58,11 @@ type Service struct {
 	engine               *Engine
 	mu                   sync.RWMutex
 	sampleMu             sync.Mutex
+	spawnMu              sync.Mutex
+	spawnTracker         spawnTracker
+	spawnOverrun         bool
+	spawnCPUAt           time.Time
+	spawnCPU             time.Duration
 	window               []Sample
 	current              Sample
 	subscribers          map[*subscriber]struct{}
@@ -77,6 +84,9 @@ func NewService(opts ServiceOptions) *Service {
 	if !opts.ConfigSet && !opts.Config.set {
 		opts.Config = DefaultConfig()
 	}
+	if opts.Config.Spawn.Interval < time.Second {
+		opts.Config.Spawn = DefaultConfig().Spawn
+	}
 	if opts.Metrics == nil {
 		opts.Metrics = metrics.NewCollector()
 	}
@@ -86,7 +96,25 @@ func NewService(opts ServiceOptions) *Service {
 	if opts.Notifier == nil {
 		opts.Notifier = NoopNotifier{}
 	}
-	return &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval}
+	if opts.SpawnBackend == nil {
+		opts.SpawnBackend = newSpawnBackend()
+	}
+	if opts.UID == nil {
+		opts.UID = currentUID
+	}
+	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval}
+	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
+		collector.Spawn = func() *SpawnState {
+			svc.mu.RLock()
+			defer svc.mu.RUnlock()
+			if svc.current.Spawn == nil {
+				return nil
+			}
+			state := *svc.current.Spawn
+			return &state
+		}
+	}
+	return svc
 }
 func (s *Service) Run(ctx context.Context) error {
 	if s.opts.Store == nil {
@@ -103,6 +131,10 @@ func (s *Service) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.engine.Restore(restored)
 	s.mu.Unlock()
+	spawnCtx, cancelSpawn := context.WithCancel(ctx)
+	spawnDone := make(chan struct{})
+	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
+	defer func() { cancelSpawn(); <-spawnDone }()
 	var inFlight <-chan error
 	timer := time.NewTimer(s.interval)
 	defer timer.Stop()
@@ -173,6 +205,14 @@ func (s *Service) Tick(ctx context.Context) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.current.Spawn != nil {
+		state := *s.current.Spawn
+		sample.Spawn = &state
+		if sample.Limits == nil {
+			sample.Limits = map[string]LimitUsage{}
+		}
+		sample.Limits["procs_per_uid"] = usage(state.ProcsUID, state.UIDLimit)
+	}
 	s.current = sample
 	s.window = append(s.window, sample)
 	cutoff := sample.At.Add(-2 * time.Hour)
@@ -182,7 +222,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	s.window = append([]Sample(nil), s.window[first:]...)
 	conditions := Evaluate(s.opts.Config, s.window)
-	events := s.engine.Evaluate(sample.At, conditions)
+	events := s.engine.EvaluateSlow(sample.At, conditions)
 	s.updateSelfGuard(sample.SelfCPUPct)
 	s.mu.Unlock()
 	data, err := json.Marshal(sample)

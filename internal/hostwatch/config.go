@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -42,6 +43,15 @@ type Config struct {
 		QEMU         int     `yaml:"qemu"`
 		Agents       int     `yaml:"agents"`
 	} `yaml:"kinds"`
+	Spawn struct {
+		Interval         time.Duration `yaml:"interval"`
+		RateWarn         float64       `yaml:"rate_warn"`
+		RateCritical     float64       `yaml:"rate_critical"`
+		UIDWarnPct       float64       `yaml:"uid_warn_pct"`
+		UIDCriticalPct   float64       `yaml:"uid_critical_pct"`
+		TotalWarnPct     float64       `yaml:"total_warn_pct"`
+		TotalCriticalPct float64       `yaml:"total_critical_pct"`
+	} `yaml:"spawn"`
 }
 
 func DefaultConfig() Config {
@@ -65,6 +75,13 @@ func DefaultConfig() Config {
 	c.Kinds.Simulator = 3
 	c.Kinds.QEMU = 2
 	c.Kinds.Agents = 8
+	c.Spawn.Interval = 5 * time.Second
+	c.Spawn.RateWarn = 40
+	c.Spawn.RateCritical = 120
+	c.Spawn.UIDWarnPct = 40
+	c.Spawn.UIDCriticalPct = 70
+	c.Spawn.TotalWarnPct = 50
+	c.Spawn.TotalCriticalPct = 80
 	return c
 }
 func LoadConfig(path string, readFile func(string) ([]byte, error)) (Config, error) {
@@ -103,6 +120,12 @@ func validateConfig(c Config) (Config, error) {
 		{"disk.warn_gb", &c.Disk.WarnGB, &d.Disk.WarnGB},
 		{"disk.critical_gb", &c.Disk.CriticalGB, &d.Disk.CriticalGB},
 		{"kinds.cpu_pct", &c.Kinds.CPUPct, &d.Kinds.CPUPct},
+		{"spawn.rate_warn", &c.Spawn.RateWarn, &d.Spawn.RateWarn},
+		{"spawn.rate_critical", &c.Spawn.RateCritical, &d.Spawn.RateCritical},
+		{"spawn.uid_warn_pct", &c.Spawn.UIDWarnPct, &d.Spawn.UIDWarnPct},
+		{"spawn.uid_critical_pct", &c.Spawn.UIDCriticalPct, &d.Spawn.UIDCriticalPct},
+		{"spawn.total_warn_pct", &c.Spawn.TotalWarnPct, &d.Spawn.TotalWarnPct},
+		{"spawn.total_critical_pct", &c.Spawn.TotalCriticalPct, &d.Spawn.TotalCriticalPct},
 	} {
 		if !(*field.value > 0) {
 			problems = append(problems, fmt.Errorf("%s must be positive", field.name))
@@ -127,6 +150,23 @@ func validateConfig(c Config) (Config, error) {
 		if *field.value <= 0 {
 			problems = append(problems, fmt.Errorf("%s must be positive", field.name))
 			*field.value = *field.fallback
+		}
+	}
+	if c.Spawn.Interval < time.Second {
+		problems = append(problems, fmt.Errorf("spawn.interval must be at least 1s"))
+		c.Spawn.Interval = d.Spawn.Interval
+	}
+	for _, field := range []struct {
+		name           string
+		warn, critical *float64
+	}{
+		{"rate", &c.Spawn.RateWarn, &c.Spawn.RateCritical},
+		{"uid_pct", &c.Spawn.UIDWarnPct, &c.Spawn.UIDCriticalPct},
+		{"total_pct", &c.Spawn.TotalWarnPct, &c.Spawn.TotalCriticalPct},
+	} {
+		if *field.critical < *field.warn {
+			problems = append(problems, fmt.Errorf("spawn.%s critical threshold must be at least warning", field.name))
+			*field.critical = *field.warn
 		}
 	}
 	return c, errors.Join(problems...)

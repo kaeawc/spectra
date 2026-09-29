@@ -66,6 +66,9 @@ func evalMemory(c Config, w []Sample, s Sample) []Condition {
 func evalLimits(c Config, s Sample) []Condition {
 	var out []Condition
 	for key, v := range s.Limits {
+		if key == "procs" || key == "procs_per_uid" {
+			continue
+		}
 		if v.Limit <= 0 {
 			continue
 		}

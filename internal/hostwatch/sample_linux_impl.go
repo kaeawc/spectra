@@ -3,6 +3,8 @@ package hostwatch
 import (
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 func linuxLoad(read func(string) ([]byte, error)) ([3]float64, error) {
@@ -48,7 +50,7 @@ func linuxMemory(read func(string) ([]byte, error)) (string, float64, float64, e
 	}
 	return p, (m["SwapTotal"] - m["SwapFree"]) / 1024, free, nil
 }
-func linuxLimits(read func(string) ([]byte, error), n int) map[string]LimitUsage {
+func linuxLimits(read func(string) ([]byte, error), n, uidCount int) map[string]LimitUsage {
 	get := func(path string) int {
 		b, err := read(path)
 		if err != nil {
@@ -65,6 +67,11 @@ func linuxLimits(read func(string) ([]byte, error), n int) map[string]LimitUsage
 	m["pty"] = usage(get("/proc/sys/kernel/pty/nr"), get("/proc/sys/kernel/pty/max"))
 	m["files"] = usage(get("/proc/sys/fs/file-nr"), get("/proc/sys/fs/file-max"))
 	m["procs"] = usage(n, get("/proc/sys/kernel/pid_max"))
-	m["procs_per_uid"] = usage(0, 0)
+	var limit unix.Rlimit
+	if unix.Getrlimit(unix.RLIMIT_NPROC, &limit) == nil {
+		m["procs_per_uid"] = usage(uidCount, finiteLimit(limit.Cur))
+	} else {
+		m["procs_per_uid"] = usage(uidCount, 0)
+	}
 	return m
 }
