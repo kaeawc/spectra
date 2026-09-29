@@ -203,6 +203,7 @@ func printHealth(out io.Writer, s hostwatch.Sample, alerts []hostwatch.Alert, as
 		}{s, alerts})
 	}
 	fmt.Fprintf(out, "Load: %.2f / %.2f / %.2f across %d cores\nMemory: %s, swap %.0f MB, free %.1f%%\nDisk free: %.1f GB\n", s.Load1, s.Load5, s.Load15, s.NCPU, s.MemoryPressure, s.SwapUsedMB, s.MemFreePct, s.DataFreeGB)
+	printSpawnHealth(out, s.Spawn, alerts)
 	kinds := make([]string, 0, len(s.Kinds))
 	for kind := range s.Kinds {
 		kinds = append(kinds, kind)
@@ -227,4 +228,23 @@ func printHealth(out io.Writer, s hostwatch.Sample, alerts []hostwatch.Alert, as
 		fmt.Fprintf(out, "  [%s] %s: %s\n", a.Severity, a.Title, a.Detail)
 	}
 	return nil
+}
+
+func printSpawnHealth(out io.Writer, p *hostwatch.SpawnState, alerts []hostwatch.Alert) {
+	if p == nil {
+		return
+	}
+	uidUsage := fmt.Sprintf("%d/unlimited", p.ProcsUID)
+	if p.UIDLimit > 0 {
+		uidUsage = fmt.Sprintf("%d/%d, %d%%", p.ProcsUID, p.UIDLimit, 100*p.ProcsUID/p.UIDLimit)
+	}
+	fmt.Fprintf(out, "Processes: %d total (uid %d: %s) · spawn %.0f/s\n", p.ProcsTotal, p.UID, uidUsage, p.NewPerSec)
+	for _, a := range alerts {
+		if a.Key == "spawn.rate" || a.Key == "procs.uid" || a.Key == "procs.total" {
+			for _, parent := range p.TopParents {
+				fmt.Fprintf(out, "  parent %s (pid %d): %d children %s\n", parent.Comm, parent.PID, parent.ChildCount, parent.Argv)
+			}
+			break
+		}
+	}
 }

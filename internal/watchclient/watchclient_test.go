@@ -24,7 +24,7 @@ func testServer(t *testing.T) daemon.Paths {
 	s := daemon.New(daemon.Options{Paths: paths, Version: "dev"})
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	alert := hostwatch.Alert{ID: "a1", Key: "load", Severity: "warning", Title: "High load", State: "firing", FiredAt: now}
-	sample := hostwatch.Sample{At: now, NCPU: 8, Load1: 4}
+	sample := hostwatch.Sample{At: now, NCPU: 8, Load1: 4, Spawn: &hostwatch.SpawnState{ProcsTotal: 7}}
 	s.Register("watch.current", func(context.Context, *daemon.Request) (any, error) {
 		return map[string]any{"sample": sample, "active_alerts": []hostwatch.Alert{alert}}, nil
 	})
@@ -69,7 +69,7 @@ func TestConnectAndRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	sample, alerts, err := w.Current(ctx)
-	if err != nil || sample.NCPU != 8 || len(alerts) != 1 {
+	if err != nil || sample.NCPU != 8 || sample.Spawn == nil || sample.Spawn.ProcsTotal != 7 || len(alerts) != 1 {
 		t.Fatalf("current: %+v %+v %v", sample, alerts, err)
 	}
 	rows, err := w.Samples(ctx, time.Time{}, 5)

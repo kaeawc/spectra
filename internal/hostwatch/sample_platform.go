@@ -19,11 +19,11 @@ func platformMemory(os hostos.Kind, read func(string) ([]byte, error)) (string, 
 	}
 	return linuxMemory(read)
 }
-func platformLimits(os hostos.Kind, read func(string) ([]byte, error), n int) map[string]LimitUsage {
+func platformLimits(os hostos.Kind, read func(string) ([]byte, error), n, uidCount int) map[string]LimitUsage {
 	if os == hostos.Darwin {
-		return darwinLimits(n)
+		return darwinLimits(n, uidCount)
 	}
-	return linuxLimits(read, n)
+	return linuxLimits(read, n, uidCount)
 }
 func platformThermal(ctx context.Context, os hostos.Kind, run proc.Runner) (bool, error) {
 	if os == hostos.Darwin {
