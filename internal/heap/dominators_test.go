@@ -28,7 +28,9 @@ func graph(roots []uint64, nodes ...tnode) *ObjectGraph {
 		}
 		b.addObject(n.id, c, n.shallow, n.out)
 	}
-	b.roots = roots
+	for _, r := range roots {
+		b.roots = append(b.roots, rawRoot{id: r, kind: RootJNIGlobal})
+	}
 	return b.build(func(classKey) string { return "" })
 }
 
@@ -214,7 +216,7 @@ func BenchmarkComputeRetained(b *testing.B) {
 		}
 		gb.addObject(uint64(i+1), c, 16, refs)
 	}
-	gb.roots = []uint64{1, 2, 3}
+	gb.roots = []rawRoot{{id: 1, kind: RootJavaFrame}, {id: 2, kind: RootJavaFrame}, {id: 3, kind: RootJavaFrame}}
 	g := gb.build(func(classKey) string { return "" })
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

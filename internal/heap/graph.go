@@ -31,6 +31,10 @@ type ObjectGraph struct {
 	outStart []int    // CSR offsets into out; len = Len()+1
 	out      []int32  // out-edge targets (object indices)
 	roots    []int32  // GC-rooted object indices (deduplicated)
+	gcRoots  []GCRoot // every GC-root record, sorted by Object
+
+	predStart []int // lazily built reverse CSR for path queries
+	preds     []int32
 
 	classNames []string         // class index -> class name
 	classObjOf map[int32]string // object index of a class object -> its class name
@@ -96,7 +100,10 @@ type graphBuilder struct {
 	edgeOff  []int
 	edgeCnt  []int32
 	rawEdges []uint64
-	roots    []uint64
+	roots    []rawRoot
+	// threadBySerial maps a thread serial number to its thread object id, from
+	// ROOT_THREAD_OBJECT records, so frame roots can name their thread.
+	threadBySerial map[uint32]uint64
 
 	classIdx   map[classKey]int32
 	classKeys  []classKey
@@ -104,7 +111,7 @@ type graphBuilder struct {
 }
 
 func newGraphBuilder(idSize int) *graphBuilder {
-	return &graphBuilder{idSize: idSize, classIdx: map[classKey]int32{}}
+	return &graphBuilder{idSize: idSize, classIdx: map[classKey]int32{}, threadBySerial: map[uint32]uint64{}}
 }
 
 func (b *graphBuilder) classFor(k classKey, presetName string) int32 {
@@ -177,7 +184,7 @@ func (b *graphBuilder) build(names func(classKey) string) *ObjectGraph {
 		}
 	}
 	g.resolveEdges(b, perm)
-	g.resolveRoots(b.roots)
+	g.resolveRoots(b.roots, b.threadBySerial)
 	for i, k := range b.classKeys {
 		if k.primType != 0 || k.classID == 0 {
 			continue
@@ -201,16 +208,6 @@ func (g *ObjectGraph) resolveEdges(b *graphBuilder, perm []int32) {
 		}
 	}
 	g.outStart[len(perm)] = len(g.out)
-}
-
-func (g *ObjectGraph) resolveRoots(ids []uint64) {
-	seen := map[int32]bool{}
-	for _, id := range ids {
-		if i, ok := g.Index(id); ok && !seen[i] {
-			seen[i] = true
-			g.roots = append(g.roots, i)
-		}
-	}
 }
 
 // classLayout captures a class's instance-field types (declaration order) and
@@ -354,8 +351,8 @@ func (st *graphState) readHeapDump(hr *hprofReader, length int64) error {
 }
 
 func (st *graphState) readHeapSub(sub *hprofReader, tag byte) error {
-	if n, ok := rootObjectIDBytes(sub.idSize, tag); ok {
-		return st.readRoot(sub, n)
+	if kind, n, ok := rootRecordLayout(sub.idSize, tag); ok {
+		return st.readRoot(sub, kind, n)
 	}
 	switch tag {
 	case hprofClassDump:
@@ -371,38 +368,6 @@ func (st *graphState) readHeapSub(sub *hprofReader, tag byte) error {
 	default:
 		return fmt.Errorf("hprof: unknown heap-dump sub-record tag 0x%02x", tag)
 	}
-}
-
-// rootObjectIDBytes reports, for a ROOT_* sub-record, the total body size and
-// that its first id field is the rooted object. Non-root sub-records return ok
-// false.
-func rootObjectIDBytes(idSize int, tag byte) (int64, bool) {
-	id := int64(idSize)
-	switch tag {
-	case hprofRootUnknown, hprofRootStickyClass, hprofRootMonitorUsed,
-		hprofRootInterned, hprofRootFinalizing, hprofRootDebugger,
-		hprofRootRefCleanup, hprofRootVMInternal:
-		return id, true
-	case hprofRootJNIGlobal:
-		return id + id, true
-	case hprofRootNativeStack, hprofRootThreadBlock:
-		return id + 4, true
-	case hprofRootJNILocal, hprofRootJavaFrame, hprofRootThreadObject, hprofRootJNIMonitor:
-		return id + 8, true
-	default:
-		return 0, false
-	}
-}
-
-func (st *graphState) readRoot(sub *hprofReader, totalBytes int64) error {
-	objID, err := sub.id()
-	if err != nil {
-		return err
-	}
-	if objID != 0 {
-		st.b.roots = append(st.b.roots, objID)
-	}
-	return sub.skip(totalBytes - int64(sub.idSize))
 }
 
 // readClassDump records the class layout and adds the class object itself as a
