@@ -358,3 +358,14 @@ Implemented:
     heap space, GC overhead, metaspace, compressed class space, direct buffer,
     native thread, array size, native memory) and surfacing them via the
     `jvm-oom-detected` recommendation.
+15. GC-log discovery: in deep mode, each running JVM's discovered log files
+    (at most 20, 1 MiB tail each) are parsed with the `gc-log` parser; files
+    containing unified `GC(N) Pause` lines are merged into a per-PID
+    `gc_log_reports` entry on the snapshot. The `jvm-gc-log-pressure`
+    recommendation (medium) fires on Full GCs, evacuation failures, a max
+    pause of 500 ms or more, or 10 s or more of cumulative pause. The inverse
+    `jvm-gc-logging-disabled` recommendation (low) fires when jstat shows
+    old-gen pressure or a full-GC burst but no GC logging is configured
+    (`-Xlog:gc*`, `-verbose:gc`, `-XX:+PrintGC*`, or `-Xloggc:`) and no GC log
+    was discovered, suggesting `-Xlog:gc*:file=...` so the next incident leaves
+    per-pause evidence.

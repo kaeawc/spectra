@@ -9,6 +9,7 @@ package gclog
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -59,6 +60,70 @@ func ParseFile(path string) (Summary, error) {
 	}
 	defer f.Close()
 	return Parse(f), nil
+}
+
+// ParseFileTail parses the GC log at path, reading at most its trailing
+// maxBytes when maxBytes > 0. Recent pauses sit at the end of a log, and the
+// bound keeps discovery cheap on large logs. When the read starts mid-file the
+// first (partial) line is discarded. A non-regular file yields an empty
+// Summary and no error so callers can skip devices and pipes.
+func ParseFileTail(path string, maxBytes int64) (Summary, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Summary{}, fmt.Errorf("open gc log: %w", err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return Summary{}, fmt.Errorf("stat gc log: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		return Summary{Causes: map[string]int{}}, nil
+	}
+	if maxBytes <= 0 || fi.Size() <= maxBytes {
+		return Parse(f), nil
+	}
+	if _, err := f.Seek(fi.Size()-maxBytes, io.SeekStart); err != nil {
+		return Summary{}, fmt.Errorf("seek gc log: %w", err)
+	}
+	br := bufio.NewReader(f)
+	if _, err := br.ReadString('\n'); err != nil {
+		return Summary{Causes: map[string]int{}}, nil // tail is a single partial line
+	}
+	return Parse(br), nil
+}
+
+// Merge combines two summaries (e.g. a log and its rotated predecessor) into
+// one aggregate. Neither input is modified.
+func Merge(a, b Summary) Summary {
+	out := Summary{
+		Pauses:             a.Pauses + b.Pauses,
+		TotalPauseMs:       a.TotalPauseMs + b.TotalPauseMs,
+		FullGCCount:        a.FullGCCount + b.FullGCCount,
+		YoungGCCount:       a.YoungGCCount + b.YoungGCCount,
+		SystemGCCount:      a.SystemGCCount + b.SystemGCCount,
+		EvacuationFailures: a.EvacuationFailures + b.EvacuationFailures,
+		Causes:             make(map[string]int, len(a.Causes)+len(b.Causes)),
+	}
+	for k, v := range a.Causes {
+		out.Causes[k] += v
+	}
+	for k, v := range b.Causes {
+		out.Causes[k] += v
+	}
+	longest := a
+	if b.MaxPauseMs > a.MaxPauseMs {
+		longest = b
+	}
+	out.MaxPauseMs = longest.MaxPauseMs
+	if longest.LongestPause != nil {
+		lp := *longest.LongestPause
+		out.LongestPause = &lp
+	}
+	if out.Pauses > 0 {
+		out.AvgPauseMs = out.TotalPauseMs / float64(out.Pauses)
+	}
+	return out
 }
 
 // Parse reads unified GC-log text and returns an aggregate Summary. It never
