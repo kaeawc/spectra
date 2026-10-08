@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/heapdump"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -61,6 +62,10 @@ type Snapshot struct {
 	// discovered log files of running JVMs. Populated only in deep mode (when
 	// process LogFiles are available); empty otherwise.
 	OOMReports []OOMReport `json:"oom_reports,omitempty"`
+
+	// HeapDumps lists .hprof files attributed to running JVMs, found in
+	// -XX:HeapDumpPath or the working directory (bounded directory reads).
+	HeapDumps []HeapDump `json:"heap_dumps,omitempty"`
 
 	// JVMHistory is recent per-PID JVM samples (oldest first) populated by
 	// callers that have access to a snapshot store. Optional: rules that
@@ -187,6 +192,10 @@ type Options struct {
 	// TTL keeps results meaningfully fresh while collapsing close-together
 	// invocations.
 	StorageCache *cache.TTLStore
+
+	// HeapDumpFS is the filesystem used to locate JVM heap dumps.
+	// Zero value uses the live filesystem.
+	HeapDumpFS heapdump.FS
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -321,9 +330,9 @@ func Build(ctx context.Context, opts Options) Snapshot {
 }
 
 // finalizeJVMData runs the post-Wait JVM steps that need collectors already
-// joined: runtime telemetry, and OOM log scanning (which needs both JVMs and
-// process LogFiles). Kept out of Build to hold Build's cyclomatic complexity
-// under the gate.
+// joined: runtime telemetry, OOM log scanning (which needs both JVMs and
+// process LogFiles), and heap-dump discovery (which prefers deep-mode cwd).
+// Kept out of Build to hold Build's cyclomatic complexity under the gate.
 func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
 	if opts.SkipJVMs {
 		return
@@ -332,6 +341,11 @@ func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
 	if !opts.SkipProcesses {
 		s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
 	}
+	fsys := opts.HeapDumpFS
+	if fsys == nil {
+		fsys = heapdump.OSFS{}
+	}
+	s.HeapDumps = collectHeapDumps(fsys, s.JVMs, s.Processes)
 }
 
 func snapshotCollectorCount(opts Options) int {
