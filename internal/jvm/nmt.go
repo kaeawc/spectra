@@ -1,6 +1,7 @@
 package jvm
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -51,6 +52,19 @@ func ParseNMTSummary(output string) NMTBreakdown {
 		return b.Categories[i].CommittedKiB > b.Categories[j].CommittedKiB
 	})
 	return b
+}
+
+// NativeMemory runs `jcmd <pid> VM.native_memory <mode>`, where mode is
+// summary, detail, baseline, or summary.diff.
+func NativeMemory(pid int, mode string, run CmdRunner) ([]byte, error) {
+	if run == nil {
+		run = DefaultRunner
+	}
+	out, err := run("jcmd", strconv.Itoa(pid), "VM.native_memory", mode)
+	if err != nil {
+		return out, fmt.Errorf("jcmd VM.native_memory %s: %w", mode, err)
+	}
+	return out, nil
 }
 
 func atoi64(s string) int64 {
