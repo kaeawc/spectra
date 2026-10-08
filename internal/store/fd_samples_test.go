@@ -25,7 +25,7 @@ func TestSaveAndGetFDSamples(t *testing.T) {
 		t.Fatalf("SaveFDSamples: %v", err)
 	}
 
-	got, err := db.GetRecentFDSamples(ctx, 1127, 0)
+	got, err := db.GetRecentFDSamples(ctx, 1127, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestGetRecentFDSamples_Limit(t *testing.T) {
 			t.Fatalf("save: %v", err)
 		}
 	}
-	got, err := db.GetRecentFDSamples(ctx, 7, 3)
+	got, err := db.GetRecentFDSamples(ctx, 7, time.Time{}, 3)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestGetRecentFDSamples_Limit(t *testing.T) {
 
 func TestGetRecentFDSamples_None(t *testing.T) {
 	db := openTestDB(t)
-	got, err := db.GetRecentFDSamples(context.Background(), 12345, 0)
+	got, err := db.GetRecentFDSamples(context.Background(), 12345, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestSaveFDSamples_Idempotent(t *testing.T) {
 	if err := db.SaveFDSamples(ctx, []snapshot.FDSample{updated}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	got, _ := db.GetRecentFDSamples(ctx, 1, 0)
+	got, _ := db.GetRecentFDSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OpenFDs != 95 {
 		t.Errorf("upsert should overwrite, got %v", got)
 	}
@@ -114,7 +114,7 @@ func TestPruneFDSamples(t *testing.T) {
 	if deleted != 2 {
 		t.Errorf("expected 2 deleted, got %d", deleted)
 	}
-	got, _ := db.GetRecentFDSamples(ctx, 1, 0)
+	got, _ := db.GetRecentFDSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OpenFDs != 90 {
 		t.Errorf("only the recent row should survive, got %v", got)
 	}
