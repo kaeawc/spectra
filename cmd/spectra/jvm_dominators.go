@@ -36,13 +36,9 @@ func runJVMDominators(args []string) int {
 // runRetainedAnalysis parses path's object graph, builds the dominator tree,
 // and prints the top objects and classes by retained size.
 func runRetainedAnalysis(path string, limit int, asJSON bool) int {
-	graph, err := heap.ParseObjectGraphFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "parsing %q: %v\n", path, err)
+	graph, ok := loadObjectGraph(path)
+	if !ok {
 		return 1
-	}
-	if graph.Unresolved > 0 {
-		fmt.Fprintf(os.Stderr, "note: %d instance(s) had no class layout; their references were not walked\n", graph.Unresolved)
 	}
 	res := heap.RankRetained(heap.ComputeRetained(graph), limit)
 	if asJSON {

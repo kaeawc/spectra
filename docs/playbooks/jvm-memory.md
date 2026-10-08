@@ -55,6 +55,17 @@ size:
 spectra jvm heap-dump --out ~/Desktop/app.hprof <pid>
 ```
 
+Then let Spectra find what is holding the memory. The leak-suspects report
+ranks dominator subtrees by retained size, names the accumulation point
+(usually a collection's backing array), and shows the shortest path from a GC
+root; `--file-issues` records each suspect as a tracked issue:
+
+```bash
+spectra jvm heap-hprof --leak-suspects ~/Desktop/app.hprof
+spectra jvm heap-hprof --paths 0x7f3a2c018 ~/Desktop/app.hprof
+spectra jvm heap-hprof --leak-suspects --file-issues ~/Desktop/app.hprof
+```
+
 Use JFR or a flamegraph when the symptom is throughput, CPU, allocation
 rate, lock contention, or thread scheduling:
 

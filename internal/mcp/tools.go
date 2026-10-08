@@ -15,6 +15,7 @@ import (
 	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/heap"
 	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -41,7 +42,7 @@ func toolDefinitions() []ToolDefinition {
 		snapshotToolDef(),
 		diagnoseToolDef(),
 		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
+		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
@@ -814,20 +815,21 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		op = "list"
 	}
 	handlers := map[string]func(jvmParams) ToolResult{
-		"list":           s.toolJVMList,
-		"inspect":        s.toolJVMInspect,
-		"explain":        s.toolJVMExplain,
-		"thread_dump":    func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
-		"gc_stats":       s.toolJVMGCStats,
-		"vm_memory":      s.toolJVMVMMemory,
-		"heap_histogram": func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
-		"attach":         s.toolJVMAttach,
-		"mbeans":         s.toolJVMMBeans,
-		"mbean_read":     s.toolJVMMBeanRead,
-		"mbean_invoke":   s.toolJVMMBeanInvoke,
-		"probe":          s.toolJVMProbe,
-		"heap_dump":      s.toolJVMHeapDump,
-		"flamegraph":     s.toolJVMFlamegraph,
+		"list":               s.toolJVMList,
+		"inspect":            s.toolJVMInspect,
+		"explain":            s.toolJVMExplain,
+		"thread_dump":        func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
+		"gc_stats":           s.toolJVMGCStats,
+		"vm_memory":          s.toolJVMVMMemory,
+		"heap_histogram":     func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
+		"attach":             s.toolJVMAttach,
+		"mbeans":             s.toolJVMMBeans,
+		"mbean_read":         s.toolJVMMBeanRead,
+		"mbean_invoke":       s.toolJVMMBeanInvoke,
+		"probe":              s.toolJVMProbe,
+		"heap_dump":          s.toolJVMHeapDump,
+		"heap_leak_suspects": s.toolJVMHeapLeakSuspects,
+		"flamegraph":         s.toolJVMFlamegraph,
 	}
 	handler, ok := handlers[op]
 	if !ok {
@@ -852,6 +854,7 @@ type jvmParams struct {
 	MBeanOperation   string `json:"mbean_operation"`
 	IncludeRaw       bool   `json:"include_raw"`
 	AutoAttach       *bool  `json:"auto_attach,omitempty"`
+	Limit            int    `json:"limit"`
 }
 
 // withAgentAttached invokes op; if the agent isn't attached and auto-attach is
@@ -1036,7 +1039,43 @@ func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
 	if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+	return toolText(toolEnvelope{
+		Summary:     fmt.Sprintf("wrote heap dump for pid %d", p.PID),
+		NextActions: []string{fmt.Sprintf("jvm heap_leak_suspects with dest=%s and confirm_sensitive=true", p.Dest)},
+		Raw:         map[string]interface{}{"pid": p.PID, "dest": p.Dest},
+		Timestamp:   s.now(),
+	})
+}
+
+// toolJVMHeapLeakSuspects analyzes a saved .hprof (typically the dest of a
+// prior heap_dump) and reports retained-size leak suspects with their
+// accumulation points and shortest paths from GC roots.
+func (s *Server) toolJVMHeapLeakSuspects(p jvmParams) ToolResult {
+	if !p.ConfirmSensitive {
+		return toolError("jvm heap_leak_suspects requires confirm_sensitive=true")
+	}
+	if p.Dest == "" {
+		return toolError("jvm heap_leak_suspects requires dest (path to an .hprof heap dump)")
+	}
+	graph, err := heap.ParseObjectGraphFile(p.Dest)
+	if err != nil {
+		return toolError(fmt.Sprintf("parse heap dump: %v", err))
+	}
+	rep := heap.LeakSuspects(heap.ComputeRetained(graph), heap.LeakOptions{MaxSuspects: p.Limit})
+	evidence := make([]string, 0, len(rep.Suspects))
+	for _, sus := range rep.Suspects {
+		evidence = append(evidence, sus.Description)
+	}
+	env := toolEnvelope{
+		Summary:   fmt.Sprintf("%d leak suspect(s) in %s (reachable heap %d bytes)", len(rep.Suspects), p.Dest, rep.ReachableBytes),
+		Evidence:  evidence,
+		Raw:       rep,
+		Timestamp: s.now(),
+	}
+	if len(rep.Suspects) > 0 {
+		env.NextActions = []string{fmt.Sprintf("spectra jvm heap-hprof --leak-suspects --file-issues %s", p.Dest)}
+	}
+	return toolText(env)
 }
 
 func (s *Server) toolJVMFlamegraph(p jvmParams) ToolResult {
