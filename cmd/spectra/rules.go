@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/cache"
@@ -33,7 +35,13 @@ func runRules(args []string) int {
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: take a live snapshot)")
 	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
 	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
+	threadDumpPIDs := fs.String("thread-dump-pid", "", "Comma-separated JVM PIDs to capture a thread dump for (enables jvm-deadlock)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	dumpPIDs, err := threadDumpPIDsFlag(*threadDumpPIDs, *snapID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rules: %v\n", err)
 		return 2
 	}
 
@@ -46,28 +54,7 @@ func runRules(args []string) int {
 		}
 		snap = *s
 	} else {
-		opts := snapshot.Options{
-			SpectraVersion: version,
-			DetectOpts:     detect.Options{},
-		}
-		// Reuse the persistent on-disk caches so per-app inspection
-		// (detect: codesign + plist + framework scan), toolchain enumeration,
-		// and the ~/Library walk in storage state are amortized across CLI
-		// calls. Cache writes go through async writers so the main collection
-		// loop never blocks on disk I/O.
-		if cacheStores != nil {
-			detectWriter := cache.NewAsyncWriter(cacheStores.Detect, 64, 2)
-			toolchainWriter := cache.NewAsyncWriter(cacheStores.Toolchain, 8, 1)
-			storageWriter := cache.NewAsyncWriter(cacheStores.Storage, 8, 1)
-			defer detectWriter.Close()
-			defer toolchainWriter.Close()
-			defer storageWriter.Close()
-			opts.DetectStore = cacheStores.Detect
-			opts.DetectWriter = detectWriter
-			opts.ToolchainCache = cache.NewTTLStore(cacheStores.Toolchain, toolchainWriter)
-			opts.StorageCache = cache.NewTTLStore(cacheStores.Storage, storageWriter)
-		}
-		snap = snapshot.Build(context.Background(), opts)
+		snap = buildLiveRulesSnapshot(dumpPIDs)
 	}
 
 	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
@@ -102,6 +89,63 @@ func runRules(args []string) int {
 // printSnapshotWarnings surfaces degraded-collection warnings so a partial
 // snapshot ("no findings — all rules passed") is not mistaken for a clean
 // machine. Warnings go to stderr to keep stdout parseable.
+// threadDumpPIDsFlag validates --thread-dump-pid. Thread dumps describe the
+// live process, so they cannot be combined with a stored --snapshot.
+func threadDumpPIDsFlag(raw, snapID string) ([]int, error) {
+	pids, err := parsePIDList(raw)
+	if err != nil {
+		return nil, fmt.Errorf("--thread-dump-pid: %w", err)
+	}
+	if len(pids) > 0 && snapID != "" {
+		return nil, errors.New("--thread-dump-pid requires a live snapshot, not --snapshot")
+	}
+	return pids, nil
+}
+
+func buildLiveRulesSnapshot(threadDumpPIDs []int) snapshot.Snapshot {
+	opts := snapshot.Options{
+		SpectraVersion: version,
+		DetectOpts:     detect.Options{},
+		ThreadDumpPIDs: threadDumpPIDs,
+	}
+	// Reuse the persistent on-disk caches so per-app inspection
+	// (detect: codesign + plist + framework scan), toolchain enumeration,
+	// and the ~/Library walk in storage state are amortized across CLI
+	// calls. Cache writes go through async writers so the main collection
+	// loop never blocks on disk I/O.
+	if cacheStores != nil {
+		detectWriter := cache.NewAsyncWriter(cacheStores.Detect, 64, 2)
+		toolchainWriter := cache.NewAsyncWriter(cacheStores.Toolchain, 8, 1)
+		storageWriter := cache.NewAsyncWriter(cacheStores.Storage, 8, 1)
+		defer detectWriter.Close()
+		defer toolchainWriter.Close()
+		defer storageWriter.Close()
+		opts.DetectStore = cacheStores.Detect
+		opts.DetectWriter = detectWriter
+		opts.ToolchainCache = cache.NewTTLStore(cacheStores.Toolchain, toolchainWriter)
+		opts.StorageCache = cache.NewTTLStore(cacheStores.Storage, storageWriter)
+	}
+	return snapshot.Build(context.Background(), opts)
+}
+
+// parsePIDList parses a comma-separated list of positive PIDs. Empty input
+// yields nil.
+func parsePIDList(raw string) ([]int, error) {
+	var pids []int
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(field)
+		if err != nil || pid <= 0 {
+			return nil, fmt.Errorf("invalid pid %q", field)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
 func printSnapshotWarnings(w io.Writer, warnings []string) {
 	for _, warning := range warnings {
 		fmt.Fprintf(w, "warning: %s\n", warning)

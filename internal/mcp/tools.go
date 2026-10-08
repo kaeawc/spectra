@@ -257,6 +257,11 @@ func diagnoseToolDef() ToolDefinition {
 			"rules_config": stringProp("spectra.yml path."),
 			"persist":      boolProp("Save as issues."),
 			"include_raw":  boolProp("Return raw findings."),
+			"thread_dump_pids": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "integer"},
+				"description": "JVM PIDs to thread-dump for jvm-deadlock (live only).",
+			},
 		}, nil),
 	}
 }
@@ -399,7 +404,7 @@ func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *p
 			scope = "target"
 		}
 	}
-	findings, err := s.evaluateLiveRules("")
+	findings, err := s.evaluateLiveRules("", triageThreadDumpPIDs(p, rawOut)...)
 	if err != nil {
 		return evidence, next
 	}
@@ -476,6 +481,18 @@ func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut m
 		}
 	}
 	return evidence
+}
+
+// triageThreadDumpPIDs targets a thread dump (for jvm-deadlock) at the triaged
+// PID only when it was confirmed to be a JVM; non-JVM PIDs are never dumped.
+func triageThreadDumpPIDs(p triageParams, rawOut map[string]interface{}) []int {
+	if p.PID <= 0 {
+		return nil
+	}
+	if _, ok := rawOut["jvm"]; !ok {
+		return nil
+	}
+	return []int{p.PID}
 }
 
 // triageTargetInfo names the resolved identifiers a triage call is scoped to.
@@ -716,15 +733,19 @@ func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
 
 func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 	var p struct {
-		SnapshotID  string `json:"snapshot_id"`
-		RulesConfig string `json:"rules_config"`
-		Persist     bool   `json:"persist"`
-		IncludeRaw  bool   `json:"include_raw"`
+		SnapshotID     string `json:"snapshot_id"`
+		RulesConfig    string `json:"rules_config"`
+		Persist        bool   `json:"persist"`
+		IncludeRaw     bool   `json:"include_raw"`
+		ThreadDumpPIDs []int  `json:"thread_dump_pids"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig)
+	if p.SnapshotID != "" && len(p.ThreadDumpPIDs) > 0 {
+		return toolError("thread_dump_pids requires a live snapshot; omit snapshot_id")
+	}
+	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig, p.ThreadDumpPIDs...)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -1552,12 +1573,15 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 	return nil
 }
 
-func (s *Server) evaluateLiveRules(config string) ([]rules.Finding, error) {
-	_, findings, err := s.evaluateRules("", config)
+func (s *Server) evaluateLiveRules(config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
+	_, findings, err := s.evaluateRules("", config, threadDumpPIDs...)
 	return findings, err
 }
 
-func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []rules.Finding, error) {
+// evaluateRules runs the catalog against a stored snapshot or a fresh live
+// one. threadDumpPIDs only applies to live snapshots: it names the JVMs to
+// thread-dump for the jvm-deadlock rule.
+func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int) (snapshot.Snapshot, []rules.Finding, error) {
 	var snap snapshot.Snapshot
 	var err error
 	if snapshotID != "" {
@@ -1566,7 +1590,10 @@ func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []
 			return snap, nil, err
 		}
 	} else {
-		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version})
+		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
+			SpectraVersion: s.Version,
+			ThreadDumpPIDs: threadDumpPIDs,
+		})
 	}
 	catalog, err := resolveRulesCatalog(config)
 	if err != nil {
