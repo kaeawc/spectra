@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/cache"
@@ -33,7 +34,17 @@ func runRules(args []string) int {
 	snapID := fs.String("snapshot", "", "Evaluate against a stored snapshot by ID (default: take a live snapshot)")
 	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
 	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
+	threadDumpPIDs := fs.String("thread-dump-pid", "", "Comma-separated JVM PIDs to capture a thread dump for (enables jvm-deadlock)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	dumpPIDs, err := parsePIDList(*threadDumpPIDs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rules: --thread-dump-pid: %v\n", err)
+		return 2
+	}
+	if len(dumpPIDs) > 0 && *snapID != "" {
+		fmt.Fprintln(os.Stderr, "rules: --thread-dump-pid requires a live snapshot, not --snapshot")
 		return 2
 	}
 
@@ -49,6 +60,7 @@ func runRules(args []string) int {
 		opts := snapshot.Options{
 			SpectraVersion: version,
 			DetectOpts:     detect.Options{},
+			ThreadDumpPIDs: dumpPIDs,
 		}
 		// Reuse the persistent on-disk caches so per-app inspection
 		// (detect: codesign + plist + framework scan), toolchain enumeration,
@@ -102,6 +114,24 @@ func runRules(args []string) int {
 // printSnapshotWarnings surfaces degraded-collection warnings so a partial
 // snapshot ("no findings — all rules passed") is not mistaken for a clean
 // machine. Warnings go to stderr to keep stdout parseable.
+// parsePIDList parses a comma-separated list of positive PIDs. Empty input
+// yields nil.
+func parsePIDList(raw string) ([]int, error) {
+	var pids []int
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(field)
+		if err != nil || pid <= 0 {
+			return nil, fmt.Errorf("invalid pid %q", field)
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
 func printSnapshotWarnings(w io.Writer, warnings []string) {
 	for _, warning := range warnings {
 		fmt.Fprintf(w, "warning: %s\n", warning)
