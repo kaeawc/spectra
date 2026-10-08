@@ -22,7 +22,10 @@ growth suspects — so an `.hprof` can be diffed against a live histogram or
 against another dump to shortlist leak suspects. It also parses the `.hprof`
 object *reference graph* (`ParseObjectGraph`) and builds its dominator tree
 (`ComputeRetained` / `RankRetained`) so objects and classes can be ranked by
-retained size. Object queries (OQL) are out of scope.
+retained size, traces shortest paths to GC roots (`PathsToGCRoots`), and
+produces an automated leak-suspects report (`LeakSuspects`). Object queries
+(OQL) are out of scope: the MCP surface makes the assistant the query
+interface.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -39,6 +42,8 @@ spectra jvm thread-dump [--json] [--summary] <pid>
 spectra jvm heap-histogram [--json] [--suspects N] <pid>
 spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>
 spectra jvm heap-hprof [--json] [--suspects N] [--retained] <file.hprof>
+spectra jvm heap-hprof --leak-suspects [--threshold 10] [--file-issues] [--json] <file.hprof>
+spectra jvm heap-hprof --paths <0xID|class> [--max-paths 3] [--json] <file.hprof>
 spectra jvm dominators [--json] [--top N] <file.hprof>
 spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>
 spectra jvm heap-dump [--out <path>] <pid>
@@ -96,8 +101,43 @@ would be freed if the object (or every instance of the class) were collected.
   (CSR edges): roughly 30 bytes per object plus 4 bytes per reference for the
   graph (about double, plus 8 bytes per reference, transiently while ids are
   resolved), and about 70 bytes per reachable object plus 4 bytes per
-  reference while the dominator tree is built. Plan for a few GiB of RAM per ~20 million
-  objects; there is no on-disk index yet.
+  reference while the dominator tree is built. Plan for a few GiB of RAM per
+  ~20 million objects; there is no on-disk index yet. Path queries add a
+  reverse index (8 bytes per object plus 4 per reference) on first use.
+
+`heap-hprof --leak-suspects` is the headless equivalent of MAT's leak-suspects
+report:
+
+- **GC roots** are kept with their kind (`jni_global`, `jni_local`,
+  `java_frame`, `native_stack`, `sticky_class`, `thread_block`,
+  `monitor_used`, `thread_object`, `interned_string`, `finalizing`,
+  `debugger`, `reference_cleanup`, `vm_internal`, `jni_monitor`, `unknown`);
+  thread-scoped roots carry the owning thread object id.
+- **Suspects.** Each top-level dominator subtree (a direct child of the
+  super-root) that retains at least `--threshold` percent of the reachable
+  heap (default 10%) is an object suspect. Smaller top-level subtrees are
+  grouped by class; a class whose instances together cross the threshold is a
+  class suspect (many independently rooted instances, such as sessions or
+  listeners).
+- **Accumulation point.** From an object suspect, Spectra descends the
+  dominator tree while one child retains at least 80% of its parent. Where
+  that stops, memory fans out across many objects; this is typically the
+  backing array of the collection that keeps growing.
+- **Path to root.** Each suspect carries the shortest reference path from a GC
+  root to its accumulation point (or to the largest instance of a class
+  suspect), found by a backwards breadth-first search. `--paths` runs the same
+  search for any object id or for every instance of a class, returning paths
+  from up to `--max-paths` distinct roots.
+- **Issues.** `--file-issues` records each suspect as a
+  `jvm-heap-leak-suspect` finding in the local issues store, keyed by the
+  suspect's class. Analyzing a later dump refreshes the same issue, and
+  `spectra issues list` / `acknowledge` / `dismiss` apply as usual. The host
+  must already be registered by `spectra issues check` or a stored snapshot.
+  `--json` returns the report together with the findings.
+
+MCP clients get the same report from the `jvm` tool's `heap_leak_suspects`
+operation (`dest` = the `.hprof` path, `confirm_sensitive=true`). After
+`heap_dump`, the tool suggests `heap_leak_suspects` as the next action.
 
 Daemon methods:
 

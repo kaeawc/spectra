@@ -140,6 +140,12 @@ Findings are matched by `(rule_id, machine_uuid, subject)` while the issue
 is `open` or `acknowledged`. Dismissed issues are not reopened by a later
 matching finding.
 
+Findings can also come from artifact analysis outside the snapshot engine.
+`spectra jvm heap-hprof --leak-suspects --file-issues` files each heap-dump
+leak suspect as a `jvm-heap-leak-suspect` issue. The subject is the suspect
+class, so the same leak found in a later dump updates the existing issue.
+See [JVM inspection](../inspection/jvm.md).
+
 ## Rule sources
 
 The V1 catalog ships with the binary. Local CEL/YAML files are loaded with
