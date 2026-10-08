@@ -33,6 +33,7 @@ type deepResult struct {
 	listenPorts   []int
 	outboundConns []string
 	logFiles      []string
+	cwd           string
 }
 
 // parseLSOFDeep merges lsof output into the procs slice in-place.
@@ -77,6 +78,9 @@ func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
 	}
 
 	fd := fields[3]
+	if fd == "cwd" && len(fields) >= 9 {
+		r.cwd = strings.Join(fields[8:], " ")
+	}
 	// Count rows where FD starts with a digit — those are real open descriptors.
 	if len(fd) > 0 && fd[0] >= '0' && fd[0] <= '9' {
 		r.fdCount++
@@ -211,6 +215,7 @@ func applyDeepResults(procs []Info, idx map[int]int, results map[int]*deepResult
 		i := idx[pid]
 		procs[i].OpenFDs = r.fdCount
 		procs[i].FDBreakdown = r.breakdown
+		procs[i].Cwd = r.cwd
 		if len(r.listenPorts) > 0 {
 			sort.Ints(r.listenPorts)
 			procs[i].ListeningPorts = r.listenPorts
