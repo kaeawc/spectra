@@ -34,6 +34,7 @@ func V1Catalog() []Rule {
 		ruleJVMRSSExceedsHeap(),
 		ruleJVMGCAlgorithm(),
 		ruleJVMOOMDetected(),
+		ruleJVMDeadlock(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
