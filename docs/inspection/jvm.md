@@ -19,9 +19,10 @@ adapt to. The JVM adapter parses both `jcmd GC.class_histogram` output and
 binary `.hprof` heap dumps (`ParseHPROF` / `HPROFParser`) into structured
 per-class histograms, compares histogram snapshots, and ranks shallow-size and
 growth suspects — so an `.hprof` can be diffed against a live histogram or
-against another dump to shortlist leak suspects. It does not yet parse the
-`.hprof` object *reference graph*, so dominator trees, retained sizes,
-paths-to-GC-roots, and object queries remain future work.
+against another dump to shortlist leak suspects. It also parses the `.hprof`
+object *reference graph* (`ParseObjectGraph`) and builds its dominator tree
+(`ComputeRetained` / `RankRetained`) so objects and classes can be ranked by
+retained size. Object queries (OQL) are out of scope.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -37,7 +38,8 @@ spectra jvm explain [--samples 1] [--interval 1s] <pid>
 spectra jvm thread-dump [--json] [--summary] <pid>
 spectra jvm heap-histogram [--json] [--suspects N] <pid>
 spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>
-spectra jvm heap-hprof [--json] [--suspects N] <file.hprof>
+spectra jvm heap-hprof [--json] [--suspects N] [--retained] <file.hprof>
+spectra jvm dominators [--json] [--top N] <file.hprof>
 spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
@@ -70,6 +72,32 @@ into the same class histogram the live `heap-histogram` produces, so a dump can
 be ranked for its largest classes or diffed against another dump to shortlist
 leak suspects. `heap-histogram compare` auto-detects its inputs, so each file may
 be a text `GC.class_histogram` capture or a binary `.hprof`.
+
+`heap-hprof --retained` (and its alias `dominators`) goes beyond shallow sizes:
+it builds the object reference graph, computes the dominator tree over the GC
+roots, and ranks objects and classes by **retained size** — the memory that
+would be freed if the object (or every instance of the class) were collected.
+
+- **Graph.** Instance reference fields are resolved from each `CLASS_DUMP`'s
+  instance-field descriptors, walking the superclass chain; object-array
+  elements are edges; class objects are nodes whose edges are their
+  superclass, class loader, and object-typed static fields, and every instance
+  references its class. Class objects have zero shallow size so totals match
+  the histogram. Both 4- and 8-byte identifier sizes are supported.
+- **Dominators.** A virtual super-root points at every GC root; immediate
+  dominators come from Lengauer-Tarjan (path compression, O(E log N)) and an
+  object's retained size is its shallow size plus that of everything it
+  dominates. Objects not reachable from a GC root are excluded.
+- **Class retained size** sums the retained sizes of instances that are not
+  dominated by another instance of the same class, so recursive structures
+  (list nodes, tree nodes) are not double counted. It is a lower bound on the
+  retained size of the instance set as a whole.
+- **Memory.** The graph is held in memory as int32-indexed flat arrays
+  (CSR edges): roughly 30 bytes per object plus 4 bytes per reference for the
+  graph (about double, plus 8 bytes per reference, transiently while ids are
+  resolved), and about 70 bytes per reachable object plus 4 bytes per
+  reference while the dominator tree is built. Plan for a few GiB of RAM per ~20 million
+  objects; there is no on-disk index yet.
 
 Daemon methods:
 
