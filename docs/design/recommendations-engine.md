@@ -213,6 +213,7 @@ Implemented rules:
 - `jvm-rss-exceeds-heap`
 - `jvm-gc-algorithm`
 - `jvm-oom-detected`
+- `jvm-heap-dump-found`
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`
