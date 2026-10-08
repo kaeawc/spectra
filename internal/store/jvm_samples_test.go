@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
@@ -23,7 +24,7 @@ func TestSaveAndGetJVMSamples(t *testing.T) {
 		t.Fatalf("SaveJVMSamples: %v", err)
 	}
 
-	got, err := db.GetRecentJVMSamples(ctx, 1127, 0)
+	got, err := db.GetRecentJVMSamples(ctx, 1127, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentJVMSamples: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestGetRecentJVMSamples_Limit(t *testing.T) {
 			t.Fatalf("save: %v", err)
 		}
 	}
-	got, err := db.GetRecentJVMSamples(ctx, 7, 3)
+	got, err := db.GetRecentJVMSamples(ctx, 7, time.Time{}, 3)
 	if err != nil {
 		t.Fatalf("GetRecentJVMSamples: %v", err)
 	}
@@ -71,7 +72,7 @@ func TestGetRecentJVMSamples_Limit(t *testing.T) {
 
 func TestGetRecentJVMSamples_None(t *testing.T) {
 	db := openTestDB(t)
-	got, err := db.GetRecentJVMSamples(context.Background(), 12345, 0)
+	got, err := db.GetRecentJVMSamples(context.Background(), 12345, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentJVMSamples: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestSaveJVMSamples_Idempotent(t *testing.T) {
 	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{updated}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	got, _ := db.GetRecentJVMSamples(ctx, 1, 0)
+	got, _ := db.GetRecentJVMSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OldGenPct != 95 {
 		t.Errorf("upsert should overwrite, got %v", got)
 	}
@@ -110,7 +111,7 @@ func TestSaveJVMSamples_SubSecondDistinct(t *testing.T) {
 	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{one, two, three}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	got, err := db.GetRecentJVMSamples(ctx, 1, 0)
+	got, err := db.GetRecentJVMSamples(ctx, 1, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -120,9 +121,9 @@ func TestSaveJVMSamples_SubSecondDistinct(t *testing.T) {
 }
 
 func TestPruneJVMSamples(t *testing.T) {
-	db := openTestDB(t)
+	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	db := openTestDBWithOptions(t, Options{Clock: clock.NewFake(now)})
 	ctx := context.Background()
-	now := time.Now().UTC()
 	old1 := snapshot.JVMSample{PID: 1, At: now.Add(-30 * 24 * time.Hour), OldGenPct: 10}
 	old2 := snapshot.JVMSample{PID: 1, At: now.Add(-10 * 24 * time.Hour), OldGenPct: 20}
 	recent := snapshot.JVMSample{PID: 1, At: now.Add(-1 * time.Hour), OldGenPct: 90}
@@ -136,7 +137,7 @@ func TestPruneJVMSamples(t *testing.T) {
 	if deleted != 2 {
 		t.Errorf("expected 2 deleted, got %d", deleted)
 	}
-	got, _ := db.GetRecentJVMSamples(ctx, 1, 0)
+	got, _ := db.GetRecentJVMSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OldGenPct != 90 {
 		t.Errorf("only the recent row should survive, got %v", got)
 	}

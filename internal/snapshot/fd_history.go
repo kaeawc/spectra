@@ -10,9 +10,12 @@ import (
 // It is a deliberately compact subset of process.Info — enough to compute a
 // leak slope without re-deserializing whole snapshots.
 type FDSample struct {
-	PID     int       `json:"pid"`
-	At      time.Time `json:"at"`
-	OpenFDs int       `json:"open_fds"`
+	PID int `json:"pid"`
+	// ProcStart distinguishes process lifetimes that share a reused PID;
+	// zero means the start time was unknown when the sample was taken.
+	ProcStart time.Time `json:"proc_start,omitzero"`
+	At        time.Time `json:"at"`
+	OpenFDs   int       `json:"open_fds"`
 }
 
 // FDSampleFrom builds a sample from a live process.Info reading. Returns
@@ -23,9 +26,10 @@ func FDSampleFrom(p process.Info, at time.Time) (FDSample, bool) {
 		return FDSample{}, false
 	}
 	return FDSample{
-		PID:     p.PID,
-		At:      at.UTC(),
-		OpenFDs: p.OpenFDs,
+		PID:       p.PID,
+		ProcStart: ProcessStart(p),
+		At:        at.UTC(),
+		OpenFDs:   p.OpenFDs,
 	}, true
 }
 

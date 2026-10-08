@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
@@ -24,7 +25,7 @@ func TestSaveAndGetFDSamples(t *testing.T) {
 		t.Fatalf("SaveFDSamples: %v", err)
 	}
 
-	got, err := db.GetRecentFDSamples(ctx, 1127, 0)
+	got, err := db.GetRecentFDSamples(ctx, 1127, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestGetRecentFDSamples_Limit(t *testing.T) {
 			t.Fatalf("save: %v", err)
 		}
 	}
-	got, err := db.GetRecentFDSamples(ctx, 7, 3)
+	got, err := db.GetRecentFDSamples(ctx, 7, time.Time{}, 3)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestGetRecentFDSamples_Limit(t *testing.T) {
 
 func TestGetRecentFDSamples_None(t *testing.T) {
 	db := openTestDB(t)
-	got, err := db.GetRecentFDSamples(context.Background(), 12345, 0)
+	got, err := db.GetRecentFDSamples(context.Background(), 12345, time.Time{}, 0)
 	if err != nil {
 		t.Fatalf("GetRecentFDSamples: %v", err)
 	}
@@ -90,16 +91,16 @@ func TestSaveFDSamples_Idempotent(t *testing.T) {
 	if err := db.SaveFDSamples(ctx, []snapshot.FDSample{updated}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	got, _ := db.GetRecentFDSamples(ctx, 1, 0)
+	got, _ := db.GetRecentFDSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OpenFDs != 95 {
 		t.Errorf("upsert should overwrite, got %v", got)
 	}
 }
 
 func TestPruneFDSamples(t *testing.T) {
-	db := openTestDB(t)
+	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	db := openTestDBWithOptions(t, Options{Clock: clock.NewFake(now)})
 	ctx := context.Background()
-	now := time.Now().UTC()
 	old1 := snapshot.FDSample{PID: 1, At: now.Add(-30 * 24 * time.Hour), OpenFDs: 10}
 	old2 := snapshot.FDSample{PID: 1, At: now.Add(-10 * 24 * time.Hour), OpenFDs: 20}
 	recent := snapshot.FDSample{PID: 1, At: now.Add(-1 * time.Hour), OpenFDs: 90}
@@ -113,7 +114,7 @@ func TestPruneFDSamples(t *testing.T) {
 	if deleted != 2 {
 		t.Errorf("expected 2 deleted, got %d", deleted)
 	}
-	got, _ := db.GetRecentFDSamples(ctx, 1, 0)
+	got, _ := db.GetRecentFDSamples(ctx, 1, time.Time{}, 0)
 	if len(got) != 1 || got[0].OpenFDs != 90 {
 		t.Errorf("only the recent row should survive, got %v", got)
 	}
@@ -136,7 +137,9 @@ func TestAttachFDHistory(t *testing.T) {
 		TakenAt:   base.Add(2 * time.Minute),
 		Processes: []process.Info{{PID: 42, OpenFDs: 170}},
 	}
-	db.AttachFDHistory(ctx, snap)
+	if err := db.AttachFDHistory(ctx, snap); err != nil {
+		t.Fatalf("AttachFDHistory: %v", err)
+	}
 
 	got := snap.FDHistory.SamplesFor(42)
 	if len(got) != 3 {
@@ -155,7 +158,9 @@ func TestAttachFDHistory_NoOpenFDs(t *testing.T) {
 		TakenAt:   time.Now(),
 		Processes: []process.Info{{PID: 42, OpenFDs: 0}},
 	}
-	db.AttachFDHistory(context.Background(), snap)
+	if err := db.AttachFDHistory(context.Background(), snap); err != nil {
+		t.Fatalf("AttachFDHistory: %v", err)
+	}
 	if snap.FDHistory != nil {
 		t.Errorf("expected no history for a snapshot with no open descriptors, got %v", snap.FDHistory)
 	}

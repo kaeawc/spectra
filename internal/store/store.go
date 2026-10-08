@@ -103,7 +103,7 @@ func (s *DB) applyPragmas() error {
 func (s *DB) migrate() error {
 	// jvm_samples shipped briefly with second-resolution at_unix. Drop the
 	// old shape so the new nanosecond schema applies — no real users yet.
-	if hasJVMSamplesAtUnix(s.db) {
+	if hasColumn(s.db, "jvm_samples", "at_unix") {
 		if _, err := s.db.Exec(`DROP TABLE IF EXISTS jvm_samples`); err != nil {
 			return err
 		}
@@ -114,13 +114,24 @@ func (s *DB) migrate() error {
 	// Add snapshot_json column if this is an existing DB without it.
 	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN tag TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE snapshots ADD COLUMN snapshot_json TEXT`)
+	// Sample tables predating process-lifetime keying get proc_start_unix=0
+	// (unknown) on existing rows, which only matches processes whose start
+	// time is also unknown.
+	for _, table := range []string{"jvm_samples", "fd_samples"} {
+		if hasColumn(s.db, table, "proc_start_unix") {
+			continue
+		}
+		if _, err := s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN proc_start_unix INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("store: add %s.proc_start_unix: %w", table, err)
+		}
+	}
 	return nil
 }
 
-// hasJVMSamplesAtUnix reports whether jvm_samples exists with the legacy
-// at_unix column. Used only by migrate() to decide whether to recreate it.
-func hasJVMSamplesAtUnix(db *sql.DB) bool {
-	rows, err := db.Query(`PRAGMA table_info(jvm_samples)`)
+// hasColumn reports whether table exists with the named column. table must
+// be a trusted identifier; PRAGMA arguments cannot be bound.
+func hasColumn(db *sql.DB, table, column string) bool {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return false
 	}
@@ -133,7 +144,7 @@ func hasJVMSamplesAtUnix(db *sql.DB) bool {
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
 			return false
 		}
-		if name == "at_unix" {
+		if name == column {
 			return true
 		}
 	}
@@ -256,6 +267,7 @@ CREATE INDEX IF NOT EXISTS idx_app_churn_app ON app_churn(app_path, ts DESC);
 
 CREATE TABLE IF NOT EXISTS jvm_samples (
     pid          INTEGER NOT NULL,
+    proc_start_unix INTEGER NOT NULL DEFAULT 0,
     at_nano      INTEGER NOT NULL,
     old_gen_pct  REAL NOT NULL DEFAULT 0,
     fgc          INTEGER NOT NULL DEFAULT 0,
@@ -268,6 +280,7 @@ CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_nano DESC)
 
 CREATE TABLE IF NOT EXISTS fd_samples (
     pid          INTEGER NOT NULL,
+    proc_start_unix INTEGER NOT NULL DEFAULT 0,
     at_nano      INTEGER NOT NULL,
     open_fds     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (pid, at_nano)
@@ -1018,9 +1031,10 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 	}
 	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO jvm_samples (pid, at_nano, old_gen_pct, fgc, fgct, heap_mb)
-		VALUES (?,?,?,?,?,?)
+		INSERT INTO jvm_samples (pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb)
+		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(pid, at_nano) DO UPDATE SET
+		    proc_start_unix=excluded.proc_start_unix,
 		    old_gen_pct=excluded.old_gen_pct,
 		    fgc=excluded.fgc,
 		    fgct=excluded.fgct,
@@ -1030,25 +1044,31 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {
-		if _, err := stmt.ExecContext(ctx, sm.PID, sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
+		if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// GetRecentJVMSamples returns up to limit JVM samples for pid, ordered
-// oldest-first so callers can hand the slice straight to trend predicates.
-// Pass limit=0 for the default cap (60 samples).
-func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapshot.JVMSample, error) {
+// GetRecentJVMSamples returns up to limit JVM samples for the process
+// lifetime identified by (pid, procStart), ordered oldest-first so callers
+// can hand the slice straight to trend predicates. Pass limit=0 for the
+// default cap (60 samples).
+//
+// procStart is compared at whole-second precision. A zero procStart
+// (unknown start time) matches only samples whose start time was also
+// unknown, so a process with a known start never inherits samples from an
+// earlier, unidentifiable owner of the same PID.
+func (s *DB) GetRecentJVMSamples(ctx context.Context, pid int, procStart time.Time, limit int) ([]snapshot.JVMSample, error) {
 	if limit <= 0 {
 		limit = 60
 	}
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pid, at_nano, old_gen_pct, fgc, fgct, heap_mb
-		FROM jvm_samples WHERE pid=?
-		ORDER BY at_nano DESC LIMIT ?`, pid, limit,
+		SELECT pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb
+		FROM jvm_samples WHERE pid=? AND proc_start_unix=?
+		ORDER BY at_nano DESC LIMIT ?`, pid, procStartUnix(procStart), limit,
 	)
 	if err != nil {
 		return nil, err
@@ -1057,10 +1077,11 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapsho
 	var out []snapshot.JVMSample
 	for rows.Next() {
 		var sm snapshot.JVMSample
-		var atNano int64
-		if err := rows.Scan(&sm.PID, &atNano, &sm.OldGenPct, &sm.FGC, &sm.FGCT, &sm.HeapMB); err != nil {
+		var startUnix, atNano int64
+		if err := rows.Scan(&sm.PID, &startUnix, &atNano, &sm.OldGenPct, &sm.FGC, &sm.FGCT, &sm.HeapMB); err != nil {
 			return nil, err
 		}
+		sm.ProcStart = procStartTime(startUnix)
 		sm.At = time.Unix(0, atNano).UTC()
 		out = append(out, sm)
 	}
@@ -1076,38 +1097,72 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapsho
 
 // AttachJVMHistory persists the current snapshot's JVMs as samples and
 // loads recent samples per PID into snap.JVMHistory so trend-aware rules
-// see a multi-sample window. Errors are accumulated but never abort the
-// caller — history is an enhancement, not a contract; rules degrade to
-// point-in-time checks when nothing is loaded.
+// see a multi-sample window. History is an enhancement, not a contract;
+// rules degrade to point-in-time checks when nothing is loaded, so callers
+// may treat a returned error as diagnostic only.
+//
+// If saving the current samples fails, no history is loaded and
+// snap.JVMHistory is left nil: a window missing the current observation
+// could let stale samples drive a trend finding. Per-PID read failures omit
+// that PID's history and are joined into the returned error.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
-// historical snapshots replayed against the store don't get a time.Now()
+// historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
-func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
+func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) error {
 	if snap == nil || len(snap.JVMs) == 0 {
-		return
+		return nil
 	}
-	now := snap.TakenAt
-	if now.IsZero() {
-		now = time.Now()
-	}
+	snap.JVMHistory = nil
+	now := s.sampleTime(snap)
+	starts := snapshot.ProcessStartsByPID(snap.Processes)
 	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
 	for _, j := range snap.JVMs {
 		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
+			sm.ProcStart = starts[j.PID]
 			current = append(current, sm)
 		}
 	}
-	_ = s.SaveJVMSamples(ctx, current)
+	if err := s.SaveJVMSamples(ctx, current); err != nil {
+		return fmt.Errorf("store: save jvm samples: %w", err)
+	}
 
 	var history snapshot.JVMHistory
+	var errs []error
 	for _, j := range snap.JVMs {
-		samples, err := s.GetRecentJVMSamples(ctx, j.PID, 0)
+		samples, err := s.GetRecentJVMSamples(ctx, j.PID, starts[j.PID], 0)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("store: load jvm samples for pid %d: %w", j.PID, err))
 			continue
 		}
 		history = append(history, samples...)
 	}
 	snap.JVMHistory = history
+	return errors.Join(errs...)
+}
+
+// sampleTime is the timestamp stamped on samples derived from snap.
+func (s *DB) sampleTime(snap *snapshot.Snapshot) time.Time {
+	if snap.TakenAt.IsZero() {
+		return s.clock.Now()
+	}
+	return snap.TakenAt
+}
+
+// procStartUnix encodes a sample's process start time for the
+// proc_start_unix column, where 0 means unknown.
+func procStartUnix(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
+func procStartTime(unix int64) time.Time {
+	if unix == 0 {
+		return time.Time{}
+	}
+	return time.Unix(unix, 0).UTC()
 }
 
 // PruneJVMSamples deletes jvm_samples rows older than keepDays. Returns the
@@ -1116,7 +1171,7 @@ func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
 	if keepDays <= 0 {
 		keepDays = 7
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	cutoff := s.clock.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM jvm_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
 		return 0, err
@@ -1139,11 +1194,12 @@ func (s *DB) SaveFDSamples(ctx context.Context, samples []snapshot.FDSample) err
 	defer tx.Rollback() //nolint:errcheck
 	for _, sm := range samples {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO fd_samples (pid, at_nano, open_fds)
-			VALUES (?,?,?)
+			INSERT INTO fd_samples (pid, proc_start_unix, at_nano, open_fds)
+			VALUES (?,?,?,?)
 			ON CONFLICT(pid, at_nano) DO UPDATE SET
+			    proc_start_unix=excluded.proc_start_unix,
 			    open_fds=excluded.open_fds`,
-			sm.PID, sm.At.UTC().UnixNano(), sm.OpenFDs,
+			sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OpenFDs,
 		)
 		if err != nil {
 			return err
@@ -1152,18 +1208,19 @@ func (s *DB) SaveFDSamples(ctx context.Context, samples []snapshot.FDSample) err
 	return tx.Commit()
 }
 
-// GetRecentFDSamples returns up to limit fd samples for pid, ordered
-// oldest-first so callers can hand the slice straight to trend predicates.
-// Pass limit=0 for the default cap (60 samples).
-func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot.FDSample, error) {
+// GetRecentFDSamples returns up to limit fd samples for the process
+// lifetime identified by (pid, procStart), ordered oldest-first so callers
+// can hand the slice straight to trend predicates. Pass limit=0 for the
+// default cap (60 samples). procStart matching follows GetRecentJVMSamples.
+func (s *DB) GetRecentFDSamples(ctx context.Context, pid int, procStart time.Time, limit int) ([]snapshot.FDSample, error) {
 	if limit <= 0 {
 		limit = 60
 	}
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pid, at_nano, open_fds
-		FROM fd_samples WHERE pid=?
-		ORDER BY at_nano DESC LIMIT ?`, pid, limit,
+		SELECT pid, proc_start_unix, at_nano, open_fds
+		FROM fd_samples WHERE pid=? AND proc_start_unix=?
+		ORDER BY at_nano DESC LIMIT ?`, pid, procStartUnix(procStart), limit,
 	)
 	if err != nil {
 		return nil, err
@@ -1172,10 +1229,11 @@ func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot
 	var out []snapshot.FDSample
 	for rows.Next() {
 		var sm snapshot.FDSample
-		var atNano int64
-		if err := rows.Scan(&sm.PID, &atNano, &sm.OpenFDs); err != nil {
+		var startUnix, atNano int64
+		if err := rows.Scan(&sm.PID, &startUnix, &atNano, &sm.OpenFDs); err != nil {
 			return nil, err
 		}
+		sm.ProcStart = procStartTime(startUnix)
 		sm.At = time.Unix(0, atNano).UTC()
 		out = append(out, sm)
 	}
@@ -1191,21 +1249,20 @@ func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot
 
 // AttachFDHistory persists the current snapshot's per-process open-fd counts
 // as samples and loads recent samples per PID into snap.FDHistory so
-// trend-aware rules see a multi-sample window. Errors are accumulated but
-// never abort the caller — history is an enhancement, not a contract; rules
-// degrade to point-in-time checks when nothing is loaded.
+// trend-aware rules see a multi-sample window. It follows the same error
+// contract as AttachJVMHistory: a failed save leaves snap.FDHistory nil and
+// returns the error without loading history; per-PID read failures omit that
+// PID's history and are joined into the returned error.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
-// historical snapshots replayed against the store don't get a time.Now()
+// historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
-func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
+func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) error {
 	if snap == nil || len(snap.Processes) == 0 {
-		return
+		return nil
 	}
-	now := snap.TakenAt
-	if now.IsZero() {
-		now = time.Now()
-	}
+	snap.FDHistory = nil
+	now := s.sampleTime(snap)
 	current := make([]snapshot.FDSample, 0, len(snap.Processes))
 	for _, p := range snap.Processes {
 		if sm, ok := snapshot.FDSampleFrom(p, now); ok {
@@ -1213,22 +1270,27 @@ func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
 		}
 	}
 	if len(current) == 0 {
-		return
+		return nil
 	}
-	_ = s.SaveFDSamples(ctx, current)
+	if err := s.SaveFDSamples(ctx, current); err != nil {
+		return fmt.Errorf("store: save fd samples: %w", err)
+	}
 
 	var history snapshot.FDHistory
+	var errs []error
 	for _, p := range snap.Processes {
 		if p.OpenFDs <= 0 {
 			continue
 		}
-		samples, err := s.GetRecentFDSamples(ctx, p.PID, 0)
+		samples, err := s.GetRecentFDSamples(ctx, p.PID, snapshot.ProcessStart(p), 0)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("store: load fd samples for pid %d: %w", p.PID, err))
 			continue
 		}
 		history = append(history, samples...)
 	}
 	snap.FDHistory = history
+	return errors.Join(errs...)
 }
 
 // PruneFDSamples deletes fd_samples rows older than keepDays. Returns the
@@ -1237,7 +1299,7 @@ func (s *DB) PruneFDSamples(ctx context.Context, keepDays int) (int64, error) {
 	if keepDays <= 0 {
 		keepDays = 7
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	cutoff := s.clock.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM fd_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
 		return 0, err
