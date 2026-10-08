@@ -43,6 +43,11 @@ spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
 spectra jvm gc-log [--json] <file>
 spectra jvm vm-memory [--json] <pid>
+spectra jvm nmt [--json] [--top N] <pid>
+spectra jvm nmt detail [--json] [--top N] <pid>
+spectra jvm nmt baseline <pid>
+spectra jvm nmt diff [--json] [--top N] <pid>
+spectra jvm nmt compare [--json] [--top N] <before-file> <after-file>
 spectra jvm jmx status [--json] <pid>
 spectra jvm jmx start-local [--json] <pid>
 spectra jvm attach [--agent <spectra-agent.jar>] [--json] <pid>
@@ -70,6 +75,26 @@ into the same class histogram the live `heap-histogram` produces, so a dump can
 be ranked for its largest classes or diffed against another dump to shortlist
 leak suspects. `heap-histogram compare` auto-detects its inputs, so each file may
 be a text `GC.class_histogram` capture or a binary `.hprof`.
+
+`nmt` is the native-memory counterpart to `heap-histogram`. It needs the target
+JVM started with `-XX:NativeMemoryTracking=summary` (or `=detail` for call
+sites) and reports a clear error otherwise.
+
+- `nmt <pid>` parses `VM.native_memory summary` into per-category reserved and
+  committed sizes, largest committed first.
+- `nmt detail <pid>` parses `VM.native_memory detail`: the summary plus every
+  malloc/mmap call site (symbolized native stack, category, reserved/committed
+  size), sorted by committed size, and the virtual memory map (reserved regions
+  with their committed sub-ranges and reserving stacks). `--json` emits all
+  sites and regions; the text view prints the top `--top N` sites.
+- `nmt baseline <pid>` then `nmt diff <pid>` use HotSpot's own
+  `VM.native_memory baseline` / `summary.diff` to show per-category growth since
+  the baseline.
+- `nmt compare <before> <after>` diffs two saved `summary` or `detail`
+  captures, sorting categories by committed growth. When both files are detail
+  captures it also diffs call sites — matched by symbolized stack, ignoring
+  addresses, so captures from different runs line up — to attribute native
+  growth to the allocating call site.
 
 Daemon methods:
 
@@ -119,7 +144,7 @@ JDK commands:
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
 | Heap layout | `jcmd <pid> GC.heap_info` |
 | Metaspace / compressed class space | `jcmd <pid> VM.metaspace` |
-| Native memory tracking | `jcmd <pid> VM.native_memory summary` |
+| Native memory tracking | `jcmd <pid> VM.native_memory summary`, `detail`, `baseline`, `summary.diff` |
 | Classloader metadata | `jcmd <pid> VM.classloader_stats` |
 | JIT code cache | `jcmd <pid> Compiler.codecache`, `Compiler.CodeHeap_Analytics` |
 | Local JMX connector | `jcmd <pid> ManagementAgent.status`, `ManagementAgent.start_local` |
