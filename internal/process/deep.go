@@ -81,24 +81,31 @@ func recordLSOFLine(idx map[int]int, results map[int]*deepResult, line string) {
 	if fd == "cwd" && len(fields) >= 9 {
 		r.cwd = strings.Join(fields[8:], " ")
 	}
-	// Count rows where FD starts with a digit — those are real open descriptors.
-	if len(fd) > 0 && fd[0] >= '0' && fd[0] <= '9' {
-		r.fdCount++
-		if r.breakdown == nil {
-			r.breakdown = &FDBreakdown{}
-		}
-		name := ""
-		if len(fields) >= 9 {
-			name = strings.Join(fields[8:], " ")
-		}
-		classifyFD(r.breakdown, fields[4], name)
-	}
+	recordFD(r, fields)
 	if len(fields) >= 9 && strings.EqualFold(fields[7], "TCP") {
 		recordTCPName(r, strings.Join(fields[8:], " "))
 	}
 	if len(fields) >= 9 && strings.EqualFold(fields[4], "REG") && fdIsWritable(fd) {
 		recordLogFile(r, strings.Join(fields[8:], " "))
 	}
+}
+
+// recordFD counts rows whose FD starts with a digit — those are real open
+// descriptors.
+func recordFD(r *deepResult, fields []string) {
+	fd := fields[3]
+	if fd == "" || fd[0] < '0' || fd[0] > '9' {
+		return
+	}
+	r.fdCount++
+	if r.breakdown == nil {
+		r.breakdown = &FDBreakdown{}
+	}
+	name := ""
+	if len(fields) >= 9 {
+		name = strings.Join(fields[8:], " ")
+	}
+	classifyFD(r.breakdown, fields[4], name)
 }
 
 func classifyFD(b *FDBreakdown, typ, name string) {
