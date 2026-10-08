@@ -38,44 +38,38 @@ type rawRoot struct {
 	threadSerial uint32
 }
 
+// rootLayouts describes each ROOT_* heap-dump sub-record: its kind and the
+// ids and u4 fields that follow the rooted object id.
+var rootLayouts = map[byte]struct {
+	kind     RootKind
+	extraIDs int
+	u4s      int
+}{
+	hprofRootUnknown:      {RootUnknown, 0, 0},
+	hprofRootStickyClass:  {RootStickyClass, 0, 0},
+	hprofRootMonitorUsed:  {RootMonitorUsed, 0, 0},
+	hprofRootInterned:     {RootInternedString, 0, 0},
+	hprofRootFinalizing:   {RootFinalizing, 0, 0},
+	hprofRootDebugger:     {RootDebugger, 0, 0},
+	hprofRootRefCleanup:   {RootReferenceCleanup, 0, 0},
+	hprofRootVMInternal:   {RootVMInternal, 0, 0},
+	hprofRootJNIGlobal:    {RootJNIGlobal, 1, 0}, // + JNI global ref id
+	hprofRootNativeStack:  {RootNativeStack, 0, 1},
+	hprofRootThreadBlock:  {RootThreadBlock, 0, 1},
+	hprofRootJNILocal:     {RootJNILocal, 0, 2},
+	hprofRootJavaFrame:    {RootJavaFrame, 0, 2},
+	hprofRootThreadObject: {RootThreadObject, 0, 2},
+	hprofRootJNIMonitor:   {RootJNIMonitor, 0, 2},
+}
+
 // rootRecordLayout maps a ROOT_* heap-dump sub-record tag to its kind and total
 // body size (after the tag). The first field is always the rooted object id.
 func rootRecordLayout(idSize int, tag byte) (RootKind, int64, bool) {
-	id := int64(idSize)
-	switch tag {
-	case hprofRootUnknown:
-		return RootUnknown, id, true
-	case hprofRootStickyClass:
-		return RootStickyClass, id, true
-	case hprofRootMonitorUsed:
-		return RootMonitorUsed, id, true
-	case hprofRootInterned:
-		return RootInternedString, id, true
-	case hprofRootFinalizing:
-		return RootFinalizing, id, true
-	case hprofRootDebugger:
-		return RootDebugger, id, true
-	case hprofRootRefCleanup:
-		return RootReferenceCleanup, id, true
-	case hprofRootVMInternal:
-		return RootVMInternal, id, true
-	case hprofRootJNIGlobal:
-		return RootJNIGlobal, id + id, true
-	case hprofRootNativeStack:
-		return RootNativeStack, id + 4, true
-	case hprofRootThreadBlock:
-		return RootThreadBlock, id + 4, true
-	case hprofRootJNILocal:
-		return RootJNILocal, id + 8, true
-	case hprofRootJavaFrame:
-		return RootJavaFrame, id + 8, true
-	case hprofRootThreadObject:
-		return RootThreadObject, id + 8, true
-	case hprofRootJNIMonitor:
-		return RootJNIMonitor, id + 8, true
-	default:
+	l, ok := rootLayouts[tag]
+	if !ok {
 		return "", 0, false
 	}
+	return l.kind, int64(idSize)*int64(1+l.extraIDs) + 4*int64(l.u4s), true
 }
 
 // hasThreadSerial reports whether a root record's second field is a thread
