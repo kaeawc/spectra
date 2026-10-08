@@ -358,3 +358,12 @@ Implemented:
     heap space, GC overhead, metaspace, compressed class space, direct buffer,
     native thread, array size, native memory) and surfacing them via the
     `jvm-oom-detected` recommendation.
+15. Heap-dump discovery: `.hprof` files left by
+    `-XX:+HeapDumpOnOutOfMemoryError` are located in each running JVM's
+    `-XX:HeapDumpPath` (a file or directory; relative paths and `%p` are
+    resolved) or, when that flag is absent, as `java_pid<PID>.hprof` in its
+    working directory (deep-mode `lsof` cwd, else `user.dir`). Directory reads
+    are bounded (1000 entries, newest 10 dumps per JVM). Results land in the
+    snapshot's `heap_dumps` and surface via the `jvm-heap-dump-found`
+    recommendation, which links the dump to the PID with its size and mtime
+    and points at `spectra jvm heap-hprof <file>`.

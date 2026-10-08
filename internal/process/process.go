@@ -45,6 +45,7 @@ type Info struct {
 	ListeningPorts      []int        `json:"listening_ports,omitempty"`      // TCP ports this process listens on
 	OutboundConnections []string     `json:"outbound_connections,omitempty"` // active TCP remote addresses (host:port)
 	LogFiles            []string     `json:"log_files,omitempty"`            // writable log-shaped files this process holds open
+	Cwd                 string       `json:"cwd,omitempty"`                  // current working directory (lsof cwd row)
 
 	// AppPath is set when the process's executable path starts with a known
 	// .app bundle path. Populated only when CollectAll is called with a set
