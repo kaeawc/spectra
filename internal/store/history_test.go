@@ -49,13 +49,76 @@ func TestAttachHistory_ZeroTakenAtUsesInjectedClock(t *testing.T) {
 		JVMs:      []jvm.Info{{PID: 42, GC: &jvm.GCStats{OC: 100, OU: 50}}},
 		Processes: []process.Info{{PID: 42, OpenFDs: 17}},
 	}
-	db.AttachJVMHistory(ctx, snap)
-	db.AttachFDHistory(ctx, snap)
+	if err := db.AttachJVMHistory(ctx, snap); err != nil {
+		t.Fatalf("AttachJVMHistory: %v", err)
+	}
+	if err := db.AttachFDHistory(ctx, snap); err != nil {
+		t.Fatalf("AttachFDHistory: %v", err)
+	}
 
 	if got := snap.JVMHistory.SamplesFor(42); len(got) != 1 || !got[0].At.Equal(historyBase) {
 		t.Errorf("jvm history = %v, want one sample at %v", got, historyBase)
 	}
 	if got := snap.FDHistory.SamplesFor(42); len(got) != 1 || !got[0].At.Equal(historyBase) {
 		t.Errorf("fd history = %v, want one sample at %v", got, historyBase)
+	}
+}
+
+// failInserts makes every INSERT into table abort while leaving reads intact,
+// so tests can exercise a failed sample write against a readable store.
+func failInserts(t *testing.T, db *DB, table string) {
+	t.Helper()
+	stmt := `CREATE TRIGGER fail_` + table + ` BEFORE INSERT ON ` + table +
+		` BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`
+	if _, err := db.db.Exec(stmt); err != nil {
+		t.Fatalf("install trigger: %v", err)
+	}
+}
+
+func TestAttachJVMHistory_FailedWriteSkipsHistory(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{
+		{PID: 42, At: historyBase, OldGenPct: 40},
+		{PID: 42, At: historyBase.Add(time.Minute), OldGenPct: 60},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	failInserts(t, db, "jvm_samples")
+
+	snap := &snapshot.Snapshot{
+		TakenAt:    historyBase.Add(2 * time.Minute),
+		JVMs:       []jvm.Info{{PID: 42, GC: &jvm.GCStats{OC: 100, OU: 80}}},
+		JVMHistory: snapshot.JVMHistory{{PID: 42, OldGenPct: 99}},
+	}
+	if err := db.AttachJVMHistory(ctx, snap); err == nil {
+		t.Fatal("expected error from failed sample write")
+	}
+	if snap.JVMHistory != nil {
+		t.Errorf("history must not be loaded after a failed write, got %v", snap.JVMHistory)
+	}
+}
+
+func TestAttachFDHistory_FailedWriteSkipsHistory(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	if err := db.SaveFDSamples(ctx, []snapshot.FDSample{
+		{PID: 42, At: historyBase, OpenFDs: 100},
+		{PID: 42, At: historyBase.Add(time.Minute), OpenFDs: 200},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	failInserts(t, db, "fd_samples")
+
+	snap := &snapshot.Snapshot{
+		TakenAt:   historyBase.Add(2 * time.Minute),
+		Processes: []process.Info{{PID: 42, OpenFDs: 300}},
+		FDHistory: snapshot.FDHistory{{PID: 42, OpenFDs: 999}},
+	}
+	if err := db.AttachFDHistory(ctx, snap); err == nil {
+		t.Fatal("expected error from failed sample write")
+	}
+	if snap.FDHistory != nil {
+		t.Errorf("history must not be loaded after a failed write, got %v", snap.FDHistory)
 	}
 }

@@ -1076,38 +1076,54 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapsho
 
 // AttachJVMHistory persists the current snapshot's JVMs as samples and
 // loads recent samples per PID into snap.JVMHistory so trend-aware rules
-// see a multi-sample window. Errors are accumulated but never abort the
-// caller — history is an enhancement, not a contract; rules degrade to
-// point-in-time checks when nothing is loaded.
+// see a multi-sample window. History is an enhancement, not a contract;
+// rules degrade to point-in-time checks when nothing is loaded, so callers
+// may treat a returned error as diagnostic only.
+//
+// If saving the current samples fails, no history is loaded and
+// snap.JVMHistory is left nil: a window missing the current observation
+// could let stale samples drive a trend finding. Per-PID read failures omit
+// that PID's history and are joined into the returned error.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
 // historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
-func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
+func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) error {
 	if snap == nil || len(snap.JVMs) == 0 {
-		return
+		return nil
 	}
-	now := snap.TakenAt
-	if now.IsZero() {
-		now = s.clock.Now()
-	}
+	snap.JVMHistory = nil
+	now := s.sampleTime(snap)
 	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
 	for _, j := range snap.JVMs {
 		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
 			current = append(current, sm)
 		}
 	}
-	_ = s.SaveJVMSamples(ctx, current)
+	if err := s.SaveJVMSamples(ctx, current); err != nil {
+		return fmt.Errorf("store: save jvm samples: %w", err)
+	}
 
 	var history snapshot.JVMHistory
+	var errs []error
 	for _, j := range snap.JVMs {
 		samples, err := s.GetRecentJVMSamples(ctx, j.PID, 0)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("store: load jvm samples for pid %d: %w", j.PID, err))
 			continue
 		}
 		history = append(history, samples...)
 	}
 	snap.JVMHistory = history
+	return errors.Join(errs...)
+}
+
+// sampleTime is the timestamp stamped on samples derived from snap.
+func (s *DB) sampleTime(snap *snapshot.Snapshot) time.Time {
+	if snap.TakenAt.IsZero() {
+		return s.clock.Now()
+	}
+	return snap.TakenAt
 }
 
 // PruneJVMSamples deletes jvm_samples rows older than keepDays. Returns the
@@ -1191,21 +1207,20 @@ func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot
 
 // AttachFDHistory persists the current snapshot's per-process open-fd counts
 // as samples and loads recent samples per PID into snap.FDHistory so
-// trend-aware rules see a multi-sample window. Errors are accumulated but
-// never abort the caller — history is an enhancement, not a contract; rules
-// degrade to point-in-time checks when nothing is loaded.
+// trend-aware rules see a multi-sample window. It follows the same error
+// contract as AttachJVMHistory: a failed save leaves snap.FDHistory nil and
+// returns the error without loading history; per-PID read failures omit that
+// PID's history and are joined into the returned error.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
 // historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
-func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
+func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) error {
 	if snap == nil || len(snap.Processes) == 0 {
-		return
+		return nil
 	}
-	now := snap.TakenAt
-	if now.IsZero() {
-		now = s.clock.Now()
-	}
+	snap.FDHistory = nil
+	now := s.sampleTime(snap)
 	current := make([]snapshot.FDSample, 0, len(snap.Processes))
 	for _, p := range snap.Processes {
 		if sm, ok := snapshot.FDSampleFrom(p, now); ok {
@@ -1213,22 +1228,27 @@ func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
 		}
 	}
 	if len(current) == 0 {
-		return
+		return nil
 	}
-	_ = s.SaveFDSamples(ctx, current)
+	if err := s.SaveFDSamples(ctx, current); err != nil {
+		return fmt.Errorf("store: save fd samples: %w", err)
+	}
 
 	var history snapshot.FDHistory
+	var errs []error
 	for _, p := range snap.Processes {
 		if p.OpenFDs <= 0 {
 			continue
 		}
 		samples, err := s.GetRecentFDSamples(ctx, p.PID, 0)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("store: load fd samples for pid %d: %w", p.PID, err))
 			continue
 		}
 		history = append(history, samples...)
 	}
 	snap.FDHistory = history
+	return errors.Join(errs...)
 }
 
 // PruneFDSamples deletes fd_samples rows older than keepDays. Returns the

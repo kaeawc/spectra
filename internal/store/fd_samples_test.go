@@ -137,7 +137,9 @@ func TestAttachFDHistory(t *testing.T) {
 		TakenAt:   base.Add(2 * time.Minute),
 		Processes: []process.Info{{PID: 42, OpenFDs: 170}},
 	}
-	db.AttachFDHistory(ctx, snap)
+	if err := db.AttachFDHistory(ctx, snap); err != nil {
+		t.Fatalf("AttachFDHistory: %v", err)
+	}
 
 	got := snap.FDHistory.SamplesFor(42)
 	if len(got) != 3 {
@@ -156,7 +158,9 @@ func TestAttachFDHistory_NoOpenFDs(t *testing.T) {
 		TakenAt:   time.Now(),
 		Processes: []process.Info{{PID: 42, OpenFDs: 0}},
 	}
-	db.AttachFDHistory(context.Background(), snap)
+	if err := db.AttachFDHistory(context.Background(), snap); err != nil {
+		t.Fatalf("AttachFDHistory: %v", err)
+	}
 	if snap.FDHistory != nil {
 		t.Errorf("expected no history for a snapshot with no open descriptors, got %v", snap.FDHistory)
 	}
