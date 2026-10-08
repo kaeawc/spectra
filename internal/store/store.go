@@ -1081,7 +1081,7 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid, limit int) ([]snapsho
 // point-in-time checks when nothing is loaded.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
-// historical snapshots replayed against the store don't get a time.Now()
+// historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
 func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
 	if snap == nil || len(snap.JVMs) == 0 {
@@ -1089,7 +1089,7 @@ func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
 	}
 	now := snap.TakenAt
 	if now.IsZero() {
-		now = time.Now()
+		now = s.clock.Now()
 	}
 	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
 	for _, j := range snap.JVMs {
@@ -1116,7 +1116,7 @@ func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
 	if keepDays <= 0 {
 		keepDays = 7
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	cutoff := s.clock.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM jvm_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
 		return 0, err
@@ -1196,7 +1196,7 @@ func (s *DB) GetRecentFDSamples(ctx context.Context, pid, limit int) ([]snapshot
 // degrade to point-in-time checks when nothing is loaded.
 //
 // The snapshot's TakenAt is used as the sample timestamp when set, so
-// historical snapshots replayed against the store don't get a time.Now()
+// historical snapshots replayed against the store don't get a wall-clock
 // stamp that would corrupt trend ordering.
 func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
 	if snap == nil || len(snap.Processes) == 0 {
@@ -1204,7 +1204,7 @@ func (s *DB) AttachFDHistory(ctx context.Context, snap *snapshot.Snapshot) {
 	}
 	now := snap.TakenAt
 	if now.IsZero() {
-		now = time.Now()
+		now = s.clock.Now()
 	}
 	current := make([]snapshot.FDSample, 0, len(snap.Processes))
 	for _, p := range snap.Processes {
@@ -1237,7 +1237,7 @@ func (s *DB) PruneFDSamples(ctx context.Context, keepDays int) (int64, error) {
 	if keepDays <= 0 {
 		keepDays = 7
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
+	cutoff := s.clock.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM fd_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
 		return 0, err

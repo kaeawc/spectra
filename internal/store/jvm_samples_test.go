@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
@@ -120,9 +121,9 @@ func TestSaveJVMSamples_SubSecondDistinct(t *testing.T) {
 }
 
 func TestPruneJVMSamples(t *testing.T) {
-	db := openTestDB(t)
+	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	db := openTestDBWithOptions(t, Options{Clock: clock.NewFake(now)})
 	ctx := context.Background()
-	now := time.Now().UTC()
 	old1 := snapshot.JVMSample{PID: 1, At: now.Add(-30 * 24 * time.Hour), OldGenPct: 10}
 	old2 := snapshot.JVMSample{PID: 1, At: now.Add(-10 * 24 * time.Hour), OldGenPct: 20}
 	recent := snapshot.JVMSample{PID: 1, At: now.Add(-1 * time.Hour), OldGenPct: 90}

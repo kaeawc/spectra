@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
@@ -97,9 +98,9 @@ func TestSaveFDSamples_Idempotent(t *testing.T) {
 }
 
 func TestPruneFDSamples(t *testing.T) {
-	db := openTestDB(t)
+	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	db := openTestDBWithOptions(t, Options{Clock: clock.NewFake(now)})
 	ctx := context.Background()
-	now := time.Now().UTC()
 	old1 := snapshot.FDSample{PID: 1, At: now.Add(-30 * 24 * time.Hour), OpenFDs: 10}
 	old2 := snapshot.FDSample{PID: 1, At: now.Add(-10 * 24 * time.Hour), OpenFDs: 20}
 	recent := snapshot.FDSample{PID: 1, At: now.Add(-1 * time.Hour), OpenFDs: 90}
