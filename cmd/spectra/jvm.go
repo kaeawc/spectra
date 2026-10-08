@@ -380,12 +380,18 @@ func runJVMHeapHPROF(args []string) int {
 	asJSON := fs.Bool("json", false, "Emit the parsed histogram and ranked suspects as JSON")
 	suspects := fs.Int("suspects", 20, "Number of largest classes (leak suspects) to rank")
 	retained := fs.Bool("retained", false, "Rank objects and classes by retained size (builds the dominator tree)")
+	graphFlags := registerHeapGraphFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-hprof [--json] [--suspects N] [--retained] <file.hprof>")
+		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-hprof [--json] [--suspects N] [--retained | --leak-suspects [--threshold P] [--file-issues] | --paths <id|class> [--max-paths N]] <file.hprof>")
 		fmt.Fprintln(os.Stderr, "       spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>")
+		return 2
+	}
+	mode, err := graphFlags.mode(*retained)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "heap-hprof: %v\n", err)
 		return 2
 	}
 	path := fs.Arg(0)
@@ -393,8 +399,8 @@ func runJVMHeapHPROF(args []string) int {
 	if limit <= 0 {
 		limit = 20
 	}
-	if *retained {
-		return runRetainedAnalysis(path, limit, *asJSON)
+	if mode != "" {
+		return graphFlags.run(mode, path, limit, *asJSON)
 	}
 	hist, err := heap.ParseHPROFFile(path)
 	if err != nil {
