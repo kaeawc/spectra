@@ -15,6 +15,7 @@ type WaitCategory = threadinspect.WaitCategory
 type ParsedThreadDump = threadinspect.Snapshot
 type Thread = threadinspect.Thread
 type DeadlockCycle = threadinspect.DeadlockCycle
+type DeadlockWait = threadinspect.DeadlockWait
 type ThreadSummary = threadinspect.Summary
 type ThreadFilter = threadinspect.Filter
 type ThreadDumpDiff = threadinspect.Diff
@@ -230,39 +231,92 @@ func classifyWait(thread Thread) WaitCategory {
 	}
 }
 
+// HotSpot prints one "Found one Java-level deadlock:" section per cycle,
+// followed by the stacks of the threads involved. Only the cycle section is
+// parsed; matching "deadlock" anywhere else (thread names, frames) would
+// otherwise produce phantom cycles.
+const (
+	deadlockSectionStart = "Found one Java-level deadlock:"
+	deadlockSectionEnd   = "Java stack information for the threads listed above:"
+)
+
+var (
+	monitorWaitRE = regexp.MustCompile(`waiting to lock monitor \S+ \(object (0x[0-9a-fA-F]+), a ([^)]+)\)`)
+	ownableWaitRE = regexp.MustCompile(`waiting for ownable synchronizer (0x[0-9a-fA-F]+), \(a ([^)]+)\)`)
+	heldByRE      = regexp.MustCompile(`which is held by "([^"]+)"`)
+)
+
 func parseDeadlocks(out string) []DeadlockCycle {
-	if !strings.Contains(out, "deadlock") && !strings.Contains(out, "Deadlock") {
-		return nil
-	}
 	var cycles []DeadlockCycle
-	var current DeadlockCycle
+	var current *DeadlockCycle
+	flush := func() {
+		if current != nil && len(current.Threads) > 1 {
+			cycles = append(cycles, *current)
+		}
+		current = nil
+	}
 	for _, line := range strings.Split(out, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, `"`) {
-			if name, ok := parseDeadlockThreadLine(trimmed); ok {
-				current.Threads = append(current.Threads, name)
-			}
-		}
-		if strings.Contains(trimmed, "waiting to lock monitor") || strings.Contains(trimmed, "waiting for ownable synchronizer") {
-			if start := strings.Index(trimmed, "<"); start >= 0 {
-				if end := strings.Index(trimmed[start:], ">"); end >= 0 {
-					current.Locks = append(current.Locks, trimmed[start:start+end+1])
-				}
-			}
+		switch {
+		case strings.HasPrefix(trimmed, deadlockSectionStart):
+			flush()
+			current = &DeadlockCycle{}
+		case current == nil:
+		case strings.HasPrefix(trimmed, deadlockSectionEnd), isDeadlockTotalLine(trimmed):
+			flush()
+		default:
+			parseDeadlockLine(current, trimmed)
 		}
 	}
-	if len(current.Threads) > 1 {
-		cycles = append(cycles, current)
-	}
+	flush()
 	return cycles
 }
 
+func isDeadlockTotalLine(line string) bool {
+	return strings.HasPrefix(line, "Found ") &&
+		(strings.HasSuffix(line, " deadlock.") || strings.HasSuffix(line, " deadlocks."))
+}
+
+func parseDeadlockLine(c *DeadlockCycle, line string) {
+	if name, ok := parseDeadlockThreadLine(line); ok {
+		c.Threads = append(c.Threads, name)
+		c.Waits = append(c.Waits, DeadlockWait{Thread: name})
+		return
+	}
+	if len(c.Waits) == 0 {
+		return
+	}
+	w := &c.Waits[len(c.Waits)-1]
+	if lock := deadlockLock(line); lock != "" && w.Lock == "" {
+		w.Lock = lock
+		c.Locks = append(c.Locks, lock)
+		return
+	}
+	if m := heldByRE.FindStringSubmatch(line); m != nil && w.HeldBy == "" {
+		w.HeldBy = m[1]
+	}
+}
+
+// parseDeadlockThreadLine matches a cycle entry header such as `"worker-1":`.
 func parseDeadlockThreadLine(line string) (string, bool) {
-	end := strings.Index(line[1:], `"`)
-	if end < 0 {
+	if len(line) < 4 || !strings.HasPrefix(line, `"`) || !strings.HasSuffix(line, `":`) {
 		return "", false
 	}
-	return line[1 : end+1], true
+	return line[1 : len(line)-2], true
+}
+
+// deadlockLock renders the awaited lock in the same `<addr> (a Class)` form
+// used by stack frames so it can be correlated with the dump.
+func deadlockLock(line string) string {
+	for _, re := range []*regexp.Regexp{monitorWaitRE, ownableWaitRE} {
+		if m := re.FindStringSubmatch(line); m != nil {
+			return "<" + m[1] + "> (a " + m[2] + ")"
+		}
+	}
+	if strings.HasPrefix(line, "waiting to lock") || strings.HasPrefix(line, "waiting for ") {
+		return strings.TrimSuffix(line, ",")
+	}
+	return ""
 }
 
 func isThreadHeader(line string) bool {
