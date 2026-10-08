@@ -1,9 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -363,4 +367,34 @@ type fixedClock struct {
 
 func (f fixedClock) Now() time.Time {
 	return f.t
+}
+
+func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
+	s := newHostServer(t, Collectors{})
+	for _, tc := range []struct {
+		params jvmParams
+		want   string
+	}{
+		{jvmParams{Dest: "x.hprof"}, "confirm_sensitive"},
+		{jvmParams{ConfirmSensitive: true}, "requires dest"},
+		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "missing.hprof")}, "parse heap dump"},
+	} {
+		res := s.toolJVMHeapLeakSuspects(tc.params)
+		if !res.IsError || !strings.Contains(res.Content[0].Text, tc.want) {
+			t.Errorf("params %+v: result = %+v, want error containing %q", tc.params, res, tc.want)
+		}
+	}
+
+	var dump bytes.Buffer
+	dump.WriteString("JAVA PROFILE 1.0.2\x00")
+	_ = binary.Write(&dump, binary.BigEndian, uint32(8))
+	_ = binary.Write(&dump, binary.BigEndian, uint64(0))
+	path := filepath.Join(t.TempDir(), "empty.hprof")
+	if err := os.WriteFile(path, dump.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: path})
+	if res.IsError || !strings.Contains(res.Content[0].Text, "0 leak suspect(s)") {
+		t.Fatalf("empty dump result = %+v", res)
+	}
 }
