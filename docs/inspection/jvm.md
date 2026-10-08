@@ -358,3 +358,10 @@ Implemented:
     heap space, GC overhead, metaspace, compressed class space, direct buffer,
     native thread, array size, native memory) and surfacing them via the
     `jvm-oom-detected` recommendation.
+15. Deadlock detection: `spectra jvm thread-dump --summary <pid>` reports
+    Java-level lock cycles, and the high-severity `jvm-deadlock`
+    recommendation names each cycle's threads, the lock each waits for, and
+    its holder. Thread dumps pause the JVM at a safepoint, so they are taken
+    only for explicitly targeted PIDs (`spectra rules --thread-dump-pid`,
+    MCP `diagnose thread_dump_pids`, or MCP `triage` on a JVM PID), never for
+    every JVM on every snapshot.

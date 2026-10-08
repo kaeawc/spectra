@@ -48,6 +48,7 @@ spectra rules
 spectra rules --json
 spectra rules --snapshot <snapshot-id>
 spectra rules --rules-config spectra.yml
+spectra rules --thread-dump-pid <pid>   # also check named JVMs for deadlocks
 ```
 
 Evaluate and persist issues:
