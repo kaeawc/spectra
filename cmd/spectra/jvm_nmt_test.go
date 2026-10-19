@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,6 +165,49 @@ func TestJVMNMTCompareFiles(t *testing.T) {
 	}
 	if report.Summary.Categories[0].Name != "Other" || report.Sites != nil {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+const nmtDetailSites = `
+Virtual memory map:
+
+Details:
+
+[0x00007f0000000001] Foo::alloc()+0x10
+[0x00007f0000000002] Bar::run()+0x20
+                             (malloc=%dKB type=Other #3)
+
+`
+
+func TestJVMNMTCompareMixedSummaryDetailSkipsSites(t *testing.T) {
+	before := writeTemp(t, "before.txt", nmtSummaryBefore)
+	after := writeTemp(t, "after.txt", nmtSummaryAfter+fmt.Sprintf(nmtDetailSites, 512))
+	env, stdout, _ := nmtTestEnv(nil)
+	if code := runJVMNMTWith([]string{"compare", before, after}, env); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if strings.Contains(stdout.String(), "Call sites") {
+		t.Fatalf("unexpected call-site section:\n%s", stdout.String())
+	}
+	env, stdout, _ = nmtTestEnv(nil)
+	if code := runJVMNMTWith([]string{"compare", "--json", before, after}, env); code != 0 {
+		t.Fatalf("json exit = %d", code)
+	}
+	var report nmtCompareReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil || report.Sites != nil {
+		t.Fatalf("report = %+v, err = %v", report, err)
+	}
+}
+
+func TestJVMNMTCompareDetailBothShowsSites(t *testing.T) {
+	before := writeTemp(t, "before.txt", nmtSummaryBefore+fmt.Sprintf(nmtDetailSites, 100))
+	after := writeTemp(t, "after.txt", nmtSummaryAfter+fmt.Sprintf(nmtDetailSites, 612))
+	env, stdout, _ := nmtTestEnv(nil)
+	if code := runJVMNMTWith([]string{"compare", before, after}, env); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "Call sites by committed growth") || !strings.Contains(stdout.String(), "+512 KB") {
+		t.Fatalf("missing call-site growth:\n%s", stdout.String())
 	}
 }
 

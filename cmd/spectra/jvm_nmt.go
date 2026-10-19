@@ -181,9 +181,11 @@ func runNMTCompare(args []string, env nmtEnv) int {
 			return 1
 		}
 	}
-	report := nmtCompareReport{
-		Summary: jvm.DiffNMTSummaries(details[0].Summary, details[1].Summary),
-		Sites:   jvm.DiffNMTCallSites(details[0].Sites, details[1].Sites),
+	report := nmtCompareReport{Summary: jvm.DiffNMTSummaries(details[0].Summary, details[1].Summary)}
+	// A summary capture has no call sites, so diffing it against a detail
+	// capture would report every site as new growth.
+	if len(details[0].Sites) > 0 && len(details[1].Sites) > 0 {
+		report.Sites = jvm.DiffNMTCallSites(details[0].Sites, details[1].Sites)
 	}
 	if asJSON {
 		return writeNMTJSON(env.stdout, report)
