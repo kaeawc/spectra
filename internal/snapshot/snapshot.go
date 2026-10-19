@@ -332,15 +332,18 @@ func Build(ctx context.Context, opts Options) Snapshot {
 // finalizeJVMData runs the post-Wait JVM steps that need collectors already
 // joined: runtime telemetry, OOM log scanning (which needs both JVMs and
 // process LogFiles), and heap-dump discovery (which prefers deep-mode cwd).
+// OOM and heap-dump discovery are filesystem scans and are skipped with
+// SkipProcesses, like the other process-derived collectors.
 // Kept out of Build to hold Build's cyclomatic complexity under the gate.
 func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
 	if opts.SkipJVMs {
 		return
 	}
 	s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
-	if !opts.SkipProcesses {
-		s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
+	if opts.SkipProcesses {
+		return
 	}
+	s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
 	fsys := opts.HeapDumpFS
 	if fsys == nil {
 		fsys = heapdump.OSFS{}

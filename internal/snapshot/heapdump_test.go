@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,5 +71,26 @@ func TestCollectHeapDumpsSharedDirAttributesByPID(t *testing.T) {
 func TestCollectHeapDumpsNoJVMs(t *testing.T) {
 	if got := collectHeapDumps(heapdump.OSFS{}, nil, nil); got != nil {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFinalizeJVMDataHeapDumpsRespectSkipProcesses(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, filepath.Join(dir, "java_pid10.hprof"))
+	jvms := []jvm.Info{{PID: 10, VMArgs: "-XX:HeapDumpPath=" + dir}}
+	runner := func(string, ...string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	for _, skip := range []bool{true, false} {
+		s := Snapshot{JVMs: jvms}
+		finalizeJVMData(context.Background(), &s, Options{
+			SkipProcesses: skip,
+			JVMOpts:       jvm.CollectOptions{CmdRunner: runner},
+		})
+		if skip && len(s.HeapDumps) != 0 {
+			t.Fatalf("SkipProcesses must not scan for heap dumps, got %+v", s.HeapDumps)
+		}
+		if !skip && len(s.HeapDumps) != 1 {
+			t.Fatalf("expected heap dump when processes not skipped, got %+v", s.HeapDumps)
+		}
 	}
 }
