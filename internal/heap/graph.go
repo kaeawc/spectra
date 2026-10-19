@@ -46,7 +46,7 @@ func (g *ObjectGraph) ID(i int32) uint64 { return g.ids[i] }
 func (g *ObjectGraph) Index(id uint64) (int32, bool) {
 	j := sort.Search(len(g.ids), func(k int) bool { return g.ids[k] >= id })
 	if j < len(g.ids) && g.ids[j] == id {
-		return int32(j), true
+		return int32(j), true // #nosec G115 -- j < len(g.ids), object count is bounded by int32 indexing
 	}
 	return -1, false
 }
@@ -111,7 +111,7 @@ func (b *graphBuilder) classFor(k classKey, presetName string) int32 {
 	if i, ok := b.classIdx[k]; ok {
 		return i
 	}
-	i := int32(len(b.classKeys))
+	i := int32(len(b.classKeys)) // #nosec G115 -- class table is far smaller than MaxInt32
 	b.classIdx[k] = i
 	b.classKeys = append(b.classKeys, k)
 	b.classNames = append(b.classNames, presetName)
@@ -142,7 +142,7 @@ func (b *graphBuilder) appendRefs(p int, refs []uint64) {
 			b.rawEdges = append(b.rawEdges, r)
 		}
 	}
-	b.edgeCnt[p] = int32(len(b.rawEdges) - b.edgeOff[p])
+	b.edgeCnt[p] = int32(len(b.rawEdges) - b.edgeOff[p]) // #nosec G115 -- one object's reference count fits int32
 }
 
 // build sorts objects by id, resolves references to object indices (dropping
