@@ -183,8 +183,13 @@ func (p *nmtDetailParser) addSite(site NMTCallSite) {
 	p.detail.Sites = append(p.detail.Sites, site)
 }
 
+// NMTUnknownFrame stands in for stack frames NMT could not symbolize. Their
+// raw addresses vary per process (ASLR), so keeping them would stop the same
+// call site from matching across captures.
+const NMTUnknownFrame = "<unknown>"
+
 // nmtFrame returns a stack frame's symbol, dropping the address so the same
-// call site matches across processes; unsymbolized frames keep the address.
+// call site matches across processes; unsymbolized frames become NMTUnknownFrame.
 func nmtFrame(line string) (string, bool) {
 	m := nmtFrameRe.FindStringSubmatch(line)
 	if m == nil {
@@ -193,5 +198,5 @@ func nmtFrame(line string) (string, bool) {
 	if m[2] != "" {
 		return m[2], true
 	}
-	return m[1], true
+	return NMTUnknownFrame, true
 }

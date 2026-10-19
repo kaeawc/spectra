@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -32,12 +33,30 @@ func TestParseNMTDetailJDK17(t *testing.T) {
 		t.Errorf("top frames = %q", top.Frames)
 	}
 	unsafe := d.Sites[1]
-	wantFrames := []string{"Unsafe_AllocateMemory0+0x84", "0x00007f2f5101a3f6"}
+	wantFrames := []string{"Unsafe_AllocateMemory0+0x84", NMTUnknownFrame}
 	if unsafe.Kind != NMTSiteMalloc || unsafe.Category != "Other" || unsafe.CommittedKiB != 24576 || unsafe.Count != 6 || !reflect.DeepEqual(unsafe.Frames, wantFrames) {
 		t.Errorf("unsafe site = %+v", unsafe)
 	}
 	if last := d.Sites[len(d.Sites)-1]; last.Category != "Thread" || last.CommittedKiB != 12 || len(last.Frames) != 3 {
 		t.Errorf("last site = %+v", last)
+	}
+}
+
+func TestParseNMTDetailUnsymbolizedFramesMatchAcrossRuns(t *testing.T) {
+	capture := func(addr string, kib int) string {
+		return "Native Memory Tracking:\n\nTotal: reserved=10KB, committed=10KB\n\n" +
+			"Details:\n\n[" + addr + "] Foo::alloc()+0x10\n[" + addr + "]\n" +
+			"                             (malloc=" + strconv.Itoa(kib) + "KB type=Other #1)\n\n"
+	}
+	before := ParseNMTDetail(capture("0x00007f0000001000", 10))
+	after := ParseNMTDetail(capture("0x00007f9999002000", 30))
+	want := []string{"Foo::alloc()+0x10", NMTUnknownFrame}
+	if !reflect.DeepEqual(before.Sites[0].Frames, want) {
+		t.Fatalf("frames = %q, want %q", before.Sites[0].Frames, want)
+	}
+	deltas := DiffNMTCallSites(before.Sites, after.Sites)
+	if len(deltas) != 1 || deltas[0].DeltaCommittedKiB != 20 {
+		t.Fatalf("deltas = %+v, want one site growing 20 KB", deltas)
 	}
 }
 
