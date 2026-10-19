@@ -155,16 +155,7 @@ func (s *Service) Run(ctx context.Context) error {
 			s.waitForTick(inFlight)
 			return nil
 		case <-timer.C:
-			if inFlight != nil {
-				select {
-				case err := <-inFlight:
-					inFlight = nil
-					if err != nil {
-						s.opts.Logger.Warn("watch tick failed", "error", err)
-					}
-				default:
-				}
-			}
+			inFlight = s.drainTick(inFlight)
 			if ctx.Err() != nil {
 				s.waitForTick(inFlight)
 				return nil
@@ -196,6 +187,24 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// drainTick returns nil if the in-flight tick has finished (logging its
+// error), or the same channel if it is still running.
+func (s *Service) drainTick(inFlight <-chan error) <-chan error {
+	if inFlight == nil {
+		return nil
+	}
+	select {
+	case err := <-inFlight:
+		if err != nil {
+			s.opts.Logger.Warn("watch tick failed", "error", err)
+		}
+		return nil
+	default:
+		return inFlight
+	}
+}
+
 func (s *Service) waitForTick(done <-chan error) {
 	if done == nil {
 		return
