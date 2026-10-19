@@ -92,7 +92,7 @@ sites) and reports a clear error otherwise.
   the baseline.
 - `nmt compare <before> <after>` diffs two saved `summary` or `detail`
   captures, sorting categories by committed growth. When both files are detail
-  captures it also diffs call sites — matched by symbolized stack, ignoring
+  captures it also diffs call sites — matched by kind, category and symbolized stack (unsymbolized frames collapse to `<unknown>`), ignoring
   addresses, so captures from different runs line up — to attribute native
   growth to the allocating call site.
 

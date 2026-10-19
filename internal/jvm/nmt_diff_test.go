@@ -61,6 +61,19 @@ func TestDiffNMTCallSites(t *testing.T) {
 	}
 }
 
+func TestDiffNMTCallSitesSameStackDifferentCategories(t *testing.T) {
+	frames := []string{"Shared::alloc"}
+	before := []NMTCallSite{{Kind: NMTSiteMalloc, Category: "Other", Frames: frames, CommittedKiB: 10, ReservedKiB: 10}}
+	after := []NMTCallSite{
+		{Kind: NMTSiteMalloc, Category: "Other", Frames: frames, CommittedKiB: 10, ReservedKiB: 10},
+		{Kind: NMTSiteMalloc, Category: "Internal", Frames: frames, CommittedKiB: 40, ReservedKiB: 40},
+	}
+	got := DiffNMTCallSites(before, after)
+	if len(got) != 1 || got[0].Category != "Internal" || got[0].DeltaCommittedKiB != 40 {
+		t.Fatalf("deltas = %+v, want only the Internal growth", got)
+	}
+}
+
 func TestParseNMTSummaryDiff(t *testing.T) {
 	d, err := ParseNMTSummaryDiff(readNMTFixture(t, "nmt_summary_diff_jdk17.txt"))
 	if err != nil {

@@ -114,7 +114,7 @@ func DiffNMTCallSites(before, after []NMTCallSite) []NMTCallSiteDelta {
 	byKey := map[string]*entry{}
 	var order []string
 	get := func(s NMTCallSite) *entry {
-		k := s.Kind + "\x00" + strings.Join(s.Frames, "\n")
+		k := s.Kind + "\x00" + s.Category + "\x00" + strings.Join(s.Frames, "\n")
 		if e, ok := byKey[k]; ok {
 			return e
 		}
