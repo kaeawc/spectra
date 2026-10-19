@@ -1591,8 +1591,8 @@ func attachJVMHistory(snap *snapshot.Snapshot) {
 		return
 	}
 	defer db.Close()
-	db.AttachJVMHistory(context.Background(), snap)
-	db.AttachFDHistory(context.Background(), snap)
+	_ = db.AttachJVMHistory(context.Background(), snap)
+	_ = db.AttachFDHistory(context.Background(), snap)
 }
 
 // snapHasOpenFDs reports whether any process in the snapshot has a positive
