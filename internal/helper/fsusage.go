@@ -116,7 +116,8 @@ func (m *fsUsageManager) stop(p fsUsageStopParams) (map[string]any, error) {
 	sess.cancel()
 	timedOut := false
 	select {
-	case <-sess.done:
+	case _ = <-sess.done:
+		// The Wait error is expected: the process was just cancelled.
 	case <-time.After(fsUsageStopTimeout):
 		timedOut = true
 	}

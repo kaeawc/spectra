@@ -157,8 +157,11 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-timer.C:
 			if inFlight != nil {
 				select {
-				case <-inFlight:
+				case err := <-inFlight:
 					inFlight = nil
+					if err != nil {
+						s.opts.Logger.Warn("watch tick failed", "error", err)
+					}
 				default:
 				}
 			}
@@ -200,7 +203,10 @@ func (s *Service) waitForTick(done <-chan error) {
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			s.opts.Logger.Warn("watch tick failed", "error", err)
+		}
 	case <-timer.C:
 		s.opts.Logger.Warn("watch tick still running after shutdown wait")
 	}
