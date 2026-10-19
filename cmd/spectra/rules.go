@@ -86,9 +86,6 @@ func runRules(args []string) int {
 	return 0
 }
 
-// printSnapshotWarnings surfaces degraded-collection warnings so a partial
-// snapshot ("no findings — all rules passed") is not mistaken for a clean
-// machine. Warnings go to stderr to keep stdout parseable.
 // threadDumpPIDsFlag validates --thread-dump-pid. Thread dumps describe the
 // live process, so they cannot be combined with a stored --snapshot.
 func threadDumpPIDsFlag(raw, snapID string) ([]int, error) {
@@ -146,6 +143,9 @@ func parsePIDList(raw string) ([]int, error) {
 	return pids, nil
 }
 
+// printSnapshotWarnings surfaces degraded-collection warnings so a partial
+// snapshot ("no findings — all rules passed") is not mistaken for a clean
+// machine. Warnings go to stderr to keep stdout parseable.
 func printSnapshotWarnings(w io.Writer, warnings []string) {
 	for _, warning := range warnings {
 		fmt.Fprintf(w, "warning: %s\n", warning)
