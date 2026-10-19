@@ -64,6 +64,8 @@ pause summary — pause count, total/max/avg pause, Full vs young/mixed counts,
 `System.gc()` calls, evacuation failures, and the longest pause — the per-pause
 view the jstat-counter GC-pressure rule cannot provide. ZGC/Shenandoah
 concurrent-cycle formats and the legacy pre-JDK9 log format are out of scope.
+Legacy JDK 8 GC flags (`-Xloggc`, `-XX:+PrintGCDetails`) still count as
+"logging enabled", but the JDK 8 log format itself is not parsed.
 
 `heap-hprof` reads binary `.hprof` dumps (`jcmd GC.heap_dump` / `jmap -dump`)
 into the same class histogram the live `heap-histogram` produces, so a dump can
