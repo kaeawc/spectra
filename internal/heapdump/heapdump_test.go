@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -163,5 +164,50 @@ func TestFindBoundsDirectoryRead(t *testing.T) {
 	}
 	if f.readN != MaxDirEntries {
 		t.Fatalf("ReadDir n = %d, want %d", f.readN, MaxDirEntries)
+	}
+}
+
+// sortedFS returns directory entries in name order, truncated to n, so a test
+// can deterministically push a file beyond the bounded read.
+type sortedFS struct{ OSFS }
+
+func (sortedFS) ReadDir(path string, n int) ([]fs.DirEntry, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	if n > 0 && len(entries) > n {
+		entries = entries[:n]
+	}
+	return entries, nil
+}
+
+func TestFindOwnDumpSurvivesLargeDirectory(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	for i := 0; i < MaxDirEntries+100; i++ {
+		writeFile(t, filepath.Join(dir, fmt.Sprintf("a%04d.hprof", i)), 1, now.Add(-time.Hour))
+	}
+	writeFile(t, filepath.Join(dir, "java_pid5.hprof"), 1, now)
+
+	dumps := Find(sortedFS{}, Request{PID: 5, HeapDumpPath: dir})
+	if len(dumps) == 0 || dumps[0].DumpPID != 5 {
+		t.Fatalf("own java_pid5.hprof must not be hidden by directory size, got %+v", dumps)
+	}
+	seen := 0
+	for _, d := range dumps {
+		if d.DumpPID == 5 {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("own dump listed %d times: %+v", seen, dumps)
+	}
+}
+
+func TestOSFSReadDirWrapsError(t *testing.T) {
+	_, err := OSFS{}.ReadDir(filepath.Join(t.TempDir(), "missing"), 10)
+	if !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("err = %v", err)
 	}
 }

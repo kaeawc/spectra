@@ -10,6 +10,7 @@ package heapdump
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -45,12 +46,15 @@ func (OSFS) Stat(path string) (fs.FileInfo, error) { return os.Stat(path) }
 func (OSFS) ReadDir(path string, n int) ([]fs.DirEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open dir %s: %w", path, err)
 	}
 	defer f.Close()
 	entries, err := f.ReadDir(n)
 	if errors.Is(err, io.EOF) {
 		err = nil
+	}
+	if err != nil {
+		err = fmt.Errorf("read dir %s: %w", path, err)
 	}
 	return entries, err
 }
@@ -121,7 +125,7 @@ func Find(fsys FS, req Request) []Dump {
 		if req.WorkingDir == "" {
 			return nil
 		}
-		return newest(scanDir(fsys, req.WorkingDir, SourceWorkingDir, false))
+		return newest(scanDir(fsys, req.WorkingDir, SourceWorkingDir, req.PID, false))
 	}
 	path := resolvePath(req)
 	if path == "" {
@@ -132,7 +136,7 @@ func Find(fsys FS, req Request) []Dump {
 		return nil
 	}
 	if fi.IsDir() {
-		return newest(scanDir(fsys, path, SourceHeapDumpPath, true))
+		return newest(scanDir(fsys, path, SourceHeapDumpPath, req.PID, true))
 	}
 	if !fi.Mode().IsRegular() {
 		return nil
@@ -153,15 +157,27 @@ func resolvePath(req Request) string {
 	return filepath.Join(req.WorkingDir, path)
 }
 
-func scanDir(fsys FS, dir string, src Source, anyName bool) []Dump {
+// scanDir lists .hprof files in dir. The JVM's own java_pid<pid>.hprof is
+// stat'ed by name first so a directory larger than MaxDirEntries cannot hide
+// the dump that most directly proves an OOM.
+func scanDir(fsys FS, dir string, src Source, pid int, anyName bool) []Dump {
+	var dumps []Dump
+	expected := ""
+	if pid > 0 {
+		expected = "java_pid" + strconv.Itoa(pid) + hprofExt
+		if fi, err := fsys.Stat(filepath.Join(dir, expected)); err == nil && fi.Mode().IsRegular() {
+			dumps = append(dumps, newDump(filepath.Join(dir, expected), fi, src))
+		} else {
+			expected = ""
+		}
+	}
 	entries, err := fsys.ReadDir(dir, MaxDirEntries)
 	if err != nil && len(entries) == 0 {
-		return nil
+		return dumps
 	}
-	var dumps []Dump
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, hprofExt) {
+		if name == expected || e.IsDir() || !strings.HasSuffix(name, hprofExt) {
 			continue
 		}
 		if _, ok := PIDFromName(name); !ok && !anyName {
