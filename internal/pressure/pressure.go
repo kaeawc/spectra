@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -293,14 +292,15 @@ func readCPU(dir string) *CPU {
 }
 
 func readPids(dir string) *Pids {
-	cur, ok := readUint(filepath.Join(dir, "pids.current"))
-	if !ok {
+	data, err := os.ReadFile(filepath.Join(dir, "pids.current"))
+	if err != nil {
 		return nil
 	}
-	if cur > math.MaxInt64 {
-		cur = math.MaxInt64
+	cur, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return nil
 	}
-	return &Pids{Current: int64(cur), Max: readLimit(filepath.Join(dir, "pids.max"))}
+	return &Pids{Current: cur, Max: readLimit(filepath.Join(dir, "pids.max"))}
 }
 
 // readLimit parses a limit file whose value is a number or "max".
