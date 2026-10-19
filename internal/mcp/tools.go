@@ -561,11 +561,21 @@ func filterFindingsForTarget(findings []rules.Finding, t triageTargetInfo) []rul
 			out = append(out, f)
 			continue
 		}
-		if pidToken != "" && strings.HasPrefix(f.Subject, pidToken) {
+		if pidToken != "" && subjectHasPIDToken(f.Subject, pidToken) {
 			out = append(out, f)
 		}
 	}
 	return out
+}
+
+// subjectHasPIDToken reports whether subject starts with token ("PID 12") on a
+// PID boundary, so "PID 12 (java)" matches but "PID 123" does not.
+func subjectHasPIDToken(subject, token string) bool {
+	rest, ok := strings.CutPrefix(subject, token)
+	if !ok {
+		return false
+	}
+	return rest == "" || rest[0] < '0' || rest[0] > '9'
 }
 
 func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
