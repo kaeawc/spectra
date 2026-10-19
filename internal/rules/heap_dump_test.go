@@ -69,3 +69,14 @@ func TestJVMHeapDumpFoundNoDumps(t *testing.T) {
 		t.Fatalf("expected no findings, got %v", f)
 	}
 }
+
+func TestJVMHeapDumpFoundCustomNameDoesNotClaimOOM(t *testing.T) {
+	for _, src := range []heapdump.Source{heapdump.SourceHeapDumpPath, heapdump.SourceWorkingDir} {
+		s := heapDumpSnap(snapshot.HeapDump{PID: 10, Dump: heapdump.Dump{Path: "/dumps/manual.hprof", Source: src}})
+		findings := ruleJVMHeapDumpFound().MatchFn(s)
+		if len(findings) != 1 || !strings.Contains(findings[0].Message, "found in") ||
+			strings.Contains(findings[0].Message, "suggesting an earlier OutOfMemoryError") {
+			t.Fatalf("source %s: findings = %v", src, findings)
+		}
+	}
+}

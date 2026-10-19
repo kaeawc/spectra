@@ -482,10 +482,12 @@ func heapDumpMessage(d snapshot.HeapDump, live map[int]bool) string {
 		return what + " was written by this JVM: it already hit an OutOfMemoryError and is still running."
 	case d.DumpPID != 0 && !live[d.DumpPID]:
 		return fmt.Sprintf("%s was left by an earlier JVM (PID %d, no longer running), likely an OutOfMemoryError before a restart.", what, d.DumpPID)
+	case d.DumpPID != 0:
+		return fmt.Sprintf("%s was written by another running JVM (PID %d), likely after an OutOfMemoryError there.", what, d.DumpPID)
 	case d.Source == heapdump.SourceHeapDumpPath:
-		return what + " is in this JVM's -XX:HeapDumpPath, suggesting an earlier OutOfMemoryError."
+		return what + " found in this JVM's -XX:HeapDumpPath; the name does not match java_pid<PID>.hprof, so it may be a manual dump rather than an OutOfMemoryError."
 	default:
-		return what + " is in this JVM's working directory, suggesting an earlier OutOfMemoryError."
+		return what + " found in this JVM's working directory."
 	}
 }
 
