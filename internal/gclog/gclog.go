@@ -37,6 +37,7 @@ type Summary struct {
 	FullGCCount        int            `json:"full_gc_count"`
 	YoungGCCount       int            `json:"young_gc_count"`
 	SystemGCCount      int            `json:"system_gc_count"`
+	SystemFullGCCount  int            `json:"system_full_gc_count"`
 	EvacuationFailures int            `json:"evacuation_failures"`
 	Causes             map[string]int `json:"causes"`
 	LongestPause       *Pause         `json:"longest_pause,omitempty"`
@@ -102,6 +103,7 @@ func Merge(a, b Summary) Summary {
 		FullGCCount:        a.FullGCCount + b.FullGCCount,
 		YoungGCCount:       a.YoungGCCount + b.YoungGCCount,
 		SystemGCCount:      a.SystemGCCount + b.SystemGCCount,
+		SystemFullGCCount:  a.SystemFullGCCount + b.SystemFullGCCount,
 		EvacuationFailures: a.EvacuationFailures + b.EvacuationFailures,
 		Causes:             make(map[string]int, len(a.Causes)+len(b.Causes)),
 	}
@@ -165,6 +167,9 @@ func accumulate(s *Summary, p Pause, raw string) {
 	}
 	if strings.Contains(p.Cause, "System.gc") {
 		s.SystemGCCount++
+		if p.Kind == "Full" {
+			s.SystemFullGCCount++
+		}
 	}
 	if strings.Contains(raw, "Evacuation Failure") || strings.Contains(raw, "to-space exhausted") {
 		s.EvacuationFailures++

@@ -29,7 +29,7 @@ func TestJVMGCLogPressureFires(t *testing.T) {
 		"evac failure":   {gclog.Summary{Pauses: 3, EvacuationFailures: 2, MaxPauseMs: 50}, "evacuation failure"},
 		"max pause":      {gclog.Summary{Pauses: 3, MaxPauseMs: 750}, "max pause"},
 		"total pause":    {gclog.Summary{Pauses: 400, MaxPauseMs: 40, TotalPauseMs: 12_000}, "total pause"},
-		"system.gc full": {gclog.Summary{Pauses: 1, FullGCCount: 1, SystemGCCount: 1}, "Full GC"},
+		"system.gc full": {gclog.Summary{Pauses: 1, FullGCCount: 1, SystemGCCount: 1, SystemFullGCCount: 1}, "Full GC"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -49,9 +49,32 @@ func TestJVMGCLogPressureFires(t *testing.T) {
 }
 
 func TestJVMGCLogPressureSystemGCFix(t *testing.T) {
-	f := ruleJVMGCLogPressure().MatchFn(gcLogSnap(gclog.Summary{Pauses: 1, FullGCCount: 1, SystemGCCount: 1}))
+	f := ruleJVMGCLogPressure().MatchFn(gcLogSnap(gclog.Summary{Pauses: 1, FullGCCount: 1, SystemGCCount: 1, SystemFullGCCount: 1}))
 	if len(f) != 1 || !strings.Contains(f[0].Fix, "DisableExplicitGC") {
 		t.Fatalf("expected System.gc() remediation, got %+v", f)
+	}
+}
+
+func TestJVMGCLogPressureYoungSystemGCNotExplicitOnly(t *testing.T) {
+	// One Full (Allocation Failure) plus one Young (System.gc()): the Full is
+	// not explicit, so DisableExplicitGC must not be suggested.
+	sum := gclog.Parse(strings.NewReader(
+		"[1.0s][info][gc] GC(0) Pause Full (Allocation Failure) 900M->800M(1024M) 700.000ms\n" +
+			"[2.0s][info][gc] GC(1) Pause Young (System.gc()) 100M->50M(1024M) 5.000ms\n"))
+	if sum.SystemGCCount != 1 || sum.SystemFullGCCount != 0 {
+		t.Fatalf("summary = %+v", sum)
+	}
+	f := ruleJVMGCLogPressure().MatchFn(gcLogSnap(sum))
+	if len(f) != 1 || strings.Contains(f[0].Fix, "DisableExplicitGC") {
+		t.Fatalf("unexpected fix: %+v", f)
+	}
+}
+
+func TestJVMGCLogPressureSystemGCAndEvacuationBothMentioned(t *testing.T) {
+	f := ruleJVMGCLogPressure().MatchFn(gcLogSnap(gclog.Summary{
+		Pauses: 2, FullGCCount: 1, SystemGCCount: 1, SystemFullGCCount: 1, EvacuationFailures: 1}))
+	if len(f) != 1 || !strings.Contains(f[0].Fix, "DisableExplicitGC") || !strings.Contains(f[0].Fix, "vacuation failures") {
+		t.Fatalf("fix should mention both: %+v", f)
 	}
 }
 

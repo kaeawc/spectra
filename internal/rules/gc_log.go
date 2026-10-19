@@ -67,11 +67,16 @@ func gcLogPressureReasons(r snapshot.GCLogReport) []string {
 
 func gcLogPressureFix(r snapshot.GCLogReport) string {
 	s := r.Summary
-	if s.FullGCCount > 0 && s.FullGCCount == s.SystemGCCount {
-		return "All Full GCs were triggered by System.gc(); remove the explicit calls or add -XX:+DisableExplicitGC (or -XX:+ExplicitGCInvokesConcurrent for G1)."
-	}
-	if s.EvacuationFailures > 0 {
-		return "Evacuation failures mean the heap ran out of space to copy live objects: raise -Xmx or G1ReservePercent, and reduce the live set (heap histogram / JFR allocation profiling)."
+	explicitOnly := s.FullGCCount > 0 && s.FullGCCount == s.SystemFullGCCount
+	const evac = "Evacuation failures mean the heap ran out of space to copy live objects: raise -Xmx or G1ReservePercent, and reduce the live set (heap histogram / JFR allocation profiling)."
+	const explicit = "All Full GCs were triggered by System.gc(); remove the explicit calls or add -XX:+DisableExplicitGC (or -XX:+ExplicitGCInvokesConcurrent for G1)."
+	switch {
+	case explicitOnly && s.EvacuationFailures > 0:
+		return explicit + " Separately, " + strings.ToLower(evac[:1]) + evac[1:]
+	case explicitOnly:
+		return explicit
+	case s.EvacuationFailures > 0:
+		return evac
 	}
 	return "Inspect the GC log's longest pauses and causes (`spectra jvm gc-log <file>`); reduce the live set or allocation rate, or size the heap / pause-time goal (-XX:MaxGCPauseMillis) for the workload."
 }
