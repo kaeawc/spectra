@@ -1159,6 +1159,8 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"backup.destinationless_scheduler_leak",
 		"updates.stale_major_prepared",
 		"process-memory-hog",
+		"jvm-gc-log-pressure",
+		"jvm-gc-logging-disabled",
 		"network.proxy_configured",
 		"network.hosts_override",
 	} {
