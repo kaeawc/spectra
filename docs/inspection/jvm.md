@@ -64,6 +64,8 @@ pause summary — pause count, total/max/avg pause, Full vs young/mixed counts,
 `System.gc()` calls, evacuation failures, and the longest pause — the per-pause
 view the jstat-counter GC-pressure rule cannot provide. ZGC/Shenandoah
 concurrent-cycle formats and the legacy pre-JDK9 log format are out of scope.
+Legacy JDK 8 GC flags (`-Xloggc`, `-XX:+PrintGCDetails`) still count as
+"logging enabled", but the JDK 8 log format itself is not parsed.
 
 `heap-hprof` reads binary `.hprof` dumps (`jcmd GC.heap_dump` / `jmap -dump`)
 into the same class histogram the live `heap-histogram` produces, so a dump can
@@ -358,7 +360,18 @@ Implemented:
     heap space, GC overhead, metaspace, compressed class space, direct buffer,
     native thread, array size, native memory) and surfacing them via the
     `jvm-oom-detected` recommendation.
-15. Heap-dump discovery: `.hprof` files left by
+15. GC-log discovery: in deep mode, each running JVM's discovered log files
+    (at most 20, 1 MiB tail each) are parsed with the `gc-log` parser; files
+    containing unified `GC(N) Pause` lines are merged into a per-PID
+    `gc_log_reports` entry on the snapshot. The `jvm-gc-log-pressure`
+    recommendation (medium) fires on Full GCs, evacuation failures, a max
+    pause of 500 ms or more, or 10 s or more of cumulative pause. The inverse
+    `jvm-gc-logging-disabled` recommendation (low) fires when jstat shows
+    old-gen pressure or a full-GC burst but no GC logging is configured
+    (`-Xlog:gc*`, `-verbose:gc`, `-XX:+PrintGC*`, or `-Xloggc:`) and no GC log
+    was discovered, suggesting `-Xlog:gc*:file=...` so the next incident leaves
+    per-pause evidence.
+16. Heap-dump discovery: `.hprof` files left by
     `-XX:+HeapDumpOnOutOfMemoryError` are located in each running JVM's
     `-XX:HeapDumpPath` (a file or directory; relative paths and `%p` are
     resolved) or, when that flag is absent, as `java_pid<PID>.hprof` in its

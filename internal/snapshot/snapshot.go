@@ -63,6 +63,10 @@ type Snapshot struct {
 	// process LogFiles are available); empty otherwise.
 	OOMReports []OOMReport `json:"oom_reports,omitempty"`
 
+	// GCLogReports holds per-PID GC-pause summaries parsed from GC logs found
+	// among running JVMs' discovered log files. Deep mode only, like OOMReports.
+	GCLogReports []GCLogReport `json:"gc_log_reports,omitempty"`
+
 	// HeapDumps lists .hprof files attributed to running JVMs, found in
 	// -XX:HeapDumpPath or the working directory (bounded directory reads).
 	HeapDumps []HeapDump `json:"heap_dumps,omitempty"`
@@ -330,9 +334,9 @@ func Build(ctx context.Context, opts Options) Snapshot {
 }
 
 // finalizeJVMData runs the post-Wait JVM steps that need collectors already
-// joined: runtime telemetry, OOM log scanning (which needs both JVMs and
+// joined: runtime telemetry, OOM / GC-log scanning (which need both JVMs and
 // process LogFiles), and heap-dump discovery (which prefers deep-mode cwd).
-// OOM and heap-dump discovery are filesystem scans and are skipped with
+// OOM, GC-log and heap-dump discovery are filesystem scans and are skipped with
 // SkipProcesses, like the other process-derived collectors.
 // Kept out of Build to hold Build's cyclomatic complexity under the gate.
 func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
@@ -344,6 +348,7 @@ func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
 		return
 	}
 	s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
+	s.GCLogReports = collectGCLogReports(s.JVMs, s.Processes)
 	fsys := opts.HeapDumpFS
 	if fsys == nil {
 		fsys = heapdump.OSFS{}

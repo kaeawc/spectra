@@ -208,8 +208,10 @@ Implemented rules:
 - `jvm-eol-version`
 - `jvm-heap-vs-system`
 - `jvm-gc-pressure`
+- `jvm-gc-log-pressure`
 - `jvm-metaspace-pressure`
 - `jvm-oom-dump-disabled`
+- `jvm-gc-logging-disabled`
 - `jvm-rss-exceeds-heap`
 - `jvm-gc-algorithm`
 - `jvm-oom-detected`
