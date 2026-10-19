@@ -72,6 +72,8 @@ func subcommandList() []subcommand {
 		{"malloc-history", "Attribute allocations to call stacks (requires MallocStackLogging)", runMallocHistory},
 		{"flamegraph", "Render a native CPU flamegraph (SVG) from a process sample", runFlamegraph},
 		{"hang", "Classify why a process's main thread is hung (lock/I-O/spin/idle)", runHang},
+		{"procdiag", "Linux: diagnose a stuck or slow process from /proc (D-state, lock wait, fd leak, CPU spin, cgroup limits)", runProcdiag},
+		{"pressure", "Linux: show pressure-stall (PSI) and cgroup v2 memory/CPU/pids accounting", runPressure},
 		{"timeline", "Chronological incident timeline: process starts, unified-log errors, and installs", runTimeline},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
 		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
