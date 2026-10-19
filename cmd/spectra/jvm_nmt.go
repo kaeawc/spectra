@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -175,6 +177,10 @@ func runNMTCompare(args []string, env nmtEnv) int {
 			fmt.Fprintf(env.stderr, "reading %q: %v\n", fs.Arg(i), err)
 			return 1
 		}
+		if err := checkNMTCaptureTotals(string(data)); err != nil {
+			fmt.Fprintf(env.stderr, "%q: %v\n", fs.Arg(i), err)
+			return 1
+		}
 		details[i] = jvm.ParseNMTDetail(string(data))
 		if !details[i].Summary.Enabled || len(details[i].Summary.Categories) == 0 {
 			fmt.Fprintf(env.stderr, "%q is not a native memory tracking summary or detail capture\n", fs.Arg(i))
@@ -193,6 +199,27 @@ func runNMTCompare(args []string, env nmtEnv) int {
 	printNMTDiff(env.stdout, report.Summary, top)
 	printNMTSiteDeltas(env.stdout, report.Sites, top)
 	return 0
+}
+
+var (
+	nmtCaptureTotalRe = regexp.MustCompile(`Total: reserved=\d+KB, committed=\d+KB`)
+	nmtDeltaSuffixRe  = regexp.MustCompile(`=\d+KB [+-]\d+KB`)
+)
+
+// checkNMTCaptureTotals rejects `summary.diff` output and other captures whose
+// Total line is missing; the summary parser would otherwise report zeros.
+// Text that is not NMT output at all falls through to the generic error.
+func checkNMTCaptureTotals(text string) error {
+	if nmtCaptureTotalRe.MatchString(text) {
+		return nil
+	}
+	if nmtDeltaSuffixRe.MatchString(text) {
+		return errors.New("looks like `summary.diff` output; save a plain `VM.native_memory summary` or `detail` capture instead (compare computes the diff itself)")
+	}
+	if strings.Contains(text, "Native Memory Tracking") {
+		return errors.New("no `Total: reserved=..., committed=...` line found; save a complete `VM.native_memory summary` or `detail` capture")
+	}
+	return nil
 }
 
 func writeNMTJSON(w io.Writer, v any) int {

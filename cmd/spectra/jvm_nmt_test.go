@@ -222,6 +222,36 @@ func TestJVMNMTCompareRejectsNonNMT(t *testing.T) {
 	}
 }
 
+func TestJVMNMTCompareRejectsSummaryDiff(t *testing.T) {
+	diff := writeTemp(t, "diff.txt", `123:
+
+Native Memory Tracking:
+
+Total: reserved=1900KB +900KB, committed=1400KB +900KB
+
+-                     Other (reserved=900KB +800KB, committed=900KB +800KB)
+`)
+	ok := writeTemp(t, "ok.txt", nmtSummaryBefore)
+	env, _, stderr := nmtTestEnv(nil)
+	if code := runJVMNMTWith([]string{"compare", ok, diff}, env); code != 1 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stderr.String(), "summary.diff") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestJVMNMTCompareRejectsMissingTotal(t *testing.T) {
+	noTotal := writeTemp(t, "nototal.txt", "123:\n\nNative Memory Tracking:\n\n-  Other (reserved=1KB, committed=1KB)\n")
+	env, _, stderr := nmtTestEnv(nil)
+	if code := runJVMNMTWith([]string{"compare", noTotal, noTotal}, env); code != 1 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stderr.String(), "Total") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestJVMNMTUsageAndErrors(t *testing.T) {
 	env, _, stderr := nmtTestEnv(nil)
 	if code := runJVMNMTWith(nil, env); code != 2 || !strings.Contains(stderr.String(), "usage:") {
