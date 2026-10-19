@@ -10,7 +10,10 @@ import (
 // It is a deliberately compact subset of jvm.Info — enough to compute
 // trend slopes without re-deserializing whole snapshots.
 type JVMSample struct {
-	PID       int       `json:"pid"`
+	PID int `json:"pid"`
+	// ProcStart distinguishes process lifetimes that share a reused PID;
+	// zero means the start time was unknown when the sample was taken.
+	ProcStart time.Time `json:"proc_start,omitzero"`
 	At        time.Time `json:"at"`
 	OldGenPct float64   `json:"old_gen_pct"`
 	FGC       int64     `json:"fgc"`     // cumulative full-GC count
