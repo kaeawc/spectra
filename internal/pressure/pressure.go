@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -296,7 +297,10 @@ func readPids(dir string) *Pids {
 	if !ok {
 		return nil
 	}
-	return &Pids{Current: int64(cur), Max: readLimit(filepath.Join(dir, "pids.max"))} // #nosec G115 -- a pid count cannot approach MaxInt64
+	if cur > math.MaxInt64 {
+		cur = math.MaxInt64
+	}
+	return &Pids{Current: int64(cur), Max: readLimit(filepath.Join(dir, "pids.max"))}
 }
 
 // readLimit parses a limit file whose value is a number or "max".
