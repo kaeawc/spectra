@@ -28,6 +28,10 @@ local ranking and adds active daemon alerts and a five-minute trend when availab
 Both commands accept `--no-daemon`, and `SPECTRA_NO_DAEMON=1` disables daemon
 access globally.
 
+On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc`
+and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
+see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
