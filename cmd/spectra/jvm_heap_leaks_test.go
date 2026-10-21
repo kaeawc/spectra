@@ -203,5 +203,23 @@ func TestFileLeakIssues(t *testing.T) {
 	boom := errors.New("boom")
 	if _, err := fileLeakIssues(context.Background(), &fakeIssueUpserter{err: boom}, "h", findings); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want wrapped boom", err)
+	} else if strings.Contains(err.Error(), "spectra issues check") {
+		t.Errorf("non-FK error carries the host-registration hint: %v", err)
+	}
+	fk := errors.New("store: insert issue: constraint failed: FOREIGN KEY constraint failed (787)")
+	if _, err := fileLeakIssues(context.Background(), &fakeIssueUpserter{err: fk}, "local", findings); !errors.Is(err, errHostNotRegistered) {
+		t.Errorf("FK failure err = %v, want errHostNotRegistered", err)
+	}
+}
+
+func TestFileLeakIssuesFreshHostRealStore(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "spectra.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	findings := []rules.Finding{{RuleID: leakSuspectRuleID, Severity: rules.SeverityHigh, Subject: "heap leak suspect: X", Message: "m", Fix: "f"}}
+	if _, err := fileLeakIssues(context.Background(), db, "local", findings); !errors.Is(err, errHostNotRegistered) {
+		t.Fatalf("err = %v, want errHostNotRegistered on a fresh host", err)
 	}
 }

@@ -33,7 +33,7 @@ type heapGraphFlags struct {
 
 func registerHeapGraphFlags(fs *flag.FlagSet) heapGraphFlags {
 	return heapGraphFlags{
-		fs:    fs,
+		fs:         fs,
 		leaks:      fs.Bool("leak-suspects", false, "Report leak suspects: dominator subtrees by retained size, accumulation points, and paths to GC roots"),
 		threshold:  fs.Float64("threshold", heap.DefaultLeakThresholdPercent, "Leak-suspect threshold as a percentage of the reachable heap"),
 		fileIssues: fs.Bool("file-issues", false, "With --leak-suspects, file each suspect as a Spectra issue"),
@@ -229,9 +229,16 @@ type issueUpserter interface {
 	UpsertIssues(ctx context.Context, machineUUID, snapshotID string, findings []store.FindingInput) ([]string, error)
 }
 
+// errHostNotRegistered reports that issues cannot be filed because the host row
+// they reference does not exist yet.
+var errHostNotRegistered = errors.New("this host is not registered in the Spectra database; run `spectra issues check` once (or take a snapshot) and retry")
+
 func fileLeakIssues(ctx context.Context, st issueUpserter, machineUUID string, findings []rules.Finding) ([]string, error) {
 	ids, err := st.UpsertIssues(ctx, machineUUID, "", issueflow.FindingInputs(findings))
 	if err != nil {
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			return nil, fmt.Errorf("file leak-suspect issues: %w", errHostNotRegistered)
+		}
 		return nil, fmt.Errorf("file leak-suspect issues: %w", err)
 	}
 	return ids, nil
@@ -243,11 +250,7 @@ func fileLeakIssuesInDefaultDB(findings []rules.Finding) ([]string, error) {
 		return nil, fmt.Errorf("open issues db: %w", err)
 	}
 	defer db.Close()
-	ids, err := fileLeakIssues(context.Background(), db, machineUUID, findings)
-	if err != nil {
-		return nil, fmt.Errorf("%w (run `spectra issues check` once so this host is registered)", err)
-	}
-	return ids, nil
+	return fileLeakIssues(context.Background(), db, machineUUID, findings)
 }
 
 // heapPathsReport is the JSON shape emitted by `heap-hprof --paths --json`.
