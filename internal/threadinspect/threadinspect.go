@@ -89,8 +89,17 @@ type Thread struct {
 
 // DeadlockCycle describes one detected lock cycle.
 type DeadlockCycle struct {
-	Threads []string `json:"threads"`
-	Locks   []string `json:"locks,omitempty"`
+	Threads []string       `json:"threads"`
+	Locks   []string       `json:"locks,omitempty"`
+	Waits   []DeadlockWait `json:"waits,omitempty"`
+}
+
+// DeadlockWait is one edge of a lock cycle: Thread is blocked on Lock, which
+// HeldBy owns.
+type DeadlockWait struct {
+	Thread string `json:"thread"`
+	Lock   string `json:"lock,omitempty"`
+	HeldBy string `json:"held_by,omitempty"`
 }
 
 // Summary aggregates one parsed thread snapshot.

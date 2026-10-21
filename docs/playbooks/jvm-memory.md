@@ -46,6 +46,16 @@ claim depends on growth:
 spectra jvm explain --samples 5 --interval 10s <pid>
 ```
 
+When RSS grows but the heap does not, attribute the native growth with NMT
+(requires `-XX:NativeMemoryTracking=summary`, or `=detail` for call sites):
+
+```bash
+spectra jvm nmt baseline <pid>
+# ...reproduce the growth...
+spectra jvm nmt diff <pid>
+spectra jvm nmt detail <pid>
+```
+
 ## Capture deeper evidence
 
 Use a heap dump only when the target can tolerate the pause and the file

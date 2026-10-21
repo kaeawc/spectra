@@ -50,6 +50,11 @@ spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
 spectra jvm gc-log [--json] <file>
 spectra jvm vm-memory [--json] <pid>
+spectra jvm nmt [--json] [--top N] <pid>
+spectra jvm nmt detail [--json] [--top N] <pid>
+spectra jvm nmt baseline <pid>
+spectra jvm nmt diff [--json] [--top N] <pid>
+spectra jvm nmt compare [--json] [--top N] <before-file> <after-file>
 spectra jvm jmx status [--json] <pid>
 spectra jvm jmx start-local [--json] <pid>
 spectra jvm attach [--agent <spectra-agent.jar>] [--json] <pid>
@@ -146,6 +151,26 @@ MCP clients get the same report from the `jvm` tool's `heap_leak_suspects`
 operation (`dest` = the `.hprof` path, `confirm_sensitive=true`). After
 `heap_dump`, the tool suggests `heap_leak_suspects` as the next action.
 
+`nmt` is the native-memory counterpart to `heap-histogram`. It needs the target
+JVM started with `-XX:NativeMemoryTracking=summary` (or `=detail` for call
+sites) and reports a clear error otherwise.
+
+- `nmt <pid>` parses `VM.native_memory summary` into per-category reserved and
+  committed sizes, largest committed first.
+- `nmt detail <pid>` parses `VM.native_memory detail`: the summary plus every
+  malloc/mmap call site (symbolized native stack, category, reserved/committed
+  size), sorted by committed size, and the virtual memory map (reserved regions
+  with their committed sub-ranges and reserving stacks). `--json` emits all
+  sites and regions; the text view prints the top `--top N` sites.
+- `nmt baseline <pid>` then `nmt diff <pid>` use HotSpot's own
+  `VM.native_memory baseline` / `summary.diff` to show per-category growth since
+  the baseline.
+- `nmt compare <before> <after>` diffs two saved `summary` or `detail`
+  captures, sorting categories by committed growth. When both files are detail
+  captures it also diffs call sites — matched by kind, category and symbolized stack (unsymbolized frames collapse to `<unknown>`), ignoring
+  addresses, so captures from different runs line up — to attribute native
+  growth to the allocating call site.
+
 Daemon methods:
 
 - `jvm.list`
@@ -194,7 +219,7 @@ JDK commands:
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
 | Heap layout | `jcmd <pid> GC.heap_info` |
 | Metaspace / compressed class space | `jcmd <pid> VM.metaspace` |
-| Native memory tracking | `jcmd <pid> VM.native_memory summary` |
+| Native memory tracking | `jcmd <pid> VM.native_memory summary`, `detail`, `baseline`, `summary.diff` |
 | Classloader metadata | `jcmd <pid> VM.classloader_stats` |
 | JIT code cache | `jcmd <pid> Compiler.codecache`, `Compiler.CodeHeap_Analytics` |
 | Local JMX connector | `jcmd <pid> ManagementAgent.status`, `ManagementAgent.start_local` |
@@ -444,3 +469,19 @@ Implemented:
     (`-Xlog:gc*`, `-verbose:gc`, `-XX:+PrintGC*`, or `-Xloggc:`) and no GC log
     was discovered, suggesting `-Xlog:gc*:file=...` so the next incident leaves
     per-pause evidence.
+16. Heap-dump discovery: `.hprof` files left by
+    `-XX:+HeapDumpOnOutOfMemoryError` are located in each running JVM's
+    `-XX:HeapDumpPath` (a file or directory; relative paths and `%p` are
+    resolved) or, when that flag is absent, as `java_pid<PID>.hprof` in its
+    working directory (deep-mode `lsof` cwd, else `user.dir`). Directory reads
+    are bounded (1000 entries, newest 10 dumps per JVM). Results land in the
+    snapshot's `heap_dumps` and surface via the `jvm-heap-dump-found`
+    recommendation, which links the dump to the PID with its size and mtime
+    and points at `spectra jvm heap-hprof <file>`.
+17. Deadlock detection: `spectra jvm thread-dump --summary <pid>` reports
+    Java-level lock cycles, and the high-severity `jvm-deadlock`
+    recommendation names each cycle's threads, the lock each waits for, and
+    its holder. Thread dumps pause the JVM at a safepoint, so they are taken
+    only for explicitly targeted PIDs (`spectra rules --thread-dump-pid`,
+    MCP `diagnose thread_dump_pids`, or MCP `triage` on a JVM PID), never for
+    every JVM on every snapshot.
