@@ -1047,6 +1047,23 @@ func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
 	})
 }
 
+// validateHPROFPath requires path to be an existing regular file with an
+// .hprof extension, so the tool cannot be pointed at arbitrary files,
+// directories, or devices.
+func validateHPROFPath(path string) error {
+	if !strings.EqualFold(filepath.Ext(path), ".hprof") {
+		return errors.New("heap dump path must have a .hprof extension")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return errors.New("heap dump path does not exist or is not readable")
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("heap dump path must be a regular file")
+	}
+	return nil
+}
+
 // toolJVMHeapLeakSuspects analyzes a saved .hprof (typically the dest of a
 // prior heap_dump) and reports retained-size leak suspects with their
 // accumulation points and shortest paths from GC roots.
@@ -1056,6 +1073,9 @@ func (s *Server) toolJVMHeapLeakSuspects(p jvmParams) ToolResult {
 	}
 	if p.Dest == "" {
 		return toolError("jvm heap_leak_suspects requires dest (path to an .hprof heap dump)")
+	}
+	if err := validateHPROFPath(p.Dest); err != nil {
+		return toolError(err.Error())
 	}
 	graph, err := heap.ParseObjectGraphFile(p.Dest)
 	if err != nil {

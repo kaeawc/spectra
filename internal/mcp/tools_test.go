@@ -377,7 +377,9 @@ func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
 	}{
 		{jvmParams{Dest: "x.hprof"}, "confirm_sensitive"},
 		{jvmParams{ConfirmSensitive: true}, "requires dest"},
-		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "missing.hprof")}, "parse heap dump"},
+		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "missing.hprof")}, "does not exist"},
+		{jvmParams{ConfirmSensitive: true, Dest: t.TempDir()}, ".hprof extension"},
+		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "dir.hprof")}, "does not exist"},
 	} {
 		res := s.toolJVMHeapLeakSuspects(tc.params)
 		if !res.IsError || !strings.Contains(res.Content[0].Text, tc.want) {
@@ -396,5 +398,38 @@ func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
 	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: path})
 	if res.IsError || !strings.Contains(res.Content[0].Text, "0 leak suspect(s)") {
 		t.Fatalf("empty dump result = %+v", res)
+	}
+}
+
+func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
+	s := newHostServer(t, Collectors{})
+	dir := t.TempDir()
+
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET-CONTENT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: secret})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, ".hprof extension") {
+		t.Errorf("non-.hprof path result = %+v, want extension error", res)
+	}
+
+	asDir := filepath.Join(dir, "d.hprof")
+	if err := os.Mkdir(asDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: asDir})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "regular file") {
+		t.Errorf("directory result = %+v, want regular-file error", res)
+	}
+
+	// A .hprof-named file with arbitrary content must not have its bytes echoed.
+	fake := filepath.Join(dir, "fake.hprof")
+	if err := os.WriteFile(fake, []byte("TOP-SECRET-CONTENT"+strings.Repeat("x", 4096)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: fake})
+	if !res.IsError || strings.Contains(res.Content[0].Text, "TOP-SECRET") {
+		t.Errorf("fake hprof result = %+v, want an error without file content", res)
 	}
 }
