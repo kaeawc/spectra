@@ -104,7 +104,8 @@ would be freed if the object (or every instance of the class) were collected.
   graph (about double, plus 8 bytes per reference, transiently while ids are
   resolved), and about 70 bytes per reachable object plus 4 bytes per
   reference while the dominator tree is built. Plan for a few GiB of RAM per
-  ~20 million objects; there is no on-disk index yet. Path queries add a
+  ~20 million objects; dumps beyond ~2^31 objects or references are rejected;
+  there is no on-disk index yet. Path queries add a
   reverse index (8 bytes per object plus 4 per reference) on first use.
 
 `heap-hprof --leak-suspects` is the headless equivalent of MAT's leak-suspects
@@ -120,11 +121,15 @@ report:
   heap (default 10%) is an object suspect. Smaller top-level subtrees are
   grouped by class; a class whose instances together cross the threshold is a
   class suspect (many independently rooted instances, such as sessions or
-  listeners).
+  listeners). Class objects themselves are never grouped (they would all
+  collapse into `java.lang.Class`); a class's static-field holdings surface as
+  object suspects when one class crosses the threshold.
 - **Accumulation point.** From an object suspect, Spectra descends the
   dominator tree while one child retains at least 80% of its parent. Where
   that stops, memory fans out across many objects; this is typically the
-  backing array of the collection that keeps growing.
+  backing array of the collection that keeps growing. The JSON field
+  `direct_children` counts the point's immediate dominator-tree children, not
+  its whole subtree.
 - **Path to root.** Each suspect carries the shortest reference path from a GC
   root to its accumulation point (or to the largest instance of a class
   suspect), found by a backwards breadth-first search. `--paths` runs the same
