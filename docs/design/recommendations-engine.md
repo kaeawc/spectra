@@ -18,6 +18,7 @@ spectra rules --json
 spectra rules --snapshot <snapshot-id>
 spectra rules --rules rules/*.yml
 spectra rules --rules-config spectra.yml
+spectra rules --thread-dump-pid <pid>[,<pid>...]
 spectra rules validate --rules rules/*.yml
 spectra rules list --rules rules/*.yml
 spectra rules explain --rules rules/*.yml <rule-id>
@@ -216,6 +217,8 @@ Implemented rules:
 - `jvm-gc-algorithm`
 - `jvm-oom-detected`
 - `jvm-heap-dump-found`
+- `jvm-deadlock` (targeted: only JVMs named via `--thread-dump-pid`, MCP
+  `diagnose thread_dump_pids`, or MCP `triage pid=<jvm>` are thread-dumped)
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`

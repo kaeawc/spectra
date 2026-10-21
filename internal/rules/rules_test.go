@@ -1162,6 +1162,7 @@ func TestV1CatalogContainsExpectedRules(t *testing.T) {
 		"jvm-gc-log-pressure",
 		"jvm-gc-logging-disabled",
 		"jvm-heap-dump-found",
+		"jvm-deadlock",
 		"network.proxy_configured",
 		"network.hosts_override",
 	} {
