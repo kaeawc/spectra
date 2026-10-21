@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/heapdump"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -22,6 +23,7 @@ import (
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/syslimits"
 	"github.com/kaeawc/spectra/internal/telemetry"
+	"github.com/kaeawc/spectra/internal/threadinspect"
 	"github.com/kaeawc/spectra/internal/toolchain"
 	"github.com/kaeawc/spectra/internal/updates"
 )
@@ -65,6 +67,14 @@ type Snapshot struct {
 	// GCLogReports holds per-PID GC-pause summaries parsed from GC logs found
 	// among running JVMs' discovered log files. Deep mode only, like OOMReports.
 	GCLogReports []GCLogReport `json:"gc_log_reports,omitempty"`
+
+	// HeapDumps lists .hprof files attributed to running JVMs, found in
+	// -XX:HeapDumpPath or the working directory (bounded directory reads).
+	HeapDumps []HeapDump `json:"heap_dumps,omitempty"`
+
+	// JVMDeadlocks records thread-dump deadlock checks for the JVMs named in
+	// Options.ThreadDumpPIDs. Empty unless a caller targeted specific PIDs.
+	JVMDeadlocks []JVMDeadlockReport `json:"jvm_deadlocks,omitempty"`
 
 	// JVMHistory is recent per-PID JVM samples (oldest first) populated by
 	// callers that have access to a snapshot store. Optional: rules that
@@ -152,6 +162,15 @@ type Options struct {
 	// Zero value keeps telemetry lightweight and uses JVMOpts for discovery.
 	JVMTelemetryOpts jvm.TelemetryOptions
 
+	// ThreadDumpPIDs names JVMs to capture a thread dump for (jcmd
+	// Thread.print) so deadlock cycles land in Snapshot.JVMDeadlocks. Runs
+	// independently of SkipJVMs; empty means no thread dumps are taken.
+	ThreadDumpPIDs []int
+
+	// ThreadCapturer overrides thread-dump capture for ThreadDumpPIDs.
+	// Nil uses jcmd via JVMOpts.CmdRunner.
+	ThreadCapturer threadinspect.Capturer
+
 	// RuntimeTelemetryCollectors can add runtime-neutral telemetry from other
 	// application architectures. JVM telemetry is collected separately unless
 	// SkipJVMs is true.
@@ -191,6 +210,10 @@ type Options struct {
 	// TTL keeps results meaningfully fresh while collapsing close-together
 	// invocations.
 	StorageCache *cache.TTLStore
+
+	// HeapDumpFS is the filesystem used to locate JVM heap dumps.
+	// Zero value uses the live filesystem.
+	HeapDumpFS heapdump.FS
 }
 
 // Build assembles a Snapshot by running every collector in parallel and
@@ -320,23 +343,32 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	s.Warnings = warnings
 	jvm.AttributeJDKs(s.JVMs, s.Toolchains.JDKs)
 	finalizeJVMData(ctx, &s, opts)
+	attachJVMDeadlocks(ctx, &s, opts, clk.Now)
 	attributeRuntimeJDKs(s.RuntimeTelemetry, s.Toolchains.JDKs)
 	return s
 }
 
 // finalizeJVMData runs the post-Wait JVM steps that need collectors already
-// joined: runtime telemetry, and OOM / GC-log scanning (which need both JVMs
-// and process LogFiles). Kept out of Build to hold Build's cyclomatic complexity
-// under the gate.
+// joined: runtime telemetry, OOM / GC-log scanning (which need both JVMs and
+// process LogFiles), and heap-dump discovery (which prefers deep-mode cwd).
+// OOM, GC-log and heap-dump discovery are filesystem scans and are skipped with
+// SkipProcesses, like the other process-derived collectors.
+// Kept out of Build to hold Build's cyclomatic complexity under the gate.
 func finalizeJVMData(ctx context.Context, s *Snapshot, opts Options) {
 	if opts.SkipJVMs {
 		return
 	}
 	s.RuntimeTelemetry = append(s.RuntimeTelemetry, collectJVMTelemetry(ctx, s.JVMs, opts)...)
-	if !opts.SkipProcesses {
-		s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
-		s.GCLogReports = collectGCLogReports(s.JVMs, s.Processes)
+	if opts.SkipProcesses {
+		return
 	}
+	s.OOMReports = collectOOMReports(s.JVMs, s.Processes)
+	s.GCLogReports = collectGCLogReports(s.JVMs, s.Processes)
+	fsys := opts.HeapDumpFS
+	if fsys == nil {
+		fsys = heapdump.OSFS{}
+	}
+	s.HeapDumps = collectHeapDumps(fsys, s.JVMs, s.Processes)
 }
 
 func snapshotCollectorCount(opts Options) int {
