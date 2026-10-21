@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/kaeawc/spectra/internal/heapdump"
 	"github.com/kaeawc/spectra/internal/oom"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -36,6 +38,7 @@ func V1Catalog() []Rule {
 		ruleJVMRSSExceedsHeap(),
 		ruleJVMGCAlgorithm(),
 		ruleJVMOOMDetected(),
+		ruleJVMHeapDumpFound(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),
@@ -442,6 +445,51 @@ func ruleJVMOOMDetected() Rule {
 			}
 			return findings
 		},
+	}
+}
+
+// ruleJVMHeapDumpFound fires for each .hprof attributed to a running JVM — in
+// its -XX:HeapDumpPath or, under the default java_pid<PID>.hprof name, its
+// working directory. Such a dump is strong evidence an OutOfMemoryError already
+// occurred, and it is ready for offline analysis.
+func ruleJVMHeapDumpFound() Rule {
+	return Rule{
+		ID:       "jvm-heap-dump-found",
+		Severity: SeverityMedium,
+		MatchFn: func(s snapshot.Snapshot) []Finding {
+			live := make(map[int]bool, len(s.JVMs))
+			for _, j := range s.JVMs {
+				live[j.PID] = true
+			}
+			var findings []Finding
+			for _, d := range s.HeapDumps {
+				findings = append(findings, Finding{
+					RuleID:   "jvm-heap-dump-found",
+					Severity: SeverityMedium,
+					Subject:  fmt.Sprintf("PID %d (%s) %s", d.PID, d.MainClass, d.Path),
+					Message:  heapDumpMessage(d, live),
+					Fix: fmt.Sprintf("Analyze it with `spectra jvm heap-hprof %s` to find the retained live set, then delete or archive it to reclaim %s.",
+						d.Path, formatBytes(d.SizeBytes)),
+				})
+			}
+			return findings
+		},
+	}
+}
+
+func heapDumpMessage(d snapshot.HeapDump, live map[int]bool) string {
+	what := fmt.Sprintf("Heap dump %s (%s, modified %s)", d.Path, formatBytes(d.SizeBytes), d.ModTime.UTC().Format(time.RFC3339))
+	switch {
+	case d.DumpPID == d.PID:
+		return what + " was written by this JVM: it already hit an OutOfMemoryError and is still running."
+	case d.DumpPID != 0 && !live[d.DumpPID]:
+		return fmt.Sprintf("%s was left by an earlier JVM (PID %d, no longer running), likely an OutOfMemoryError before a restart.", what, d.DumpPID)
+	case d.DumpPID != 0:
+		return fmt.Sprintf("%s was written by another running JVM (PID %d), likely after an OutOfMemoryError there.", what, d.DumpPID)
+	case d.Source == heapdump.SourceHeapDumpPath:
+		return what + " found in this JVM's -XX:HeapDumpPath; the name does not match java_pid<PID>.hprof, so it may be a manual dump rather than an OutOfMemoryError."
+	default:
+		return what + " found in this JVM's working directory."
 	}
 }
 
