@@ -100,6 +100,7 @@ func resolveJVMSubcommand(args []string) (func([]string) int, bool) {
 		"jfr":            runJVMJFR,
 		"gc-stats":       runJVMGCStats,
 		"vm-memory":      runJVMVMMemory,
+		"nmt":            runJVMNMT,
 		"jmx":            runJVMJMX,
 		"attach":         runJVMAttach,
 		"mbeans":         runJVMMBeans,
