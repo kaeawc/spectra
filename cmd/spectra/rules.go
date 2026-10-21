@@ -274,8 +274,12 @@ func attachCLIHistory(snap *snapshot.Snapshot) {
 		return
 	}
 	defer db.Close()
-	db.AttachJVMHistory(context.Background(), snap)
-	db.AttachFDHistory(context.Background(), snap)
+	if err := db.AttachJVMHistory(context.Background(), snap); err != nil {
+		cliLogger.Debug("rules: jvm history incomplete", "error", err)
+	}
+	if err := db.AttachFDHistory(context.Background(), snap); err != nil {
+		cliLogger.Debug("rules: fd history incomplete", "error", err)
+	}
 }
 
 // hasOpenFDs reports whether any process in the snapshot has a positive

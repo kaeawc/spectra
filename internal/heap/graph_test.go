@@ -3,7 +3,9 @@ package heap
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
+	"time"
 )
 
 // classDumpFields writes a CLASS_DUMP with an explicit superclass, object-typed
@@ -399,6 +401,68 @@ func TestRetainedFromHPROFStaticField(t *testing.T) {
 			if c.ClassName == javaLangClass && (c.RetainedBytes != 24 || c.Instances != 6) {
 				t.Errorf("idSize %d: java.lang.Class = %+v, want 6 class objects retaining 24", idSize, c)
 			}
+		}
+	}
+}
+
+func TestParseObjectGraphObjectLimit(t *testing.T) {
+	old := maxGraphObjects
+	maxGraphObjects = 2
+	defer func() { maxGraphObjects = old }()
+	if _, err := ParseObjectGraph(bytes.NewReader(buildGraphDump(8))); err == nil || !strings.Contains(err.Error(), "more than 2 objects") {
+		t.Fatalf("err = %v, want object-limit error", err)
+	}
+}
+
+func TestParseObjectGraphEdgeLimit(t *testing.T) {
+	old := maxGraphEdges
+	maxGraphEdges = 1
+	defer func() { maxGraphEdges = old }()
+	if _, err := ParseObjectGraph(bytes.NewReader(buildGraphDump(8))); err == nil || !strings.Contains(err.Error(), "references") {
+		t.Fatalf("err = %v, want edge-limit error", err)
+	}
+}
+
+func TestParseObjectGraphSuperclassCycle(t *testing.T) {
+	b := newHPROFBuilder(8)
+	b.stringRecord(100, "com/acme/A")
+	b.stringRecord(101, "com/acme/B")
+	b.loadClass(1, 1, 100)
+	b.loadClass(2, 2, 101)
+	var seg bytes.Buffer
+	b.classDumpFields(&seg, 1, 2, 8, nil, nil) // A extends B
+	b.classDumpFields(&seg, 2, 1, 8, nil, nil) // B extends A: cycle, no fields
+	b.instanceDumpData(&seg, 10, 1, nil)
+	b.rootJNIGlobal(&seg, 10)
+	b.heapDumpSegment(seg.Bytes())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ParseObjectGraph(bytes.NewReader(b.finish()))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ParseObjectGraph did not terminate on a superclass cycle")
+	}
+}
+
+func TestParseObjectGraphOversizedInstance(t *testing.T) {
+	for _, claimed := range []uint32{0xFFFFFFF0, 4096} {
+		b := newHPROFBuilder(8)
+		var seg bytes.Buffer
+		seg.WriteByte(0x21)
+		b.writeIDTo(&seg, 10)
+		_ = binary.Write(&seg, binary.BigEndian, uint32(0))
+		b.writeIDTo(&seg, 1)
+		_ = binary.Write(&seg, binary.BigEndian, claimed)
+		seg.Write([]byte{1, 2, 3, 4}) // far fewer bytes than claimed
+		b.heapDumpSegment(seg.Bytes())
+		if _, err := ParseObjectGraph(bytes.NewReader(b.finish())); err == nil || !strings.Contains(err.Error(), "field data length") {
+			t.Errorf("claimed %d: err = %v, want field-data-length error", claimed, err)
 		}
 	}
 }

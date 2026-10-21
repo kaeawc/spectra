@@ -107,7 +107,7 @@ func dfsPreorder(g *ObjectGraph) (dfnum, vertex, parent []int32) {
 	}
 	var stack []frame
 	visit := func(v, from int32) {
-		dfnum[v] = int32(len(vertex))
+		dfnum[v] = int32(len(vertex)) // #nosec G115 -- Len() <= maxGraphObjects (= MaxInt32-1), so Len()+1 fits int32
 		vertex = append(vertex, v)
 		parent = append(parent, from)
 		stack = append(stack, frame{v, g.outStart[v]})
@@ -214,7 +214,7 @@ func lengauerTarjan(m int, parent []int32, predStart []int, preds []int32) []int
 		lt.ancestor[i] = -1
 		bucketHead[i] = -1
 	}
-	for w := int32(m - 1); w >= 1; w-- {
+	for w := int32(m - 1); w >= 1; w-- { // #nosec G115 -- m <= Len()+1 <= MaxInt32 (see maxGraphObjects)
 		for _, v := range preds[predStart[w]:predStart[w+1]] {
 			if u := lt.eval(v); lt.semi[u] < lt.semi[w] {
 				lt.semi[w] = lt.semi[u]
@@ -362,7 +362,7 @@ func (s *RetainedSnapshot) topRetained(limit int) []int32 {
 		limit = n
 	}
 	h := &retainedHeap{s: s}
-	for d := int32(1); d <= int32(n); d++ {
+	for d := int32(1); d <= int32(n); d++ { // #nosec G115 -- n <= Len() <= maxGraphObjects
 		if h.Len() < limit {
 			heap.Push(h, d)
 		} else if limit > 0 && h.less(h.items[0], d) {

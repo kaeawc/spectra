@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 )
@@ -14,6 +15,21 @@ import (
 // objects are graph nodes so static-field references (the usual way an
 // application retains memory) are part of the reference graph.
 const javaLangClass = "java.lang.Class"
+
+// Graph size limits. Every object and class index is an int32 (and the
+// dominator code adds one sentinel slot), so the parser rejects a dump with
+// more objects or references than int32 can index instead of wrapping. They
+// are variables so tests can lower them.
+var (
+	maxGraphObjects = math.MaxInt32 - 1
+	maxGraphEdges   = math.MaxInt32
+)
+
+// maxInstanceFieldBytes bounds one INSTANCE_DUMP's field data. A Java object's
+// fields cannot exceed 65535 declared fields of at most 8 bytes per class
+// level; 16 MiB is far above any real object and keeps a crafted u4 length
+// from forcing a multi-gigabyte allocation.
+const maxInstanceFieldBytes = 16 << 20
 
 // ObjectGraph is the parsed HPROF object reference graph in a compact,
 // int32-indexed form. Objects are numbered 0..Len()-1 in ascending object-id
@@ -50,7 +66,7 @@ func (g *ObjectGraph) ID(i int32) uint64 { return g.ids[i] }
 func (g *ObjectGraph) Index(id uint64) (int32, bool) {
 	j := sort.Search(len(g.ids), func(k int) bool { return g.ids[k] >= id })
 	if j < len(g.ids) && g.ids[j] == id {
-		return int32(j), true
+		return int32(j), true // #nosec G115 -- len(g.ids) <= maxGraphObjects, enforced when the graph is built
 	}
 	return -1, false
 }
@@ -101,6 +117,7 @@ type graphBuilder struct {
 	edgeCnt  []int32
 	rawEdges []uint64
 	roots    []rawRoot
+	err      error // first size-limit violation; checked by the parser after each record
 	// threadBySerial maps a thread serial number to its thread object id, from
 	// ROOT_THREAD_OBJECT records, so frame roots can name their thread.
 	threadBySerial map[uint32]uint64
@@ -118,7 +135,7 @@ func (b *graphBuilder) classFor(k classKey, presetName string) int32 {
 	if i, ok := b.classIdx[k]; ok {
 		return i
 	}
-	i := int32(len(b.classKeys))
+	i := int32(len(b.classKeys)) // #nosec G115 -- class table entries are created per object, so it is bounded by maxGraphObjects+2 < MaxInt32
 	b.classIdx[k] = i
 	b.classKeys = append(b.classKeys, k)
 	b.classNames = append(b.classNames, presetName)
@@ -126,8 +143,15 @@ func (b *graphBuilder) classFor(k classKey, presetName string) int32 {
 }
 
 // addObject appends an object and returns its parse-order index.
+// It returns -1 and records b.err once the object limit is exceeded.
 func (b *graphBuilder) addObject(id uint64, class int32, shallow int64, refs []uint64) int {
 	p := len(b.ids)
+	if p >= maxGraphObjects {
+		if b.err == nil {
+			b.err = fmt.Errorf("hprof: heap has more than %d objects, which exceeds the supported maximum", maxGraphObjects)
+		}
+		return -1
+	}
 	b.ids = append(b.ids, id)
 	b.class = append(b.class, class)
 	b.shallow = append(b.shallow, shallow)
@@ -140,7 +164,13 @@ func (b *graphBuilder) addObject(id uint64, class int32, shallow int64, refs []u
 // appendRefs sets object p's references. It must be called at most once per
 // object after addObject(…, nil) so the run stays contiguous.
 func (b *graphBuilder) appendRefs(p int, refs []uint64) {
-	if len(refs) == 0 {
+	if len(refs) == 0 || p < 0 {
+		return
+	}
+	if len(b.rawEdges)+len(refs) > maxGraphEdges {
+		if b.err == nil {
+			b.err = fmt.Errorf("hprof: heap has more than %d references, which exceeds the supported maximum", maxGraphEdges)
+		}
 		return
 	}
 	b.edgeOff[p] = len(b.rawEdges)
@@ -149,7 +179,7 @@ func (b *graphBuilder) appendRefs(p int, refs []uint64) {
 			b.rawEdges = append(b.rawEdges, r)
 		}
 	}
-	b.edgeCnt[p] = int32(len(b.rawEdges) - b.edgeOff[p])
+	b.edgeCnt[p] = int32(len(b.rawEdges) - b.edgeOff[p]) // #nosec G115 -- bounded by maxGraphEdges (checked above)
 }
 
 // build sorts objects by id, resolves references to object indices (dropping
@@ -159,7 +189,7 @@ func (b *graphBuilder) build(names func(classKey) string) *ObjectGraph {
 	n := len(b.ids)
 	perm := make([]int32, n)
 	for i := range perm {
-		perm[i] = int32(i)
+		perm[i] = int32(i) // #nosec G115 -- n <= maxGraphObjects, enforced by addObject
 	}
 	sort.Slice(perm, func(x, y int) bool { return b.ids[perm[x]] < b.ids[perm[y]] })
 
@@ -235,6 +265,9 @@ type graphState struct {
 	b           *graphBuilder
 	classClass  int32
 	scratch     []uint64
+	// segLeft reports the bytes of the current heap-dump segment not yet
+	// consumed, so length fields can be validated before allocating.
+	segLeft func() int64
 }
 
 // ParseObjectGraph streams a .hprof dump and returns its object reference graph
@@ -244,6 +277,10 @@ type graphState struct {
 // Instances whose class dump has already been seen are reduced to their
 // reference ids as they stream past; only instances that precede their class
 // dump are buffered whole until the end of the stream.
+//
+// Peak memory is roughly 40 bytes per object plus 16 bytes per reference
+// (builder arrays, then the sorted copy during build), so budget about twice
+// the final graph size. Dumps beyond maxGraphObjects/maxGraphEdges are rejected.
 func ParseObjectGraph(r io.Reader) (*ObjectGraph, error) {
 	br := bufio.NewReaderSize(r, 64*1024)
 	hr := &hprofReader{r: br}
@@ -276,6 +313,9 @@ func ParseObjectGraph(r io.Reader) (*ObjectGraph, error) {
 		}
 		if err := st.readRecord(hr, tag, int64(length)); err != nil {
 			return nil, err
+		}
+		if st.b.err != nil {
+			return nil, st.b.err
 		}
 	}
 	return st.finalize(), nil
@@ -333,6 +373,7 @@ func (st *graphState) readLoadClass(hr *hprofReader) error {
 func (st *graphState) readHeapDump(hr *hprofReader, length int64) error {
 	lr := &io.LimitedReader{R: hr.r, N: length}
 	sub := &hprofReader{r: bufio.NewReader(lr), idSize: hr.idSize}
+	st.segLeft = func() int64 { return lr.N + int64(sub.r.Buffered()) }
 	for {
 		tag, err := sub.u1()
 		if errors.Is(err, io.EOF) {
@@ -346,6 +387,9 @@ func (st *graphState) readHeapDump(hr *hprofReader, length int64) error {
 		}
 		if err := st.readHeapSub(sub, tag); err != nil {
 			return err
+		}
+		if st.b.err != nil {
+			return st.b.err
 		}
 	}
 }
@@ -478,6 +522,9 @@ func (st *graphState) readInstanceDump(sub *hprofReader) error {
 	if err != nil {
 		return err
 	}
+	if nbytes > maxInstanceFieldBytes || (st.segLeft != nil && int64(nbytes) > st.segLeft()) {
+		return fmt.Errorf("hprof: instance 0x%x field data length %d exceeds the remaining heap-dump segment or the %d byte limit", objID, nbytes, maxInstanceFieldBytes)
+	}
 	fields := make([]byte, nbytes)
 	if _, err := io.ReadFull(sub.r, fields); err != nil {
 		return err
@@ -590,7 +637,12 @@ func (st *graphState) finalize() *ObjectGraph {
 func (st *graphState) instanceRefs(classID uint64, fields []byte, out []uint64) ([]uint64, bool) {
 	out = append(out, classID)
 	offset := 0
-	for c := classID; c != 0; {
+	// A corrupt dump can make the superclass chain cyclic; no valid chain is
+	// longer than the number of known classes.
+	for depth, c := 0, classID; c != 0; depth++ {
+		if depth > len(st.layouts) {
+			return out, true
+		}
 		layout, ok := st.layouts[c]
 		if !ok {
 			return out, false
