@@ -1078,14 +1078,17 @@ func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
 	})
 }
 
-// validateHPROFPath requires path to be an existing regular file with an
-// .hprof extension, so the tool cannot be pointed at arbitrary files,
-// directories, or devices.
+// validateHPROFPath requires path to be an absolute path to an existing
+// regular file (not a symlink) with an .hprof extension, so the tool cannot be
+// pointed at arbitrary files, directories, devices, or symlink targets.
 func validateHPROFPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return errors.New("heap dump path must be absolute")
+	}
 	if !strings.EqualFold(filepath.Ext(path), ".hprof") {
 		return errors.New("heap dump path must have a .hprof extension")
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return errors.New("heap dump path does not exist or is not readable")
 	}

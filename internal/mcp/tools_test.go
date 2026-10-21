@@ -433,3 +433,24 @@ func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
 		t.Errorf("fake hprof result = %+v, want an error without file content", res)
 	}
 }
+
+func TestValidateHPROFPathRejectsSymlinkAndRelative(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.hprof")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateHPROFPath(target); err != nil {
+		t.Errorf("regular absolute path rejected: %v", err)
+	}
+	link := filepath.Join(dir, "link.hprof")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := validateHPROFPath(link); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Errorf("symlink err = %v, want regular-file error", err)
+	}
+	if err := validateHPROFPath("rel/real.hprof"); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("relative err = %v, want absolute error", err)
+	}
+}
