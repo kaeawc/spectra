@@ -23,6 +23,7 @@ const leakSuspectRuleID = "jvm-heap-leak-suspect"
 
 // heapGraphFlags are the `jvm heap-hprof` flags that need the object graph.
 type heapGraphFlags struct {
+	fs         *flag.FlagSet
 	leaks      *bool
 	threshold  *float64
 	fileIssues *bool
@@ -32,6 +33,7 @@ type heapGraphFlags struct {
 
 func registerHeapGraphFlags(fs *flag.FlagSet) heapGraphFlags {
 	return heapGraphFlags{
+		fs:    fs,
 		leaks:      fs.Bool("leak-suspects", false, "Report leak suspects: dominator subtrees by retained size, accumulation points, and paths to GC roots"),
 		threshold:  fs.Float64("threshold", heap.DefaultLeakThresholdPercent, "Leak-suspect threshold as a percentage of the reachable heap"),
 		fileIssues: fs.Bool("file-issues", false, "With --leak-suspects, file each suspect as a Spectra issue"),
@@ -62,9 +64,35 @@ func (f heapGraphFlags) mode(retained bool) (string, error) {
 	case *f.maxPaths < 1:
 		return "", errors.New("--max-paths must be >= 1")
 	case len(modes) == 0:
-		return "", nil
+		return "", f.requireNoModeFlags()
 	}
-	return modes[0], nil
+	return modes[0], f.checkModeFlags(modes[0])
+}
+
+// wasSet reports whether the flag was given explicitly on the command line.
+func (f heapGraphFlags) wasSet(name string) bool {
+	set := false
+	f.fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+// checkModeFlags rejects flags that have no effect in the chosen mode.
+func (f heapGraphFlags) checkModeFlags(mode string) error {
+	if f.wasSet("threshold") && mode != "leak-suspects" {
+		return errors.New("--threshold only applies to --leak-suspects")
+	}
+	if f.wasSet("max-paths") && mode != "paths" {
+		return errors.New("--max-paths requires --paths")
+	}
+	return nil
+}
+
+func (f heapGraphFlags) requireNoModeFlags() error {
+	return f.checkModeFlags("")
 }
 
 func (f heapGraphFlags) run(mode, path string, limit int, asJSON bool) int {

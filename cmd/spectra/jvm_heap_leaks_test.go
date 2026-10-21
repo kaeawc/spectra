@@ -107,6 +107,9 @@ func TestRunJVMHeapHPROFLeakSuspectsAndPaths(t *testing.T) {
 			t.Errorf("args %v: exit = %d, want 0", args, code)
 		}
 	}
+	if code := runJVMHeapHPROF([]string{"--paths", "0x65", "--max-paths", "2", path}); code != 0 {
+		t.Errorf("--paths with --max-paths: exit = %d, want 0", code)
+	}
 	if code := runJVMHeapHPROF([]string{"--paths", "com.acme.Missing", path}); code != 1 {
 		t.Errorf("unknown paths target: exit = %d, want 1", code)
 	}
@@ -119,6 +122,10 @@ func TestRunJVMHeapHPROFGraphFlagValidation(t *testing.T) {
 		{"--file-issues", "a.hprof"},
 		{"--leak-suspects", "--threshold", "0", "a.hprof"},
 		{"--paths", "0x1", "--max-paths", "0", "a.hprof"},
+		{"--retained", "--threshold", "20", "a.hprof"},
+		{"--paths", "0x1", "--threshold", "20", "a.hprof"},
+		{"--max-paths", "5", "a.hprof"},
+		{"--leak-suspects", "--max-paths", "5", "a.hprof"},
 	} {
 		if code := runJVMHeapHPROF(args); code != 2 {
 			t.Errorf("args %v: exit = %d, want 2", args, code)
