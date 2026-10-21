@@ -1,6 +1,7 @@
 package heap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -44,7 +45,7 @@ func TestLeakSuspectsStaticCache(t *testing.T) {
 			t.Errorf("idSize %d: suspect = %+v, want class com.acme.Cache retaining %d", idSize, sus, wantRetained)
 		}
 		acc := sus.Accumulation
-		if acc == nil || acc.ID != 101 || acc.ClassName != "[Lcom.acme.Entry;" || acc.DominatedObjects != 50 || acc.Depth != 2 {
+		if acc == nil || acc.ID != 101 || acc.ClassName != "[Lcom.acme.Entry;" || acc.DirectChildren != 50 || acc.Depth != 2 {
 			t.Errorf("idSize %d: accumulation = %+v, want the Entry[] table (0x65) dominating 50 entries at depth 2", idSize, acc)
 		}
 		if p := sus.PathToRoot; p == nil || !equalIDs(stepIDs(*p), []uint64{1, 100, 101}) || p.Roots[0].Kind != RootStickyClass {
@@ -92,5 +93,25 @@ func TestLeakSuspectsThresholdAndEmpty(t *testing.T) {
 	}
 	if rep := LeakSuspects(ComputeRetained(graph(nil)), LeakOptions{}); len(rep.Suspects) != 0 || rep.ThresholdPercent != DefaultLeakThresholdPercent {
 		t.Errorf("empty heap report = %+v", rep)
+	}
+}
+
+func TestLeakSuspectsIgnoreClassObjectGrouping(t *testing.T) {
+	// 30 sticky-class roots, each holding a 1000-byte array through a static
+	// field: none reaches the threshold alone, and together they must not be
+	// reported as a "java.lang.Class" class suspect.
+	s := newSynthDump(8)
+	for i := uint64(0); i < 30; i++ {
+		s.class(1+i, fmt.Sprintf("com/acme/Holder%d", i), 8, 200+i)
+		s.b.primArrayDump(&s.seg, 200+i, 1000, hprofTypeByte, 1)
+	}
+	rep := LeakSuspects(s.parse(t), LeakOptions{})
+	for _, sus := range rep.Suspects {
+		if sus.ClassName == javaLangClass {
+			t.Fatalf("class objects were grouped into a suspect: %+v", sus)
+		}
+	}
+	if len(rep.Suspects) != 0 {
+		t.Errorf("suspects = %+v, want none", rep.Suspects)
 	}
 }

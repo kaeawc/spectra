@@ -136,7 +136,7 @@ func printLeakSuspects(w io.Writer, path string, rep heap.LeakReport) {
 		fmt.Fprintf(w, "  %s\n", s.Description)
 		if acc := s.Accumulation; acc != nil {
 			fmt.Fprintf(w, "  accumulation point: %s (0x%x) retains %s, directly dominating %d objects\n",
-				acc.ClassName, acc.ID, humanSize(acc.RetainedBytes), acc.DominatedObjects)
+				acc.ClassName, acc.ID, humanSize(acc.RetainedBytes), acc.DirectChildren)
 		}
 		if p := s.PathToRoot; p != nil {
 			printRootPath(w, "  ", *p)

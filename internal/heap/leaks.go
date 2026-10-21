@@ -34,12 +34,15 @@ type LeakOptions struct {
 // AccumulationPoint is the object inside a suspect's dominator subtree where
 // retained memory stops flowing through a single child and fans out.
 type AccumulationPoint struct {
-	ID               uint64  `json:"id"`
-	ClassName        string  `json:"class_name"`
-	RetainedBytes    int64   `json:"retained_bytes"`
-	PercentOfHeap    float64 `json:"percent_of_heap"`
-	DominatedObjects int     `json:"dominated_objects"`
-	Depth            int     `json:"depth"`
+	ID            uint64  `json:"id"`
+	ClassName     string  `json:"class_name"`
+	RetainedBytes int64   `json:"retained_bytes"`
+	PercentOfHeap float64 `json:"percent_of_heap"`
+	// DirectChildren is the number of objects the accumulation point
+	// immediately dominates (its dominator-tree children), not the size of its
+	// whole subtree.
+	DirectChildren int `json:"direct_children"`
+	Depth          int `json:"depth"`
 }
 
 // LeakSuspect is one automatically detected leak suspect. Object suspects are
@@ -98,6 +101,11 @@ func LeakSuspects(s *RetainedSnapshot, opts LeakOptions) LeakReport {
 	for _, d := range s.children[s.childStart[0]:s.childStart[1]] {
 		if s.retained[d] >= threshold {
 			rep.Suspects = append(rep.Suspects, s.objectSuspect(d))
+			continue
+		}
+		// Class objects are all java.lang.Class instances; grouping them would
+		// report a meaningless "java.lang.Class" suspect for every sticky root.
+		if _, isClassObj := s.Graph.classObjOf[s.vertex[d]]; isClassObj {
 			continue
 		}
 		c := s.Graph.class[s.vertex[d]]
@@ -163,12 +171,12 @@ func (s *RetainedSnapshot) accumulationPoint(d int32) (AccumulationPoint, int32)
 	}
 	obj := s.vertex[d]
 	return AccumulationPoint{
-		ID:               s.Graph.ids[obj],
-		ClassName:        s.Graph.DisplayName(obj),
-		RetainedBytes:    s.retained[d],
-		PercentOfHeap:    s.percentOf(s.retained[d]),
-		DominatedObjects: int(s.childStart[d+1] - s.childStart[d]),
-		Depth:            depth,
+		ID:             s.Graph.ids[obj],
+		ClassName:      s.Graph.DisplayName(obj),
+		RetainedBytes:  s.retained[d],
+		PercentOfHeap:  s.percentOf(s.retained[d]),
+		DirectChildren: int(s.childStart[d+1] - s.childStart[d]),
+		Depth:          depth,
 	}, d
 }
 
@@ -222,12 +230,12 @@ func describeObjectSuspect(ls LeakSuspect) string {
 	if acc := ls.Accumulation; acc != nil && acc.Depth > 0 {
 		fmt.Fprintf(&b, " Memory accumulates in %s (0x%x), which retains %s",
 			acc.ClassName, acc.ID, formatBytes(acc.RetainedBytes))
-		if acc.DominatedObjects > 0 {
-			fmt.Fprintf(&b, " across %d directly dominated objects", acc.DominatedObjects)
+		if acc.DirectChildren > 0 {
+			fmt.Fprintf(&b, " across %d directly dominated objects", acc.DirectChildren)
 		}
 		b.WriteString(".")
-	} else if acc != nil && acc.DominatedObjects > 1 {
-		fmt.Fprintf(&b, " It directly dominates %d objects.", acc.DominatedObjects)
+	} else if acc != nil && acc.DirectChildren > 1 {
+		fmt.Fprintf(&b, " It directly dominates %d objects.", acc.DirectChildren)
 	}
 	if p := ls.PathToRoot; p != nil {
 		fmt.Fprintf(&b, " Shortest path from a GC root: %s.", p.String())
