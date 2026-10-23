@@ -114,13 +114,18 @@ zsh(60) > log(70)`), a one-shot summary, and a suggested next command (`sample
 top of stack or Linux busiest threads. At most one summary is collected per tick,
 with a three second limit, so a new alert may first appear without one. After a daemon restart, restored sustained alerts are carried like alerts across
 a suspend gap: they stay firing, with the same ID, until fresh samples disprove
-them. If the probe's `ps` call fails, that tick is skipped entirely and no alert
-is resolved on missing evidence. The probe takes its own timestamp when it runs,
+them. The alert detail records the original since-time and the process start time (`up 5h0m0s (started 2026-01-01T07:00:00Z)`), and a restart restores both from it without any schema change: the duration shown continues from the original since-time rather than the alert's fired time, and a process that reuses the PID with the same name but a different start time does not adopt the old alert. Alerts written by an older version lack these fields and fall back to the fired time and a name-only match. If the probe's `ps` call fails, that tick is skipped entirely and no alert
+is resolved on missing evidence. After five consecutive failed probes the daemon logs a warning (and another every five
+further failures, plus an info line on recovery) and appends "[probe unavailable: ...]" to the
+detail of every firing sustained alert, emitted to subscribers as an `updated` event and persisted immediately (a failed write is retried on later failed ticks). The alerts stay
+firing with the same ID, because resolving them as healthy would be a claim
+without evidence; the note tells the reader they are stale. The note disappears
+when the probe recovers and the alert is re-evaluated, with another `updated` event and an immediate stored-detail write. The probe takes its own timestamp when it runs,
 because `ps` elapsed times are only meaningful against the snapshot time. The probe runs last in the watch
 tick, after alert persistence, notifications and maintenance, so a slow sample
 never delays them. A process that `ps` lists but whose `/proc` stat read fails
 for a tick keeps its state and previous snapshot rather than resolving; if it
-stays unreadable for a whole window (for example `hidepid`), the alert resolves.
+stays unreadable for a whole window (for example `hidepid`), the alert resolves. Readings that resume after unreadable ticks spanning more than eight base watch intervals start a fresh history (an alert already firing keeps its since-time), so an old sample never stands in for window coverage.
 A firing alert needs at least two fresh samples below the threshold to clear,
 and a reused PID with a new start time never inherits an old alert. `sample`
 needs root for daemons such as `diagnosticd`; when it fails the detail says

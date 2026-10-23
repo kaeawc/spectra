@@ -1125,7 +1125,9 @@ func (s *DB) loadNMTSamples(ctx context.Context, pid int, samples []snapshot.JVM
 // can hand the slice straight to trend predicates. Pass limit=0 for the
 // default cap (60 samples).
 //
-// procStart is compared at whole-second precision. A zero procStart
+// procStart is compared within procStartTolerance, because Linux derives
+// start times from btime plus clock ticks and btime drifts by about a
+// second between reads. A zero procStart
 // (unknown start time) matches only samples whose start time was also
 // unknown, so a process with a known start never inherits samples from an
 // earlier, unidentifiable owner of the same PID.
@@ -1133,11 +1135,12 @@ func (s *DB) GetRecentJVMSamples(ctx context.Context, pid int, procStart time.Ti
 	if limit <= 0 {
 		limit = 60
 	}
+	startLo, startHi := procStartRange(procStart)
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb
-		FROM jvm_samples WHERE pid=? AND proc_start_unix=?
-		ORDER BY at_nano DESC LIMIT ?`, pid, procStartUnix(procStart), limit,
+		FROM jvm_samples WHERE pid=? AND proc_start_unix BETWEEN ? AND ?
+		ORDER BY at_nano DESC LIMIT ?`, pid, startLo, startHi, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -1230,6 +1233,26 @@ func procStartUnix(t time.Time) int64 {
 	return t.Unix()
 }
 
+// procStartTolerance is how far a stored proc_start_unix may differ from a
+// queried start and still be the same process lifetime. Accepted trade-off:
+// a PID wrapping within this window (tiny pid_max or a spawn storm) could
+// mix trend history for that PID; this is rare and low impact. The window is
+// anchored to the current read, not chained across rows, so a start time
+// drifting monotonically by more than the tolerance over a process's life
+// ages the oldest rows out rather than splitting history.
+const procStartTolerance = 2 * time.Second
+
+// procStartRange returns the inclusive proc_start_unix bounds matching t.
+// An unknown (zero) start matches only unknown, never a nearby known start.
+func procStartRange(t time.Time) (lo, hi int64) {
+	u := procStartUnix(t)
+	if u == 0 {
+		return 0, 0
+	}
+	tol := int64(procStartTolerance / time.Second)
+	return u - tol, u + tol
+}
+
 func procStartTime(unix int64) time.Time {
 	if unix == 0 {
 		return time.Time{}
@@ -1291,11 +1314,12 @@ func (s *DB) GetRecentFDSamples(ctx context.Context, pid int, procStart time.Tim
 	if limit <= 0 {
 		limit = 60
 	}
+	startLo, startHi := procStartRange(procStart)
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pid, proc_start_unix, at_nano, open_fds
-		FROM fd_samples WHERE pid=? AND proc_start_unix=?
-		ORDER BY at_nano DESC LIMIT ?`, pid, procStartUnix(procStart), limit,
+		FROM fd_samples WHERE pid=? AND proc_start_unix BETWEEN ? AND ?
+		ORDER BY at_nano DESC LIMIT ?`, pid, startLo, startHi, limit,
 	)
 	if err != nil {
 		return nil, err
