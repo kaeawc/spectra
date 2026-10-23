@@ -11,7 +11,8 @@ import (
 // whole seconds because collectors differ in precision (ps lstart is
 // second-resolution) and the identity must compare equal across runs.
 // The store matches history within a small tolerance, so Linux btime drift
-// of about a second does not split one lifetime. Returns the zero time when the start time is unknown.
+// of about a second does not split one lifetime.
+// Returns the zero time when the start time is unknown.
 func ProcessStart(p process.Info) time.Time {
 	start := p.StartTime
 	if start.IsZero() {

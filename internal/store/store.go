@@ -1162,8 +1162,12 @@ func procStartUnix(t time.Time) int64 {
 }
 
 // procStartTolerance is how far a stored proc_start_unix may differ from a
-// queried start and still be the same process lifetime. Genuine PID reuse
-// takes far longer than this.
+// queried start and still be the same process lifetime. Accepted trade-off:
+// a PID wrapping within this window (tiny pid_max or a spawn storm) could
+// mix trend history for that PID; this is rare and low impact. The window is
+// anchored to the current read, not chained across rows, so a start time
+// drifting monotonically by more than the tolerance over a process's life
+// ages the oldest rows out rather than splitting history.
 const procStartTolerance = 2 * time.Second
 
 // procStartRange returns the inclusive proc_start_unix bounds matching t.
