@@ -96,20 +96,31 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 	}
 	select {
 	case result := <-ch:
-		if result.Error != nil {
-			return result.Error
-		}
-		if out != nil && len(result.Result) > 0 {
-			if err := json.Unmarshal(result.Result, out); err != nil {
-				return fmt.Errorf("daemon client decode: %w", err)
-			}
-		}
-		return nil
+		return decodeReply(result, out)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.closed:
-		return net.ErrClosed
+		// The server may reply and hang up (shutdown) before this select runs,
+		// leaving both ready; the reply wins, otherwise the choice is random.
+		select {
+		case result := <-ch:
+			return decodeReply(result, out)
+		default:
+			return net.ErrClosed
+		}
 	}
+}
+
+func decodeReply(result reply, out any) error {
+	if result.Error != nil {
+		return result.Error
+	}
+	if out != nil && len(result.Result) > 0 {
+		if err := json.Unmarshal(result.Result, out); err != nil {
+			return fmt.Errorf("daemon client decode: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c *Client) OnNotification(fn func(string, json.RawMessage)) {
