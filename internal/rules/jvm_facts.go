@@ -57,6 +57,7 @@ func ParseVMArgs(raw string) VMArgsFacts {
 	if raw == "" {
 		return f
 	}
+	f.NMTEnabled = jvm.NMTEnabledInArgs(raw)
 	for _, tok := range strings.Fields(raw) {
 		if applyVMArgToken(&f, tok) {
 			continue
@@ -125,9 +126,6 @@ func applyVMArgToken(f *VMArgsFacts, tok string) bool {
 		f.MaxMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MaxMetaspaceFreeRatio="):])
 	case strings.HasPrefix(tok, "-XX:MinMetaspaceFreeRatio="):
 		f.MinMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MinMetaspaceFreeRatio="):])
-	case strings.HasPrefix(tok, "-XX:NativeMemoryTracking="):
-		v := tok[len("-XX:NativeMemoryTracking="):]
-		f.NMTEnabled = v == "summary" || v == "detail"
 	default:
 		return false
 	}

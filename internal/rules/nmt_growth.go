@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/snapshot"
 )
 
@@ -78,10 +79,10 @@ func ruleJVMNativeMemoryGrowthWith(cfg NMTGrowthConfig) Rule {
 					findings = append(findings, Finding{
 						RuleID:   "jvm-native-memory-growth",
 						Severity: SeverityMedium,
-						Subject:  fmt.Sprintf("PID %d (%s) NMT %s", j.PID, j.MainClass, cat),
+						Subject:  fmt.Sprintf("PID %d NMT %s", j.PID, cat),
 						Message: fmt.Sprintf(
-							"NMT category %q committed memory grew %d MiB (%d -> %d MiB, +%.0f%%) over %s across %d samples without shrinking.",
-							cat, g.growthKiB/1024, g.firstKiB/1024, g.lastKiB/1024, g.pct, g.span.Round(time.Minute), g.samples),
+							"%s: NMT category %q committed memory grew %d MiB (%d -> %d MiB, +%.0f%%) over %s across %d samples without shrinking.",
+							jvmLabel(j), cat, g.growthKiB/1024, g.firstKiB/1024, g.lastKiB/1024, g.pct, g.span.Round(time.Minute), g.samples),
 						Fix: fmt.Sprintf("Attribute the growth to call sites: run `spectra jvm nmt baseline %d`, let it grow further, then `spectra jvm nmt diff %d`.", j.PID, j.PID),
 					})
 				}
@@ -180,4 +181,13 @@ func growthOver(pts []nmtPoint, cfg NMTGrowthConfig) (nmtGrowth, bool) {
 		}
 	}
 	return nmtGrowth{growth, first.kib, last.kib, pct, span, len(pts)}, true
+}
+
+// jvmLabel names a JVM in message text; unlike the finding Subject it may
+// include the main class, which jps can omit between scans.
+func jvmLabel(j jvm.Info) string {
+	if j.MainClass == "" {
+		return fmt.Sprintf("PID %d", j.PID)
+	}
+	return fmt.Sprintf("PID %d (%s)", j.PID, j.MainClass)
 }

@@ -27,13 +27,18 @@ func TestNMTEnabledInArgs(t *testing.T) {
 	}
 }
 
+func ctxFake(out string, err error, gotArgs *[]string) CtxCmdRunner {
+	return func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if gotArgs != nil {
+			*gotArgs = append([]string{name}, args...)
+		}
+		return []byte(out), err
+	}
+}
+
 func TestCollectNMTCommitted(t *testing.T) {
 	var gotArgs []string
-	run := func(name string, args ...string) ([]byte, error) {
-		gotArgs = append([]string{name}, args...)
-		return []byte(nmtSample), nil
-	}
-	cats, err := CollectNMTCommitted(42, run, 0)
+	cats, err := CollectNMTCommitted(context.Background(), 42, ctxFake(nmtSample, nil, &gotArgs), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,27 +51,44 @@ func TestCollectNMTCommitted(t *testing.T) {
 }
 
 func TestCollectNMTCommittedDisabledAndError(t *testing.T) {
-	off := func(string, ...string) ([]byte, error) {
-		return []byte("42:\nNative memory tracking is not enabled\n"), nil
-	}
-	if _, err := CollectNMTCommitted(42, off, 0); !errors.Is(err, ErrNMTDisabled) {
+	off := ctxFake("42:\nNative memory tracking is not enabled\n", nil, nil)
+	if _, err := CollectNMTCommitted(context.Background(), 42, off, 0); !errors.Is(err, ErrNMTDisabled) {
 		t.Fatalf("err = %v, want ErrNMTDisabled", err)
 	}
 	boom := errors.New("attach failed")
-	fail := func(string, ...string) ([]byte, error) { return nil, boom }
-	if _, err := CollectNMTCommitted(42, fail, 0); !errors.Is(err, boom) {
+	if _, err := CollectNMTCommitted(context.Background(), 42, ctxFake("", boom, nil), 0); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want wrapped boom", err)
 	}
 }
 
-func TestCollectNMTCommittedTimeout(t *testing.T) {
+// The runner blocks until its context is cancelled, as exec.CommandContext
+// does by killing the child; the probe must cancel it on timeout.
+func TestCollectNMTCommittedTimeoutCancelsChild(t *testing.T) {
+	cancelled := make(chan struct{})
+	hang := func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+		<-ctx.Done()
+		close(cancelled)
+		return nil, ctx.Err()
+	}
+	_, err := CollectNMTCommitted(context.Background(), 42, hang, 20*time.Millisecond)
+	if !errors.Is(err, ErrNMTSampleTimeout) {
+		t.Fatalf("err = %v, want ErrNMTSampleTimeout", err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner context was not cancelled")
+	}
+}
+
+func TestAdaptRunnerAbandonsOnTimeout(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	hang := func(string, ...string) ([]byte, error) {
 		<-release
 		return nil, nil
 	}
-	_, err := CollectNMTCommitted(42, hang, 20*time.Millisecond)
+	_, err := CollectNMTCommitted(context.Background(), 42, adaptRunner(hang), 20*time.Millisecond)
 	if !errors.Is(err, ErrNMTSampleTimeout) {
 		t.Fatalf("err = %v, want ErrNMTSampleTimeout", err)
 	}
@@ -89,16 +111,31 @@ func fakeJVMRunner(vmArgs string, nmtCalls *int) CmdRunner {
 	}
 }
 
-func TestCollectOneSamplesNMTOnlyWhenEnabled(t *testing.T) {
+func TestCollectOneSamplesNMTOnlyWhenOptedInAndEnabled(t *testing.T) {
+	const nmtArgs = "-Xmx1g -XX:NativeMemoryTracking=summary"
+	run := func(args string, calls *int) CmdRunner { return fakeJVMRunner(args, calls) }
+
 	var calls int
-	info := collectOne(context.Background(), 7, "app.Main", fakeJVMRunner("-Xmx1g -XX:NativeMemoryTracking=summary", &calls), CollectOptions{})
+	opts := CollectOptions{SampleNMT: true}
+	opts.CmdRunner = run(nmtArgs, &calls)
+	info := collectOne(context.Background(), 7, "app.Main", opts.CmdRunner, opts)
 	if calls != 1 || info.NMTCommittedKiB["Thread"] != 52428 {
-		t.Fatalf("calls=%d nmt=%v", calls, info.NMTCommittedKiB)
+		t.Fatalf("opted in: calls=%d nmt=%v", calls, info.NMTCommittedKiB)
 	}
 
+	// NMT enabled in args but the caller did not opt in: never probed.
 	calls = 0
-	info = collectOne(context.Background(), 7, "app.Main", fakeJVMRunner("-Xmx1g", &calls), CollectOptions{})
+	opts = CollectOptions{CmdRunner: run(nmtArgs, &calls)}
+	info = collectOne(context.Background(), 7, "app.Main", opts.CmdRunner, opts)
 	if calls != 0 || info.NMTCommittedKiB != nil {
-		t.Fatalf("NMT must not be probed when not enabled: calls=%d nmt=%v", calls, info.NMTCommittedKiB)
+		t.Fatalf("not opted in: calls=%d nmt=%v", calls, info.NMTCommittedKiB)
+	}
+
+	// Opted in but the JVM has no NMT flag: not probed.
+	calls = 0
+	opts = CollectOptions{SampleNMT: true, CmdRunner: run("-Xmx1g", &calls)}
+	info = collectOne(context.Background(), 7, "app.Main", opts.CmdRunner, opts)
+	if calls != 0 || info.NMTCommittedKiB != nil {
+		t.Fatalf("flag absent: calls=%d nmt=%v", calls, info.NMTCommittedKiB)
 	}
 }

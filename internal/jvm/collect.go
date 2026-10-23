@@ -17,6 +17,14 @@ type CollectOptions struct {
 	// JDKs is the already-discovered JDK inventory used to attribute each
 	// running JVM's java.home back to an installed toolchain.
 	JDKs []toolchain.JDKInstall
+	// SampleNMT opts in to one `jcmd VM.native_memory summary` per JVM that
+	// runs with NativeMemoryTracking enabled. Default false: ordinary
+	// collection (inspect, snapshot, MCP) must not attach to JVMs for it; only
+	// the history sampler path sets it.
+	SampleNMT bool
+	// CmdRunnerContext, when set, runs the NMT probe so the jcmd child is
+	// killed on timeout. Nil uses CmdRunner (adapted) or the real runner.
+	CmdRunnerContext CtxCmdRunner
 	// NMTTimeout bounds the per-JVM NMT summary sample. Zero means
 	// DefaultNMTSampleTimeout.
 	NMTTimeout time.Duration
@@ -88,7 +96,7 @@ func AttributeJDKs(infos []Info, jdks []toolchain.JDKInstall) {
 }
 
 // collectOne gathers Info for a single PID.
-func collectOne(_ context.Context, pid int, main string, run CmdRunner, opts CollectOptions) Info {
+func collectOne(ctx context.Context, pid int, main string, run CmdRunner, opts CollectOptions) Info {
 	info := Info{PID: pid, MainClass: main}
 
 	props := collectSysProps(pid, run)
@@ -109,9 +117,9 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner, opts Col
 	if classes, err := CollectClassStats(pid, run); err == nil {
 		info.Classes = classes
 	}
-	// Sample NMT only when the JVM opted in via VM args; never enable it.
-	if NMTEnabledInArgs(info.VMArgs) {
-		if cats, err := CollectNMTCommitted(pid, run, opts.NMTTimeout); err == nil {
+	// Sample NMT only when the caller opted in and the JVM runs with NMT; never enable it.
+	if opts.SampleNMT && NMTEnabledInArgs(info.VMArgs) {
+		if cats, err := CollectNMTCommitted(ctx, pid, ctxRunnerFor(opts), opts.NMTTimeout); err == nil {
 			info.NMTCommittedKiB = cats
 		}
 	}

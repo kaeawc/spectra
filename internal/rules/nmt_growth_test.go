@@ -62,7 +62,10 @@ func TestNMTGrowthFiresOnSteadyGrowth(t *testing.T) {
 	if f[0].RuleID != "jvm-native-memory-growth" || !strings.Contains(f[0].Subject, "Internal") {
 		t.Errorf("finding = %+v", f[0])
 	}
-	for _, want := range []string{"Internal", "80 MiB", "20m0s", "5 samples"} {
+	if f[0].Subject != "PID 77 NMT Internal" {
+		t.Errorf("subject = %q, want PID + category only", f[0].Subject)
+	}
+	for _, want := range []string{"leaky.App", "Internal", "80 MiB", "20m0s", "5 samples"} {
 		if !strings.Contains(f[0].Message, want) {
 			t.Errorf("message %q missing %q", f[0].Message, want)
 		}
