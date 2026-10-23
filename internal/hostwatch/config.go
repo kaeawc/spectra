@@ -52,6 +52,21 @@ type Config struct {
 		TotalWarnPct     float64       `yaml:"total_warn_pct"`
 		TotalCriticalPct float64       `yaml:"total_critical_pct"`
 	} `yaml:"spawn"`
+	Sustained SustainedConfig `yaml:"sustained"`
+}
+
+// SustainedConfig tunes the sustained per-process CPU detector.
+type SustainedConfig struct {
+	CPUPct      float64       `yaml:"cpu_pct"`
+	Window      time.Duration `yaml:"window"`
+	MinFraction float64       `yaml:"min_fraction"`
+	// Allowlist holds case-insensitive process-name patterns (path.Match
+	// syntax) for expected long-running work that must not alert.
+	Allowlist []string `yaml:"allowlist"`
+}
+
+func DefaultSustainedConfig() SustainedConfig {
+	return SustainedConfig{CPUPct: 50, Window: 15 * time.Minute, MinFraction: 0.9}
 }
 
 func DefaultConfig() Config {
@@ -82,6 +97,7 @@ func DefaultConfig() Config {
 	c.Spawn.UIDCriticalPct = 70
 	c.Spawn.TotalWarnPct = 50
 	c.Spawn.TotalCriticalPct = 80
+	c.Sustained = DefaultSustainedConfig()
 	return c
 }
 func LoadConfig(path string, readFile func(string) ([]byte, error)) (Config, error) {
@@ -156,6 +172,7 @@ func validateConfig(c Config) (Config, error) {
 		problems = append(problems, fmt.Errorf("spawn.interval must be at least 1s"))
 		c.Spawn.Interval = d.Spawn.Interval
 	}
+	problems = append(problems, validateSustained(&c.Sustained)...)
 	for _, field := range []struct {
 		name           string
 		warn, critical *float64
@@ -170,4 +187,22 @@ func validateConfig(c Config) (Config, error) {
 		}
 	}
 	return c, errors.Join(problems...)
+}
+
+func validateSustained(s *SustainedConfig) []error {
+	d := DefaultSustainedConfig()
+	var problems []error
+	if !(s.CPUPct > 0) {
+		problems = append(problems, fmt.Errorf("sustained.cpu_pct must be positive"))
+		s.CPUPct = d.CPUPct
+	}
+	if s.Window < time.Minute {
+		problems = append(problems, fmt.Errorf("sustained.window must be at least 1m"))
+		s.Window = d.Window
+	}
+	if !(s.MinFraction > 0.5 && s.MinFraction <= 1) {
+		problems = append(problems, fmt.Errorf("sustained.min_fraction must be above 0.5 and at most 1"))
+		s.MinFraction = d.MinFraction
+	}
+	return problems
 }
