@@ -24,6 +24,7 @@ type slowSignals struct {
 	Power sysinfo.PowerState
 	Procs []process.Info
 	Now   time.Time // optional; used for family ages
+	Cores int       // logical CPU count; 0 if unknown
 }
 
 type slowCause struct {
@@ -38,6 +39,7 @@ type slowDeps struct {
 	procs   func() []process.Info
 	connect func(context.Context) (slowWatchClient, bool)
 	now     func() time.Time
+	cpus    func() int // logical CPU count; nil or 0 means unknown
 }
 
 type slowWatchClient interface {
@@ -58,7 +60,8 @@ func defaultSlowDeps() slowDeps {
 			}
 			return watchclient.Connect(ctx, os.Getenv, paths)
 		},
-		now: time.Now,
+		now:  time.Now,
+		cpus: runtime.NumCPU,
 	}
 }
 
@@ -75,6 +78,9 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 		return 2
 	}
 	sig := slowSignals{Load: deps.load(), Power: deps.power(), Procs: deps.procs()}
+	if deps.cpus != nil {
+		sig.Cores = deps.cpus()
+	}
 	if deps.now != nil {
 		sig.Now = deps.now()
 	}
@@ -194,7 +200,7 @@ func rankSlowCauses(s slowSignals) []slowCause {
 	var causes []slowCause
 	causes = appendMemoryCauses(causes, s.Load)
 	causes = appendThermalCauses(causes, s.Power)
-	causes = appendFamilyCauses(causes, slowFamilies(s.Procs, s.Now))
+	causes = appendFamilyCauses(causes, slowFamilies(s.Procs, s.Now), s.Cores)
 	causes = appendProcessCauses(causes, s.Procs)
 	sort.SliceStable(causes, func(i, j int) bool {
 		return severityRank(causes[i].Severity) < severityRank(causes[j].Severity)

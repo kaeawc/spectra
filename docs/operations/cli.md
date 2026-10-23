@@ -29,7 +29,8 @@ Both commands accept `--no-daemon`, and `SPECTRA_NO_DAEMON=1` disables daemon
 access globally.
 
 `whatswrong` also sums CPU per process family and reports multi-process
-families at 100% CPU or more as "`<family>` uses N% of total CPU", ranked above
+simulator/emulator families at 100% CPU or more (browser, build and Xcode
+families need a higher bar) as "`<family>` uses N% of machine CPU", ranked above
 single-process findings. Each names the family (for iOS simulators, the device
 UDID), its process count, the age of its oldest member, and its heaviest
 members; `--json` adds a `families` array. See

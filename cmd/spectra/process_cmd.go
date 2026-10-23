@@ -35,9 +35,11 @@ func runProcess(args []string) int {
 	if *fdBreakdown {
 		*deep = true
 	}
-	if *groupBy != "" && (*groupBy != "family" || *tree) {
-		fmt.Fprintf(os.Stderr, "invalid --group-by %q (supported: family; not combinable with --tree)\n", *groupBy)
-		return 2
+	if *groupBy != "" {
+		if msg := groupByConflict(fs, *groupBy); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+			return 2
+		}
 	}
 	filters, ok := processFiltersFromFlags(*minRSS, *minVSZ, *minElapsed, *ppid, *user)
 	if !ok {

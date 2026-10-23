@@ -127,6 +127,44 @@ member (so "steady for 3h" reads differently from a boot burst), and the
 heaviest members. Parent chains with missing parents or cycles stop the walk.
 The logic is pure and lives in `internal/process/family.go`.
 
+Matching rules: a process in a simulator device (own UDID path, or a
+`launchd_sim` ancestor) always stays in that device's family, even if it is
+MobileSafari or a runtime hosted inside `Xcode.app`. A `launchd_sim` with no
+UDID is keyed by its PID so devices never merge. Browsers match on the app
+bundle or binary name only, never on arguments or directory names. Compiler
+tools (`clang`, `ld`, ...) join the build family only under a build driver
+(`make`, `ninja`, `gradle`, `cargo`, `bazel`, ...). A parent that started after
+its child is ignored as PID reuse.
+
+`whatswrong` raises a finding for simulator and emulator families at 100% CPU
+or more (high at 200%). Browser, build and Xcode families need 400% or 50% of
+machine CPU and stay at medium. Titles read "N% of machine CPU" (family CPU
+divided by logical cores x 100); if the core count is unknown they fall back
+to the family's share of all process CPU. This is separate from the
+hostwatch "simulator process count high" alert, which counts processes and is
+unchanged.
+
+### Family JSON
+
+`spectra process --group-by family --json` prints an array; `spectra whatswrong
+--json` carries the multi-process ones under `families`. Each entry:
+
+| Field | Meaning |
+| --- | --- |
+| `key`, `kind`, `name` | Stable id, kind (`simulator`, `xcode`, `emulator`, `build`, `browser`, `other`) and display name |
+| `udid` | Simulator device UDID (simulator families only) |
+| `members` | Process count |
+| `cpu_pct` | Summed CPU in percent of one core (250 = 2.5 cores busy) |
+| `share_pct` | Share of CPU used by all listed processes (not of machine capacity) |
+| `rss_kib` | Summed RSS in KiB |
+| `started_at` | Earliest member start (RFC 3339); omitted when unknown |
+| `age_seconds` | Age of the oldest member in seconds; omitted when unknown |
+| `heaviest` | Top members: `pid`, `command`, `cpu_pct`, `age_seconds` |
+
+`--group-by family` cannot be combined with `--sort`, `--tree`, `--ppid`,
+`--user`, `--min-rss`, `--min-vsz` or `--min-elapsed` (exit status 2): filters
+would remove ancestors needed for attribution.
+
 ## Implementation reference
 
 Per-app attribution in `internal/detect/detect.go`:

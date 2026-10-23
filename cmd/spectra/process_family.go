@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -26,6 +27,26 @@ func emitProcessFamilies(w io.Writer, procs []process.Info, now time.Time, topN 
 	}
 	printProcessFamilies(w, fams)
 	return 0
+}
+
+// groupByConflict returns an error message when --group-by is combined with a
+// flag that would change or break family attribution (filters drop ancestors;
+// --sort and --tree do not apply to family rows), or is not a known grouping.
+func groupByConflict(fs *flag.FlagSet, groupBy string) string {
+	if groupBy != "family" {
+		return fmt.Sprintf("invalid --group-by %q (supported: family)", groupBy)
+	}
+	var bad []string
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "sort", "tree", "ppid", "user", "min-rss", "min-vsz", "min-elapsed":
+			bad = append(bad, "--"+f.Name)
+		}
+	})
+	if len(bad) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("--group-by family cannot be combined with %s", strings.Join(bad, ", "))
 }
 
 func printProcessFamilies(w io.Writer, fams []process.Family) {
