@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -27,37 +28,50 @@ var simUDIDRe = regexp.MustCompile(`(?i)CoreSimulator/Devices/([0-9a-f]{8}-[0-9a
 
 // Member is one process inside a Family, reported for the heaviest-members view.
 type Member struct {
-	PID     int           `json:"pid"`
-	Command string        `json:"command"`
-	CPUPct  float64       `json:"cpu_pct"`
-	Age     time.Duration `json:"age,omitempty"`
+	PID        int           `json:"pid"`
+	Command    string        `json:"command"`
+	CPUPct     float64       `json:"cpu_pct"`
+	Age        time.Duration `json:"-"`
+	AgeSeconds int64         `json:"age_seconds,omitempty"`
 }
 
 // Family is a group of related processes whose CPU is summed together.
+// CPUPct is in percent of one core (so 250 means 2.5 cores busy); SharePct is
+// the family's share of the CPU used by all listed processes, not of machine
+// capacity. Age and AgeSeconds are the age of the oldest member.
 type Family struct {
-	Key       string        `json:"key"`
-	Kind      string        `json:"kind"`
-	Name      string        `json:"name"`
-	UDID      string        `json:"udid,omitempty"`
-	Members   int           `json:"members"`
-	CPUPct    float64       `json:"cpu_pct"`
-	SharePct  float64       `json:"share_pct"` // of CPU used by all processes
-	RSSKiB    int64         `json:"rss_kib"`
-	StartedAt time.Time     `json:"started_at,omitempty"` // earliest member start
-	Age       time.Duration `json:"age,omitempty"`        // age of the oldest member
-	Heaviest  []Member      `json:"heaviest,omitempty"`
+	Key        string        `json:"key"`
+	Kind       string        `json:"kind"`
+	Name       string        `json:"name"`
+	UDID       string        `json:"udid,omitempty"`
+	Members    int           `json:"members"`
+	CPUPct     float64       `json:"cpu_pct"`
+	SharePct   float64       `json:"share_pct"`
+	RSSKiB     int64         `json:"rss_kib"`
+	StartedAt  *time.Time    `json:"started_at,omitempty"` // earliest member start
+	Age        time.Duration `json:"-"`
+	AgeSeconds int64         `json:"age_seconds,omitempty"`
+	Heaviest   []Member      `json:"heaviest,omitempty"`
 }
 
 type famID struct{ key, kind, name, udid string }
 
 var (
 	xcodeNames = setOf("xcodebuild", "xcode", "xcbbuildservice", "sourcekitservice", "ibtoold", "swift-build", "simulator")
-	buildNames = setOf("gradle", "make", "gmake", "ninja", "cmake", "cargo", "rustc", "clang", "clang++", "ld",
-		"swift-frontend", "swiftc", "javac", "kotlinc", "bazel", "mvn", "sbt", "compile", "link", "ccache")
-	browserApps = []struct{ match, name string }{
-		{"google chrome", "Google Chrome"}, {"chromium", "Chromium"}, {"microsoft edge", "Microsoft Edge"},
-		{"brave browser", "Brave Browser"}, {"firefox", "Firefox"}, {"safari", "Safari"},
-		{"com.apple.webkit", "Safari"}, {"/opera", "Opera"}, {"/arc.app/", "Arc"}, {"/chrome", "Google Chrome"},
+	// buildDrivers start build trees; their children are in the build family.
+	buildDrivers = setOf("gradle", "make", "gmake", "ninja", "cmake", "cargo", "bazel", "mvn", "sbt")
+	// buildTools only count as build when a driver (or Xcode) is an ancestor.
+	buildTools = setOf("clang", "clang++", "ld", "swift-frontend", "swiftc", "javac", "kotlinc", "rustc",
+		"compile", "link", "ccache", "cc", "c++", "gcc", "g++")
+	browserBundles = map[string]string{
+		"google chrome.app": "Google Chrome", "chromium.app": "Chromium", "microsoft edge.app": "Microsoft Edge",
+		"brave browser.app": "Brave Browser", "firefox.app": "Firefox", "safari.app": "Safari",
+		"arc.app": "Arc", "opera.app": "Opera",
+	}
+	browserBinaries = map[string]string{
+		"chrome": "Google Chrome", "google-chrome": "Google Chrome", "google-chrome-stable": "Google Chrome",
+		"chromium": "Chromium", "chromium-browser": "Chromium", "firefox": "Firefox", "firefox-bin": "Firefox",
+		"brave": "Brave Browser", "brave-browser": "Brave Browser", "microsoft-edge": "Microsoft Edge", "opera": "Opera",
 	}
 )
 
@@ -98,19 +112,21 @@ func GroupFamilies(procs []Info, now time.Time, topMembers int) []Family {
 		f.Members++
 		f.CPUPct += cpu
 		f.RSSKiB += p.RSSKiB
-		if started := procStart(p, now, age); !started.IsZero() && (f.StartedAt.IsZero() || started.Before(f.StartedAt)) {
-			f.StartedAt = started
+		if started := procStart(p, now, age); !started.IsZero() && (f.StartedAt == nil || started.Before(*f.StartedAt)) {
+			s := started
+			f.StartedAt = &s
 		}
 		if age > f.Age {
 			f.Age = age
 		}
-		members[id.key] = append(members[id.key], Member{PID: p.PID, Command: p.Command, CPUPct: cpu, Age: age})
+		members[id.key] = append(members[id.key], Member{PID: p.PID, Command: p.Command, CPUPct: cpu, Age: age, AgeSeconds: int64(age.Seconds())})
 	}
 	out := make([]Family, 0, len(groups))
 	for key, f := range groups {
 		if total > 0 {
 			f.SharePct = f.CPUPct / total * 100
 		}
+		f.AgeSeconds = int64(f.Age.Seconds())
 		f.Heaviest = topMembersByCPU(members[key], topMembers)
 		out = append(out, *f)
 	}
@@ -170,26 +186,57 @@ func procStart(p Info, now time.Time, age time.Duration) time.Time {
 	return time.Time{}
 }
 
-// resolveFamily classifies p directly, then lets unclassified or generic
-// build processes inherit the family of the nearest simulator/Xcode/emulator
-// ancestor. Missing parents and cycles end the walk.
-func resolveFamily(p Info, byPID map[int]Info) famID {
-	id, ok := directFamily(p)
-	if ok && id.kind != FamilyBuild {
-		return id
-	}
+// ancestors returns p's parent chain, nearest first. It stops at a missing
+// parent, a cycle, or a parent that started after its child (PID reuse).
+func ancestors(p Info, byPID map[int]Info) []Info {
+	var out []Info
 	seen := map[int]bool{p.PID: true}
 	cur := p
-	for hops := 0; hops < maxAncestorHops; hops++ {
-		parent, found := byPID[cur.PPID]
-		if !found || seen[parent.PID] {
+	for len(out) < maxAncestorHops {
+		parent, ok := byPID[cur.PPID]
+		if !ok || seen[parent.PID] {
+			break
+		}
+		if ps, cs := procStartRaw(parent), procStartRaw(cur); !ps.IsZero() && !cs.IsZero() && ps.After(cs) {
 			break
 		}
 		seen[parent.PID] = true
-		if pid, pok := directFamily(parent); pok && inherits(pid.kind) {
-			return pid
-		}
+		out = append(out, parent)
 		cur = parent
+	}
+	return out
+}
+
+// resolveFamily decides p's family. A simulator device (own UDID path, or a
+// launchd_sim ancestor) always wins, so Safari/WebKit helpers and runtimes
+// hosted inside Xcode.app stay with their device. Otherwise the process is
+// classified directly, with generic processes and build tools inheriting from
+// the nearest Xcode, emulator or build-driver ancestor.
+func resolveFamily(p Info, byPID map[int]Info) famID {
+	chain := ancestors(p, byPID)
+	if id, ok := simulatorFamily(p); ok {
+		return id
+	}
+	for _, a := range chain {
+		if id, ok := simulatorFamily(a); ok {
+			return id
+		}
+	}
+	id, ok := directFamily(p)
+	if ok && id.kind != FamilyBuild && !isBuildTool(p) {
+		return id
+	}
+	for _, a := range chain {
+		aid, aok := directFamily(a)
+		if !aok {
+			continue
+		}
+		if aid.kind == FamilyXcode || aid.kind == FamilyEmulator {
+			return aid
+		}
+		if aid.kind == FamilyBuild && isBuildTool(p) {
+			return aid
+		}
 	}
 	if ok {
 		return id
@@ -198,38 +245,61 @@ func resolveFamily(p Info, byPID map[int]Info) famID {
 	return famID{key: FamilyOther + ":" + name, kind: FamilyOther, name: name}
 }
 
-func inherits(kind string) bool {
-	return kind == FamilySimulator || kind == FamilyXcode || kind == FamilyEmulator
-}
-
-func directFamily(p Info) (famID, bool) {
-	lower := strings.ToLower(exeText(p))
-	name := strings.ToLower(commandName(p))
+func simulatorFamily(p Info) (famID, bool) {
 	if m := simUDIDRe.FindStringSubmatch(p.FullCommandLine + " " + p.ExecutablePath); m != nil {
 		udid := strings.ToUpper(m[1])
 		return famID{key: FamilySimulator + ":" + udid, kind: FamilySimulator, name: "Simulator " + udid, udid: udid}, true
 	}
-	if name == "launchd_sim" {
-		return famID{key: FamilySimulator + ":unknown", kind: FamilySimulator, name: "Simulator (unknown device)"}, true
+	if strings.ToLower(commandName(p)) == "launchd_sim" {
+		return famID{key: fmt.Sprintf("%s:launchd_sim-%d", FamilySimulator, p.PID), kind: FamilySimulator,
+			name: fmt.Sprintf("Simulator (launchd_sim pid %d)", p.PID)}, true
 	}
+	return famID{}, false
+}
+
+func isBuildTool(p Info) bool { return buildTools[strings.ToLower(commandName(p))] }
+
+func directFamily(p Info) (famID, bool) {
+	name := strings.ToLower(commandName(p))
 	if name == "emulator" || strings.HasPrefix(name, "qemu-") {
 		return famID{key: FamilyEmulator, kind: FamilyEmulator, name: "Emulator (qemu)"}, true
 	}
-	for _, b := range browserApps {
-		if strings.Contains(lower, b.match) {
-			return famID{key: FamilyBrowser + ":" + b.name, kind: FamilyBrowser, name: b.name}, true
-		}
+	if app := browserName(p); app != "" {
+		return famID{key: FamilyBrowser + ":" + app, kind: FamilyBrowser, name: app}, true
 	}
-	if xcodeNames[name] || strings.Contains(lower, "/xcode.app/") || strings.Contains(lower, "com.apple.dt.") {
+	exe := strings.ToLower(exeText(p))
+	if xcodeNames[name] || strings.Contains(exe, "/xcode.app/") || strings.HasPrefix(name, "com.apple.dt.") {
 		return famID{key: FamilyXcode, kind: FamilyXcode, name: "Xcode"}, true
 	}
-	if buildNames[name] || isGradleJVM(name, p.FullCommandLine) {
+	if buildDrivers[name] || isGradleJVM(name, p.FullCommandLine) {
 		return famID{key: FamilyBuild, kind: FamilyBuild, name: "Build tools"}, true
 	}
 	return famID{}, false
 }
 
-// commandName is the short executable name, lowercase-agnostic.
+// browserName matches the executable's app bundle (macOS) or binary name
+// (Linux), never arbitrary arguments or directory names.
+func browserName(p Info) string {
+	exe := exeText(p)
+	lower := strings.ToLower(exe)
+	if i := strings.Index(lower, ".app/"); i >= 0 {
+		bundle := lower[:i+4]
+		if j := strings.LastIndex(bundle, "/"); j >= 0 {
+			bundle = bundle[j+1:]
+		}
+		return browserBundles[bundle]
+	}
+	return browserBinaries[strings.ToLower(filepath.Base(firstToken(exe)))]
+}
+
+func firstToken(s string) string {
+	if f := strings.Fields(s); len(f) > 0 {
+		return f[0]
+	}
+	return s
+}
+
+// commandName is the short executable name.
 func commandName(p Info) string {
 	if p.Command != "" {
 		return filepath.Base(p.Command)
@@ -250,13 +320,16 @@ func isGradleJVM(name, cmdline string) bool {
 	return false
 }
 
-// exeText is the executable portion of the process, excluding arguments, so
-// a "grep chrome" argument does not classify as a browser.
+// exeText is the executable portion of the process, excluding arguments.
 func exeText(p Info) string {
 	if p.ExecutablePath != "" {
 		return p.ExecutablePath
 	}
 	s := p.FullCommandLine
+	if !strings.HasPrefix(s, "/") {
+		// relative argv[0]: arguments may contain paths, so use only the name
+		return firstToken(s)
+	}
 	if i := strings.Index(s, " -"); i >= 0 {
 		s = s[:i]
 	}

@@ -69,7 +69,7 @@ func TestGroupFamiliesThreeSimulators(t *testing.T) {
 			t.Errorf("%s share = %v, want %v", udid, f.SharePct, wantShare)
 		}
 	}
-	if fams[len(fams)-1].Kind != FamilyOther && fams[0].Kind != FamilySimulator {
+	if fams[0].Kind != FamilySimulator {
 		t.Errorf("simulators should rank first: %+v", fams[0])
 	}
 	var git *Family
@@ -106,6 +106,54 @@ func TestGroupFamiliesClassification(t *testing.T) {
 				{PID: 12, PPID: 1, Command: "java", FullCommandLine: "java -cp x org.gradle.launcher.daemon.bootstrap.GradleDaemon"},
 			},
 			wantKeys: map[string]int{FamilyBuild: 3},
+		},
+		{
+			name: "generic compiler tools without a driver stay ungrouped",
+			procs: []Info{
+				{PID: 10, PPID: 1, Command: "clang"},
+				{PID: 11, PPID: 1, Command: "ld"},
+				{PID: 12, PPID: 1, Command: "link"},
+			},
+			wantKeys: map[string]int{"other:clang": 1, "other:ld": 1, "other:link": 1},
+		},
+		{
+			name: "browser names in arguments or directories do not match",
+			procs: []Info{
+				{PID: 10, PPID: 1, Command: "vim", FullCommandLine: "vim /tmp/chrome/notes"},
+				{PID: 11, PPID: 1, Command: "rg", FullCommandLine: "rg foo /home/u/src/chrome"},
+				{PID: 12, PPID: 1, Command: "safaridriver", ExecutablePath: "/usr/bin/safaridriver"},
+				{PID: 13, PPID: 1, Command: "com.apple.WebKit.WebContent", ExecutablePath: "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent"},
+				{PID: 14, PPID: 1, Command: "vim", FullCommandLine: "vim /Applications/Safari.app/notes"},
+			},
+			wantKeys: map[string]int{"other:vim": 2, "other:rg": 1, "other:safaridriver": 1, "other:com.apple.WebKit.WebContent": 1},
+		},
+		{
+			name: "Xcode-hosted runtime and MobileSafari stay in the device family",
+			procs: []Info{
+				{PID: 50, PPID: 1, Command: "launchd_sim", FullCommandLine: "launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/" + udidA + "/data/var/run/launchd_bootstrap.plist"},
+				{PID: 51, PPID: 50, Command: "backboardd", ExecutablePath: "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/backboardd"},
+				{PID: 52, PPID: 51, Command: "MobileSafari", ExecutablePath: "/Applications/Safari.app/MobileSafari"},
+				{PID: 53, PPID: 52, Command: "com.apple.WebKit.WebContent"},
+			},
+			wantKeys: map[string]int{"simulator:" + udidA: 4},
+		},
+		{
+			name: "launchd_sim without UDID is keyed by pid",
+			procs: []Info{
+				{PID: 70, PPID: 1, Command: "launchd_sim"},
+				{PID: 71, PPID: 70, Command: "a"},
+				{PID: 80, PPID: 1, Command: "launchd_sim"},
+				{PID: 81, PPID: 80, Command: "b"},
+			},
+			wantKeys: map[string]int{"simulator:launchd_sim-70": 2, "simulator:launchd_sim-80": 2},
+		},
+		{
+			name: "parent started after child (pid reuse) is not an ancestor",
+			procs: []Info{
+				{PID: 60, PPID: 1, Command: "launchd_sim", StartedAt: familyNow.Add(-time.Minute)},
+				{PID: 61, PPID: 60, Command: "old", StartedAt: familyNow.Add(-time.Hour)},
+			},
+			wantKeys: map[string]int{"simulator:launchd_sim-60": 1, "other:old": 1},
 		},
 		{
 			name: "browsers split by app",
@@ -176,7 +224,7 @@ func TestGroupFamiliesEmptyAndAge(t *testing.T) {
 		{PID: 2, PPID: 1, Command: "clang", StartTime: familyNow.Add(-time.Hour), CPUPct: 50},
 	}
 	f := GroupFamilies(procs, familyNow, 0)[0]
-	if f.Age != time.Hour || f.StartedAt != familyNow.Add(-time.Hour) {
+	if f.Age != time.Hour || f.AgeSeconds != 3600 || f.StartedAt == nil || !f.StartedAt.Equal(familyNow.Add(-time.Hour)) {
 		t.Errorf("age/start = %v/%v", f.Age, f.StartedAt)
 	}
 	if f.Heaviest[0].PID != 2 || f.SharePct != 100 {
