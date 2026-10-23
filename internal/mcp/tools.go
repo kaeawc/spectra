@@ -15,6 +15,7 @@ import (
 	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
+	"github.com/kaeawc/spectra/internal/heap"
 	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -41,7 +42,7 @@ func toolDefinitions() []ToolDefinition {
 		snapshotToolDef(),
 		diagnoseToolDef(),
 		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
+		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
 		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
@@ -257,6 +258,11 @@ func diagnoseToolDef() ToolDefinition {
 			"rules_config": stringProp("spectra.yml path."),
 			"persist":      boolProp("Save as issues."),
 			"include_raw":  boolProp("Return raw findings."),
+			"thread_dump_pids": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "integer"},
+				"description": "JVM PIDs to thread-dump for jvm-deadlock (live only).",
+			},
 		}, nil),
 	}
 }
@@ -399,7 +405,7 @@ func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *p
 			scope = "target"
 		}
 	}
-	findings, err := s.evaluateLiveRules("")
+	findings, err := s.evaluateLiveRules("", triageThreadDumpPIDs(p, rawOut)...)
 	if err != nil {
 		return evidence, next
 	}
@@ -478,6 +484,18 @@ func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut m
 	return evidence
 }
 
+// triageThreadDumpPIDs targets a thread dump (for jvm-deadlock) at the triaged
+// PID only when it was confirmed to be a JVM; non-JVM PIDs are never dumped.
+func triageThreadDumpPIDs(p triageParams, rawOut map[string]interface{}) []int {
+	if p.PID <= 0 {
+		return nil
+	}
+	if _, ok := rawOut["jvm"]; !ok {
+		return nil
+	}
+	return []int{p.PID}
+}
+
 // triageTargetInfo names the resolved identifiers a triage call is scoped to.
 // Subjects on findings are matched against the AppNames set (app-rule
 // subjects use the .app display name) or the PID set (process/JVM-rule
@@ -544,11 +562,21 @@ func filterFindingsForTarget(findings []rules.Finding, t triageTargetInfo) []rul
 			out = append(out, f)
 			continue
 		}
-		if pidToken != "" && strings.HasPrefix(f.Subject, pidToken) {
+		if pidToken != "" && subjectHasPIDToken(f.Subject, pidToken) {
 			out = append(out, f)
 		}
 	}
 	return out
+}
+
+// subjectHasPIDToken reports whether subject starts with token ("PID 12") on a
+// PID boundary, so "PID 12 (java)" matches but "PID 123" does not.
+func subjectHasPIDToken(subject, token string) bool {
+	rest, ok := strings.CutPrefix(subject, token)
+	if !ok {
+		return false
+	}
+	return rest == "" || rest[0] < '0' || rest[0] > '9'
 }
 
 func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
@@ -716,15 +744,19 @@ func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
 
 func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 	var p struct {
-		SnapshotID  string `json:"snapshot_id"`
-		RulesConfig string `json:"rules_config"`
-		Persist     bool   `json:"persist"`
-		IncludeRaw  bool   `json:"include_raw"`
+		SnapshotID     string `json:"snapshot_id"`
+		RulesConfig    string `json:"rules_config"`
+		Persist        bool   `json:"persist"`
+		IncludeRaw     bool   `json:"include_raw"`
+		ThreadDumpPIDs []int  `json:"thread_dump_pids"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig)
+	if p.SnapshotID != "" && len(p.ThreadDumpPIDs) > 0 {
+		return toolError("thread_dump_pids requires a live snapshot; omit snapshot_id")
+	}
+	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig, p.ThreadDumpPIDs...)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -814,20 +846,21 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 		op = "list"
 	}
 	handlers := map[string]func(jvmParams) ToolResult{
-		"list":           s.toolJVMList,
-		"inspect":        s.toolJVMInspect,
-		"explain":        s.toolJVMExplain,
-		"thread_dump":    func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
-		"gc_stats":       s.toolJVMGCStats,
-		"vm_memory":      s.toolJVMVMMemory,
-		"heap_histogram": func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
-		"attach":         s.toolJVMAttach,
-		"mbeans":         s.toolJVMMBeans,
-		"mbean_read":     s.toolJVMMBeanRead,
-		"mbean_invoke":   s.toolJVMMBeanInvoke,
-		"probe":          s.toolJVMProbe,
-		"heap_dump":      s.toolJVMHeapDump,
-		"flamegraph":     s.toolJVMFlamegraph,
+		"list":               s.toolJVMList,
+		"inspect":            s.toolJVMInspect,
+		"explain":            s.toolJVMExplain,
+		"thread_dump":        func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
+		"gc_stats":           s.toolJVMGCStats,
+		"vm_memory":          s.toolJVMVMMemory,
+		"heap_histogram":     func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
+		"attach":             s.toolJVMAttach,
+		"mbeans":             s.toolJVMMBeans,
+		"mbean_read":         s.toolJVMMBeanRead,
+		"mbean_invoke":       s.toolJVMMBeanInvoke,
+		"probe":              s.toolJVMProbe,
+		"heap_dump":          s.toolJVMHeapDump,
+		"heap_leak_suspects": s.toolJVMHeapLeakSuspects,
+		"flamegraph":         s.toolJVMFlamegraph,
 	}
 	handler, ok := handlers[op]
 	if !ok {
@@ -852,6 +885,7 @@ type jvmParams struct {
 	MBeanOperation   string `json:"mbean_operation"`
 	IncludeRaw       bool   `json:"include_raw"`
 	AutoAttach       *bool  `json:"auto_attach,omitempty"`
+	Limit            int    `json:"limit"`
 }
 
 // withAgentAttached invokes op; if the agent isn't attached and auto-attach is
@@ -1036,7 +1070,66 @@ func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
 	if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote heap dump for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+	return toolText(toolEnvelope{
+		Summary:     fmt.Sprintf("wrote heap dump for pid %d", p.PID),
+		NextActions: []string{fmt.Sprintf("jvm heap_leak_suspects with dest=%s and confirm_sensitive=true", p.Dest)},
+		Raw:         map[string]interface{}{"pid": p.PID, "dest": p.Dest},
+		Timestamp:   s.now(),
+	})
+}
+
+// validateHPROFPath requires path to be an absolute path to an existing
+// regular file (not a symlink) with an .hprof extension, so the tool cannot be
+// pointed at arbitrary files, directories, devices, or symlink targets.
+func validateHPROFPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return errors.New("heap dump path must be absolute")
+	}
+	if !strings.EqualFold(filepath.Ext(path), ".hprof") {
+		return errors.New("heap dump path must have a .hprof extension")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return errors.New("heap dump path does not exist or is not readable")
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("heap dump path must be a regular file")
+	}
+	return nil
+}
+
+// toolJVMHeapLeakSuspects analyzes a saved .hprof (typically the dest of a
+// prior heap_dump) and reports retained-size leak suspects with their
+// accumulation points and shortest paths from GC roots.
+func (s *Server) toolJVMHeapLeakSuspects(p jvmParams) ToolResult {
+	if !p.ConfirmSensitive {
+		return toolError("jvm heap_leak_suspects requires confirm_sensitive=true")
+	}
+	if p.Dest == "" {
+		return toolError("jvm heap_leak_suspects requires dest (path to an .hprof heap dump)")
+	}
+	if err := validateHPROFPath(p.Dest); err != nil {
+		return toolError(err.Error())
+	}
+	graph, err := heap.ParseObjectGraphFile(p.Dest)
+	if err != nil {
+		return toolError(fmt.Sprintf("parse heap dump: %v", err))
+	}
+	rep := heap.LeakSuspects(heap.ComputeRetained(graph), heap.LeakOptions{MaxSuspects: p.Limit})
+	evidence := make([]string, 0, len(rep.Suspects))
+	for _, sus := range rep.Suspects {
+		evidence = append(evidence, sus.Description)
+	}
+	env := toolEnvelope{
+		Summary:   fmt.Sprintf("%d leak suspect(s) in %s (reachable heap %d bytes)", len(rep.Suspects), p.Dest, rep.ReachableBytes),
+		Evidence:  evidence,
+		Raw:       rep,
+		Timestamp: s.now(),
+	}
+	if len(rep.Suspects) > 0 {
+		env.NextActions = []string{fmt.Sprintf("spectra jvm heap-hprof --leak-suspects --file-issues %s", p.Dest)}
+	}
+	return toolText(env)
 }
 
 func (s *Server) toolJVMFlamegraph(p jvmParams) ToolResult {
@@ -1552,12 +1645,15 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 	return nil
 }
 
-func (s *Server) evaluateLiveRules(config string) ([]rules.Finding, error) {
-	_, findings, err := s.evaluateRules("", config)
+func (s *Server) evaluateLiveRules(config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
+	_, findings, err := s.evaluateRules("", config, threadDumpPIDs...)
 	return findings, err
 }
 
-func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []rules.Finding, error) {
+// evaluateRules runs the catalog against a stored snapshot or a fresh live
+// one. threadDumpPIDs only applies to live snapshots: it names the JVMs to
+// thread-dump for the jvm-deadlock rule.
+func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int) (snapshot.Snapshot, []rules.Finding, error) {
 	var snap snapshot.Snapshot
 	var err error
 	if snapshotID != "" {
@@ -1566,7 +1662,12 @@ func (s *Server) evaluateRules(snapshotID, config string) (snapshot.Snapshot, []
 			return snap, nil, err
 		}
 	} else {
-		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version})
+		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
+			SpectraVersion: s.Version,
+			ThreadDumpPIDs: threadDumpPIDs,
+			// attachJVMHistory below records these JVMs as history samples.
+			JVMOpts: jvm.CollectOptions{SampleNMT: true},
+		})
 	}
 	catalog, err := resolveRulesCatalog(config)
 	if err != nil {

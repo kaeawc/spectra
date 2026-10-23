@@ -19,9 +19,13 @@ adapt to. The JVM adapter parses both `jcmd GC.class_histogram` output and
 binary `.hprof` heap dumps (`ParseHPROF` / `HPROFParser`) into structured
 per-class histograms, compares histogram snapshots, and ranks shallow-size and
 growth suspects — so an `.hprof` can be diffed against a live histogram or
-against another dump to shortlist leak suspects. It does not yet parse the
-`.hprof` object *reference graph*, so dominator trees, retained sizes,
-paths-to-GC-roots, and object queries remain future work.
+against another dump to shortlist leak suspects. It also parses the `.hprof`
+object *reference graph* (`ParseObjectGraph`) and builds its dominator tree
+(`ComputeRetained` / `RankRetained`) so objects and classes can be ranked by
+retained size, traces shortest paths to GC roots (`PathsToGCRoots`), and
+produces an automated leak-suspects report (`LeakSuspects`). Object queries
+(OQL) are out of scope: the MCP surface makes the assistant the query
+interface.
 
 Spectra is intended to **supplant VisualVM** for the day-to-day
 "what's this Java process doing" question. JVM inspection is a
@@ -37,12 +41,20 @@ spectra jvm explain [--samples 1] [--interval 1s] <pid>
 spectra jvm thread-dump [--json] [--summary] <pid>
 spectra jvm heap-histogram [--json] [--suspects N] <pid>
 spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>
-spectra jvm heap-hprof [--json] [--suspects N] <file.hprof>
+spectra jvm heap-hprof [--json] [--suspects N] [--retained] <file.hprof>
+spectra jvm heap-hprof --leak-suspects [--threshold 10] [--file-issues] [--json] <file.hprof>
+spectra jvm heap-hprof --paths <0xID|class> [--max-paths 3] [--json] <file.hprof>
+spectra jvm dominators [--json] [--top N] <file.hprof>
 spectra jvm heap-hprof compare [--json] [--suspects N] <before.hprof> <after.hprof>
 spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm gc-stats [--json] <pid>
 spectra jvm gc-log [--json] <file>
 spectra jvm vm-memory [--json] <pid>
+spectra jvm nmt [--json] [--top N] <pid>
+spectra jvm nmt detail [--json] [--top N] <pid>
+spectra jvm nmt baseline <pid>
+spectra jvm nmt diff [--json] [--top N] <pid>
+spectra jvm nmt compare [--json] [--top N] <before-file> <after-file>
 spectra jvm jmx status [--json] <pid>
 spectra jvm jmx start-local [--json] <pid>
 spectra jvm attach [--agent <spectra-agent.jar>] [--json] <pid>
@@ -72,6 +84,104 @@ into the same class histogram the live `heap-histogram` produces, so a dump can
 be ranked for its largest classes or diffed against another dump to shortlist
 leak suspects. `heap-histogram compare` auto-detects its inputs, so each file may
 be a text `GC.class_histogram` capture or a binary `.hprof`.
+
+`heap-hprof --retained` (and its alias `dominators`) goes beyond shallow sizes:
+it builds the object reference graph, computes the dominator tree over the GC
+roots, and ranks objects and classes by **retained size** — the memory that
+would be freed if the object (or every instance of the class) were collected.
+
+- **Graph.** Instance reference fields are resolved from each `CLASS_DUMP`'s
+  instance-field descriptors, walking the superclass chain; object-array
+  elements are edges; class objects are nodes whose edges are their
+  superclass, class loader, and object-typed static fields, and every instance
+  references its class. Class objects have zero shallow size so totals match
+  the histogram. Both 4- and 8-byte identifier sizes are supported.
+- **Dominators.** A virtual super-root points at every GC root; immediate
+  dominators come from Lengauer-Tarjan (path compression, O(E log N)) and an
+  object's retained size is its shallow size plus that of everything it
+  dominates. Objects not reachable from a GC root are excluded.
+- **Class retained size** sums the retained sizes of instances that are not
+  dominated by another instance of the same class, so recursive structures
+  (list nodes, tree nodes) are not double counted. It is a lower bound on the
+  retained size of the instance set as a whole.
+- **Memory.** The graph is held in memory as int32-indexed flat arrays
+  (CSR edges): roughly 30 bytes per object plus 4 bytes per reference for the
+  graph (about double, plus 8 bytes per reference, transiently while ids are
+  resolved), and about 70 bytes per reachable object plus 4 bytes per
+  reference while the dominator tree is built. Plan for a few GiB of RAM per
+  ~20 million objects; dumps beyond ~2^31 objects or references are rejected;
+  there is no on-disk index yet. Path queries add a
+  reverse index (8 bytes per object plus 4 per reference) on first use.
+
+`heap-hprof --leak-suspects` is the headless equivalent of MAT's leak-suspects
+report:
+
+- **GC roots** are kept with their kind (`jni_global`, `jni_local`,
+  `java_frame`, `native_stack`, `sticky_class`, `thread_block`,
+  `monitor_used`, `thread_object`, `interned_string`, `finalizing`,
+  `debugger`, `reference_cleanup`, `vm_internal`, `jni_monitor`, `unknown`);
+  thread-scoped roots carry the owning thread object id.
+- **Suspects.** Each top-level dominator subtree (a direct child of the
+  super-root) that retains at least `--threshold` percent of the reachable
+  heap (default 10%) is an object suspect. Smaller top-level subtrees are
+  grouped by class; a class whose instances together cross the threshold is a
+  class suspect (many independently rooted instances, such as sessions or
+  listeners). Class objects themselves are never grouped (they would all
+  collapse into `java.lang.Class`); a class's static-field holdings surface as
+  object suspects when one class crosses the threshold.
+- **Accumulation point.** From an object suspect, Spectra descends the
+  dominator tree while one child retains at least 80% of its parent. Where
+  that stops, memory fans out across many objects; this is typically the
+  backing array of the collection that keeps growing. The JSON field
+  `direct_children` counts the point's immediate dominator-tree children, not
+  its whole subtree.
+- **Path to root.** Each suspect carries the shortest reference path from a GC
+  root to its accumulation point (or to the largest instance of a class
+  suspect), found by a backwards breadth-first search. `--paths` runs the same
+  search for any object id or for every instance of a class, returning paths
+  from up to `--max-paths` distinct roots.
+- **Issues.** `--file-issues` records each suspect as a
+  `jvm-heap-leak-suspect` finding in the local issues store, keyed by the
+  suspect's class. Analyzing a later dump refreshes the same issue, and
+  `spectra issues list` / `acknowledge` / `dismiss` apply as usual. The host
+  must already be registered by `spectra issues check` or a stored snapshot.
+  `--json` returns the report together with the findings.
+
+MCP clients get the same report from the `jvm` tool's `heap_leak_suspects`
+operation (`dest` = the `.hprof` path, `confirm_sensitive=true`). After
+`heap_dump`, the tool suggests `heap_leak_suspects` as the next action.
+
+`nmt` is the native-memory counterpart to `heap-histogram`. It needs the target
+JVM started with `-XX:NativeMemoryTracking=summary` (or `=detail` for call
+sites) and reports a clear error otherwise.
+
+- `nmt <pid>` parses `VM.native_memory summary` into per-category reserved and
+  committed sizes, largest committed first.
+- `nmt detail <pid>` parses `VM.native_memory detail`: the summary plus every
+  malloc/mmap call site (symbolized native stack, category, reserved/committed
+  size), sorted by committed size, and the virtual memory map (reserved regions
+  with their committed sub-ranges and reserving stacks). `--json` emits all
+  sites and regions; the text view prints the top `--top N` sites.
+- `nmt baseline <pid>` then `nmt diff <pid>` use HotSpot's own
+  `VM.native_memory baseline` / `summary.diff` to show per-category growth since
+  the baseline.
+- `nmt compare <before> <after>` diffs two saved `summary` or `detail`
+  captures, sorting categories by committed growth. When both files are detail
+  captures it also diffs call sites — matched by kind, category and symbolized stack (unsymbolized frames collapse to `<unknown>`), ignoring
+  addresses, so captures from different runs line up — to attribute native
+  growth to the allocating call site.
+
+When a JVM runs with `-XX:NativeMemoryTracking=summary|detail`, history sampling
+(`spectra rules`, MCP rules evaluation; not `spectra jvm` or snapshots) records per-category committed KiB (one bounded `jcmd
+VM.native_memory summary`, 5 s timeout) in the JVM sample history. The
+`jvm-native-memory-growth` rule uses it to flag a category that grows steadily
+(default: at least 64 MiB and 25% over at least 4 samples spanning 15 minutes;
+`Class`/`Code`/`Compiler` only after the process is 30 minutes old) and points
+at `nmt baseline` / `nmt diff`. Spectra never enables NMT on a JVM itself; with
+NMT off nothing is sampled and the rule stays quiet. No daemon sampler records
+JVM history yet, so the rule needs history built up by repeated `spectra rules`
+or MCP `evaluateRules` runs. See
+[recommendations engine](../design/recommendations-engine.md).
 
 Daemon methods:
 
@@ -121,7 +231,7 @@ JDK commands:
 | Heap dump | `jcmd <pid> GC.heap_dump <path>` |
 | Heap layout | `jcmd <pid> GC.heap_info` |
 | Metaspace / compressed class space | `jcmd <pid> VM.metaspace` |
-| Native memory tracking | `jcmd <pid> VM.native_memory summary` |
+| Native memory tracking | `jcmd <pid> VM.native_memory summary`, `detail`, `baseline`, `summary.diff` |
 | Classloader metadata | `jcmd <pid> VM.classloader_stats` |
 | JIT code cache | `jcmd <pid> Compiler.codecache`, `Compiler.CodeHeap_Analytics` |
 | Local JMX connector | `jcmd <pid> ManagementAgent.status`, `ManagementAgent.start_local` |
@@ -371,3 +481,19 @@ Implemented:
     (`-Xlog:gc*`, `-verbose:gc`, `-XX:+PrintGC*`, or `-Xloggc:`) and no GC log
     was discovered, suggesting `-Xlog:gc*:file=...` so the next incident leaves
     per-pause evidence.
+16. Heap-dump discovery: `.hprof` files left by
+    `-XX:+HeapDumpOnOutOfMemoryError` are located in each running JVM's
+    `-XX:HeapDumpPath` (a file or directory; relative paths and `%p` are
+    resolved) or, when that flag is absent, as `java_pid<PID>.hprof` in its
+    working directory (deep-mode `lsof` cwd, else `user.dir`). Directory reads
+    are bounded (1000 entries, newest 10 dumps per JVM). Results land in the
+    snapshot's `heap_dumps` and surface via the `jvm-heap-dump-found`
+    recommendation, which links the dump to the PID with its size and mtime
+    and points at `spectra jvm heap-hprof <file>`.
+17. Deadlock detection: `spectra jvm thread-dump --summary <pid>` reports
+    Java-level lock cycles, and the high-severity `jvm-deadlock`
+    recommendation names each cycle's threads, the lock each waits for, and
+    its holder. Thread dumps pause the JVM at a safepoint, so they are taken
+    only for explicitly targeted PIDs (`spectra rules --thread-dump-pid`,
+    MCP `diagnose thread_dump_pids`, or MCP `triage` on a JVM PID), never for
+    every JVM on every snapshot.

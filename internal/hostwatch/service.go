@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -44,6 +46,13 @@ type ServiceOptions struct {
 	Notifier     Notifier
 	SpawnBackend SpawnBackend
 	UID          func() int
+	// Runner and OS drive the sustained-CPU probe. When unset they are taken
+	// from a *Collector Collector; a custom Collector without a Runner
+	// leaves the probe disabled.
+	Runner proc.Runner
+	OS     hostos.Kind
+	// ReadFile reads /proc files for the Linux sustained-CPU delta.
+	ReadFile func(string) ([]byte, error)
 }
 type subscriber struct {
 	ch      chan notification
@@ -58,6 +67,8 @@ type Service struct {
 	engine               *Engine
 	mu                   sync.RWMutex
 	sampleMu             sync.Mutex
+	sustMu               sync.Mutex
+	sustained            *sustainedState
 	spawnMu              sync.Mutex
 	spawnTracker         spawnTracker
 	spawnOverrun         bool
@@ -110,6 +121,7 @@ func NewService(opts ServiceOptions) *Service {
 		opts.UID = currentUID
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
+	svc.initSustained()
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()
@@ -123,10 +135,10 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	return svc
 }
-func (s *Service) Run(ctx context.Context) error {
-	if s.opts.Store == nil {
-		return fmt.Errorf("watch store is required")
-	}
+
+// restore loads firing alerts into the engine and seeds the sustained tracker
+// with the restored sustained alerts so they survive warm-up unresolved.
+func (s *Service) restore(ctx context.Context) error {
 	rows, err := s.opts.Store.ListAlerts(ctx, "firing", 2000)
 	if err != nil {
 		return fmt.Errorf("watch restore alerts: %w", err)
@@ -138,6 +150,16 @@ func (s *Service) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.engine.Restore(restored)
 	s.mu.Unlock()
+	s.seedSustained(s.opts.Clock.Now(), restored)
+	return nil
+}
+func (s *Service) Run(ctx context.Context) error {
+	if s.opts.Store == nil {
+		return fmt.Errorf("watch store is required")
+	}
+	if err := s.restore(ctx); err != nil {
+		return err
+	}
 	spawnCtx, cancelSpawn := context.WithCancel(ctx)
 	spawnDone := make(chan struct{})
 	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
@@ -286,6 +308,11 @@ func (s *Service) Tick(ctx context.Context) error {
 		}
 	}
 	s.maintenance(ctx, sample.At)
+	// Last, so a slow one-shot `sample` (3s cap) never delays the slow-tick
+	// alert persistence, notifications or maintenance. It takes its own
+	// timestamp: sample.At predates collection, persistence and maintenance,
+	// and ps etime is only meaningful against the time of the ps snapshot.
+	s.TickSustained(ctx, s.opts.Clock.Now().UTC())
 	return nil
 }
 func (s *Service) updateSelfGuard(cpu float64) {
