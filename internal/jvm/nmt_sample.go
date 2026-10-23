@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // DefaultNMTSampleTimeout bounds the jcmd VM.native_memory summary call made
@@ -35,9 +36,10 @@ func NMTEnabledInArgs(vmArgs string) bool {
 // CtxCmdRunner is a CmdRunner whose child process is killed when ctx ends.
 type CtxCmdRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-// DefaultCtxRunner runs the real command and kills it when ctx is done.
+// DefaultCtxRunner runs the real command through the proc.Runner seam and
+// kills it when ctx is done; a non-zero exit (including a kill) is an error.
 func DefaultCtxRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	return proc.Output(ctx, nil, name, args...)
 }
 
 // ctxRunnerFor picks the runner used for the NMT probe: an explicit
