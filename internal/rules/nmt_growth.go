@@ -96,7 +96,7 @@ func ruleJVMNativeMemoryGrowthWith(cfg NMTGrowthConfig) Rule {
 // returns nil when the newest sample has none (probe failed, timed out, or NMT
 // went away): an older series must not keep firing without a current reading.
 func nmtSamplesFor(h snapshot.JVMHistory, pid int) []snapshot.JVMSample {
-	all := h.SamplesFor(pid)
+	all := h.NMTSamplesFor(pid)
 	if len(all) == 0 {
 		return nil
 	}

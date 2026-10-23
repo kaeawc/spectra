@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
@@ -123,6 +124,11 @@ func (s *DB) migrate() error {
 		}
 		if _, err := s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN proc_start_unix INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("store: add %s.proc_start_unix: %w", table, err)
+		}
+	}
+	if !hasColumn(s.db, "jvm_nmt_samples", "proc_start_unix") {
+		if _, err := s.db.Exec(`ALTER TABLE jvm_nmt_samples ADD COLUMN proc_start_unix INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("store: add jvm_nmt_samples.proc_start_unix: %w", err)
 		}
 	}
 	return nil
@@ -283,6 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_nano DESC)
 -- exist only for samples taken while NMT was enabled.
 CREATE TABLE IF NOT EXISTS jvm_nmt_samples (
     pid            INTEGER NOT NULL,
+    proc_start_unix INTEGER NOT NULL DEFAULT 0,
     at_nano        INTEGER NOT NULL,
     committed_json TEXT NOT NULL,
     PRIMARY KEY (pid, at_nano)
@@ -1054,8 +1061,12 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {
-		if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
-			return err
+		// NMT-only samples have unknown GC counters: no jvm_samples row, so
+		// GC trends never see zeros.
+		if !sm.NMTOnly {
+			if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
+				return err
+			}
 		}
 		if err := saveNMTSample(ctx, tx, sm); err != nil {
 			return err
@@ -1077,9 +1088,11 @@ func saveNMTSample(ctx context.Context, tx *sql.Tx, sm snapshot.JVMSample) error
 		return fmt.Errorf("store: encode nmt sample: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO jvm_nmt_samples (pid, at_nano, committed_json) VALUES (?,?,?)
-		ON CONFLICT(pid, at_nano) DO UPDATE SET committed_json=excluded.committed_json`,
-		sm.PID, atNano, string(data))
+		INSERT INTO jvm_nmt_samples (pid, proc_start_unix, at_nano, committed_json) VALUES (?,?,?,?)
+		ON CONFLICT(pid, at_nano) DO UPDATE SET
+		    proc_start_unix=excluded.proc_start_unix,
+		    committed_json=excluded.committed_json`,
+		sm.PID, procStartUnix(sm.ProcStart), atNano, string(data))
 	return err
 }
 
@@ -1118,6 +1131,44 @@ func (s *DB) loadNMTSamples(ctx context.Context, pid int, samples []snapshot.JVM
 		samples[i].NMTCommittedKiB = byAt[samples[i].At.UnixNano()]
 	}
 	return nil
+}
+
+// loadNMTOnlySamples returns NMT-only samples (no jvm_samples row) for the
+// process lifetime (pid, procStart), oldest first, capped at the default
+// window. They are kept out of jvm_samples so GC trends never see them.
+func (s *DB) loadNMTOnlySamples(ctx context.Context, pid int, procStart time.Time) ([]snapshot.JVMSample, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT at_nano, committed_json FROM jvm_nmt_samples
+		WHERE pid=? AND proc_start_unix=?
+		  AND at_nano NOT IN (SELECT at_nano FROM jvm_samples WHERE pid=?)
+		ORDER BY at_nano DESC LIMIT 60`, pid, procStartUnix(procStart), pid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []snapshot.JVMSample
+	for rows.Next() {
+		var at int64
+		var raw string
+		if err := rows.Scan(&at, &raw); err != nil {
+			return nil, err
+		}
+		var cats map[string]int64
+		if json.Unmarshal([]byte(raw), &cats) != nil || len(cats) == 0 {
+			continue
+		}
+		out = append(out, snapshot.JVMSample{
+			PID: pid, ProcStart: procStart, At: time.Unix(0, at).UTC(),
+			NMTCommittedKiB: cats, NMTOnly: true,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
 }
 
 // GetRecentJVMSamples returns up to limit JVM samples for the process
@@ -1190,7 +1241,11 @@ func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) erro
 	starts := snapshot.ProcessStartsByPID(snap.Processes)
 	current := make([]snapshot.JVMSample, 0, len(snap.JVMs))
 	for _, j := range snap.JVMs {
-		if sm, ok := snapshot.JVMSampleFrom(j, now); ok {
+		sm, ok := snapshot.JVMSampleFrom(j, now)
+		if !ok {
+			sm, ok = snapshot.NMTSampleFrom(j, now)
+		}
+		if ok {
 			sm.ProcStart = starts[j.PID]
 			current = append(current, sm)
 		}
@@ -1210,7 +1265,11 @@ func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) erro
 		if err := s.loadNMTSamples(ctx, j.PID, samples); err != nil {
 			errs = append(errs, fmt.Errorf("store: load nmt samples for pid %d: %w", j.PID, err))
 		}
-		history = append(history, samples...)
+		only, err := s.loadNMTOnlySamples(ctx, j.PID, starts[j.PID])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("store: load nmt-only samples for pid %d: %w", j.PID, err))
+		}
+		history = append(history, mergeByTime(samples, only)...)
 	}
 	snap.JVMHistory = history
 	return errors.Join(errs...)
@@ -1749,4 +1808,16 @@ func (s *DB) newID() string {
 		ids = idgen.UUID{}
 	}
 	return ids.Next()
+}
+
+// mergeByTime merges two oldest-first sample slices into one oldest-first slice.
+func mergeByTime(a, b []snapshot.JVMSample) []snapshot.JVMSample {
+	if len(b) == 0 {
+		return a
+	}
+	out := make([]snapshot.JVMSample, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	return out
 }
