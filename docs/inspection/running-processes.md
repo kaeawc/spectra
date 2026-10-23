@@ -104,6 +104,29 @@ The `RunningProcesses` field on the JSON result holds the full list:
   the process is visible to the current user. Processes that cannot be
   queried keep `thread_count: 0`.
 
+## Process families
+
+Many small processes can saturate a machine without any single one looking
+heavy (for example three booted iOS simulators with hundreds of children
+each). `spectra process --group-by family [--top N] [--json]` sums CPU per
+family instead of listing processes. Families:
+
+- **simulator** - one per device, keyed by the UDID in the
+  `CoreSimulator/Devices/<UDID>` path of `launchd_sim` or any descendant;
+  processes without the path inherit the family by walking the parent chain.
+- **xcode** - `xcodebuild`, `XCBBuildService`, `SourceKitService`, anything under
+  `Xcode.app`, and build-tool children of those.
+- **emulator** - `emulator` and `qemu-*`.
+- **build** - `make`, `ninja`, `cargo`, `clang`, Gradle/Kotlin daemons, etc.
+- **browser** - one family per browser app.
+
+Anything else is grouped by command name under kind `other`, which is shown by
+`--group-by family` but never raised as a `whatswrong` finding. Each family
+reports member count, CPU, share of all process CPU, RSS, the age of its oldest
+member (so "steady for 3h" reads differently from a boot burst), and the
+heaviest members. Parent chains with missing parents or cycles stop the walk.
+The logic is pure and lives in `internal/process/family.go`.
+
 ## Implementation reference
 
 Per-app attribution in `internal/detect/detect.go`:
