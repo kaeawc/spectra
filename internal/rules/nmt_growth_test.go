@@ -77,6 +77,20 @@ func TestNMTGrowthFiresOnSteadyGrowth(t *testing.T) {
 	}
 }
 
+func TestNMTGrowthQuietWhenLatestSampleHasNoNMT(t *testing.T) {
+	s := nmtSnap(nmtArgs, longAgo, map[string][]int64{"Internal": steady(100, 20, 5)})
+	if f := ruleJVMNativeMemoryGrowth().MatchFn(s); len(f) != 1 {
+		t.Fatalf("precondition: want 1 finding, got %v", f)
+	}
+	// A newer sample whose NMT probe failed (no categories).
+	s.JVMHistory = append(s.JVMHistory, snapshot.JVMSample{
+		PID: 77, ProcStart: longAgo, At: nmtBase.Add(25 * time.Minute),
+	})
+	if f := ruleJVMNativeMemoryGrowth().MatchFn(s); len(f) != 0 {
+		t.Fatalf("stale series must not fire without a current reading, got %v", f)
+	}
+}
+
 func TestNMTGrowthOneFindingPerCategory(t *testing.T) {
 	s := nmtSnap(nmtArgs, longAgo, map[string][]int64{
 		"Internal": steady(100, 20, 5),

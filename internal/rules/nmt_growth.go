@@ -92,10 +92,25 @@ func ruleJVMNativeMemoryGrowthWith(cfg NMTGrowthConfig) Rule {
 	}
 }
 
-// nmtSamplesFor returns pid's samples that carry NMT data, oldest first.
+// nmtSamplesFor returns pid's samples that carry NMT data, oldest first. It
+// returns nil when the newest sample has none (probe failed, timed out, or NMT
+// went away): an older series must not keep firing without a current reading.
 func nmtSamplesFor(h snapshot.JVMHistory, pid int) []snapshot.JVMSample {
+	all := h.SamplesFor(pid)
+	if len(all) == 0 {
+		return nil
+	}
+	newest := all[0]
+	for _, sm := range all {
+		if sm.At.After(newest.At) {
+			newest = sm
+		}
+	}
+	if len(newest.NMTCommittedKiB) == 0 {
+		return nil
+	}
 	var out []snapshot.JVMSample
-	for _, sm := range h.SamplesFor(pid) {
+	for _, sm := range all {
 		if len(sm.NMTCommittedKiB) > 0 {
 			out = append(out, sm)
 		}
