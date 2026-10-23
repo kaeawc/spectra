@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -44,6 +46,11 @@ type ServiceOptions struct {
 	Notifier     Notifier
 	SpawnBackend SpawnBackend
 	UID          func() int
+	// Runner and OS drive the sustained-CPU probe. When unset they are taken
+	// from a *Collector Collector; a custom Collector without a Runner
+	// leaves the probe disabled.
+	Runner proc.Runner
+	OS     hostos.Kind
 }
 type subscriber struct {
 	ch      chan notification
@@ -58,6 +65,8 @@ type Service struct {
 	engine               *Engine
 	mu                   sync.RWMutex
 	sampleMu             sync.Mutex
+	sustMu               sync.Mutex
+	sustained            *sustainedState
 	spawnMu              sync.Mutex
 	spawnTracker         spawnTracker
 	spawnOverrun         bool
@@ -110,6 +119,15 @@ func NewService(opts ServiceOptions) *Service {
 		opts.UID = currentUID
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
+	if collector, ok := opts.Collector.(*Collector); ok && svc.opts.Runner == nil {
+		svc.opts.Runner, svc.opts.OS = collector.runner(), collector.OS
+	}
+	if svc.opts.Runner != nil {
+		if svc.opts.Config.Sustained.Window <= 0 {
+			svc.opts.Config.Sustained = DefaultSustainedConfig()
+		}
+		svc.sustained = newSustainedState(svc.opts.Config.Sustained, svc.opts.Runner, svc.opts.OS)
+	}
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()
@@ -285,6 +303,7 @@ func (s *Service) Tick(ctx context.Context) error {
 			}
 		}
 	}
+	s.TickSustained(ctx, sample.At)
 	s.maintenance(ctx, sample.At)
 	return nil
 }
