@@ -24,6 +24,9 @@ const (
 	// linuxClockTicks is USER_HZ, the unit of utime/stime in /proc/<pid>/stat.
 	// 100 is assumed; it is the value on every mainstream Linux build.
 	linuxClockTicks = 100
+	// sustainedProbeFailLimit is how many consecutive failed ps probes make the
+	// firing alerts carry a "probe unavailable" note.
+	sustainedProbeFailLimit = 5
 )
 
 type sampleSummary struct {
@@ -47,6 +50,8 @@ type sustainedState struct {
 	summaries map[string]sampleSummary
 	persisted map[string]time.Time
 	prev      map[int]cpuSnap
+	// failures counts consecutive failed ps probes.
+	failures int
 }
 
 func newSustainedState(cfg SustainedConfig, runner proc.Runner, read func(string) ([]byte, error), kind hostos.Kind) *sustainedState {
@@ -303,9 +308,21 @@ func (s *Service) sustainedConditions(ctx context.Context, at time.Time) (conds 
 	st := s.sustained
 	procs, err := listProcObs(ctx, st.runner, st.os, at)
 	if err != nil {
-		s.opts.Logger.Debug("sustained cpu probe unavailable", "error", err)
+		st.failures++
+		switch {
+		case st.failures == sustainedProbeFailLimit:
+			s.opts.Logger.Warn("sustained cpu probe unavailable; firing alerts are flagged and no longer refreshed", "error", err, "consecutive_failures", st.failures)
+		case st.failures > sustainedProbeFailLimit && st.failures%sustainedProbeFailLimit == 0:
+			s.opts.Logger.Warn("sustained cpu probe still unavailable", "error", err, "consecutive_failures", st.failures)
+		default:
+			s.opts.Logger.Debug("sustained cpu probe unavailable", "error", err)
+		}
 		return nil, false
 	}
+	if st.failures >= sustainedProbeFailLimit {
+		s.opts.Logger.Info("sustained cpu probe recovered", "consecutive_failures", st.failures)
+	}
+	st.failures = 0
 	table := make(map[int]ProcObs, len(procs))
 	for _, p := range procs {
 		table[p.PID] = p
@@ -358,9 +375,15 @@ func (s *Service) TickSustained(ctx context.Context, at time.Time) {
 	}
 	s.sustMu.Lock()
 	conds, ok := s.sustainedConditions(ctx, at)
+	failures := s.sustained.failures
 	s.sustMu.Unlock()
 	if !ok {
-		return // no evidence this tick: leave alerts and tracker untouched
+		// No evidence this tick: leave alerts and tracker untouched, but once
+		// the probe has been down for a while say so on the alerts themselves.
+		if failures >= sustainedProbeFailLimit {
+			s.flagProbeUnavailable(ctx, at)
+		}
+		return
 	}
 	s.mu.Lock()
 	events := s.engine.EvaluateSustained(at, conds)
@@ -382,6 +405,47 @@ func (s *Service) TickSustained(ctx context.Context, at time.Time) {
 			}
 		}
 	}
+}
+
+// probeUnavailableNote marks firing alerts whose evidence has gone stale. It is
+// constant so re-flagging is idempotent and the stored detail only changes once.
+const probeUnavailableNote = " [probe unavailable: ps has failed for several consecutive ticks; this alert is not being re-evaluated and may be stale]"
+
+// flagProbeUnavailable keeps every firing sustained alert (resolving it as
+// healthy, or holding it silently forever, are both wrong without evidence) but
+// appends probeUnavailableNote to its detail and persists the change at once.
+func (s *Service) flagProbeUnavailable(ctx context.Context, at time.Time) {
+	s.mu.Lock()
+	var conds []Condition
+	fresh := map[string]bool{}
+	for _, a := range s.engine.Active() {
+		if !strings.HasPrefix(a.Key, sustainedKeyPrefix) {
+			continue
+		}
+		c := Condition{Key: a.Key, Severity: a.Severity, Title: a.Title, Detail: a.Detail}
+		if !strings.HasSuffix(a.Detail, probeUnavailableNote) {
+			c.Detail += probeUnavailableNote
+			fresh[a.Key] = true
+		}
+		conds = append(conds, c)
+	}
+	events := s.engine.EvaluateSustained(at, conds)
+	for _, event := range events {
+		s.fanoutLocked(notification{"alerts.event", event}, false)
+	}
+	var refresh []Alert
+	for _, a := range s.engine.Active() {
+		if fresh[a.Key] {
+			refresh = append(refresh, a)
+		}
+	}
+	s.mu.Unlock()
+	s.sustMu.Lock()
+	for _, a := range refresh {
+		delete(s.sustained.persisted, a.Key) // force an immediate write
+	}
+	s.persistSustained(ctx, at, events, refresh)
+	s.sustMu.Unlock()
 }
 
 func (s *Service) persistSustained(ctx context.Context, at time.Time, events []Event, active []Alert) {

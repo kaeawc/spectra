@@ -115,7 +115,12 @@ top of stack or Linux busiest threads. At most one summary is collected per tick
 with a three second limit, so a new alert may first appear without one. After a daemon restart, restored sustained alerts are carried like alerts across
 a suspend gap: they stay firing, with the same ID, until fresh samples disprove
 them. If the probe's `ps` call fails, that tick is skipped entirely and no alert
-is resolved on missing evidence. The probe takes its own timestamp when it runs,
+is resolved on missing evidence. After five consecutive failed probes the daemon logs a warning (and another every five
+further failures, plus an info line on recovery) and appends "[probe unavailable: ...]" to the
+detail of every firing sustained alert, persisted immediately. The alerts stay
+firing with the same ID, because resolving them as healthy would be a claim
+without evidence; the note tells the reader they are stale. The note disappears
+when the probe recovers and the alert is re-evaluated. The probe takes its own timestamp when it runs,
 because `ps` elapsed times are only meaningful against the snapshot time. The probe runs last in the watch
 tick, after alert persistence, notifications and maintenance, so a slow sample
 never delays them. A process that `ps` lists but whose `/proc` stat read fails
