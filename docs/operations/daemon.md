@@ -77,25 +77,44 @@ while an alert is active.
 
 A sustained-CPU detector catches long-lived busy daemons that the
 instantaneous probes miss, such as `diagnosticd`, `OSLogService`, or
-`mds_stores` pinned for hours. Each regular tick adds one `ps` call (pid, ppid,
-`%cpu`, `etime`, command). A process is tracked by PID plus start time, so a
-reused PID starts a fresh history. The `cpu.sustained:<name>:<pid>` warning
-fires when at least 90% of the samples in a rolling 15-minute window are at or
-above 50% CPU and the window is covered; a short dip is tolerated, bursty load
-is not. It resolves once fewer than half the window samples are above the
-threshold or the process exits, and tracking resets after a gap longer than five
-minutes (for example sleep). Linux `ps` reports lifetime-average CPU, so a
-newly busy long-lived process takes longer to cross the threshold there.
+`mds_stores` pinned for hours. Each regular tick adds one `ps -A` call (pid,
+ppid, `%cpu`, `etime`, command) of its own, separate from the bulk sample call,
+plus, on Linux, one `/proc/<pid>/stat` read per process. A process is tracked
+by PID plus start time, so a reused PID starts a fresh history.
+
+CPU usage is taken from `ps %cpu` on macOS, which is a recent, decayed value.
+On Linux `ps %cpu` is a lifetime average, so the detector instead divides the
+change in cumulative user+system CPU time (from `/proc/<pid>/stat`, assuming
+the standard 100 ticks per second) by the wall time between two samples of the
+same PID and start time; a first sighting yields no sample. An old daemon that
+becomes busy therefore fires on schedule, and one that goes idle stops counting
+immediately.
+
+The `cpu.sustained:<name>:<pid>` warning fires when at least 90% of the samples
+in a rolling 15-minute window are at or above 50% CPU and the window is covered
+(within a tenth of the window or one watch interval); a short dip is tolerated,
+bursty load is not. The window must be at least twice the watch interval, or the
+daemon logs an error and widens it. Resolution lags on purpose: the alert keeps
+firing until fewer than half of the window samples are above the threshold, so
+expect up to roughly half a window after the load stops, and then two clear
+ticks. After a gap longer than the larger of five minutes and three watch
+intervals (for example sleep) the history is discarded, but an alert that was
+already firing is kept, with its original ID and since-time, until at least four
+fresh samples show the load is gone; an alert that was not yet firing starts over.
 
 The alert detail names the process, average CPU, how long it has been busy,
 process age, the owner chain (for example `launchd(1) > Terminal(50) >
-zsh(60) > log(70)`), a one-shot summary (macOS `sample` top of stack, Linux
-busiest threads, taken once when the alert fires), and a suggested next command
-(`sample <pid> 10` on macOS, `top -H -p <pid>` on Linux). For `diagnosticd` and
-`OSLogService` it notes that a client is usually polling or streaming the
-unified log (`log stream`, `log show`, OSLogStore); for `mds_stores` it points
-at Spotlight indexing. `spectra alerts` lists these like any other alert, and the
-stored detail is refreshed every five minutes while the alert is firing.
+zsh(60) > log(70)`), a one-shot summary, and a suggested next command (`sample
+<pid> 10` on macOS, `top -H -p <pid>` on Linux). The summary is macOS `sample`
+top of stack or Linux busiest threads. At most one summary is collected per tick,
+with a three second limit, so a new alert may first appear without one. `sample`
+needs root for daemons such as `diagnosticd`; when it fails the detail says
+"sample unavailable (needs root)" with the exact `sudo sample <pid> 10`
+command to run, and the attempt is retried after 30 minutes. For `diagnosticd` and `OSLogService` the detail notes
+that a client is usually polling or streaming the unified log (`log stream`,
+`log show`, OSLogStore); for `mds_stores` it points at Spotlight indexing.
+`spectra alerts` lists these like any other alert, and the stored detail is
+refreshed every five minutes while the alert is firing.
 
 Warnings include load above 1.5 times CPU count for two samples, rising load,
 memory pressure for two samples, swap growth above 1 GB in five minutes,
@@ -114,7 +133,9 @@ snake case names in the defaults, such as `load.warn_multiple` or
 (default 50), `window` (duration, minimum `1m`, default `15m`), `min_fraction`
 (above 0.5 up to 1, default 0.9), and `allowlist`, a list of case-insensitive
 process-name patterns for expected long-running work, for example
-`allowlist: [backupd, "mds*"]`. An unknown YAML key logs an error and keeps all defaults.
+`allowlist: [backupd, "mds*"]`. Patterns match the process base name only,
+not the path or arguments, and on Linux the name is the kernel `comm`, which is
+truncated to 15 characters, so write the pattern against the truncated name. An unknown YAML key logs an error and keeps all defaults.
 Non-positive thresholds log an error and use the default for that field while
 preserving other valid settings.
 
