@@ -10,7 +10,8 @@ import (
 // identifies one process lifetime for sample history. It is truncated to
 // whole seconds because collectors differ in precision (ps lstart is
 // second-resolution) and the identity must compare equal across runs.
-// Returns the zero time when the start time is unknown.
+// The store matches history within a small tolerance, so Linux btime drift
+// of about a second does not split one lifetime. Returns the zero time when the start time is unknown.
 func ProcessStart(p process.Info) time.Time {
 	start := p.StartTime
 	if start.IsZero() {
