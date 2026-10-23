@@ -330,8 +330,16 @@ func exeText(p Info) string {
 		// relative argv[0]: arguments may contain paths, so use only the name
 		return firstToken(s)
 	}
-	if i := strings.Index(s, " -"); i >= 0 {
-		s = s[:i]
+	// Executable paths inside an app bundle may contain spaces
+	// ("Google Chrome.app/Contents/MacOS/Google Chrome"); allow them only when
+	// no later absolute-path argument starts before the bundle marker.
+	marker := strings.Index(s, ".app/Contents/")
+	argStart := strings.Index(s, " /")
+	if marker < 0 || (argStart >= 0 && argStart < marker) {
+		return firstToken(s)
+	}
+	if i := strings.Index(s[marker:], " -"); i >= 0 {
+		s = s[:marker+i]
 	}
 	return s
 }

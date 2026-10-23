@@ -128,6 +128,23 @@ func TestGroupFamiliesClassification(t *testing.T) {
 			wantKeys: map[string]int{"other:vim": 2, "other:rg": 1, "other:safaridriver": 1, "other:com.apple.WebKit.WebContent": 1},
 		},
 		{
+			name: "positional path arguments do not classify when ExecutablePath is empty",
+			procs: []Info{
+				{PID: 10, PPID: 1, Command: "cat", FullCommandLine: "/bin/cat /Applications/Safari.app/Contents/Info.plist"},
+				{PID: 11, PPID: 1, Command: "less", FullCommandLine: "/usr/bin/less /Applications/Xcode.app/Contents/Info.plist"},
+				{PID: 12, PPID: 1, Command: "vim", FullCommandLine: "/usr/bin/vim /Applications/Google Chrome.app/Contents/MacOS/Google Chrome"},
+			},
+			wantKeys: map[string]int{"other:cat": 1, "other:less": 1, "other:vim": 1},
+		},
+		{
+			name: "bundle executable with spaces still matches from the command line",
+			procs: []Info{
+				{PID: 10, PPID: 1, Command: "Google Chrome", FullCommandLine: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer"},
+				{PID: 11, PPID: 1, Command: "Google Chrome Helper", FullCommandLine: "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=gpu"},
+			},
+			wantKeys: map[string]int{"browser:Google Chrome": 2},
+		},
+		{
 			name: "Xcode-hosted runtime and MobileSafari stay in the device family",
 			procs: []Info{
 				{PID: 50, PPID: 1, Command: "launchd_sim", FullCommandLine: "launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/" + udidA + "/data/var/run/launchd_bootstrap.plist"},
