@@ -70,12 +70,25 @@ func TestHistory_DistinctLifetimesAndUnknownStaySeparate(t *testing.T) {
 		j, err := db.GetRecentJVMSamples(ctx, 7, start, 0)
 		if err != nil || len(j) != 1 {
 			t.Errorf("jvm %s = (%d, %v), want 1", name, len(j), err)
+		} else if !sameStartIdentity(j[0].ProcStart, start) {
+			t.Errorf("jvm %s returned sample with start %v, want %v", name, j[0].ProcStart, start)
 		}
 		f, err := db.GetRecentFDSamples(ctx, 7, start, 0)
 		if err != nil || len(f) != 1 {
 			t.Errorf("fd %s = (%d, %v), want 1", name, len(f), err)
+		} else if !sameStartIdentity(f[0].ProcStart, start) {
+			t.Errorf("fd %s returned sample with start %v, want %v", name, f[0].ProcStart, start)
 		}
 	}
+}
+
+// sameStartIdentity reports whether got identifies the same start as want:
+// both unknown, or equal Unix seconds.
+func sameStartIdentity(got, want time.Time) bool {
+	if want.IsZero() || got.IsZero() {
+		return want.IsZero() && got.IsZero()
+	}
+	return got.Unix() == want.Unix()
 }
 
 func TestProcStartRange(t *testing.T) {
