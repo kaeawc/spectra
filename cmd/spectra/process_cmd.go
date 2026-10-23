@@ -28,11 +28,18 @@ func runProcess(args []string) int {
 	minElapsed := fs.Duration("min-elapsed", 0, "Minimum elapsed runtime")
 	ppid := fs.Int("ppid", -1, "Only direct children of PID")
 	user := fs.String("user", "", "Only processes owned by user name")
+	groupBy := fs.String("group-by", "", "Group processes: family (sums CPU per simulator device, Xcode, build tools, browsers)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *fdBreakdown {
 		*deep = true
+	}
+	if *groupBy != "" {
+		if msg := groupByConflict(fs, *groupBy); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+			return 2
+		}
 	}
 	filters, ok := processFiltersFromFlags(*minRSS, *minVSZ, *minElapsed, *ppid, *user)
 	if !ok {
@@ -44,6 +51,10 @@ func runProcess(args []string) int {
 	if len(procs) == 0 {
 		fmt.Fprintln(os.Stderr, "no processes found")
 		return 0
+	}
+
+	if *groupBy == "family" {
+		return emitProcessFamilies(os.Stdout, procs, time.Now(), *topN, *asJSON)
 	}
 
 	if !sortProcesses(procs, *sortBy) {

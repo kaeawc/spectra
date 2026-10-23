@@ -128,3 +128,27 @@ func findRule(catalog []rules.Rule, id string) *rules.Rule {
 	}
 	return nil
 }
+
+func TestParsePIDList(t *testing.T) {
+	pids, err := parsePIDList(" 10, 20,,30 ")
+	if err != nil || len(pids) != 3 || pids[0] != 10 || pids[2] != 30 {
+		t.Fatalf("parsePIDList = %v, %v", pids, err)
+	}
+	if pids, err := parsePIDList(""); err != nil || pids != nil {
+		t.Fatalf("empty = %v, %v", pids, err)
+	}
+	for _, bad := range []string{"abc", "0", "-5"} {
+		if _, err := parsePIDList(bad); err == nil {
+			t.Errorf("parsePIDList(%q) should fail", bad)
+		}
+	}
+}
+
+func TestRunRulesRejectsThreadDumpWithStoredSnapshot(t *testing.T) {
+	if code := runRules([]string{"--snapshot", "snap-x", "--thread-dump-pid", "10"}); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if code := runRules([]string{"--thread-dump-pid", "nope"}); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+}

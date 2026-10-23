@@ -18,6 +18,7 @@ spectra rules --json
 spectra rules --snapshot <snapshot-id>
 spectra rules --rules rules/*.yml
 spectra rules --rules-config spectra.yml
+spectra rules --thread-dump-pid <pid>[,<pid>...]
 spectra rules validate --rules rules/*.yml
 spectra rules list --rules rules/*.yml
 spectra rules explain --rules rules/*.yml <rule-id>
@@ -140,6 +141,12 @@ Findings are matched by `(rule_id, machine_uuid, subject)` while the issue
 is `open` or `acknowledged`. Dismissed issues are not reopened by a later
 matching finding.
 
+Findings can also come from artifact analysis outside the snapshot engine.
+`spectra jvm heap-hprof --leak-suspects --file-issues` files each heap-dump
+leak suspect as a `jvm-heap-leak-suspect` issue. The subject is the suspect
+class, so the same leak found in a later dump updates the existing issue.
+See [JVM inspection](../inspection/jvm.md).
+
 ## Rule sources
 
 The V1 catalog ships with the binary. Local CEL/YAML files are loaded with
@@ -213,8 +220,13 @@ Implemented rules:
 - `jvm-oom-dump-disabled`
 - `jvm-gc-logging-disabled`
 - `jvm-rss-exceeds-heap`
+- `jvm-native-memory-growth` (history-based: one finding per Native Memory
+  Tracking category whose committed size grows monotonically; see below)
 - `jvm-gc-algorithm`
 - `jvm-oom-detected`
+- `jvm-heap-dump-found`
+- `jvm-deadlock` (targeted: only JVMs named via `--thread-dump-pid`, MCP
+  `diagnose thread_dump_pids`, or MCP `triage pid=<jvm>` are thread-dumped)
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`
@@ -233,6 +245,38 @@ Implemented rules:
 - `process-memory-hog`
 - `network.proxy_configured`
 - `network.hosts_override`
+
+### `jvm-native-memory-growth`
+
+Fires per JVM and per NMT category when committed memory keeps climbing across
+the stored JVM sample history. It only has data for JVMs started with
+`-XX:NativeMemoryTracking=summary|detail`; Spectra never enables NMT itself,
+and a JVM with NMT off simply has no samples, so the rule stays quiet.
+
+When history is sampled (`spectra rules`, MCP rules evaluation), one cost-bounded (5 s, child killed on timeout) `jcmd <pid> VM.native_memory
+summary` call is made per NMT-enabled JVM; ordinary inspect and snapshot collection never makes it. The per-category committed KiB are stored with the sample
+(`jvm_nmt_samples`, keyed like `jvm_samples`, so a reused PID never inherits an
+earlier process's history). Default thresholds, all of which must hold for the
+category's series:
+
+- at least 4 samples spanning at least 15 minutes;
+- committed growth (first to last sample) of at least 64 MiB and at least 25%;
+- monotonic within noise: no single step may drop by more than 10% of the
+  total growth;
+- `Java Heap` is never evaluated (heap sizing is the GC rules' job);
+- `Class`, `Code`, and `Compiler` grow legitimately during warmup, so they are
+  only evaluated on samples taken after the process is 30 minutes old (using
+  the sample's process start time; an unknown start time suppresses them).
+
+The finding names the category, growth, and duration, and points at
+`spectra jvm nmt baseline <pid>` followed by `spectra jvm nmt diff <pid>` to
+attribute the growth to call sites. Thresholds live in `NMTGrowthConfig`
+(`DefaultNMTGrowthConfig`) in `internal/rules/nmt_growth.go`.
+
+No daemon sampler records JVM history yet, so the rule needs history built up
+by repeated `spectra rules` or MCP `evaluateRules` runs (spanning at least the
+minimum window); a single run, or runs that are too close together, will not
+fire it.
 
 ## Out of scope for v1
 

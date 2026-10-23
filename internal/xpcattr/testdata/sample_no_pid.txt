@@ -1,0 +1,4 @@
+Process:         OSLogService [17874]
+Call graph:
+    300 Thread_1   DispatchQueue_1: com.apple.NSXPCConnection.m-user.com.apple.logd  (serial)
+    + 300 mach_msg  (in libsystem_kernel.dylib) + 8  [0x4]

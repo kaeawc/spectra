@@ -75,6 +75,67 @@ at 120/s for one. `procs.uid` warns at 40% and is critical at 70% of
 health` shows the latest process counts and spawn rate, including top parents
 while an alert is active.
 
+A sustained-CPU detector catches long-lived busy daemons that the
+instantaneous probes miss, such as `diagnosticd`, `OSLogService`, or
+`mds_stores` pinned for hours. Each regular tick adds one `ps -A` call (pid,
+ppid, `%cpu`, `etime`, command) of its own, separate from the bulk sample call,
+plus, on Linux, one `/proc/<pid>/stat` read per process. A process is tracked
+by PID plus start time, so a reused PID starts a fresh history.
+
+CPU usage is taken from `ps %cpu` on macOS, which is a recent, decayed value.
+On Linux `ps %cpu` is a lifetime average, so the detector instead divides the
+change in cumulative user+system CPU time (from `/proc/<pid>/stat`, assuming
+the standard 100 ticks per second) by the wall time between two samples of the
+same PID and start time; a first sighting yields no sample. An old daemon that
+becomes busy therefore fires on schedule, and one that goes idle stops counting
+immediately.
+
+The `cpu.sustained:<name>:<pid>` warning fires when at least 90% of the samples
+in a rolling 15-minute window are at or above 50% CPU and the window is covered
+(measured from the newest sample older than the window, so tick jitter cannot
+make a full window unreachable) with at least three above-threshold samples
+(more for long windows); a short dip is tolerated, bursty load is not. The
+window must be at least 16 base watch intervals, so it holds four samples even
+when self-guard backoff stretches the tick to four times the base; a shorter
+window logs an error and is widened. The suspend gap is sized for the worst-case
+backed-off interval (four times the base) so self-guard backoff does not
+trigger it. Resolution lags on purpose: the alert keeps
+firing until fewer than half of the window samples are above the threshold, so
+expect up to roughly half a window after the load stops, and then two clear
+ticks. After a gap longer than the larger of five minutes and twelve base
+watch intervals (for example sleep) the history is discarded, but an alert that was
+already firing is kept, with its original ID and since-time, until at least four
+fresh samples (fewer if the window cannot hold four) show the load is gone; an alert that was not yet firing starts over.
+
+The alert detail names the process, average CPU, how long it has been busy,
+process age, the owner chain (for example `launchd(1) > Terminal(50) >
+zsh(60) > log(70)`), a one-shot summary, and a suggested next command (`sample
+<pid> 10` on macOS, `top -H -p <pid>` on Linux). The summary is macOS `sample`
+top of stack or Linux busiest threads. At most one summary is collected per tick,
+with a three second limit, so a new alert may first appear without one. After a daemon restart, restored sustained alerts are carried like alerts across
+a suspend gap: they stay firing, with the same ID, until fresh samples disprove
+them. The alert detail records the original since-time and the process start time (`up 5h0m0s (started 2026-01-01T07:00:00Z)`), and a restart restores both from it without any schema change: the duration shown continues from the original since-time rather than the alert's fired time, and a process that reuses the PID with the same name but a different start time does not adopt the old alert. Alerts written by an older version lack these fields and fall back to the fired time and a name-only match. If the probe's `ps` call fails, that tick is skipped entirely and no alert
+is resolved on missing evidence. After five consecutive failed probes the daemon logs a warning (and another every five
+further failures, plus an info line on recovery) and appends "[probe unavailable: ...]" to the
+detail of every firing sustained alert, emitted to subscribers as an `updated` event and persisted immediately (a failed write is retried on later failed ticks). The alerts stay
+firing with the same ID, because resolving them as healthy would be a claim
+without evidence; the note tells the reader they are stale. The note disappears
+when the probe recovers and the alert is re-evaluated, with another `updated` event and an immediate stored-detail write. The probe takes its own timestamp when it runs,
+because `ps` elapsed times are only meaningful against the snapshot time. The probe runs last in the watch
+tick, after alert persistence, notifications and maintenance, so a slow sample
+never delays them. A process that `ps` lists but whose `/proc` stat read fails
+for a tick keeps its state and previous snapshot rather than resolving; if it
+stays unreadable for a whole window (for example `hidepid`), the alert resolves. Readings that resume after unreadable ticks spanning more than eight base watch intervals start a fresh history (an alert already firing keeps its since-time), so an old sample never stands in for window coverage.
+A firing alert needs at least two fresh samples below the threshold to clear,
+and a reused PID with a new start time never inherits an old alert. `sample`
+needs root for daemons such as `diagnosticd`; when it fails the detail says
+"sample unavailable (needs root)" with the exact `sudo sample <pid> 10`
+command to run, and the attempt is retried after 30 minutes. For `diagnosticd` and `OSLogService` the detail notes
+that a client is usually polling or streaming the unified log (`log stream`,
+`log show`, OSLogStore); for `mds_stores` it points at Spotlight indexing.
+`spectra alerts` lists these like any other alert, and the stored detail is
+refreshed every five minutes while the alert is firing.
+
 Warnings include load above 1.5 times CPU count for two samples, rising load,
 memory pressure for two samples, swap growth above 1 GB in five minutes,
 resource limits above 70%, less than 20 GB free, thermal throttling for two
@@ -84,11 +145,17 @@ above three times CPU count for two samples, critical memory pressure, limits
 above 90%, and less than 5 GB free. Alerts clear after two healthy evaluations.
 
 Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
-`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, and `spawn`; field names are the
+`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, `spawn`, and `sustained`; field names are the
 snake case names in the defaults, such as `load.warn_multiple` or
 `disk.critical_gb`. The `spawn` keys are `interval` (duration, minimum `1s`),
 `rate_warn`, `rate_critical`, `uid_warn_pct`, `uid_critical_pct`,
-`total_warn_pct`, and `total_critical_pct`. An unknown YAML key logs an error and keeps all defaults.
+`total_warn_pct`, and `total_critical_pct`. The `sustained` keys are `cpu_pct`
+(default 50), `window` (duration, default `15m`, at least 16 watch intervals), `min_fraction`
+(above 0.5 up to 1, default 0.9), and `allowlist`, a list of case-insensitive
+process-name patterns for expected long-running work, for example
+`allowlist: [backupd, "mds*"]`. Patterns match the process base name only,
+not the path or arguments, and on Linux the name is the kernel `comm`, which is
+truncated to 15 characters, so write the pattern against the truncated name. An unknown YAML key logs an error and keeps all defaults.
 Non-positive thresholds log an error and use the default for that field while
 preserving other valid settings.
 

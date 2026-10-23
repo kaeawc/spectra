@@ -23,6 +23,8 @@ type slowSignals struct {
 	Load  sysload.Load
 	Power sysinfo.PowerState
 	Procs []process.Info
+	Now   time.Time // optional; used for family ages
+	Cores int       // logical CPU count; 0 if unknown
 }
 
 type slowCause struct {
@@ -37,6 +39,9 @@ type slowDeps struct {
 	procs   func() []process.Info
 	connect func(context.Context) (slowWatchClient, bool)
 	now     func() time.Time
+	cpus    func() int // logical CPU count; nil or 0 means unknown
+	// xpc attributes a busy service to its clients; nil disables it.
+	xpc xpcAttributeFunc
 }
 
 type slowWatchClient interface {
@@ -57,7 +62,9 @@ func defaultSlowDeps() slowDeps {
 			}
 			return watchclient.Connect(ctx, os.Getenv, paths)
 		},
-		now: time.Now,
+		now:  time.Now,
+		cpus: runtime.NumCPU,
+		xpc:  defaultXPCAttribute,
 	}
 }
 
@@ -74,7 +81,14 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 		return 2
 	}
 	sig := slowSignals{Load: deps.load(), Power: deps.power(), Procs: deps.procs()}
+	if deps.cpus != nil {
+		sig.Cores = deps.cpus()
+	}
+	if deps.now != nil {
+		sig.Now = deps.now()
+	}
 	causes := rankSlowCauses(sig)
+	causes = appendXPCCauses(causes, sig.Procs, deps.xpc)
 	var daemonAlerts []hostwatch.Alert
 	var trend string
 	if !*noDaemon && deps.connect != nil {
@@ -109,6 +123,7 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 	if *asJSON {
 		out := struct {
 			Causes       []slowCause       `json:"causes"`
+			Families     []process.Family  `json:"families,omitempty"`
 			DaemonAlerts []hostwatch.Alert `json:"daemon_alerts,omitempty"`
 			Trend        string            `json:"trend,omitempty"`
 			Signals      struct {
@@ -117,7 +132,7 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 				TopCPU *process.Info      `json:"top_cpu,omitempty"`
 				TopRSS *process.Info      `json:"top_rss,omitempty"`
 			} `json:"signals"`
-		}{Causes: causes, DaemonAlerts: daemonAlerts, Trend: trend}
+		}{Causes: causes, Families: reportableFamilies(sig), DaemonAlerts: daemonAlerts, Trend: trend}
 		out.Signals.Load = sig.Load
 		out.Signals.Power = sig.Power
 		if p, ok := topByCPU(sig.Procs); ok {
@@ -189,6 +204,7 @@ func rankSlowCauses(s slowSignals) []slowCause {
 	var causes []slowCause
 	causes = appendMemoryCauses(causes, s.Load)
 	causes = appendThermalCauses(causes, s.Power)
+	causes = appendFamilyCauses(causes, slowFamilies(s.Procs, s.Now), s.Cores)
 	causes = appendProcessCauses(causes, s.Procs)
 	sort.SliceStable(causes, func(i, j int) bool {
 		return severityRank(causes[i].Severity) < severityRank(causes[j].Severity)
@@ -282,4 +298,15 @@ func renderWhatswrong(w io.Writer, causes []slowCause) {
 			fmt.Fprintf(w, "     %s\n", c.Detail)
 		}
 	}
+}
+
+// reportableFamilies returns the multi-process families for JSON output.
+func reportableFamilies(s slowSignals) []process.Family {
+	var out []process.Family
+	for _, f := range slowFamilies(s.Procs, s.Now) {
+		if f.Kind != process.FamilyOther && f.Members > 1 {
+			out = append(out, f)
+		}
+	}
+	return out
 }
