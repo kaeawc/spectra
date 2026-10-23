@@ -65,6 +65,9 @@ type sustainedEntry struct {
 	// lastGood is when the entry last received a real CPU reading; Skip'd
 	// ticks do not advance it, so a permanently unreadable process ages out.
 	lastGood time.Time
+	// adopt marks an entry seeded from a restored alert: its start time is
+	// unknown until the process is next seen.
+	adopt bool
 }
 
 // SustainedTracker is a pure, clock-free state machine: the caller supplies
@@ -110,9 +113,21 @@ func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFin
 // dropIfReused forgets an entry whose PID now belongs to a process with a
 // different start time, whether or not this tick has a CPU reading for it.
 func (t *SustainedTracker) dropIfReused(p ProcObs) {
-	if e := t.entries[p.PID]; e != nil && !sameStart(e.started, p.Started) {
+	e := t.entries[p.PID]
+	switch {
+	case e == nil:
+	case e.adopt && path.Base(p.Name) == path.Base(e.name):
+		e.started, e.adopt = p.Started, false
+	case e.adopt || !sameStart(e.started, p.Started):
 		delete(t.entries, p.PID)
 	}
+}
+
+// Seed registers a finding restored after a daemon restart as a carried entry:
+// it keeps being reported (so its alert is not resolved) until fresh samples
+// disprove it, exactly like an alert carried across a suspend gap.
+func (t *SustainedTracker) Seed(at time.Time, pid int, name string, since time.Time) {
+	t.entries[pid] = &sustainedEntry{name: name, since: since, lastGood: at, adopt: true}
 }
 
 // maxGap is the observation gap treated as a suspend. The service sets MaxGap

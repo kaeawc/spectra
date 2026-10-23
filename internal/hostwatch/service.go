@@ -135,10 +135,10 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	return svc
 }
-func (s *Service) Run(ctx context.Context) error {
-	if s.opts.Store == nil {
-		return fmt.Errorf("watch store is required")
-	}
+
+// restore loads firing alerts into the engine and seeds the sustained tracker
+// with the restored sustained alerts so they survive warm-up unresolved.
+func (s *Service) restore(ctx context.Context) error {
 	rows, err := s.opts.Store.ListAlerts(ctx, "firing", 2000)
 	if err != nil {
 		return fmt.Errorf("watch restore alerts: %w", err)
@@ -150,6 +150,16 @@ func (s *Service) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.engine.Restore(restored)
 	s.mu.Unlock()
+	s.seedSustained(s.opts.Clock.Now(), restored)
+	return nil
+}
+func (s *Service) Run(ctx context.Context) error {
+	if s.opts.Store == nil {
+		return fmt.Errorf("watch store is required")
+	}
+	if err := s.restore(ctx); err != nil {
+		return err
+	}
 	spawnCtx, cancelSpawn := context.WithCancel(ctx)
 	spawnDone := make(chan struct{})
 	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
@@ -299,8 +309,10 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	s.maintenance(ctx, sample.At)
 	// Last, so a slow one-shot `sample` (3s cap) never delays the slow-tick
-	// alert persistence, notifications or maintenance.
-	s.TickSustained(ctx, sample.At)
+	// alert persistence, notifications or maintenance. It takes its own
+	// timestamp: sample.At predates collection, persistence and maintenance,
+	// and ps etime is only meaningful against the time of the ps snapshot.
+	s.TickSustained(ctx, s.opts.Clock.Now().UTC())
 	return nil
 }
 func (s *Service) updateSelfGuard(cpu float64) {

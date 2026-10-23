@@ -297,12 +297,12 @@ func (st *sustainedState) sampleFor(ctx context.Context, key string, pid int, at
 // sustainedConditions observes one process snapshot and renders conditions.
 // The sample summary is collected once per alert (failures are retried after
 // a long backoff) and reused for the life of the alert.
-func (s *Service) sustainedConditions(ctx context.Context, at time.Time) []Condition {
+func (s *Service) sustainedConditions(ctx context.Context, at time.Time) (conds []Condition, ok bool) {
 	st := s.sustained
 	procs, err := listProcObs(ctx, st.runner, st.os, at)
 	if err != nil {
 		s.opts.Logger.Debug("sustained cpu probe unavailable", "error", err)
-		return nil
+		return nil, false
 	}
 	table := make(map[int]ProcObs, len(procs))
 	for _, p := range procs {
@@ -310,7 +310,7 @@ func (s *Service) sustainedConditions(ctx context.Context, at time.Time) []Condi
 	}
 	findings := st.tracker.Observe(at, st.cpuObservations(procs, at))
 	live := make(map[string]bool, len(findings))
-	conds := make([]Condition, 0, len(findings))
+	conds = make([]Condition, 0, len(findings))
 	budget := 1
 	for _, f := range findings {
 		key := sustainedKey(f)
@@ -324,7 +324,29 @@ func (s *Service) sustainedConditions(ctx context.Context, at time.Time) []Condi
 			delete(st.summaries, key)
 		}
 	}
-	return conds
+	return conds, true
+}
+
+// seedSustained registers restored sustained alerts with the tracker.
+func (s *Service) seedSustained(at time.Time, alerts []Alert) {
+	if s.sustained == nil {
+		return
+	}
+	s.sustMu.Lock()
+	defer s.sustMu.Unlock()
+	for _, a := range alerts {
+		if a.State != "firing" || !strings.HasPrefix(a.Key, sustainedKeyPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(a.Key, sustainedKeyPrefix)
+		i := strings.LastIndexByte(rest, ':')
+		if i < 0 {
+			continue
+		}
+		if pid, err := strconv.Atoi(rest[i+1:]); err == nil && pid > 0 {
+			s.sustained.tracker.Seed(at, pid, rest[:i], a.FiredAt)
+		}
+	}
 }
 
 // TickSustained runs one sustained-CPU probe cycle at the given time.
@@ -333,8 +355,11 @@ func (s *Service) TickSustained(ctx context.Context, at time.Time) {
 		return
 	}
 	s.sustMu.Lock()
-	conds := s.sustainedConditions(ctx, at)
+	conds, ok := s.sustainedConditions(ctx, at)
 	s.sustMu.Unlock()
+	if !ok {
+		return // no evidence this tick: leave alerts and tracker untouched
+	}
 	s.mu.Lock()
 	events := s.engine.EvaluateSustained(at, conds)
 	var refresh []Alert
