@@ -75,6 +75,7 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 	}
 	sig := slowSignals{Load: deps.load(), Power: deps.power(), Procs: deps.procs()}
 	causes := rankSlowCauses(sig)
+	causes = appendXPCCauses(causes, sig.Procs)
 	var daemonAlerts []hostwatch.Alert
 	var trend string
 	if !*noDaemon && deps.connect != nil {
