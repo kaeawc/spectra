@@ -1665,6 +1665,8 @@ func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int)
 		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
 			SpectraVersion: s.Version,
 			ThreadDumpPIDs: threadDumpPIDs,
+			// attachJVMHistory below records these JVMs as history samples.
+			JVMOpts: jvm.CollectOptions{SampleNMT: true},
 		})
 	}
 	catalog, err := resolveRulesCatalog(config)

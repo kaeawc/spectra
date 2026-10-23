@@ -36,6 +36,7 @@ func V1Catalog() []Rule {
 		ruleJVMOOMDumpDisabled(),
 		ruleJVMGCLoggingDisabled(),
 		ruleJVMRSSExceedsHeap(),
+		ruleJVMNativeMemoryGrowth(),
 		ruleJVMGCAlgorithm(),
 		ruleJVMOOMDetected(),
 		ruleJVMHeapDumpFound(),

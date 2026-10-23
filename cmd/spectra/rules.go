@@ -13,6 +13,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
@@ -104,6 +105,8 @@ func buildLiveRulesSnapshot(threadDumpPIDs []int) snapshot.Snapshot {
 		SpectraVersion: version,
 		DetectOpts:     detect.Options{},
 		ThreadDumpPIDs: threadDumpPIDs,
+		// This path feeds attachCLIHistory, so it is a history sampler.
+		JVMOpts: jvm.CollectOptions{SampleNMT: true},
 	}
 	// Reuse the persistent on-disk caches so per-app inspection
 	// (detect: codesign + plist + framework scan), toolchain enumeration,
