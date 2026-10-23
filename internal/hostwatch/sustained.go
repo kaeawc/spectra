@@ -138,18 +138,18 @@ func (t *SustainedTracker) resetAfterGap() {
 	}
 }
 
-// capacity is how many samples a window holds at the base interval; zero
-// when the interval is unknown.
+// capacity is how many samples the window holds at the worst-case effective
+// interval (4x the base, self-guard backoff); zero when the interval is unknown.
 func (t *SustainedTracker) capacity() int {
 	if t.cfg.Interval <= 0 {
 		return 0
 	}
-	return int(t.cfg.Window / t.cfg.Interval)
+	return int(t.cfg.Window / (4 * t.cfg.Interval))
 }
 
-// minClearPoints is the number of samples required before a firing finding may
-// be disproved: sustainedMinClearPoints, capped by what the window can hold,
-// but never below two so a single low sample cannot clear an alert.
+// minClearPoints is the number of in-window samples required before a firing
+// finding may be disproved: sustainedMinClearPoints, capped by what the window
+// holds, but never below two so one low sample cannot clear an alert.
 func (t *SustainedTracker) minClearPoints() int {
 	n := sustainedMinClearPoints
 	if c := t.capacity(); c > 0 && c < n {
@@ -162,25 +162,32 @@ func (t *SustainedTracker) minClearPoints() int {
 }
 
 // minAbovePoints is how many above-threshold samples firing needs: at least
-// three, or half the samples the window holds at the worst-case (4x) backed-off
-// interval, so one lucky sample can never fire an alert yet backoff cannot
-// make firing unreachable.
+// three, or half the window's capacity at the effective interval.
 func (t *SustainedTracker) minAbovePoints() int {
 	n := 3
-	if c := t.capacity() / 8; c > n {
+	if c := t.capacity() / 2; c > n {
 		n = c
 	}
 	return n
 }
 
-// coverageSlack is how much shorter than the window the sampled span may be:
-// a tenth of the window, but no more than one base interval.
-func (t *SustainedTracker) coverageSlack() time.Duration {
-	s := t.cfg.Window / 10
-	if t.cfg.Interval > 0 && t.cfg.Interval < s {
-		s = t.cfg.Interval
+// trimPoints drops samples older than the window but keeps the newest of them
+// as an anchor. Coverage is then measured from the anchor, so tick jitter
+// (the period is interval plus work) can never make a full window unreachable.
+func trimPoints(points []cpuPoint, cutoff time.Time) []cpuPoint {
+	k := 0
+	for k+1 < len(points) && points[k+1].at.Before(cutoff) {
+		k++
 	}
-	return s
+	return points[k:]
+}
+
+// inWindow returns the samples inside [cutoff, now], excluding the anchor.
+func inWindow(points []cpuPoint, cutoff time.Time) []cpuPoint {
+	if len(points) > 0 && points[0].at.Before(cutoff) {
+		return points[1:]
+	}
+	return points
 }
 
 func (t *SustainedTracker) record(at time.Time, p ProcObs) {
@@ -194,35 +201,34 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		t.entries[p.PID] = e
 	}
 	e.lastGood = at
-	e.points = append(e.points, cpuPoint{at: at, above: above, cpu: p.CPUPct})
 	cutoff := at.Add(-t.cfg.Window)
-	first := 0
-	for first < len(e.points) && e.points[first].at.Before(cutoff) {
-		first++
-	}
-	e.points = e.points[first:]
-	carried := !e.since.IsZero() && len(e.points) < t.minClearPoints()
-	if !anyAbove(e.points) && !carried {
+	e.points = trimPoints(append(e.points, cpuPoint{at: at, above: above, cpu: p.CPUPct}), cutoff)
+	in := inWindow(e.points, cutoff)
+	carried := !e.since.IsZero() && len(in) < t.minClearPoints()
+	if !anyAbove(in) && !carried {
 		delete(t.entries, p.PID)
 	}
 }
 
 func (t *SustainedTracker) evaluate(at time.Time) []SustainedFinding {
 	var out []SustainedFinding
+	cutoff := at.Add(-t.cfg.Window)
 	for pid, e := range t.entries {
 		if at.Sub(e.lastGood) >= t.cfg.Window {
 			delete(t.entries, pid) // unreadable for a whole window: age out
 			continue
 		}
-		if len(e.points) == 0 {
+		e.points = trimPoints(e.points, cutoff)
+		in := inWindow(e.points, cutoff)
+		if len(in) == 0 {
 			continue // carried across a gap with no fresh sample yet
 		}
-		frac, avg := summarize(e.points)
-		covered := at.Sub(e.points[0].at) >= t.cfg.Window-t.coverageSlack()
+		frac, avg := summarize(in)
+		covered := at.Sub(e.points[0].at) >= t.cfg.Window
 		switch {
-		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction && countAbove(e.points) >= t.minAbovePoints():
-			e.since = e.points[0].at
-		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= t.minClearPoints() && lastBelow(e.points, 2):
+		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction && countAbove(in) >= t.minAbovePoints():
+			e.since = in[0].at
+		case !e.since.IsZero() && frac < sustainedClearFraction && len(in) >= t.minClearPoints() && lastBelow(in, 2):
 			e.since = time.Time{}
 		}
 		if e.since.IsZero() {

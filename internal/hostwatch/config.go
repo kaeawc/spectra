@@ -70,17 +70,20 @@ type SustainedConfig struct {
 	MaxGap   time.Duration `yaml:"-"`
 }
 
+// sustainedWindowIntervals is the minimum window in base watch intervals:
+// four samples even when self-guard backoff stretches the tick to 4x.
+const sustainedWindowIntervals = 16
+
 // ValidateWatchInterval checks the sustained window against the watch
-// interval, widening the window to four intervals (the samples needed to
-// disprove a firing alert) if it is too short to hold them.
+// interval, widening the window if it cannot hold enough samples.
 func (c *Config) ValidateWatchInterval(interval time.Duration) error {
-	minWindow := sustainedMinClearPoints * interval
+	minWindow := sustainedWindowIntervals * interval
 	if c.Sustained.Window >= minWindow {
 		return nil
 	}
 	got := c.Sustained.Window
 	c.Sustained.Window = minWindow
-	return fmt.Errorf("sustained.window %s must be at least %d times the watch interval (%s); using %s", got, sustainedMinClearPoints, interval, minWindow)
+	return fmt.Errorf("sustained.window %s must be at least %d times the watch interval (%s); using %s", got, sustainedWindowIntervals, interval, minWindow)
 }
 
 func DefaultSustainedConfig() SustainedConfig {

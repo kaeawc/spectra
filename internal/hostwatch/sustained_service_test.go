@@ -312,7 +312,7 @@ func TestSustainedLinuxFirstSightingYieldsNoSample(t *testing.T) {
 func TestValidateWatchIntervalAndTrackerGap(t *testing.T) {
 	c := DefaultConfig()
 	c.Sustained.Window = 20 * time.Second
-	if err := c.ValidateWatchInterval(15 * time.Second); err == nil || c.Sustained.Window != 60*time.Second {
+	if err := c.ValidateWatchInterval(15 * time.Second); err == nil || c.Sustained.Window != 4*time.Minute {
 		t.Fatalf("window not widened: %v %v", err, c.Sustained.Window)
 	}
 	if err := c.ValidateWatchInterval(15 * time.Second); err != nil {
