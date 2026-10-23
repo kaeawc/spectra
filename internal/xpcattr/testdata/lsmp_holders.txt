@@ -1,0 +1,7 @@
+Process (17874) : OSLogService
+  name      ipc-object    rights     flags   boost  reqs  recv  send sonce oref  qlimit msgcount context            identifier  type
+---------   ----------  ----------  -------- -----  ---- ----- ----- ----- ---- ------ -------- ------------------ ----------  -----------
+0x00001003  0x1a        send        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 17649)
+0x00001107  0x2b        send        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 17649)
+0x00001203  0x3c        send        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 20001)
+0x00001303  0x4d        recv        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 17874)

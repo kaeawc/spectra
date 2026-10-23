@@ -1,0 +1,14 @@
+Analysis of sampling OSLogService (pid 17874) every 1 millisecond
+Process:         OSLogService [17874]
+Path:            /usr/libexec/OSLogService
+Call graph:
+    1000 Thread_9001   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1000 start  (in dyld) + 6  [0x1]
+    700 Thread_9002   DispatchQueue_5: com.apple.NSXPCConnection.user.anonymous.17649  (serial)
+    + 700 -[OSLogStore enumerate]  (in OSLog) + 12  [0x2]
+    200 Thread_9003   DispatchQueue_6: com.apple.NSXPCConnection.user.anonymous.20001  (serial)
+    + 200 -[OSLogStore enumerate]  (in OSLog) + 12  [0x2]
+    100 Thread_9004   DispatchQueue_7: com.apple.NSXPCConnection.user.anonymous.17649  (serial)
+    + 100 -[OSLogStore count]  (in OSLog) + 4  [0x3]
+    50 Thread_9005   DispatchQueue_8: com.apple.NSXPCConnection.m-user.com.apple.logd  (serial)
+    + 50 mach_msg  (in libsystem_kernel.dylib) + 8  [0x4]
