@@ -51,6 +51,8 @@ type ServiceOptions struct {
 	// leaves the probe disabled.
 	Runner proc.Runner
 	OS     hostos.Kind
+	// ReadFile reads /proc files for the Linux sustained-CPU delta.
+	ReadFile func(string) ([]byte, error)
 }
 type subscriber struct {
 	ch      chan notification

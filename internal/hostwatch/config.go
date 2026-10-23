@@ -63,6 +63,22 @@ type SustainedConfig struct {
 	// Allowlist holds case-insensitive process-name patterns (path.Match
 	// syntax) for expected long-running work that must not alert.
 	Allowlist []string `yaml:"allowlist"`
+	// Interval is the watch sampling interval, set by the service (not YAML).
+	// It sizes the coverage slack and the suspend-gap threshold.
+	Interval time.Duration `yaml:"-"`
+}
+
+// ValidateWatchInterval checks the sustained window against the watch
+// interval, widening the window to the minimum if it is too short to hold
+// enough samples.
+func (c *Config) ValidateWatchInterval(interval time.Duration) error {
+	min := 2 * interval
+	if c.Sustained.Window >= min {
+		return nil
+	}
+	got := c.Sustained.Window
+	c.Sustained.Window = min
+	return fmt.Errorf("sustained.window %s must be at least twice the watch interval (%s); using %s", got, interval, min)
 }
 
 func DefaultSustainedConfig() SustainedConfig {

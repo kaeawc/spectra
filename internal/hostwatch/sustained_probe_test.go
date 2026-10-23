@@ -118,7 +118,7 @@ func TestServiceSustainedAlertEndToEnd(t *testing.T) {
 		t.Fatalf("alerts %+v err %v", alerts, err)
 	}
 	a := alerts[0]
-	for _, want := range []string{"diagnosticd (pid 412)", "owner chain: launchd(1) > diagnosticd(412)", "log stream", "sample: top of stack: __ulock_wait 1000", "next: sample 412 10", "up 5h"} {
+	for _, want := range []string{"diagnosticd (pid 412)", "owner chain: launchd(1) > diagnosticd(412)", "log stream", "sample top of stack: __ulock_wait 1000", "next: sample 412 10", "up 5h"} {
 		if !strings.Contains(a.Detail, want) {
 			t.Errorf("detail lacks %q: %s", want, a.Detail)
 		}

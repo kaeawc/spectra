@@ -15,7 +15,10 @@ const (
 	startTolerance = 3 * time.Second
 	// sustainedMaxGap resets all tracking after the daemon was suspended or
 	// the host slept, so a gap is never counted as continuous load.
-	sustainedMaxGap = 5 * time.Minute
+	sustainedMinGap = 5 * time.Minute
+	// sustainedMinClearPoints is how many fresh samples must follow a gap
+	// reset before a still-active finding can be disproved.
+	sustainedMinClearPoints = 4
 	// sustainedClearFraction is the hysteresis floor: an active finding keeps
 	// firing until fewer than this share of window samples are above threshold.
 	sustainedClearFraction = 0.5
@@ -71,8 +74,8 @@ func NewSustainedTracker(cfg SustainedConfig) *SustainedTracker {
 // Observe records a full process snapshot taken at the given time and returns
 // the processes currently considered sustained, ordered by PID.
 func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFinding {
-	if !t.last.IsZero() && (at.Sub(t.last) > sustainedMaxGap || at.Before(t.last)) {
-		t.entries = map[int]*sustainedEntry{}
+	if !t.last.IsZero() && (at.Sub(t.last) > t.maxGap() || at.Before(t.last)) {
+		t.resetAfterGap()
 	}
 	t.last = at
 	seen := make(map[int]bool, len(procs))
@@ -89,6 +92,34 @@ func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFin
 		}
 	}
 	return t.evaluate(at)
+}
+
+func (t *SustainedTracker) maxGap() time.Duration {
+	if g := 3 * t.cfg.Interval; g > sustainedMinGap {
+		return g
+	}
+	return sustainedMinGap
+}
+
+// resetAfterGap discards history that spans a suspend, so the gap is never
+// counted as continuous load. Entries that were already firing keep their
+// since-time and stay reported until fresh samples disprove them, so the
+// alert does not resolve and refire under a new ID across sleep.
+func (t *SustainedTracker) resetAfterGap() {
+	for pid, e := range t.entries {
+		if e.since.IsZero() {
+			delete(t.entries, pid)
+			continue
+		}
+		e.points = nil
+	}
+}
+
+func (t *SustainedTracker) coverageSlack() time.Duration {
+	if s := t.cfg.Window / 10; s > t.cfg.Interval {
+		return s
+	}
+	return t.cfg.Interval
 }
 
 func (t *SustainedTracker) record(at time.Time, p ProcObs) {
@@ -112,7 +143,8 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		first++
 	}
 	e.points = e.points[first:]
-	if !anyAbove(e.points) {
+	carried := !e.since.IsZero() && len(e.points) < sustainedMinClearPoints
+	if !anyAbove(e.points) && !carried {
 		delete(t.entries, p.PID)
 	}
 }
@@ -120,13 +152,15 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 func (t *SustainedTracker) evaluate(at time.Time) []SustainedFinding {
 	var out []SustainedFinding
 	for pid, e := range t.entries {
+		if len(e.points) == 0 {
+			continue // carried across a gap with no fresh sample yet
+		}
 		frac, avg := summarize(e.points)
-		span := at.Sub(e.points[0].at)
-		covered := span >= t.cfg.Window-t.cfg.Window/10
+		covered := at.Sub(e.points[0].at) >= t.cfg.Window-t.coverageSlack()
 		switch {
 		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction:
 			e.since = e.points[0].at
-		case !e.since.IsZero() && frac < sustainedClearFraction:
+		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= sustainedMinClearPoints:
 			e.since = time.Time{}
 		}
 		if e.since.IsZero() {
@@ -252,7 +286,7 @@ func SustainedDetail(f SustainedFinding, at time.Time, chain []ChainLink, goos, 
 		parts = append(parts, "hint: "+hint)
 	}
 	if sampleSummary != "" {
-		parts = append(parts, "sample: "+sampleSummary)
+		parts = append(parts, sampleSummary)
 	}
 	parts = append(parts, "next: "+SuggestNextCommand(goos, f.PID))
 	return strings.Join(parts, "; ")

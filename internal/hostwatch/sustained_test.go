@@ -183,8 +183,8 @@ func TestSustainedDetailHints(t *testing.T) {
 		name, goos, sample string
 		want, absent       []string
 	}{
-		{"diagnosticd", "darwin", "top: __ulock_wait", []string{"unified log", "`log stream`", "OSLogStore", "launchd(1) > diagnosticd(412)", "for 3h0m0s", "up 5h0m0s", "next: sample 412 10", "sample: top: __ulock_wait", "87% CPU"}, nil},
-		{"OSLogService", "darwin", "", []string{"unified log"}, []string{"sample:"}},
+		{"diagnosticd", "darwin", "top: __ulock_wait", []string{"unified log", "`log stream`", "OSLogStore", "launchd(1) > diagnosticd(412)", "for 3h0m0s", "up 5h0m0s", "next: sample 412 10", "top: __ulock_wait", "87% CPU"}, nil},
+		{"OSLogService", "darwin", "", []string{"unified log"}, []string{"sample top", "unavailable"}},
 		{"/usr/libexec/mds_stores", "darwin", "", []string{"Spotlight"}, []string{"unified log"}},
 		{"java", "linux", "", []string{"next: top -H -p 412"}, []string{"hint:"}},
 	} {
