@@ -246,11 +246,18 @@ func resolveFamily(p Info, byPID map[int]Info) famID {
 }
 
 func simulatorFamily(p Info) (famID, bool) {
-	if m := simUDIDRe.FindStringSubmatch(p.FullCommandLine + " " + p.ExecutablePath); m != nil {
+	isLaunchd := strings.ToLower(commandName(p)) == "launchd_sim"
+	// Only launchd_sim documents its device path as an argument; for other
+	// processes, arguments (tail -f .../Devices/<UDID>/log) must not count.
+	text := exeText(p)
+	if isLaunchd {
+		text = p.FullCommandLine + " " + p.ExecutablePath
+	}
+	if m := simUDIDRe.FindStringSubmatch(text); m != nil {
 		udid := strings.ToUpper(m[1])
 		return famID{key: FamilySimulator + ":" + udid, kind: FamilySimulator, name: "Simulator " + udid, udid: udid}, true
 	}
-	if strings.ToLower(commandName(p)) == "launchd_sim" {
+	if isLaunchd {
 		return famID{key: fmt.Sprintf("%s:launchd_sim-%d", FamilySimulator, p.PID), kind: FamilySimulator,
 			name: fmt.Sprintf("Simulator (launchd_sim pid %d)", p.PID)}, true
 	}

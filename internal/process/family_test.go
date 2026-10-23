@@ -155,6 +155,14 @@ func TestGroupFamiliesClassification(t *testing.T) {
 			wantKeys: map[string]int{"simulator:" + udidA: 4},
 		},
 		{
+			name: "device path in an argument does not classify as the simulator",
+			procs: []Info{
+				{PID: 90, PPID: 1, Command: "tail", FullCommandLine: "/usr/bin/tail -f /Users/x/Library/Developer/CoreSimulator/Devices/" + udidA + "/data/log"},
+				{PID: 91, PPID: 1, Command: "cat", FullCommandLine: "/bin/cat /Users/x/Library/Developer/CoreSimulator/Devices/" + udidA + "/data/log"},
+			},
+			wantKeys: map[string]int{"other:tail": 1, "other:cat": 1},
+		},
+		{
 			name: "launchd_sim without UDID is keyed by pid",
 			procs: []Info{
 				{PID: 70, PPID: 1, Command: "launchd_sim"},

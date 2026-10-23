@@ -112,11 +112,13 @@ each). `spectra process --group-by family [--top N] [--json]` sums CPU per
 family instead of listing processes. Families:
 
 - **simulator** - one per device, keyed by the UDID in the
-  `CoreSimulator/Devices/<UDID>` path of `launchd_sim` or any descendant;
+  `CoreSimulator/Devices/<UDID>` path of `launchd_sim` (its arguments) or of a
+  descendant's executable (arguments of other processes are ignored);
   processes without the path inherit the family by walking the parent chain.
 - **xcode** - `xcodebuild`, `XCBBuildService`, `SourceKitService`, anything under
-  `Xcode.app`, and build-tool children of those.
-- **emulator** - `emulator` and `qemu-*`.
+  `Xcode.app`, and any descendant of those that no other family claims.
+- **emulator** - `emulator` and `qemu-*`, plus any descendant that no other
+  family claims.
 - **build** - `make`, `ninja`, `cargo`, `clang`, Gradle/Kotlin daemons, etc.
 - **browser** - one family per browser app.
 
