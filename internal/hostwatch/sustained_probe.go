@@ -128,9 +128,10 @@ func (s *Service) initSustained() {
 		s.opts.Logger.Warn("watch config", "error", err)
 	}
 	cfg := s.opts.Config.Sustained
-	// Self-guard backoff can stretch the tick to 4x the base interval, so
-	// size coverage slack and the suspend gap for that worst case.
-	cfg.Interval = 4 * s.opts.Interval
+	// Self-guard backoff can stretch the tick to 4x the base interval, so the
+	// suspend gap is sized for that worst case; coverage uses the base interval.
+	cfg.Interval = s.opts.Interval
+	cfg.MaxGap = 12 * s.opts.Interval
 	read := s.opts.ReadFile
 	if c, ok := s.opts.Collector.(*Collector); ok && read == nil {
 		read = c.readFile()

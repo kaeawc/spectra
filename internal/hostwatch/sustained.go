@@ -62,6 +62,9 @@ type sustainedEntry struct {
 	started time.Time
 	points  []cpuPoint
 	since   time.Time // zero until the criteria are first met
+	// lastGood is when the entry last received a real CPU reading; Skip'd
+	// ticks do not advance it, so a permanently unreadable process ages out.
+	lastGood time.Time
 }
 
 // SustainedTracker is a pure, clock-free state machine: the caller supplies
@@ -90,6 +93,7 @@ func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFin
 			continue
 		}
 		seen[p.PID] = true
+		t.dropIfReused(p)
 		if p.Skip {
 			continue
 		}
@@ -103,9 +107,19 @@ func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFin
 	return t.evaluate(at)
 }
 
+// dropIfReused forgets an entry whose PID now belongs to a process with a
+// different start time, whether or not this tick has a CPU reading for it.
+func (t *SustainedTracker) dropIfReused(p ProcObs) {
+	if e := t.entries[p.PID]; e != nil && !sameStart(e.started, p.Started) {
+		delete(t.entries, p.PID)
+	}
+}
+
+// maxGap is the observation gap treated as a suspend. The service sets MaxGap
+// from the worst-case backed-off tick; without it, the floor applies.
 func (t *SustainedTracker) maxGap() time.Duration {
-	if g := 3 * t.cfg.Interval; g > sustainedMinGap {
-		return g
+	if t.cfg.MaxGap > sustainedMinGap {
+		return t.cfg.MaxGap
 	}
 	return sustainedMinGap
 }
@@ -124,34 +138,53 @@ func (t *SustainedTracker) resetAfterGap() {
 	}
 }
 
-// minClearPoints is sustainedMinClearPoints, capped by how many samples a
-// window can hold at the configured interval so clearing can never deadlock.
+// capacity is how many samples a window holds at the base interval; zero
+// when the interval is unknown.
+func (t *SustainedTracker) capacity() int {
+	if t.cfg.Interval <= 0 {
+		return 0
+	}
+	return int(t.cfg.Window / t.cfg.Interval)
+}
+
+// minClearPoints is the number of samples required before a firing finding may
+// be disproved: sustainedMinClearPoints, capped by what the window can hold,
+// but never below two so a single low sample cannot clear an alert.
 func (t *SustainedTracker) minClearPoints() int {
 	n := sustainedMinClearPoints
-	if t.cfg.Interval > 0 {
-		if fit := int(t.cfg.Window / t.cfg.Interval); fit < n {
-			n = fit
-		}
+	if c := t.capacity(); c > 0 && c < n {
+		n = c
 	}
-	if n < 1 {
-		n = 1
+	if n < 2 {
+		n = 2
 	}
 	return n
 }
 
-func (t *SustainedTracker) coverageSlack() time.Duration {
-	if s := t.cfg.Window / 10; s > t.cfg.Interval {
-		return s
+// minAbovePoints is how many above-threshold samples firing needs: at least
+// three, or half the samples the window holds at the worst-case (4x) backed-off
+// interval, so one lucky sample can never fire an alert yet backoff cannot
+// make firing unreachable.
+func (t *SustainedTracker) minAbovePoints() int {
+	n := 3
+	if c := t.capacity() / 8; c > n {
+		n = c
 	}
-	return t.cfg.Interval
+	return n
+}
+
+// coverageSlack is how much shorter than the window the sampled span may be:
+// a tenth of the window, but no more than one base interval.
+func (t *SustainedTracker) coverageSlack() time.Duration {
+	s := t.cfg.Window / 10
+	if t.cfg.Interval > 0 && t.cfg.Interval < s {
+		s = t.cfg.Interval
+	}
+	return s
 }
 
 func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 	e := t.entries[p.PID]
-	if e != nil && !sameStart(e.started, p.Started) {
-		delete(t.entries, p.PID)
-		e = nil
-	}
 	above := p.CPUPct >= t.cfg.CPUPct
 	if e == nil {
 		if !above {
@@ -160,6 +193,7 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		e = &sustainedEntry{name: p.Name, started: p.Started}
 		t.entries[p.PID] = e
 	}
+	e.lastGood = at
 	e.points = append(e.points, cpuPoint{at: at, above: above, cpu: p.CPUPct})
 	cutoff := at.Add(-t.cfg.Window)
 	first := 0
@@ -176,15 +210,19 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 func (t *SustainedTracker) evaluate(at time.Time) []SustainedFinding {
 	var out []SustainedFinding
 	for pid, e := range t.entries {
+		if at.Sub(e.lastGood) >= t.cfg.Window {
+			delete(t.entries, pid) // unreadable for a whole window: age out
+			continue
+		}
 		if len(e.points) == 0 {
 			continue // carried across a gap with no fresh sample yet
 		}
 		frac, avg := summarize(e.points)
 		covered := at.Sub(e.points[0].at) >= t.cfg.Window-t.coverageSlack()
 		switch {
-		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction:
+		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction && countAbove(e.points) >= t.minAbovePoints():
 			e.since = e.points[0].at
-		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= t.minClearPoints():
+		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= t.minClearPoints() && lastBelow(e.points, 2):
 			e.since = time.Time{}
 		}
 		if e.since.IsZero() {
@@ -207,6 +245,29 @@ func summarize(points []cpuPoint) (fraction, avg float64) {
 	}
 	n := float64(len(points))
 	return float64(above) / n, sum / n
+}
+
+func countAbove(points []cpuPoint) int {
+	n := 0
+	for _, p := range points {
+		if p.above {
+			n++
+		}
+	}
+	return n
+}
+
+// lastBelow reports whether the n most recent samples are all below threshold.
+func lastBelow(points []cpuPoint, n int) bool {
+	if len(points) < n {
+		return false
+	}
+	for _, p := range points[len(points)-n:] {
+		if p.above {
+			return false
+		}
+	}
+	return true
 }
 
 func anyAbove(points []cpuPoint) bool {

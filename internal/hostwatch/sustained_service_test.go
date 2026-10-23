@@ -322,7 +322,7 @@ func TestValidateWatchIntervalAndTrackerGap(t *testing.T) {
 	if g := NewSustainedTracker(cfg).maxGap(); g != 5*time.Minute {
 		t.Fatalf("default gap %v", g)
 	}
-	cfg.Interval = 4 * time.Minute
+	cfg.MaxGap = 12 * time.Minute
 	if g := NewSustainedTracker(cfg).maxGap(); g != 12*time.Minute {
 		t.Fatalf("interval gap %v", g)
 	}

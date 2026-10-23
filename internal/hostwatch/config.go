@@ -63,9 +63,11 @@ type SustainedConfig struct {
 	// Allowlist holds case-insensitive process-name patterns (path.Match
 	// syntax) for expected long-running work that must not alert.
 	Allowlist []string `yaml:"allowlist"`
-	// Interval is the watch sampling interval, set by the service (not YAML).
-	// It sizes the coverage slack and the suspend-gap threshold.
+	// Interval is the base watch sampling interval and MaxGap the observation
+	// gap treated as a suspend (sized for worst-case backoff). Both are set by
+	// the service, not YAML.
 	Interval time.Duration `yaml:"-"`
+	MaxGap   time.Duration `yaml:"-"`
 }
 
 // ValidateWatchInterval checks the sustained window against the watch
