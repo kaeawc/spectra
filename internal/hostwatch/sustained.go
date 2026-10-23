@@ -205,6 +205,18 @@ func inWindow(points []cpuPoint, cutoff time.Time) []cpuPoint {
 	return points
 }
 
+// staleHistory reports whether the entry's newest sample is too old to be
+// continuous with a reading taken at the given time: a run of Skip'd ticks (for
+// example an unreadable /proc) is not evidence of load, so the history before it
+// must not stand in for window coverage. The limit is twice the worst-case
+// backed-off tick; with no known interval nothing is considered stale here.
+func (t *SustainedTracker) staleHistory(e *sustainedEntry, at time.Time) bool {
+	if t.cfg.Interval <= 0 || len(e.points) == 0 {
+		return false
+	}
+	return at.Sub(e.points[len(e.points)-1].at) > 8*t.cfg.Interval
+}
+
 func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 	e := t.entries[p.PID]
 	above := p.CPUPct >= t.cfg.CPUPct
@@ -214,6 +226,9 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		}
 		e = &sustainedEntry{name: p.Name, started: p.Started}
 		t.entries[p.PID] = e
+	}
+	if t.staleHistory(e, at) {
+		e.points = nil
 	}
 	e.lastGood = at
 	cutoff := at.Add(-t.cfg.Window)
