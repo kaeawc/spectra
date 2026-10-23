@@ -171,6 +171,16 @@ sites) and reports a clear error otherwise.
   addresses, so captures from different runs line up — to attribute native
   growth to the allocating call site.
 
+When a JVM runs with `-XX:NativeMemoryTracking=summary|detail`, each JVM
+collection also records per-category committed KiB (one bounded `jcmd
+VM.native_memory summary`, 5 s timeout) in the JVM sample history. The
+`jvm-native-memory-growth` rule uses it to flag a category that grows steadily
+(default: at least 64 MiB and 25% over at least 4 samples spanning 15 minutes;
+`Class`/`Code`/`Compiler` only after the process is 30 minutes old) and points
+at `nmt baseline` / `nmt diff`. Spectra never enables NMT on a JVM itself; with
+NMT off nothing is sampled and the rule stays quiet. See
+[recommendations engine](../design/recommendations-engine.md).
+
 Daemon methods:
 
 - `jvm.list`
