@@ -178,7 +178,9 @@ VM.native_memory summary`, 5 s timeout) in the JVM sample history. The
 (default: at least 64 MiB and 25% over at least 4 samples spanning 15 minutes;
 `Class`/`Code`/`Compiler` only after the process is 30 minutes old) and points
 at `nmt baseline` / `nmt diff`. Spectra never enables NMT on a JVM itself; with
-NMT off nothing is sampled and the rule stays quiet. See
+NMT off nothing is sampled and the rule stays quiet. No daemon sampler records
+JVM history yet, so the rule needs history built up by repeated `spectra rules`
+or MCP `evaluateRules` runs. See
 [recommendations engine](../design/recommendations-engine.md).
 
 Daemon methods:
