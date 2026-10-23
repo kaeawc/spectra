@@ -278,6 +278,16 @@ CREATE TABLE IF NOT EXISTS jvm_samples (
 
 CREATE INDEX IF NOT EXISTS idx_jvm_samples_pid ON jvm_samples(pid, at_nano DESC);
 
+-- Per-category NMT committed KiB (JSON object) for a jvm_samples row. Kept in a
+-- side table so the jvm_samples shape and its readers stay unchanged; rows
+-- exist only for samples taken while NMT was enabled.
+CREATE TABLE IF NOT EXISTS jvm_nmt_samples (
+    pid            INTEGER NOT NULL,
+    at_nano        INTEGER NOT NULL,
+    committed_json TEXT NOT NULL,
+    PRIMARY KEY (pid, at_nano)
+);
+
 CREATE TABLE IF NOT EXISTS fd_samples (
     pid          INTEGER NOT NULL,
     proc_start_unix INTEGER NOT NULL DEFAULT 0,
@@ -1047,8 +1057,67 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 		if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
 			return err
 		}
+		if err := saveNMTSample(ctx, tx, sm); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+// saveNMTSample upserts the sample's NMT categories into jvm_nmt_samples and
+// clears any stale row when the sample carries none.
+func saveNMTSample(ctx context.Context, tx *sql.Tx, sm snapshot.JVMSample) error {
+	atNano := sm.At.UTC().UnixNano()
+	if len(sm.NMTCommittedKiB) == 0 {
+		_, err := tx.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
+		return err
+	}
+	data, err := json.Marshal(sm.NMTCommittedKiB)
+	if err != nil {
+		return fmt.Errorf("store: encode nmt sample: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO jvm_nmt_samples (pid, at_nano, committed_json) VALUES (?,?,?)
+		ON CONFLICT(pid, at_nano) DO UPDATE SET committed_json=excluded.committed_json`,
+		sm.PID, atNano, string(data))
+	return err
+}
+
+// loadNMTSamples fills NMTCommittedKiB on samples (one process lifetime of one
+// PID) from jvm_nmt_samples. Rows that fail to decode are skipped: NMT history
+// is an enhancement and must not break trend loading.
+func (s *DB) loadNMTSamples(ctx context.Context, pid int, samples []snapshot.JVMSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	lo := samples[0].At.UnixNano()
+	hi := samples[len(samples)-1].At.UnixNano()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT at_nano, committed_json FROM jvm_nmt_samples
+		WHERE pid=? AND at_nano BETWEEN ? AND ?`, pid, lo, hi)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	byAt := make(map[int64]map[string]int64)
+	for rows.Next() {
+		var at int64
+		var raw string
+		if err := rows.Scan(&at, &raw); err != nil {
+			return err
+		}
+		var cats map[string]int64
+		if json.Unmarshal([]byte(raw), &cats) == nil {
+			byAt[at] = cats
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range samples {
+		samples[i].NMTCommittedKiB = byAt[samples[i].At.UnixNano()]
+	}
+	return nil
 }
 
 // GetRecentJVMSamples returns up to limit JVM samples for the process
@@ -1135,6 +1204,9 @@ func (s *DB) AttachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) erro
 			errs = append(errs, fmt.Errorf("store: load jvm samples for pid %d: %w", j.PID, err))
 			continue
 		}
+		if err := s.loadNMTSamples(ctx, j.PID, samples); err != nil {
+			errs = append(errs, fmt.Errorf("store: load nmt samples for pid %d: %w", j.PID, err))
+		}
 		history = append(history, samples...)
 	}
 	snap.JVMHistory = history
@@ -1174,6 +1246,9 @@ func (s *DB) PruneJVMSamples(ctx context.Context, keepDays int) (int64, error) {
 	cutoff := s.clock.Now().UTC().Add(-time.Duration(keepDays) * 24 * time.Hour).UnixNano()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM jvm_samples WHERE at_nano < ?`, cutoff)
 	if err != nil {
+		return 0, err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE at_nano < ?`, cutoff); err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
