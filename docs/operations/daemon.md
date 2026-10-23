@@ -92,11 +92,13 @@ immediately.
 
 The `cpu.sustained:<name>:<pid>` warning fires when at least 90% of the samples
 in a rolling 15-minute window are at or above 50% CPU and the window is covered
-(within a tenth of the window or one backed-off interval); a short dip is tolerated,
+(within a tenth of the window or one base watch interval) with at least three
+above-threshold samples (more for long windows, scaled to the worst-case
+backed-off tick); a short dip is tolerated,
 bursty load is not. The window must be at least four watch intervals, or the
-daemon logs an error and widens it. Coverage slack and the suspend gap are sized
-for the worst-case backed-off interval (four times the base) so self-guard
-backoff does not undersize them. Resolution lags on purpose: the alert keeps
+daemon logs an error and widens it. The suspend gap is sized for the worst-case
+backed-off interval (four times the base) so self-guard backoff does not
+trigger it. Resolution lags on purpose: the alert keeps
 firing until fewer than half of the window samples are above the threshold, so
 expect up to roughly half a window after the load stops, and then two clear
 ticks. After a gap longer than the larger of five minutes and three watch
@@ -112,7 +114,10 @@ top of stack or Linux busiest threads. At most one summary is collected per tick
 with a three second limit, so a new alert may first appear without one. The probe runs last in the watch
 tick, after alert persistence, notifications and maintenance, so a slow sample
 never delays them. A process that `ps` lists but whose `/proc` stat read fails
-for a tick keeps its state and previous snapshot rather than resolving. `sample`
+for a tick keeps its state and previous snapshot rather than resolving; if it
+stays unreadable for a whole window (for example `hidepid`), the alert resolves.
+A firing alert needs at least two fresh samples below the threshold to clear,
+and a reused PID with a new start time never inherits an old alert. `sample`
 needs root for daemons such as `diagnosticd`; when it fails the detail says
 "sample unavailable (needs root)" with the exact `sudo sample <pid> 10`
 command to run, and the attempt is retried after 30 minutes. For `diagnosticd` and `OSLogService` the detail notes
