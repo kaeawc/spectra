@@ -9,34 +9,43 @@ import (
 	"github.com/kaeawc/spectra/internal/xpcattr"
 )
 
-// xpcBusyCPUPct is the CPU level at which a process is sampled for XPC
-// client attribution.
-const xpcBusyCPUPct = 80
+const (
+	// xpcBusyCPUPct is the CPU level at which a service is sampled for XPC
+	// client attribution.
+	xpcBusyCPUPct = 80
+	// xpcSampleDuration is the sample length; xpcTimeout bounds the whole
+	// attribution so whatswrong is never delayed beyond it.
+	xpcSampleDuration = time.Second
+	xpcTimeout        = 4 * time.Second
+)
 
-// xpcAttribute captures an attribution for a busy pid; tests substitute it.
-var xpcAttribute = func(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error) {
+// xpcAttributeFunc captures an attribution for a busy pid.
+type xpcAttributeFunc func(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error)
+
+func defaultXPCAttribute(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error) {
 	return xpcattr.Capture(ctx, xpcattr.Options{
 		PID:      pid,
-		Duration: 2 * time.Second,
+		Duration: xpcSampleDuration,
 		Procs:    func(context.Context) []process.Info { return procs },
 	})
 }
 
 // appendXPCCauses adds a cause naming the client driving the busiest process
-// when that process is an XPC service with identifiable clients. It samples
-// only on macOS and only for a process already over xpcBusyCPUPct; any
-// failure leaves the causes unchanged.
-func appendXPCCauses(causes []slowCause, procs []process.Info) []slowCause {
-	if hostos.Current() != hostos.Darwin {
+// when that process looks like an XPC service and has identifiable clients.
+// It samples only on macOS, only for a service already over xpcBusyCPUPct,
+// and never longer than xpcTimeout; any failure leaves the causes unchanged.
+// A nil attribute disables it.
+func appendXPCCauses(causes []slowCause, procs []process.Info, attribute xpcAttributeFunc) []slowCause {
+	if attribute == nil || hostos.Current() != hostos.Darwin {
 		return causes
 	}
 	top, ok := topByCPU(procs)
-	if !ok || top.CPUPct < xpcBusyCPUPct {
+	if !ok || top.CPUPct < xpcBusyCPUPct || !xpcattr.LooksLikeService(top) {
 		return causes
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), xpcTimeout)
 	defer cancel()
-	a, err := xpcAttribute(ctx, top.PID, procs)
+	a, err := attribute(ctx, top.PID, procs)
 	if err != nil {
 		cliLogger.Debug("whatswrong xpc attribution unavailable", "error", err)
 		return causes

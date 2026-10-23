@@ -13,6 +13,9 @@ import (
 	"github.com/kaeawc/spectra/internal/xpcattr"
 )
 
+// whoisSlack is added to --duration for process listing and lsmp.
+const whoisSlack = 15 * time.Second
+
 // whoisCapture captures an attribution; tests substitute it.
 type whoisCapture func(ctx context.Context, o xpcattr.Options) (xpcattr.Attribution, error)
 
@@ -38,7 +41,9 @@ func runWhoisWithIO(args []string, stdout, stderr io.Writer, capture whoisCaptur
 		fmt.Fprintf(stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
-	a, err := capture(context.Background(), xpcattr.Options{PID: pid, Duration: *duration, Sudo: *sudo})
+	ctx, cancel := context.WithTimeout(context.Background(), *duration+whoisSlack)
+	defer cancel()
+	a, err := capture(ctx, xpcattr.Options{PID: pid, Duration: *duration, Sudo: *sudo})
 	if err != nil {
 		fmt.Fprintf(stderr, "whois: %v\n", err)
 		return 1

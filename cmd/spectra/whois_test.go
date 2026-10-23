@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/xpcattr"
 )
@@ -50,6 +51,23 @@ func TestRunWhoisJSONAndErrors(t *testing.T) {
 	errBuf.Reset()
 	if code := runWhoisWithIO([]string{"5"}, &out, &errBuf, fakeWhois(xpcattr.Attribution{}, errors.New("boom"))); code != 1 || !strings.Contains(errBuf.String(), "boom") {
 		t.Errorf("capture error exit = %d %q", code, errBuf.String())
+	}
+}
+
+func TestRunWhoisSetsDeadline(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	var got time.Duration
+	capture := func(ctx context.Context, o xpcattr.Options) (xpcattr.Attribution, error) {
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Error("no deadline")
+		}
+		got = time.Until(dl)
+		return xpcattr.Attribution{PID: o.PID}, nil
+	}
+	runWhoisWithIO([]string{"--duration", "5s", "9"}, &out, &errBuf, capture)
+	if got < 15*time.Second || got > 20*time.Second {
+		t.Errorf("deadline in %v, want about 20s", got)
 	}
 }
 

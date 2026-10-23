@@ -37,6 +37,8 @@ type slowDeps struct {
 	procs   func() []process.Info
 	connect func(context.Context) (slowWatchClient, bool)
 	now     func() time.Time
+	// xpc attributes a busy service to its clients; nil disables it.
+	xpc xpcAttributeFunc
 }
 
 type slowWatchClient interface {
@@ -58,6 +60,7 @@ func defaultSlowDeps() slowDeps {
 			return watchclient.Connect(ctx, os.Getenv, paths)
 		},
 		now: time.Now,
+		xpc: defaultXPCAttribute,
 	}
 }
 
@@ -75,7 +78,7 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 	}
 	sig := slowSignals{Load: deps.load(), Power: deps.power(), Procs: deps.procs()}
 	causes := rankSlowCauses(sig)
-	causes = appendXPCCauses(causes, sig.Procs)
+	causes = appendXPCCauses(causes, sig.Procs, deps.xpc)
 	var daemonAlerts []hostwatch.Alert
 	var trend string
 	if !*noDaemon && deps.connect != nil {
