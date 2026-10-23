@@ -92,22 +92,27 @@ immediately.
 
 The `cpu.sustained:<name>:<pid>` warning fires when at least 90% of the samples
 in a rolling 15-minute window are at or above 50% CPU and the window is covered
-(within a tenth of the window or one watch interval); a short dip is tolerated,
-bursty load is not. The window must be at least twice the watch interval, or the
-daemon logs an error and widens it. Resolution lags on purpose: the alert keeps
+(within a tenth of the window or one backed-off interval); a short dip is tolerated,
+bursty load is not. The window must be at least four watch intervals, or the
+daemon logs an error and widens it. Coverage slack and the suspend gap are sized
+for the worst-case backed-off interval (four times the base) so self-guard
+backoff does not undersize them. Resolution lags on purpose: the alert keeps
 firing until fewer than half of the window samples are above the threshold, so
 expect up to roughly half a window after the load stops, and then two clear
 ticks. After a gap longer than the larger of five minutes and three watch
 intervals (for example sleep) the history is discarded, but an alert that was
 already firing is kept, with its original ID and since-time, until at least four
-fresh samples show the load is gone; an alert that was not yet firing starts over.
+fresh samples (fewer if the window cannot hold four) show the load is gone; an alert that was not yet firing starts over.
 
 The alert detail names the process, average CPU, how long it has been busy,
 process age, the owner chain (for example `launchd(1) > Terminal(50) >
 zsh(60) > log(70)`), a one-shot summary, and a suggested next command (`sample
 <pid> 10` on macOS, `top -H -p <pid>` on Linux). The summary is macOS `sample`
 top of stack or Linux busiest threads. At most one summary is collected per tick,
-with a three second limit, so a new alert may first appear without one. `sample`
+with a three second limit, so a new alert may first appear without one. The probe runs last in the watch
+tick, after alert persistence, notifications and maintenance, so a slow sample
+never delays them. A process that `ps` lists but whose `/proc` stat read fails
+for a tick keeps its state and previous snapshot rather than resolving. `sample`
 needs root for daemons such as `diagnosticd`; when it fails the detail says
 "sample unavailable (needs root)" with the exact `sudo sample <pid> 10`
 command to run, and the attempt is retried after 30 minutes. For `diagnosticd` and `OSLogService` the detail notes
