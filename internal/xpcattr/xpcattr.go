@@ -56,8 +56,11 @@ var (
 	// queueLine matches a call-graph line that starts with a sample count and
 	// names an anonymous NSXPCConnection queue carrying the client PID.
 	queueLine = regexp.MustCompile(`^[\s+!:|]*(\d+)\s+.*com\.apple\.NSXPCConnection\.[\w.\-]*?anonymous\.(\d+)`)
-	// lsmpPID matches the owning-process annotation on an lsmp port row.
-	lsmpPID = regexp.MustCompile(`\(pid (\d+)\)`)
+	// lsmpPID matches the peer annotation on an lsmp port row: either
+	// "(pid N)" or "(N) procname". The exact column format is unverified on
+	// real macOS output, so both shapes are accepted.
+	lsmpPID = regexp.MustCompile(`\((?:pid )?(\d+)\)`)
+	lsmpHex = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
 	// launchers are build/test drivers worth naming as "launched by".
 	launchers = map[string]bool{
 		"xcodebuild": true, "Xcode": true, "swift-build": true, "swift-test": true,
@@ -86,11 +89,16 @@ func ParseQueueClients(out string) map[int]int {
 	return res
 }
 
-// ParseLsmpHolders counts, per remote PID, the port rows of `lsmp -p` output
-// annotated "(pid N)". The service's own PID is excluded.
+// ParseLsmpHolders counts, per remote PID, the send and send-once port rows of
+// `lsmp -p` output that name a peer. Receive rights belong to the service
+// itself and are ignored, as is the service's own PID.
 func ParseLsmpHolders(out string, self int) map[int]int {
 	res := map[int]int{}
 	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !lsmpHex.MatchString(fields[0]) || !hasClientRight(fields) {
+			continue
+		}
 		m := lsmpPID.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -102,6 +110,18 @@ func ParseLsmpHolders(out string, self int) map[int]int {
 		res[pid]++
 	}
 	return res
+}
+
+func hasClientRight(fields []string) bool {
+	for _, f := range fields {
+		switch f {
+		case "send", "send-once":
+			return true
+		case "recv", "port-set":
+			return false
+		}
+	}
+	return false
 }
 
 // Resolve turns raw per-PID weights into clients with command line, parent
@@ -138,11 +158,13 @@ func Resolve(weights map[int]int, procs []process.Info) []Client {
 	return clients
 }
 
+// procName prefers the executable basename: Command is the comm field, which
+// the kernel truncates to 16 characters.
 func procName(p process.Info) string {
-	if p.Command != "" {
-		return filepath.Base(p.Command)
+	if p.ExecutablePath != "" {
+		return filepath.Base(p.ExecutablePath)
 	}
-	return filepath.Base(p.ExecutablePath)
+	return filepath.Base(p.Command)
 }
 
 // parentChain lists the ancestors of p, nearest first, stopping at launchd,
@@ -162,8 +184,8 @@ func parentChain(p process.Info, byPID map[int]process.Info) []ProcRef {
 	return chain
 }
 
-// launcherOf picks the outermost known build/test driver in the chain,
-// falling back to the immediate parent.
+// launcherOf picks the outermost known build/test driver in the chain, or nil
+// when the chain holds none.
 func launcherOf(chain []ProcRef) *ProcRef {
 	if len(chain) == 0 {
 		return nil
@@ -174,8 +196,7 @@ func launcherOf(chain []ProcRef) *ProcRef {
 			return &r
 		}
 	}
-	r := chain[0]
-	return &r
+	return nil
 }
 
 // FromSample attributes clients from sample/spindump text, falling back to
@@ -219,34 +240,46 @@ func Capture(ctx context.Context, o Options) (Attribution, error) {
 	if secs < 1 {
 		secs = 1
 	}
-	res, err := o.Runner.Run(ctx, proc.Cmd{Name: "sample", Args: []string{strconv.Itoa(o.PID), strconv.Itoa(secs), "10"}})
-	if err != nil {
-		return Attribution{}, fmt.Errorf("sample pid %d: %w", o.PID, err)
-	}
-	sampleOut := string(res.Stdout)
-	var lsmpOut string
-	if len(ParseQueueClients(sampleOut)) == 0 {
-		lsmpOut = o.lsmp(ctx)
-	}
+	// Snapshot processes before sampling so a PID recycled during the sample
+	// is less likely to be mislabeled.
 	var procs []process.Info
 	if o.Procs != nil {
 		procs = o.Procs(ctx)
 	} else {
 		procs = process.CollectAll(ctx, process.CollectOptions{})
 	}
+	res, err := o.Runner.Run(ctx, proc.Cmd{Name: "/usr/bin/sample", Args: []string{strconv.Itoa(o.PID), strconv.Itoa(secs), "10"}})
+	if err != nil {
+		return Attribution{}, fmt.Errorf("sample pid %d: %w", o.PID, err)
+	}
+	if res.ExitCode != 0 {
+		return Attribution{}, fmt.Errorf("sample pid %d: exit %d: %s", o.PID, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	sampleOut := string(res.Stdout)
+	var lsmpOut string
+	if len(ParseQueueClients(sampleOut)) == 0 {
+		var lerr error
+		lsmpOut, lerr = o.lsmp(ctx)
+		if lerr != nil && o.Sudo {
+			return Attribution{}, lerr
+		}
+	}
 	return FromSample(o.PID, nameFromSample(sampleOut), sampleOut, lsmpOut, procs), nil
 }
 
-func (o Options) lsmp(ctx context.Context) string {
+func (o Options) lsmp(ctx context.Context) (string, error) {
 	cmd := proc.Cmd{Name: "/usr/bin/lsmp", Args: []string{"-p", strconv.Itoa(o.PID)}}
 	if o.Sudo {
-		cmd = proc.Cmd{Name: "/usr/bin/sudo", Args: append([]string{cmd.Name}, cmd.Args...)}
+		cmd = proc.Cmd{Name: "/usr/bin/sudo", Args: append([]string{"-n", cmd.Name}, cmd.Args...)}
 	}
 	res, err := o.Runner.Run(ctx, cmd)
-	if err != nil || res.ExitCode != 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("lsmp pid %d: %w", o.PID, err)
 	}
-	return string(res.Stdout)
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("lsmp pid %d: exit %d: %s", o.PID, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	return string(res.Stdout), nil
 }
 
 func nameFromSample(out string) string {
@@ -273,6 +306,26 @@ func (a Attribution) Summary() string {
 		s += fmt.Sprintf(", launched by %s (%d)", top.Launcher.Name, top.Launcher.PID)
 	}
 	return s
+}
+
+// knownServices are daemons that commonly serve XPC/Mach clients but live
+// outside the path patterns LooksLikeService checks.
+var knownServices = map[string]bool{
+	"OSLogService": true, "diagnosticd": true, "mds": true, "mds_stores": true,
+	"logd": true, "distnoted": true, "cfprefsd": true, "trustd": true,
+}
+
+// LooksLikeService reports whether p plausibly serves XPC clients, so callers
+// avoid sampling arbitrary busy processes: an executable under /usr/libexec,
+// inside an XPCServices directory or .xpc bundle, or a known daemon.
+func LooksLikeService(p process.Info) bool {
+	path := p.ExecutablePath
+	if strings.HasPrefix(path, "/usr/libexec/") ||
+		strings.Contains(path, "/XPCServices/") ||
+		strings.Contains(path, ".xpc/") {
+		return true
+	}
+	return knownServices[procName(p)]
 }
 
 func clientName(c Client) string {

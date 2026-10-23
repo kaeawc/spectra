@@ -2,6 +2,7 @@ package xpcattr
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -23,9 +24,10 @@ func fixture(t *testing.T, name string) string {
 func testProcs() []process.Info {
 	return []process.Info{
 		{PID: 1, Command: "launchd"},
-		{PID: 17491, PPID: 1, Command: "xcodebuild", FullCommandLine: "xcodebuild test"},
+		{PID: 17491, PPID: 1, Command: "xcodebuil", ExecutablePath: "/usr/bin/xcodebuild", FullCommandLine: "xcodebuild test"},
 		{PID: 17500, PPID: 17491, Command: "xctest-helper"},
-		{PID: 17649, PPID: 17500, Command: "CtrlProxyUITests-Runner", FullCommandLine: "/x/CtrlProxyUITests-Runner"},
+		{PID: 17649, PPID: 17500, Command: "CtrlProxyUITests-Ru",
+			ExecutablePath: "/x/CtrlProxyUITests-Runner", FullCommandLine: "/x/CtrlProxyUITests-Runner"},
 		{PID: 20001, PPID: 1, Command: "Terminal"},
 	}
 }
@@ -86,7 +88,8 @@ func TestFromSampleSummary(t *testing.T) {
 
 func TestFromSampleLsmpFallback(t *testing.T) {
 	a := FromSample(17874, "OSLogService", fixture(t, "sample_no_pid.txt"), fixture(t, "lsmp_holders.txt"), testProcs())
-	if a.Source != SourceLsmp || len(a.Clients) != 2 || a.Clients[0].PID != 17649 || a.Clients[0].Weight != 2 {
+	// Both "(pid N)" and "(N) name" forms count; recv rows are ignored.
+	if a.Source != SourceLsmp || len(a.Clients) != 2 || a.Clients[0].PID != 17649 || a.Clients[0].Weight != 2 || a.Clients[1].PID != 20001 {
 		t.Errorf("attribution = %+v", a)
 	}
 }
@@ -109,7 +112,7 @@ func TestCaptureDarwinFallsBackToLsmp(t *testing.T) {
 	var cmds []string
 	fake := runnerFunc(func(c proc.Cmd) (proc.Result, error) {
 		cmds = append(cmds, c.Name)
-		if c.Name == "sample" {
+		if c.Name == "/usr/bin/sample" {
 			return proc.Result{Stdout: []byte(fixture(t, "sample_no_pid.txt"))}, nil
 		}
 		return proc.Result{Stdout: []byte(fixture(t, "lsmp_holders.txt"))}, nil
@@ -119,7 +122,7 @@ func TestCaptureDarwinFallsBackToLsmp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Source != SourceLsmp || a.Name != "OSLogService" || strings.Join(cmds, ",") != "sample,/usr/bin/lsmp" {
+	if a.Source != SourceLsmp || a.Name != "OSLogService" || strings.Join(cmds, ",") != "/usr/bin/sample,/usr/bin/lsmp" {
 		t.Errorf("a=%+v cmds=%v", a, cmds)
 	}
 }
@@ -127,3 +130,76 @@ func TestCaptureDarwinFallsBackToLsmp(t *testing.T) {
 type runnerFunc func(proc.Cmd) (proc.Result, error)
 
 func (f runnerFunc) Run(_ context.Context, c proc.Cmd) (proc.Result, error) { return f(c) }
+
+func TestLooksLikeService(t *testing.T) {
+	cases := map[string]process.Info{
+		"libexec":  {ExecutablePath: "/usr/libexec/foo"},
+		"xpcdir":   {ExecutablePath: "/System/Library/Frameworks/X.framework/XPCServices/Y.xpc/Contents/MacOS/Y"},
+		"bundle":   {ExecutablePath: "/Applications/A.app/Contents/XPCServices/B.xpc/Contents/MacOS/B"},
+		"known":    {Command: "OSLogService"},
+		"knownexe": {ExecutablePath: "/weird/path/diagnosticd"},
+	}
+	for name, p := range cases {
+		if !LooksLikeService(p) {
+			t.Errorf("%s should look like a service", name)
+		}
+	}
+	if LooksLikeService(process.Info{ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", Command: "Slack"}) {
+		t.Error("Slack is not a service")
+	}
+}
+
+func TestLauncherNilWithoutKnownTool(t *testing.T) {
+	procs := []process.Info{{PID: 5, PPID: 6, Command: "child"}, {PID: 6, PPID: 1, Command: "zsh"}}
+	c := Resolve(map[int]int{5: 1}, procs)[0]
+	if len(c.Chain) != 1 || c.Launcher != nil {
+		t.Errorf("chain=%+v launcher=%+v", c.Chain, c.Launcher)
+	}
+}
+
+func captureWith(t *testing.T, o Options) (Attribution, error) {
+	t.Helper()
+	defer hostos.SetForTest(hostos.Darwin)()
+	o.PID = 17874
+	o.Procs = func(context.Context) []process.Info { return testProcs() }
+	return Capture(context.Background(), o)
+}
+
+func TestCaptureSampleFailureIncludesStderr(t *testing.T) {
+	_, err := captureWith(t, Options{Runner: runnerFunc(func(proc.Cmd) (proc.Result, error) {
+		return proc.Result{ExitCode: 1, Stderr: []byte("no such process")}, nil
+	})})
+	if err == nil || !strings.Contains(err.Error(), "no such process") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestCaptureSudoUsesNonInteractiveAndSurfacesError(t *testing.T) {
+	var sudoArgs []string
+	boom := errors.New("sudo: a password is required")
+	_, err := captureWith(t, Options{Sudo: true, Runner: runnerFunc(func(c proc.Cmd) (proc.Result, error) {
+		if c.Name == "/usr/bin/sample" {
+			return proc.Result{Stdout: []byte(fixture(t, "sample_no_pid.txt"))}, nil
+		}
+		sudoArgs = append([]string{c.Name}, c.Args...)
+		return proc.Result{}, boom
+	})})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Join(sudoArgs[:3], " ") != "/usr/bin/sudo -n /usr/bin/lsmp" {
+		t.Errorf("args = %v", sudoArgs)
+	}
+}
+
+func TestCaptureLsmpErrorSwallowedWithoutSudo(t *testing.T) {
+	a, err := captureWith(t, Options{Runner: runnerFunc(func(c proc.Cmd) (proc.Result, error) {
+		if c.Name == "/usr/bin/sample" {
+			return proc.Result{Stdout: []byte(fixture(t, "sample_no_pid.txt"))}, nil
+		}
+		return proc.Result{ExitCode: 1}, nil
+	})})
+	if err != nil || len(a.Clients) != 0 {
+		t.Errorf("a=%+v err=%v", a, err)
+	}
+}
