@@ -142,6 +142,19 @@ func (e *Engine) resolveMissing(at time.Time, seen map[string]bool, scope string
 	}
 	return out
 }
+
+// SetDetail replaces an active alert's detail without touching its severity or
+// clear counter. It reports the updated alert, or false if the key is not
+// active or the detail is unchanged.
+func (e *Engine) SetDetail(key, detail string) (Alert, bool) {
+	a, ok := e.active[key]
+	if !ok || a.Detail == detail {
+		return Alert{}, false
+	}
+	a.Detail = detail
+	e.active[key] = a
+	return a, true
+}
 func (e *Engine) Active() []Alert {
 	out := make([]Alert, 0, len(e.active))
 	for _, a := range e.active {
