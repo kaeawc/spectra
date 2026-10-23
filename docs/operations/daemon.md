@@ -75,6 +75,28 @@ at 120/s for one. `procs.uid` warns at 40% and is critical at 70% of
 health` shows the latest process counts and spawn rate, including top parents
 while an alert is active.
 
+A sustained-CPU detector catches long-lived busy daemons that the
+instantaneous probes miss, such as `diagnosticd`, `OSLogService`, or
+`mds_stores` pinned for hours. Each regular tick adds one `ps` call (pid, ppid,
+`%cpu`, `etime`, command). A process is tracked by PID plus start time, so a
+reused PID starts a fresh history. The `cpu.sustained:<name>:<pid>` warning
+fires when at least 90% of the samples in a rolling 15-minute window are at or
+above 50% CPU and the window is covered; a short dip is tolerated, bursty load
+is not. It resolves once fewer than half the window samples are above the
+threshold or the process exits, and tracking resets after a gap longer than five
+minutes (for example sleep). Linux `ps` reports lifetime-average CPU, so a
+newly busy long-lived process takes longer to cross the threshold there.
+
+The alert detail names the process, average CPU, how long it has been busy,
+process age, the owner chain (for example `launchd(1) > Terminal(50) >
+zsh(60) > log(70)`), a one-shot summary (macOS `sample` top of stack, Linux
+busiest threads, taken once when the alert fires), and a suggested next command
+(`sample <pid> 10` on macOS, `top -H -p <pid>` on Linux). For `diagnosticd` and
+`OSLogService` it notes that a client is usually polling or streaming the
+unified log (`log stream`, `log show`, OSLogStore); for `mds_stores` it points
+at Spotlight indexing. `spectra alerts` lists these like any other alert, and the
+stored detail is refreshed every five minutes while the alert is firing.
+
 Warnings include load above 1.5 times CPU count for two samples, rising load,
 memory pressure for two samples, swap growth above 1 GB in five minutes,
 resource limits above 70%, less than 20 GB free, thermal throttling for two
@@ -84,11 +106,15 @@ above three times CPU count for two samples, critical memory pressure, limits
 above 90%, and less than 5 GB free. Alerts clear after two healthy evaluations.
 
 Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
-`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, and `spawn`; field names are the
+`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, `spawn`, and `sustained`; field names are the
 snake case names in the defaults, such as `load.warn_multiple` or
 `disk.critical_gb`. The `spawn` keys are `interval` (duration, minimum `1s`),
 `rate_warn`, `rate_critical`, `uid_warn_pct`, `uid_critical_pct`,
-`total_warn_pct`, and `total_critical_pct`. An unknown YAML key logs an error and keeps all defaults.
+`total_warn_pct`, and `total_critical_pct`. The `sustained` keys are `cpu_pct`
+(default 50), `window` (duration, minimum `1m`, default `15m`), `min_fraction`
+(above 0.5 up to 1, default 0.9), and `allowlist`, a list of case-insensitive
+process-name patterns for expected long-running work, for example
+`allowlist: [backupd, "mds*"]`. An unknown YAML key logs an error and keeps all defaults.
 Non-positive thresholds log an error and use the default for that field while
 preserving other valid settings.
 
