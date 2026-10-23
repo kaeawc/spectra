@@ -119,15 +119,7 @@ func NewService(opts ServiceOptions) *Service {
 		opts.UID = currentUID
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
-	if collector, ok := opts.Collector.(*Collector); ok && svc.opts.Runner == nil {
-		svc.opts.Runner, svc.opts.OS = collector.runner(), collector.OS
-	}
-	if svc.opts.Runner != nil {
-		if svc.opts.Config.Sustained.Window <= 0 {
-			svc.opts.Config.Sustained = DefaultSustainedConfig()
-		}
-		svc.sustained = newSustainedState(svc.opts.Config.Sustained, svc.opts.Runner, svc.opts.OS)
-	}
+	svc.initSustained()
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()

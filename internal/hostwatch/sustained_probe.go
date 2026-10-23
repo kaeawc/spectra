@@ -32,6 +32,19 @@ func newSustainedState(cfg SustainedConfig, runner proc.Runner, kind hostos.Kind
 	return &sustainedState{tracker: NewSustainedTracker(cfg), runner: runner, os: hostos.Resolve(kind), summaries: map[string]string{}, persisted: map[string]time.Time{}}
 }
 
+func (s *Service) initSustained() {
+	if collector, ok := s.opts.Collector.(*Collector); ok && s.opts.Runner == nil {
+		s.opts.Runner, s.opts.OS = collector.runner(), collector.OS
+	}
+	if s.opts.Runner == nil {
+		return
+	}
+	if s.opts.Config.Sustained.Window <= 0 {
+		s.opts.Config.Sustained = DefaultSustainedConfig()
+	}
+	s.sustained = newSustainedState(s.opts.Config.Sustained, s.opts.Runner, s.opts.OS)
+}
+
 // parseEtime converts ps etime ([[dd-]hh:]mm:ss) to a duration.
 func parseEtime(v string) (time.Duration, error) {
 	days := 0
