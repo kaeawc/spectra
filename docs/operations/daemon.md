@@ -92,17 +92,18 @@ immediately.
 
 The `cpu.sustained:<name>:<pid>` warning fires when at least 90% of the samples
 in a rolling 15-minute window are at or above 50% CPU and the window is covered
-(within a tenth of the window or one base watch interval) with at least three
-above-threshold samples (more for long windows, scaled to the worst-case
-backed-off tick); a short dip is tolerated,
-bursty load is not. The window must be at least four watch intervals, or the
-daemon logs an error and widens it. The suspend gap is sized for the worst-case
+(measured from the newest sample older than the window, so tick jitter cannot
+make a full window unreachable) with at least three above-threshold samples
+(more for long windows); a short dip is tolerated, bursty load is not. The
+window must be at least 16 base watch intervals, so it holds four samples even
+when self-guard backoff stretches the tick to four times the base; a shorter
+window logs an error and is widened. The suspend gap is sized for the worst-case
 backed-off interval (four times the base) so self-guard backoff does not
 trigger it. Resolution lags on purpose: the alert keeps
 firing until fewer than half of the window samples are above the threshold, so
 expect up to roughly half a window after the load stops, and then two clear
-ticks. After a gap longer than the larger of five minutes and three watch
-intervals (for example sleep) the history is discarded, but an alert that was
+ticks. After a gap longer than the larger of five minutes and twelve base
+watch intervals (for example sleep) the history is discarded, but an alert that was
 already firing is kept, with its original ID and since-time, until at least four
 fresh samples (fewer if the window cannot hold four) show the load is gone; an alert that was not yet firing starts over.
 
@@ -140,7 +141,7 @@ snake case names in the defaults, such as `load.warn_multiple` or
 `disk.critical_gb`. The `spawn` keys are `interval` (duration, minimum `1s`),
 `rate_warn`, `rate_critical`, `uid_warn_pct`, `uid_critical_pct`,
 `total_warn_pct`, and `total_critical_pct`. The `sustained` keys are `cpu_pct`
-(default 50), `window` (duration, minimum `1m`, default `15m`), `min_fraction`
+(default 50), `window` (duration, default `15m`, at least 16 watch intervals), `min_fraction`
 (above 0.5 up to 1, default 0.9), and `allowlist`, a list of case-insensitive
 process-name patterns for expected long-running work, for example
 `allowlist: [backupd, "mds*"]`. Patterns match the process base name only,
