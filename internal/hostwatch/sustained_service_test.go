@@ -432,3 +432,25 @@ func TestSustainedLinuxTransientStatFailureKeepsAlert(t *testing.T) {
 		t.Fatalf("detail: %s", a[0].Detail)
 	}
 }
+
+func TestReadLinuxCPUHugeCounterDoesNotOverflow(t *testing.T) {
+	const ticks = int64(2e10) // ~6.3 CPU-years; overflowed when scaled by 1e9 first
+	read := func(string) ([]byte, error) {
+		return []byte(fmt.Sprintf("412 (d) S 1 0 0 0 0 0 0 0 0 0 %d %d", ticks/2, ticks/2)), nil
+	}
+	got, err := readLinuxCPU(read, 412)
+	if err != nil || got != time.Duration(ticks)*10*time.Millisecond || got <= 0 {
+		t.Fatalf("cpu = %v, %v", got, err)
+	}
+	h := &linuxHost{start: svcT0.Add(-24 * time.Hour), ticks: ticks}
+	st := newSustainedState(DefaultSustainedConfig(), nil, h.read, hostos.Linux)
+	procs := []ProcObs{{PID: 412, Name: "d", Started: h.start}}
+	h.now = svcT0
+	st.cpuObservations(procs, h.now)
+	h.now = svcT0.Add(10 * time.Second)
+	h.ticks += 500
+	obs := st.cpuObservations(procs, h.now)
+	if len(obs) != 1 || obs[0].Skip || obs[0].CPUPct < 49.9 || obs[0].CPUPct > 50.1 {
+		t.Fatalf("huge counter reset or mis-scaled the delta: %+v", obs)
+	}
+}

@@ -76,7 +76,9 @@ func readLinuxCPU(read func(string) ([]byte, error), pid int) (time.Duration, er
 	if e1 != nil || e2 != nil {
 		return 0, fmt.Errorf("sustained stat pid %d: bad cpu fields", pid)
 	}
-	return time.Duration(utime+stime) * time.Second / linuxClockTicks, nil
+	// Scale by the exact per-tick duration (10ms): multiplying by time.Second
+	// before dividing overflows int64 after ~1,067 CPU-days.
+	return time.Duration(utime+stime) * (time.Second / linuxClockTicks), nil
 }
 
 // cpuObservations turns a process snapshot into tracker input. On Linux ps
