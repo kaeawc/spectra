@@ -28,6 +28,16 @@ local ranking and adds active daemon alerts and a five-minute trend when availab
 Both commands accept `--no-daemon`, and `SPECTRA_NO_DAEMON=1` disables daemon
 access globally.
 
+`spectra whois [--json] [--sudo] [--duration 3s] <pid>` (macOS only) attributes a
+busy XPC/Mach service to the processes driving it. It samples the service, reads
+the PID from `com.apple.NSXPCConnection...anonymous.<pid>` dispatch queue names,
+and resolves each client to its command line, parent chain, and launching tool
+(for example `xcodebuild`) with its share of the sampled work. When the queue
+names carry no PID it falls back to `lsmp` port ownership (`--sudo` for root).
+`spectra whatswrong` adds the same attribution, such as `OSLogService (17874)
+busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
+when the busiest process is over 80% CPU.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
