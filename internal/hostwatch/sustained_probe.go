@@ -22,6 +22,7 @@ const (
 	// another attempt, so a privilege failure is not retried every tick.
 	sustainedSampleRetry = 30 * time.Minute
 	// linuxClockTicks is USER_HZ, the unit of utime/stime in /proc/<pid>/stat.
+	// 100 is assumed; it is the value on every mainstream Linux build.
 	linuxClockTicks = 100
 )
 
@@ -92,6 +93,13 @@ func (st *sustainedState) cpuObservations(procs []ProcObs, at time.Time) []ProcO
 	for _, p := range procs {
 		cpu, err := readLinuxCPU(st.read, p.PID)
 		if err != nil {
+			// ps still lists the process: keep its tracker state and its
+			// previous snapshot so the next tick can still produce a delta.
+			if prev, ok := st.prev[p.PID]; ok {
+				next[p.PID] = prev
+			}
+			p.Skip = true
+			out = append(out, p)
 			continue
 		}
 		next[p.PID] = cpuSnap{started: p.Started, cpu: cpu, at: at}
@@ -120,7 +128,9 @@ func (s *Service) initSustained() {
 		s.opts.Logger.Warn("watch config", "error", err)
 	}
 	cfg := s.opts.Config.Sustained
-	cfg.Interval = s.opts.Interval
+	// Self-guard backoff can stretch the tick to 4x the base interval, so
+	// size coverage slack and the suspend gap for that worst case.
+	cfg.Interval = 4 * s.opts.Interval
 	read := s.opts.ReadFile
 	if c, ok := s.opts.Collector.(*Collector); ok && read == nil {
 		read = c.readFile()

@@ -312,7 +312,7 @@ func TestSustainedLinuxFirstSightingYieldsNoSample(t *testing.T) {
 func TestValidateWatchIntervalAndTrackerGap(t *testing.T) {
 	c := DefaultConfig()
 	c.Sustained.Window = 20 * time.Second
-	if err := c.ValidateWatchInterval(15 * time.Second); err == nil || c.Sustained.Window != 30*time.Second {
+	if err := c.ValidateWatchInterval(15 * time.Second); err == nil || c.Sustained.Window != 60*time.Second {
 		t.Fatalf("window not widened: %v %v", err, c.Sustained.Window)
 	}
 	if err := c.ValidateWatchInterval(15 * time.Second); err != nil {
@@ -346,5 +346,89 @@ func TestSustainedTrackerCarriesFiringAcrossGap(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("fresh idle samples did not clear: %+v", got)
+	}
+}
+
+func TestSustainedClearsWhenWindowHoldsFewerThanFourSamples(t *testing.T) {
+	cfg := DefaultSustainedConfig()
+	cfg.Window, cfg.Interval = 3*time.Minute, time.Minute
+	tr := NewSustainedTracker(cfg)
+	started := at(-300)
+	var last []SustainedFinding
+	for m := 0; m <= 6; m++ {
+		last = tr.Observe(at(float64(m)), []ProcObs{obs(10, "diagnosticd", 90, started)})
+	}
+	if len(last) != 1 {
+		t.Fatalf("expected finding: %+v", last)
+	}
+	for m := 7; m <= 14; m++ {
+		last = tr.Observe(at(float64(m)), []ProcObs{obs(10, "diagnosticd", 1, started)})
+	}
+	if len(last) != 0 {
+		t.Fatalf("alert stuck with window < 4 intervals: %+v", last)
+	}
+	// A carried entry (gap reset) must also leave the carried state.
+	tr = NewSustainedTracker(cfg)
+	for m := 0; m <= 6; m++ {
+		tr.Observe(at(float64(m)), []ProcObs{obs(10, "diagnosticd", 90, started)})
+	}
+	for m := 60; m <= 70; m++ {
+		last = tr.Observe(at(float64(m)), []ProcObs{obs(10, "diagnosticd", 1, started)})
+	}
+	if len(last) != 0 || len(tr.entries) != 0 {
+		t.Fatalf("carried entry never cleared: %+v %+v", last, tr.entries)
+	}
+}
+
+func TestSustainedTrackerSkipKeepsState(t *testing.T) {
+	tr := NewSustainedTracker(DefaultSustainedConfig())
+	started := at(-300)
+	last, _ := runSteps(tr, "diagnosticd", started, ramp(0, 20, 0.25, 90))
+	if len(last) != 1 {
+		t.Fatal("expected finding")
+	}
+	skip := obs(10, "diagnosticd", 0, started)
+	skip.Skip = true
+	got := tr.Observe(at(20.25), []ProcObs{skip})
+	if len(got) != 1 || !got[0].Since.Equal(last[0].Since) {
+		t.Fatalf("skip dropped state: %+v", got)
+	}
+}
+
+func TestSustainedLinuxTransientStatFailureKeepsAlert(t *testing.T) {
+	h := &linuxHost{start: svcT0.Add(-240 * time.Hour), ticks: 100 * 3600}
+	failing := false
+	r := &scriptRunner{ps: h.ps}
+	svc := NewService(ServiceOptions{Store: testDB(t), Runner: r, OS: hostos.Linux, IDs: idgen.NewSequence("a"), Collector: &sequenceCollector{},
+		ReadFile: func(p string) ([]byte, error) {
+			if failing {
+				return nil, errors.New("transient")
+			}
+			return h.read(p)
+		}})
+	var id string
+	for m := 0; m <= 30; m++ {
+		h.now = minutes(m)
+		h.ticks += 100 * 60 * 90 / 100
+		failing = m == 22 || m == 23
+		svc.TickSustained(context.Background(), h.now)
+		if m == 21 {
+			a := firingKeys(t, svc)
+			if len(a) != 1 {
+				t.Fatalf("expected firing before the failure: %+v", a)
+			}
+			id = a[0].ID
+		}
+	}
+	a := firingKeys(t, svc)
+	if len(a) != 1 || a[0].ID != id {
+		t.Fatalf("alert lost or refired across stat failure: %+v (id %s)", a, id)
+	}
+	if resolved, _ := svc.Alerts(context.Background(), "resolved", 10); len(resolved) != 0 {
+		t.Fatalf("alert resolved during transient failure: %+v", resolved)
+	}
+	// The delta after the failure spans both skipped ticks and stays near 90%.
+	if !strings.Contains(a[0].Detail, "averaged 90% CPU") {
+		t.Fatalf("detail: %s", a[0].Detail)
 	}
 }

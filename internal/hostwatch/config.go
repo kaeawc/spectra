@@ -69,16 +69,16 @@ type SustainedConfig struct {
 }
 
 // ValidateWatchInterval checks the sustained window against the watch
-// interval, widening the window to the minimum if it is too short to hold
-// enough samples.
+// interval, widening the window to four intervals (the samples needed to
+// disprove a firing alert) if it is too short to hold them.
 func (c *Config) ValidateWatchInterval(interval time.Duration) error {
-	min := 2 * interval
-	if c.Sustained.Window >= min {
+	minWindow := sustainedMinClearPoints * interval
+	if c.Sustained.Window >= minWindow {
 		return nil
 	}
 	got := c.Sustained.Window
-	c.Sustained.Window = min
-	return fmt.Errorf("sustained.window %s must be at least twice the watch interval (%s); using %s", got, interval, min)
+	c.Sustained.Window = minWindow
+	return fmt.Errorf("sustained.window %s must be at least %d times the watch interval (%s); using %s", got, sustainedMinClearPoints, interval, minWindow)
 }
 
 func DefaultSustainedConfig() SustainedConfig {

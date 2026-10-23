@@ -297,8 +297,10 @@ func (s *Service) Tick(ctx context.Context) error {
 			}
 		}
 	}
-	s.TickSustained(ctx, sample.At)
 	s.maintenance(ctx, sample.At)
+	// Last, so a slow one-shot `sample` (3s cap) never delays the slow-tick
+	// alert persistence, notifications or maintenance.
+	s.TickSustained(ctx, sample.At)
 	return nil
 }
 func (s *Service) updateSelfGuard(cpu float64) {

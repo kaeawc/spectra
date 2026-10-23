@@ -13,11 +13,13 @@ const (
 	// startTolerance absorbs the one-second resolution of ps etime when a
 	// process start time is derived as now-etime on successive samples.
 	startTolerance = 3 * time.Second
-	// sustainedMaxGap resets all tracking after the daemon was suspended or
-	// the host slept, so a gap is never counted as continuous load.
+	// sustainedMinGap is the floor for the suspend-gap threshold (see maxGap):
+	// a longer gap between observations means the daemon was suspended or the
+	// host slept, and is never counted as continuous load.
 	sustainedMinGap = 5 * time.Minute
-	// sustainedMinClearPoints is how many fresh samples must follow a gap
-	// reset before a still-active finding can be disproved.
+	// sustainedMinClearPoints is how many samples must be in the window before
+	// a still-active finding can be disproved (capped by how many the window can
+	// hold, see minClearPoints).
 	sustainedMinClearPoints = 4
 	// sustainedClearFraction is the hysteresis floor: an active finding keeps
 	// firing until fewer than this share of window samples are above threshold.
@@ -31,6 +33,10 @@ type ProcObs struct {
 	Name    string
 	CPUPct  float64
 	Started time.Time
+	// Skip marks a process that is present but has no usable CPU reading this
+	// tick (for example a transient /proc read failure). The tracker keeps its
+	// state instead of treating it as exited.
+	Skip bool
 }
 
 // SustainedFinding describes a process that has stayed above the CPU
@@ -84,6 +90,9 @@ func (t *SustainedTracker) Observe(at time.Time, procs []ProcObs) []SustainedFin
 			continue
 		}
 		seen[p.PID] = true
+		if p.Skip {
+			continue
+		}
 		t.record(at, p)
 	}
 	for pid := range t.entries {
@@ -115,6 +124,21 @@ func (t *SustainedTracker) resetAfterGap() {
 	}
 }
 
+// minClearPoints is sustainedMinClearPoints, capped by how many samples a
+// window can hold at the configured interval so clearing can never deadlock.
+func (t *SustainedTracker) minClearPoints() int {
+	n := sustainedMinClearPoints
+	if t.cfg.Interval > 0 {
+		if fit := int(t.cfg.Window / t.cfg.Interval); fit < n {
+			n = fit
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 func (t *SustainedTracker) coverageSlack() time.Duration {
 	if s := t.cfg.Window / 10; s > t.cfg.Interval {
 		return s
@@ -143,7 +167,7 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		first++
 	}
 	e.points = e.points[first:]
-	carried := !e.since.IsZero() && len(e.points) < sustainedMinClearPoints
+	carried := !e.since.IsZero() && len(e.points) < t.minClearPoints()
 	if !anyAbove(e.points) && !carried {
 		delete(t.entries, p.PID)
 	}
@@ -160,7 +184,7 @@ func (t *SustainedTracker) evaluate(at time.Time) []SustainedFinding {
 		switch {
 		case e.since.IsZero() && covered && frac >= t.cfg.MinFraction:
 			e.since = e.points[0].at
-		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= sustainedMinClearPoints:
+		case !e.since.IsZero() && frac < sustainedClearFraction && len(e.points) >= t.minClearPoints():
 			e.since = time.Time{}
 		}
 		if e.since.IsZero() {
