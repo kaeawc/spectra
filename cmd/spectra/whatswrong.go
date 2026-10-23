@@ -40,6 +40,8 @@ type slowDeps struct {
 	connect func(context.Context) (slowWatchClient, bool)
 	now     func() time.Time
 	cpus    func() int // logical CPU count; nil or 0 means unknown
+	// xpc attributes a busy service to its clients; nil disables it.
+	xpc xpcAttributeFunc
 }
 
 type slowWatchClient interface {
@@ -62,6 +64,7 @@ func defaultSlowDeps() slowDeps {
 		},
 		now:  time.Now,
 		cpus: runtime.NumCPU,
+		xpc:  defaultXPCAttribute,
 	}
 }
 
@@ -85,6 +88,7 @@ func runWhatswrongWithIO(args []string, stdout, stderr io.Writer, deps slowDeps)
 		sig.Now = deps.now()
 	}
 	causes := rankSlowCauses(sig)
+	causes = appendXPCCauses(causes, sig.Procs, deps.xpc)
 	var daemonAlerts []hostwatch.Alert
 	var trend string
 	if !*noDaemon && deps.connect != nil {
