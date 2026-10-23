@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -16,6 +17,9 @@ type CollectOptions struct {
 	// JDKs is the already-discovered JDK inventory used to attribute each
 	// running JVM's java.home back to an installed toolchain.
 	JDKs []toolchain.JDKInstall
+	// NMTTimeout bounds the per-JVM NMT summary sample. Zero means
+	// DefaultNMTSampleTimeout.
+	NMTTimeout time.Duration
 }
 
 // CollectAll discovers all running JVM processes and collects per-process
@@ -50,7 +54,7 @@ func CollectAllStatus(ctx context.Context, opts CollectOptions) (infos []Info, j
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			info := collectOne(ctx, pid, main, run, opts.JDKs)
+			info := collectOne(ctx, pid, main, run, opts)
 			mu.Lock()
 			results = append(results, info)
 			mu.Unlock()
@@ -71,7 +75,7 @@ func InspectPID(_ context.Context, pid int, opts CollectOptions) *Info {
 	if _, err := run("jcmd", fmt.Sprint(pid), "VM.version"); err != nil {
 		return nil
 	}
-	info := collectOne(context.Background(), pid, "", run, opts.JDKs)
+	info := collectOne(context.Background(), pid, "", run, opts)
 	return &info
 }
 
@@ -84,7 +88,7 @@ func AttributeJDKs(infos []Info, jdks []toolchain.JDKInstall) {
 }
 
 // collectOne gathers Info for a single PID.
-func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []toolchain.JDKInstall) Info {
+func collectOne(_ context.Context, pid int, main string, run CmdRunner, opts CollectOptions) Info {
 	info := Info{PID: pid, MainClass: main}
 
 	props := collectSysProps(pid, run)
@@ -105,7 +109,13 @@ func collectOne(_ context.Context, pid int, main string, run CmdRunner, jdks []t
 	if classes, err := CollectClassStats(pid, run); err == nil {
 		info.Classes = classes
 	}
-	attributeJDK(&info, jdks)
+	// Sample NMT only when the JVM opted in via VM args; never enable it.
+	if NMTEnabledInArgs(info.VMArgs) {
+		if cats, err := CollectNMTCommitted(pid, run, opts.NMTTimeout); err == nil {
+			info.NMTCommittedKiB = cats
+		}
+	}
+	attributeJDK(&info, opts.JDKs)
 
 	return info
 }
