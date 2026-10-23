@@ -264,3 +264,18 @@ func TestHPROFParserImplementsParser(t *testing.T) {
 		t.Fatalf("snapshot = %+v", snap)
 	}
 }
+
+func TestReadHPROFHeaderDoesNotEchoContent(t *testing.T) {
+	for _, in := range []string{
+		"TOP-SECRET-CONTENT\x00rest",
+		"TOP-SECRET-CONTENT" + strings.Repeat("y", 1<<16), // no NUL within the cap
+	} {
+		_, err := ParseObjectGraph(strings.NewReader(in))
+		if err == nil {
+			t.Fatal("expected an error for a non-HPROF input")
+		}
+		if strings.Contains(err.Error(), "TOP-SECRET") {
+			t.Errorf("error echoes file content: %v", err)
+		}
+	}
+}
