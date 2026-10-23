@@ -46,6 +46,32 @@ func TestAttachJVMHistory_NMTOnlyWhenGCUnavailable(t *testing.T) {
 	}
 }
 
+// Linux start times jitter by about a second between scans: an NMT-only series
+// must stay joined, while a clearly different lifetime stays separate.
+func TestLoadNMTOnlySamples_ToleratesStartJitter(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	start := historyBase.Add(-time.Hour)
+	for i, jitter := range []time.Duration{0, time.Second, -time.Second} {
+		if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{{
+			PID: 42, ProcStart: start.Add(jitter), At: historyBase.Add(time.Duration(i) * time.Minute),
+			NMTOnly: true, NMTCommittedKiB: map[string]int64{"Other": int64(i + 1)},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := db.loadNMTOnlySamples(ctx, 42, start.Add(time.Second))
+	if err != nil || len(got) != 3 {
+		t.Fatalf("jittered lifetime = (%d samples, %v), want 3", len(got), err)
+	}
+	if far, _ := db.loadNMTOnlySamples(ctx, 42, start.Add(10*time.Minute)); len(far) != 0 {
+		t.Fatalf("distant lifetime inherited samples: %v", far)
+	}
+	if unknown, _ := db.loadNMTOnlySamples(ctx, 42, time.Time{}); len(unknown) != 0 {
+		t.Fatalf("unknown start inherited known-start samples: %v", unknown)
+	}
+}
+
 func TestLoadNMTOnlySamples_IsolatedByProcessLifetime(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

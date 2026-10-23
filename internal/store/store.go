@@ -1137,11 +1137,15 @@ func (s *DB) loadNMTSamples(ctx context.Context, pid int, samples []snapshot.JVM
 // process lifetime (pid, procStart), oldest first, capped at the default
 // window. They are kept out of jvm_samples so GC trends never see them.
 func (s *DB) loadNMTOnlySamples(ctx context.Context, pid int, procStart time.Time) ([]snapshot.JVMSample, error) {
+	startLo, startHi := procStartRange(procStart)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT at_nano, committed_json FROM jvm_nmt_samples
-		WHERE pid=? AND proc_start_unix=?
-		  AND at_nano NOT IN (SELECT at_nano FROM jvm_samples WHERE pid=?)
-		ORDER BY at_nano DESC LIMIT 60`, pid, procStartUnix(procStart), pid)
+		WHERE pid=? AND proc_start_unix BETWEEN ? AND ?
+		  AND at_nano NOT IN (
+		      SELECT at_nano FROM jvm_samples
+		      WHERE pid=? AND proc_start_unix BETWEEN ? AND ?)
+		ORDER BY at_nano DESC LIMIT ?`,
+		pid, startLo, startHi, pid, startLo, startHi, defaultSampleLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1184,7 +1188,7 @@ func (s *DB) loadNMTOnlySamples(ctx context.Context, pid int, procStart time.Tim
 // earlier, unidentifiable owner of the same PID.
 func (s *DB) GetRecentJVMSamples(ctx context.Context, pid int, procStart time.Time, limit int) ([]snapshot.JVMSample, error) {
 	if limit <= 0 {
-		limit = 60
+		limit = defaultSampleLimit
 	}
 	startLo, startHi := procStartRange(procStart)
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
@@ -1301,6 +1305,10 @@ func procStartUnix(t time.Time) int64 {
 // ages the oldest rows out rather than splitting history.
 const procStartTolerance = 2 * time.Second
 
+// defaultSampleLimit is the default number of recent samples read per process
+// lifetime (JVM, fd, and NMT-only series share it so their windows align).
+const defaultSampleLimit = 60
+
 // procStartRange returns the inclusive proc_start_unix bounds matching t.
 // An unknown (zero) start matches only unknown, never a nearby known start.
 func procStartRange(t time.Time) (lo, hi int64) {
@@ -1371,7 +1379,7 @@ func (s *DB) SaveFDSamples(ctx context.Context, samples []snapshot.FDSample) err
 // default cap (60 samples). procStart matching follows GetRecentJVMSamples.
 func (s *DB) GetRecentFDSamples(ctx context.Context, pid int, procStart time.Time, limit int) ([]snapshot.FDSample, error) {
 	if limit <= 0 {
-		limit = 60
+		limit = defaultSampleLimit
 	}
 	startLo, startHi := procStartRange(procStart)
 	// Pull newest-first so LIMIT applies to the most recent rows, then reverse.
