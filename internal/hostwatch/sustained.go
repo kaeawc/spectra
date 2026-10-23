@@ -3,6 +3,7 @@ package hostwatch
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -116,7 +117,7 @@ func (t *SustainedTracker) dropIfReused(p ProcObs) {
 	e := t.entries[p.PID]
 	switch {
 	case e == nil:
-	case e.adopt && path.Base(p.Name) == path.Base(e.name):
+	case e.adopt && path.Base(p.Name) == path.Base(e.name) && (e.started.IsZero() || sameStart(e.started, p.Started)):
 		e.started, e.adopt = p.Started, false
 	case e.adopt || !sameStart(e.started, p.Started):
 		delete(t.entries, p.PID)
@@ -126,8 +127,10 @@ func (t *SustainedTracker) dropIfReused(p ProcObs) {
 // Seed registers a finding restored after a daemon restart as a carried entry:
 // it keeps being reported (so its alert is not resolved) until fresh samples
 // disprove it, exactly like an alert carried across a suspend gap.
-func (t *SustainedTracker) Seed(at time.Time, pid int, name string, since time.Time) {
-	t.entries[pid] = &sustainedEntry{name: name, since: since, lastGood: at, adopt: true}
+// A non-zero started pins the process identity: only a process with that start
+// time adopts the entry, so a reused PID with the same name does not.
+func (t *SustainedTracker) Seed(at time.Time, pid int, name string, since, started time.Time) {
+	t.entries[pid] = &sustainedEntry{name: name, started: started, since: since, lastGood: at, adopt: true}
 }
 
 // maxGap is the observation gap treated as a suspend. The service sets MaxGap
@@ -394,11 +397,46 @@ func SuggestNextCommand(goos string, pid int) string {
 	return fmt.Sprintf("top -H -p %d", pid)
 }
 
+// upDescription renders the process age. The exact start time rides along so a
+// restarted daemon can tell the same process from a PID reuse (see
+// parseRestoredIdent) without a schema change.
+func upDescription(f SustainedFinding, at time.Time) string {
+	up := "up " + at.Sub(f.Started).Round(time.Minute).String()
+	if f.Started.IsZero() {
+		return up
+	}
+	return up + " (started " + f.Started.UTC().Format(time.RFC3339) + ")"
+}
+
+var (
+	detailSinceRe   = regexp.MustCompile(`\) averaged [^;]* since (\S+?);`)
+	detailStartedRe = regexp.MustCompile(`\(started (\S+?)\)`)
+)
+
+// restoredIdent is what a restored alert's detail says about the process it
+// described. Zero fields mean the detail predates that field.
+type restoredIdent struct {
+	since, started time.Time
+}
+
+// parseRestoredIdent recovers the original since-time and process start time
+// from an alert detail rendered by SustainedDetail.
+func parseRestoredIdent(detail string) restoredIdent {
+	var id restoredIdent
+	if m := detailSinceRe.FindStringSubmatch(detail); m != nil {
+		id.since, _ = time.Parse(time.RFC3339, m[1])
+	}
+	if m := detailStartedRe.FindStringSubmatch(detail); m != nil {
+		id.started, _ = time.Parse(time.RFC3339, m[1])
+	}
+	return id
+}
+
 // SustainedDetail renders the single-line alert detail.
 func SustainedDetail(f SustainedFinding, at time.Time, chain []ChainLink, goos, sampleSummary string) string {
 	parts := []string{
 		fmt.Sprintf("%s (pid %d) averaged %.0f%% CPU for %s since %s", f.Name, f.PID, f.AvgCPU, f.Duration.Round(time.Minute), f.Since.UTC().Format(time.RFC3339)),
-		"up " + at.Sub(f.Started).Round(time.Minute).String(),
+		upDescription(f, at),
 	}
 	if len(chain) > 0 {
 		parts = append(parts, "owner chain: "+formatChain(chain))

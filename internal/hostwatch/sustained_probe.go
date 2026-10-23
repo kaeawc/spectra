@@ -363,7 +363,12 @@ func (s *Service) seedSustained(at time.Time, alerts []Alert) {
 			continue
 		}
 		if pid, err := strconv.Atoi(rest[i+1:]); err == nil && pid > 0 {
-			s.sustained.tracker.Seed(at, pid, rest[:i], a.FiredAt)
+			id := parseRestoredIdent(a.Detail)
+			since := id.since
+			if since.IsZero() || since.After(a.FiredAt) {
+				since = a.FiredAt // legacy detail without a since-time
+			}
+			s.sustained.tracker.Seed(at, pid, rest[:i], since, id.started)
 		}
 	}
 }
