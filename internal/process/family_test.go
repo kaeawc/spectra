@@ -163,6 +163,38 @@ func TestGroupFamiliesClassification(t *testing.T) {
 			wantKeys: map[string]int{"other:tail": 1, "other:cat": 1},
 		},
 		{
+			name: "launchd_sim without UDID unifies with a descendant that exposes one",
+			procs: []Info{
+				{PID: 70, PPID: 1, Command: "launchd_sim"},
+				{PID: 71, PPID: 70, Command: "runtimed", CPUPct: 60},
+				{PID: 72, PPID: 70, Command: "MyApp", CPUPct: 60, ExecutablePath: "/Users/x/Library/Developer/CoreSimulator/Devices/" + udidA + "/data/Containers/Bundle/MyApp"},
+				{PID: 73, PPID: 72, Command: "helper"},
+			},
+			wantKeys: map[string]int{"simulator:" + udidA: 4},
+		},
+		{
+			name: "two launchd_sim trees with different UDIDs stay separate",
+			procs: []Info{
+				{PID: 100, PPID: 1, Command: "launchd_sim"},
+				{PID: 101, PPID: 100, Command: "a", ExecutablePath: "/x/CoreSimulator/Devices/" + udidA + "/data/a"},
+				{PID: 102, PPID: 100, Command: "rt"},
+				{PID: 200, PPID: 1, Command: "launchd_sim"},
+				{PID: 201, PPID: 200, Command: "b", ExecutablePath: "/x/CoreSimulator/Devices/" + udidB + "/data/b"},
+				{PID: 202, PPID: 200, Command: "rt"},
+			},
+			wantKeys: map[string]int{"simulator:" + udidA: 3, "simulator:" + udidB: 3},
+		},
+		{
+			name: "several UDIDs under one launchd_sim keep the pid family for the rest",
+			procs: []Info{
+				{PID: 300, PPID: 1, Command: "launchd_sim"},
+				{PID: 301, PPID: 300, Command: "a", ExecutablePath: "/x/CoreSimulator/Devices/" + udidA + "/data/a"},
+				{PID: 302, PPID: 300, Command: "b", ExecutablePath: "/x/CoreSimulator/Devices/" + udidB + "/data/b"},
+				{PID: 303, PPID: 300, Command: "rt"},
+			},
+			wantKeys: map[string]int{"simulator:" + udidA: 1, "simulator:" + udidB: 1, "simulator:launchd_sim-300": 2},
+		},
+		{
 			name: "launchd_sim without UDID is keyed by pid",
 			procs: []Info{
 				{PID: 70, PPID: 1, Command: "launchd_sim"},

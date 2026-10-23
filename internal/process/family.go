@@ -99,8 +99,9 @@ func GroupFamilies(procs []Info, now time.Time, topMembers int) []Family {
 	groups := map[string]*Family{}
 	members := map[string][]Member{}
 	var total float64
-	for _, p := range procs {
-		id := resolveFamily(p, byPID)
+	ids := resolveAll(procs, byPID)
+	for i, p := range procs {
+		id := ids[i]
 		f := groups[id.key]
 		if f == nil {
 			f = &Family{Key: id.key, Kind: id.kind, Name: id.name, UDID: id.udid}
@@ -205,6 +206,50 @@ func ancestors(p Info, byPID map[int]Info) []Info {
 		cur = parent
 	}
 	return out
+}
+
+// resolveAll resolves every process, then gives each simulator tree one
+// identity: a launchd_sim without a UDID of its own (keyed by PID) is re-keyed
+// to the single UDID that any process in its tree exposes. If the tree shows
+// several UDIDs (unexpected) or none, the per-PID key is kept.
+func resolveAll(procs []Info, byPID map[int]Info) []famID {
+	ids := make([]famID, len(procs))
+	roots := make([]int, len(procs))
+	udids := map[int]map[string]famID{}
+	for i, p := range procs {
+		ids[i] = resolveFamily(p, byPID)
+		if ids[i].kind != FamilySimulator {
+			continue
+		}
+		roots[i] = launchdRoot(p, byPID)
+		if roots[i] != 0 && ids[i].udid != "" {
+			if udids[roots[i]] == nil {
+				udids[roots[i]] = map[string]famID{}
+			}
+			udids[roots[i]][ids[i].udid] = ids[i]
+		}
+	}
+	for i := range ids {
+		if ids[i].kind == FamilySimulator && ids[i].udid == "" && len(udids[roots[i]]) == 1 {
+			for _, only := range udids[roots[i]] {
+				ids[i] = only
+			}
+		}
+	}
+	return ids
+}
+
+// launchdRoot returns the PID of p or its nearest launchd_sim ancestor, or 0.
+func launchdRoot(p Info, byPID map[int]Info) int {
+	if strings.ToLower(commandName(p)) == "launchd_sim" {
+		return p.PID
+	}
+	for _, a := range ancestors(p, byPID) {
+		if strings.ToLower(commandName(a)) == "launchd_sim" {
+			return a.PID
+		}
+	}
+	return 0
 }
 
 // resolveFamily decides p's family. A simulator device (own UDID path, or a
