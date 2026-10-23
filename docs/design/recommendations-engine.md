@@ -253,8 +253,8 @@ the stored JVM sample history. It only has data for JVMs started with
 `-XX:NativeMemoryTracking=summary|detail`; Spectra never enables NMT itself,
 and a JVM with NMT off simply has no samples, so the rule stays quiet.
 
-Each JVM collection makes one cost-bounded (5 s) `jcmd <pid> VM.native_memory
-summary` call, and the per-category committed KiB are stored with the sample
+When history is sampled (`spectra rules`, MCP rules evaluation), one cost-bounded (5 s, child killed on timeout) `jcmd <pid> VM.native_memory
+summary` call is made per NMT-enabled JVM; ordinary inspect and snapshot collection never makes it. The per-category committed KiB are stored with the sample
 (`jvm_nmt_samples`, keyed like `jvm_samples`, so a reused PID never inherits an
 earlier process's history). Default thresholds, all of which must hold for the
 category's series:
