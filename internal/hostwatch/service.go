@@ -53,6 +53,11 @@ type ServiceOptions struct {
 	OS     hostos.Kind
 	// ReadFile reads /proc files for the Linux sustained-CPU delta.
 	ReadFile func(string) ([]byte, error)
+	// JVMSource and JVMHistory drive the opt-in JVM history sampler
+	// (Config.JVMHistory). JVMSource defaults to NewJVMSource over Runner/OS;
+	// JVMHistory defaults to Store when it implements JVMHistoryStore.
+	JVMSource  JVMSource
+	JVMHistory JVMHistoryStore
 }
 type subscriber struct {
 	ch      chan notification
@@ -69,6 +74,8 @@ type Service struct {
 	sampleMu             sync.Mutex
 	sustMu               sync.Mutex
 	sustained            *sustainedState
+	jvmMu                sync.Mutex
+	jvm                  *jvmSamplerState
 	spawnMu              sync.Mutex
 	spawnTracker         spawnTracker
 	spawnOverrun         bool
@@ -122,6 +129,7 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
 	svc.initSustained()
+	svc.initJVMSampler()
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()
@@ -163,10 +171,12 @@ func (s *Service) Run(ctx context.Context) error {
 	spawnCtx, cancelSpawn := context.WithCancel(ctx)
 	spawnDone := make(chan struct{})
 	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
+	stopJVM := s.startJVMSampler(ctx)
 	defer func() {
 		cancelSpawn()
 		s.waitForSpawn(spawnDone)
 		s.stopSpawnPersister()
+		stopJVM()
 	}()
 	var inFlight <-chan error
 	timer := time.NewTimer(s.interval)
