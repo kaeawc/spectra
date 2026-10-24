@@ -145,7 +145,7 @@ above three times CPU count for two samples, critical memory pressure, limits
 above 90%, and less than 5 GB free. Alerts clear after two healthy evaluations.
 
 Thresholds can be overridden in `<daemon directory>/watch.yml`. Sections are
-`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, `spawn`, and `sustained`; field names are the
+`load`, `memory`, `limits`, `disk`, `thermal`, `kinds`, `spawn`, `sustained`, and `jvm_history`; field names are the
 snake case names in the defaults, such as `load.warn_multiple` or
 `disk.critical_gb`. The `spawn` keys are `interval` (duration, minimum `1s`),
 `rate_warn`, `rate_critical`, `uid_warn_pct`, `uid_critical_pct`,
@@ -158,6 +158,46 @@ not the path or arguments, and on Linux the name is the kernel `comm`, which is
 truncated to 15 characters, so write the pattern against the truncated name. An unknown YAML key logs an error and keeps all defaults.
 Non-positive thresholds log an error and use the default for that field while
 preserving other valid settings.
+
+### JVM history sampler
+
+Trend rules (JVM heap trend, `jvm-native-memory-growth`) need several samples of
+the same JVM over time. `spectra rules` and MCP `evaluateRules` record one per
+run, so without a daemon the history only builds when someone reruns them. The
+daemon can build it in the background. It is **off by default**: sampling
+attaches `jps`, `jcmd`, and `jstat` to every JVM of the user, so an operator
+opts in through `watch.yml`:
+
+```yaml
+jvm_history:
+  enabled: true
+  interval: 5m   # 1m to 1h, default 5m
+  timeout: 30s   # per-pass budget, 1s up to the interval, default 30s
+```
+
+An out-of-range value logs a config error and falls back to its default; the
+other settings stay in effect. Five-minute samples give `jvm-native-memory-growth`
+its minimum (4 samples spanning 15 minutes) in about 15 to 20 minutes.
+
+Each pass uses the same collection and persistence path as `spectra rules`
+(`jvm.CollectAllStatus` then `AttachJVMHistory`), through the daemon's
+`proc.Runner` on macOS and Linux alike. One NMT summary `jcmd` is made only for
+JVMs started with `-XX:NativeMemoryTracking`; Spectra never enables NMT. A pass
+skips quietly when no JVM is running. It is bounded by `timeout`: when the budget
+expires, child processes are killed and the pass is abandoned, and daemon
+shutdown cancels a pass in flight. The first pass runs 10 seconds after the
+daemon starts. Passes never overlap.
+
+A failed pass (`jps` missing, collection or database error) is logged at debug.
+After three consecutive failures the daemon logs one warning, and another every
+three further failures, and stretches the interval to four times the
+configured value until a pass succeeds, which logs an info line. Per-JVM
+failures (a `jcmd` that cannot attach) are absorbed by the collector and leave
+that JVM without a sample for the pass.
+
+Samples share the host-sample retention: the hourly prune deletes JVM samples
+older than seven days (about 2,000 rows per JVM at 5 minutes), while rules read
+only the most recent 60 per process lifetime.
 
 The watch stores JSON samples for seven days and resolved alerts for 30 days
 in the Spectra SQLite database. `SPECTRA_WATCH_DB` overrides the database path

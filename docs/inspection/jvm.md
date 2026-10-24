@@ -172,15 +172,16 @@ sites) and reports a clear error otherwise.
   growth to the allocating call site.
 
 When a JVM runs with `-XX:NativeMemoryTracking=summary|detail`, history sampling
-(`spectra rules`, MCP rules evaluation; not `spectra jvm` or snapshots) records per-category committed KiB (one bounded `jcmd
+(`spectra rules`, MCP rules evaluation, or the opt-in daemon sampler; not `spectra jvm` or snapshots) records per-category committed KiB (one bounded `jcmd
 VM.native_memory summary`, 5 s timeout) in the JVM sample history. The
 `jvm-native-memory-growth` rule uses it to flag a category that grows steadily
 (default: at least 64 MiB and 25% over at least 4 samples spanning 15 minutes;
 `Class`/`Code`/`Compiler` only after the process is 30 minutes old) and points
 at `nmt baseline` / `nmt diff`. Spectra never enables NMT on a JVM itself; with
-NMT off nothing is sampled and the rule stays quiet. No daemon sampler records
-JVM history yet, so the rule needs history built up by repeated `spectra rules`
-or MCP `evaluateRules` runs. See
+NMT off nothing is sampled and the rule stays quiet. The daemon can build
+that history without repeated CLI runs when `jvm_history.enabled: true` is set in
+`watch.yml` (off by default; see [local daemon](../operations/daemon.md)); otherwise
+it needs repeated `spectra rules` or MCP `evaluateRules` runs. See
 [recommendations engine](../design/recommendations-engine.md).
 
 Daemon methods:
