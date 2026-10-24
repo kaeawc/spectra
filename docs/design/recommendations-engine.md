@@ -253,7 +253,7 @@ the stored JVM sample history. It only has data for JVMs started with
 `-XX:NativeMemoryTracking=summary|detail`; Spectra never enables NMT itself,
 and a JVM with NMT off simply has no samples, so the rule stays quiet.
 
-When history is sampled (`spectra rules`, MCP rules evaluation), one cost-bounded (5 s, child killed on timeout) `jcmd <pid> VM.native_memory
+When history is sampled (`spectra rules`, MCP rules evaluation, or the opt-in daemon JVM history sampler), one cost-bounded (5 s, child killed on timeout) `jcmd <pid> VM.native_memory
 summary` call is made per NMT-enabled JVM; ordinary inspect and snapshot collection never makes it. The per-category committed KiB are stored with the sample
 (`jvm_nmt_samples`, keyed like `jvm_samples`, so a reused PID never inherits an
 earlier process's history). Default thresholds, all of which must hold for the
@@ -273,10 +273,12 @@ The finding names the category, growth, and duration, and points at
 attribute the growth to call sites. Thresholds live in `NMTGrowthConfig`
 (`DefaultNMTGrowthConfig`) in `internal/rules/nmt_growth.go`.
 
-No daemon sampler records JVM history yet, so the rule needs history built up
-by repeated `spectra rules` or MCP `evaluateRules` runs (spanning at least the
-minimum window); a single run, or runs that are too close together, will not
-fire it.
+The rule needs history spanning at least the minimum window; a single run, or
+runs that are too close together, will not fire it. History accrues from
+repeated `spectra rules` or MCP `evaluateRules` runs, or in the background when
+the daemon's JVM history sampler is enabled (`jvm_history.enabled` in
+`watch.yml`, off by default; see [local daemon](../operations/daemon.md)).
+Heap trend rules read the same stored samples.
 
 ## Out of scope for v1
 
