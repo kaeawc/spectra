@@ -20,8 +20,9 @@ type CollectOptions struct {
 	// SampleNMT opts in to one `jcmd VM.native_memory summary` per JVM that
 	// runs with NativeMemoryTracking enabled. Default false: ordinary
 	// collection (inspect, snapshot, MCP) must not attach to JVMs for it; only
-	// the CLI `spectra rules` (buildLiveRulesSnapshot) and MCP evaluateRules
-	// live paths set it.
+	// the history samplers set it: CLI `spectra rules` (buildLiveRulesSnapshot),
+	// MCP evaluateRules live path, and the opt-in daemon JVM history sampler
+	// (hostwatch.NewJVMSource, jvm_history.enabled).
 	SampleNMT bool
 	// CmdRunnerContext, when set, runs the NMT probe so the jcmd child is
 	// killed on timeout. Nil uses CmdRunner (adapted) or the real runner.

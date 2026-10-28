@@ -52,7 +52,48 @@ type Config struct {
 		TotalWarnPct     float64       `yaml:"total_warn_pct"`
 		TotalCriticalPct float64       `yaml:"total_critical_pct"`
 	} `yaml:"spawn"`
-	Sustained SustainedConfig `yaml:"sustained"`
+	Sustained  SustainedConfig  `yaml:"sustained"`
+	JVMHistory JVMHistoryConfig `yaml:"jvm_history"`
+}
+
+// JVMHistoryConfig tunes the opt-in background JVM history sampler. It is off
+// by default: sampling attaches jcmd/jstat to every JVM of the user, which an
+// operator should choose.
+type JVMHistoryConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Interval is the time between samples. Minutes-scale: the NMT growth rule
+	// needs 4 samples spanning 15 minutes, so 5m builds that in 15 minutes.
+	Interval time.Duration `yaml:"interval"`
+	// Timeout is the hard budget for one sampling pass (discovery, per-JVM
+	// jcmd/jstat calls and persistence); children are killed when it expires.
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+const (
+	minJVMHistoryInterval = time.Minute
+	maxJVMHistoryInterval = time.Hour
+	minJVMHistoryTimeout  = time.Second
+)
+
+// DefaultJVMHistoryConfig is disabled with a conservative cadence.
+func DefaultJVMHistoryConfig() JVMHistoryConfig {
+	return JVMHistoryConfig{Interval: 5 * time.Minute, Timeout: 30 * time.Second}
+}
+
+// validate clamps out-of-range values to defaults and reports each problem.
+// The timeout must fit inside the interval so passes never overlap.
+func (j *JVMHistoryConfig) validate() []error {
+	d := DefaultJVMHistoryConfig()
+	var problems []error
+	if j.Interval < minJVMHistoryInterval || j.Interval > maxJVMHistoryInterval {
+		problems = append(problems, fmt.Errorf("jvm_history.interval must be between %s and %s", minJVMHistoryInterval, maxJVMHistoryInterval))
+		j.Interval = d.Interval
+	}
+	if j.Timeout < minJVMHistoryTimeout || j.Timeout > j.Interval {
+		problems = append(problems, fmt.Errorf("jvm_history.timeout must be between %s and the interval (%s)", minJVMHistoryTimeout, j.Interval))
+		j.Timeout = min(d.Timeout, j.Interval)
+	}
+	return problems
 }
 
 // SustainedConfig tunes the sustained per-process CPU detector.
@@ -119,6 +160,7 @@ func DefaultConfig() Config {
 	c.Spawn.TotalWarnPct = 50
 	c.Spawn.TotalCriticalPct = 80
 	c.Sustained = DefaultSustainedConfig()
+	c.JVMHistory = DefaultJVMHistoryConfig()
 	return c
 }
 func LoadConfig(path string, readFile func(string) ([]byte, error)) (Config, error) {
@@ -194,6 +236,7 @@ func validateConfig(c Config) (Config, error) {
 		c.Spawn.Interval = d.Spawn.Interval
 	}
 	problems = append(problems, validateSustained(&c.Sustained)...)
+	problems = append(problems, c.JVMHistory.validate()...)
 	for _, field := range []struct {
 		name           string
 		warn, critical *float64
