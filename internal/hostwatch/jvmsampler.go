@@ -21,6 +21,9 @@ const (
 	// log to Warn and stretch the cadence (jvmHistoryBackoff).
 	jvmHistoryFailLimit = 3
 	jvmHistoryBackoff   = 4
+	// jvmHistoryStopGrace is added to the pass timeout when waiting for the
+	// sampler to exit at shutdown.
+	jvmHistoryStopGrace = 5 * time.Second
 )
 
 // ErrJPSUnavailable is returned by the default JVMSource when jps could not
@@ -72,6 +75,9 @@ type jvmSamplerState struct {
 	source   JVMSource
 	store    JVMHistoryStore
 	failures int
+	// jpsDown is set once the no-JDK condition has been warned about, so it
+	// is announced once and not on every pass.
+	jpsDown bool
 }
 
 // initJVMSampler wires the sampler when jvm_history.enabled is set and a
@@ -97,7 +103,11 @@ func (s *Service) initJVMSampler() {
 }
 
 // startJVMSampler runs the sampler loop when enabled and returns a stop
-// function that cancels it and waits (bounded) for the pass in flight.
+// function that cancels it and waits for the pass in flight, so the store is
+// not written after Run returns (the daemon closes it next). The pass context
+// is cancelled first and persistence honors it, so the wait is short; it is
+// capped at the pass budget plus a grace period to keep a store that ignores
+// ctx from hanging shutdown.
 func (s *Service) startJVMSampler(ctx context.Context) (stop func()) {
 	if s.jvm == nil {
 		return func() {}
@@ -107,12 +117,12 @@ func (s *Service) startJVMSampler(ctx context.Context) (stop func()) {
 	go func() { defer close(done); s.runJVMSampler(jctx) }()
 	return func() {
 		cancel()
-		timer := time.NewTimer(2 * time.Second)
+		timer := time.NewTimer(s.opts.Config.JVMHistory.Timeout + jvmHistoryStopGrace)
 		defer timer.Stop()
 		select {
 		case <-done:
 		case <-timer.C:
-			s.opts.Logger.Warn("jvm history sampler still running after shutdown wait")
+			s.opts.Logger.Warn("jvm history sampler still running after shutdown wait; store writes may race close")
 		}
 	}
 }
@@ -127,7 +137,7 @@ func (s *Service) runJVMSampler(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		_ = s.TickJVM(ctx)
+		_ = s.tickJVM(ctx)
 		timer.Reset(s.jvmNextInterval())
 	}
 }
@@ -142,11 +152,11 @@ func (s *Service) jvmNextInterval() time.Duration {
 	return base
 }
 
-// TickJVM runs one bounded sampling pass: collect, then persist through
+// tickJVM runs one bounded sampling pass: collect, then persist through
 // AttachJVMHistory. It is a no-op when the sampler is disabled or no JVM is
 // running. Failures are rate-limited in the log and returned for callers
 // that care; a cancelled parent ctx is not a failure.
-func (s *Service) TickJVM(parent context.Context) error {
+func (s *Service) tickJVM(parent context.Context) error {
 	if s.jvm == nil {
 		return nil
 	}
@@ -206,8 +216,19 @@ func (s *Service) jvmFailed(err error) {
 	s.jvmMu.Lock()
 	s.jvm.failures++
 	n := s.jvm.failures
+	firstJPS := errors.Is(err, ErrJPSUnavailable) && !s.jvm.jpsDown
+	if firstJPS {
+		s.jvm.jpsDown = true
+	}
 	s.jvmMu.Unlock()
 	switch {
+	case errors.Is(err, ErrJPSUnavailable):
+		// A host without a JDK fails every pass; announce it once.
+		if firstJPS {
+			s.opts.Logger.Warn("jvm history sampling unavailable: jps not found; backing off until it appears", "error", err)
+		} else {
+			s.opts.Logger.Debug("jvm history sampling failed", "error", err)
+		}
 	case n == jvmHistoryFailLimit:
 		s.opts.Logger.Warn("jvm history sampling failing; backing off", "error", err, "consecutive_failures", n)
 	case n > jvmHistoryFailLimit && n%jvmHistoryFailLimit == 0:
@@ -221,8 +242,10 @@ func (s *Service) jvmSucceeded() {
 	s.jvmMu.Lock()
 	n := s.jvm.failures
 	s.jvm.failures = 0
+	wasJPSDown := s.jvm.jpsDown
+	s.jvm.jpsDown = false
 	s.jvmMu.Unlock()
-	if n >= jvmHistoryFailLimit {
+	if n >= jvmHistoryFailLimit || wasJPSDown {
 		s.opts.Logger.Info("jvm history sampling recovered", "consecutive_failures", n)
 	}
 }

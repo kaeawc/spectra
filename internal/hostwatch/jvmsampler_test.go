@@ -84,8 +84,8 @@ func newJVMFixture(t *testing.T, mutate func(*Config)) *jvmFixture {
 
 func (f *jvmFixture) tick(t *testing.T) {
 	t.Helper()
-	if err := f.svc.TickJVM(context.Background()); err != nil {
-		t.Fatalf("TickJVM: %v", err)
+	if err := f.svc.tickJVM(context.Background()); err != nil {
+		t.Fatalf("tickJVM: %v", err)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestJVMSamplerDisabledByDefault(t *testing.T) {
 	if svc.jvm != nil {
 		t.Fatal("sampler must be off with the default config")
 	}
-	if err := svc.TickJVM(context.Background()); err != nil || called {
-		t.Fatalf("disabled TickJVM err=%v called=%v", err, called)
+	if err := svc.tickJVM(context.Background()); err != nil || called {
+		t.Fatalf("disabled tickJVM err=%v called=%v", err, called)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stop := svc.startJVMSampler(ctx)
@@ -143,7 +143,7 @@ func TestJVMSamplerBudgetAbandonsStuckSource(t *testing.T) {
 	t.Cleanup(func() { close(block) })
 	f.svc.jvm.source = func(context.Context) (snapshot.Snapshot, error) { <-block; return snapshot.Snapshot{}, nil }
 	start := time.Now()
-	err := f.svc.TickJVM(context.Background())
+	err := f.svc.tickJVM(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
@@ -161,7 +161,7 @@ func TestJVMSamplerParentCancelIsNotAFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for i := 0; i < 2*jvmHistoryFailLimit; i++ {
-		if err := f.svc.TickJVM(ctx); !errors.Is(err, context.Canceled) {
+		if err := f.svc.tickJVM(ctx); !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want canceled", err)
 		}
 	}
@@ -172,10 +172,10 @@ func TestJVMSamplerParentCancelIsNotAFailure(t *testing.T) {
 
 func TestJVMSamplerFailureLoggingIsRateLimited(t *testing.T) {
 	f := newJVMFixture(t, nil)
-	f.err = ErrJPSUnavailable
+	f.err = errors.New("collect failed")
 	base := f.svc.opts.Config.JVMHistory.Interval
 	for i := 1; i <= 3*jvmHistoryFailLimit; i++ {
-		if err := f.svc.TickJVM(context.Background()); !errors.Is(err, ErrJPSUnavailable) {
+		if err := f.svc.tickJVM(context.Background()); err == nil {
 			t.Fatalf("pass %d err = %v", i, err)
 		}
 		want := base
@@ -204,7 +204,7 @@ func TestJVMSamplerPersistFailureCounts(t *testing.T) {
 	f := newJVMFixture(t, nil)
 	boom := errors.New("disk full")
 	f.svc.jvm.store = failingHistory{boom}
-	if err := f.svc.TickJVM(context.Background()); !errors.Is(err, boom) {
+	if err := f.svc.tickJVM(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want wrapped %v", err, boom)
 	}
 	if f.svc.jvm.failures != 1 {
@@ -357,5 +357,70 @@ func TestNewJVMSourceReportsMissingJPS(t *testing.T) {
 	src := NewJVMSource(jvmRunner(&nmt, errors.New("not found")), hostos.Linux, nil)
 	if _, err := src(context.Background()); !errors.Is(err, ErrJPSUnavailable) {
 		t.Fatalf("err = %v, want ErrJPSUnavailable", err)
+	}
+}
+
+func TestJVMSamplerNoJDKWarnsOnce(t *testing.T) {
+	f := newJVMFixture(t, nil)
+	f.err = ErrJPSUnavailable
+	base := f.svc.opts.Config.JVMHistory.Interval
+	for i := 0; i < 4*jvmHistoryFailLimit; i++ {
+		if err := f.svc.tickJVM(context.Background()); !errors.Is(err, ErrJPSUnavailable) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	if warns := f.count(slog.LevelWarn); warns != 1 {
+		t.Fatalf("warns = %d, want exactly 1 for a host without jps", warns)
+	}
+	if f.svc.jvmNextInterval() != base*jvmHistoryBackoff {
+		t.Fatal("backoff must still apply")
+	}
+	f.err = nil
+	f.tick(t)
+	if f.count(slog.LevelInfo) != 1 || !f.log.HasMessage("recovered") {
+		t.Fatal("recovery must log at info")
+	}
+	// A later outage is announced again.
+	f.err = ErrJPSUnavailable
+	_ = f.svc.tickJVM(context.Background())
+	if f.count(slog.LevelWarn) != 2 {
+		t.Fatalf("warns = %d, want a fresh warn after recovery", f.count(slog.LevelWarn))
+	}
+}
+
+type slowHistory struct {
+	started chan struct{}
+	done    atomic.Bool
+}
+
+// AttachJVMHistory ignores ctx, like a store stuck on SQLite busy.
+func (h *slowHistory) AttachJVMHistory(context.Context, *snapshot.Snapshot) error {
+	close(h.started)
+	time.Sleep(2500 * time.Millisecond) // longer than the old 2s shutdown cap
+	h.done.Store(true)
+	return nil
+}
+
+func TestJVMSamplerRunWaitsForPersistBeforeReturning(t *testing.T) {
+	f := newJVMFixture(t, func(c *Config) {
+		c.JVMHistory.Interval = 5 * time.Millisecond
+		c.JVMHistory.Timeout = 5 * time.Millisecond
+	})
+	h := &slowHistory{started: make(chan struct{})}
+	f.svc.jvm.store = h
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- f.svc.Run(ctx) }()
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("persist never started")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !h.done.Load() {
+		t.Fatal("Run returned while a store write was still in flight")
 	}
 }
