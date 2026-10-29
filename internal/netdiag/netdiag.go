@@ -151,6 +151,12 @@ type TLSProbe struct {
 	// ExpiringSoon is set when that is within expirySoonDays.
 	LeafExpiresInDays int  `json:"leaf_expires_in_days,omitempty"`
 	ExpiringSoon      bool `json:"expiring_soon,omitempty"`
+	// CompromisedCA is set when any certificate in the presented chain matches
+	// the affected-CA table (affected_cas.json), regardless of whether trust
+	// verification succeeded. It says the chain includes an affected CA, not
+	// that the host is compromised.
+	CompromisedCA       bool   `json:"compromised_ca,omitempty"`
+	CompromisedCADetail string `json:"compromised_ca_detail,omitempty"`
 }
 
 // CertInfo summarizes one certificate in a presented TLS chain.
@@ -162,6 +168,8 @@ type CertInfo struct {
 	IsCA         bool   `json:"is_ca,omitempty"`
 	DaysToExpiry int    `json:"days_to_expiry"`
 	SPKIPin      string `json:"spki_pin,omitempty"`
+	// CompromisedCA marks a certificate matching the affected-CA table.
+	CompromisedCA bool `json:"compromised_ca,omitempty"`
 }
 
 type TraceProbe struct {
@@ -712,6 +720,7 @@ func analyzeChain(probe *TLSProbe, host string, certs []*x509.Certificate, roots
 	probe.Intercepted, probe.InterceptionReason = interceptionSignal(leaf, probe.TrustValid, probe.TrustError)
 	probe.LeafExpiresInDays = daysUntil(leaf.NotAfter, now)
 	probe.ExpiringSoon = probe.LeafExpiresInDays <= expirySoonDays
+	flagAffectedCAs(probe, certs, affectedCAs)
 }
 
 // interceptionSignal reports whether the leaf certificate looks like it comes
@@ -838,6 +847,13 @@ func portFindings(host string, port PortDiagnosis) []Finding {
 	}
 	if port.TLS != nil && port.TLS.OK && port.TLS.DurationMS >= slowTLSMS {
 		out = append(out, Finding{Severity: "warning", Title: "slow tls handshake", Detail: fmt.Sprintf("%s:%d tls_ms=%d", host, port.Port, port.TLS.DurationMS)})
+	}
+	if port.TLS != nil && port.TLS.CompromisedCA {
+		out = append(out, Finding{
+			Severity: "high",
+			Title:    "tls chain includes a compromised CA",
+			Detail:   fmt.Sprintf("%s:%d %s. Update OS/browser trust stores and reissue the certificate from an unaffected CA.", host, port.Port, port.TLS.CompromisedCADetail),
+		})
 	}
 	if port.TLS != nil && port.TLS.ZscalerHint {
 		out = append(out, Finding{Severity: "info", Title: "zscaler tls issuer/subject observed", Detail: host})
