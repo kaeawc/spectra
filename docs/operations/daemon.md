@@ -191,7 +191,7 @@ daemon starts. Passes never overlap.
 A failed pass (`jps` missing, collection or database error) is logged at debug.
 After three consecutive failures the daemon logs one warning, and another every
 three further failures, and stretches the interval to four times the
-configured value until a pass succeeds, which logs an info line. A host with no `jps` (no JDK) logs a single warning the first time and debug lines after that, with the same backoff, and an info line when `jps` appears. Shutdown waits for a pass in flight (up to the pass timeout plus 5 seconds) so no sample is written after the daemon closes its database. Per-JVM
+configured value until a pass succeeds, which logs an info line. A host with no `jps` (no JDK) logs a single warning the first time and debug lines after that, with the same backoff, and an info line when `jps` appears. Shutdown waits for a pass in flight (up to the pass timeout plus 5 seconds) so no sample is written after the daemon closes its database. Persistence honors the pass context: a write or commit waiting on a SQLite lock is abandoned and rolled back within about 50 ms of cancellation. A write stalled in disk I/O cannot be interrupted, so the wait is a cap, not a guarantee: after it elapses the daemon logs a warning and continues shutdown, and closing the database then waits for that write. Per-JVM
 failures (a `jcmd` that cannot attach) are absorbed by the collector and leave
 that JVM without a sample for the pass.
 

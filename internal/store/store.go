@@ -6,12 +6,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
@@ -56,7 +58,7 @@ func OpenWithOptions(path string, opts Options) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", connDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
@@ -80,6 +82,19 @@ func OpenWithOptions(path string, opts Options) (*DB, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// connDSN appends per-connection pragmas to path. foreign_keys and synchronous
+// are connection-scoped, and the pool opens a replacement whenever a conn is
+// discarded (discardConn) or dropped as bad, so applying them once with Exec
+// after Open would leave that replacement on SQLite defaults. journal_mode=WAL
+// persists in the database file and stays in applyPragmas.
+func connDSN(path string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "_pragma=foreign_keys(1)&_pragma=synchronous(1)"
 }
 
 // Close releases the database connection.
@@ -1042,12 +1057,49 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 	if len(samples) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	// A dedicated conn with explicit BEGIN/COMMIT statements instead of
+	// BeginTx/Tx.Commit: modernc.org/sqlite runs Tx.Commit and Tx.Rollback with
+	// context.Background, so they ignore ctx. See commitCancellable for why
+	// ExecContext alone does not bound COMMIT either.
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return wrapSave(ctx, "acquire connection", err)
+	}
+	defer conn.Close() //nolint:errcheck
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		// An interrupted BEGIN may leave the conn in an unknown state.
+		discardConn(conn)
+		return wrapSave(ctx, "begin jvm_samples", err)
+	}
+	committed := false
+	defer func() {
+		// Also runs on panic. Detached from ctx: the rollback must run even
+		// after cancellation. A conn that cannot roll back must not return to
+		// the single-connection pool still inside the transaction.
+		if !committed {
+			if _, err := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); err != nil {
+				discardConn(conn)
+			}
+		}
+	}()
+	if err := saveJVMSampleRows(ctx, conn, samples); err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck
-	stmt, err := tx.PrepareContext(ctx, `
+	if err := commitCancellable(ctx, conn); err != nil {
+		return wrapSave(ctx, "commit jvm_samples", err)
+	}
+	committed = true
+	return nil
+}
+
+// testHookAfterBegin lets tests inject a failure inside the open transaction.
+var testHookAfterBegin func()
+
+func saveJVMSampleRows(ctx context.Context, conn *sql.Conn, samples []snapshot.JVMSample) error {
+	if testHookAfterBegin != nil {
+		testHookAfterBegin()
+	}
+	stmt, err := conn.PrepareContext(ctx, `
 		INSERT INTO jvm_samples (pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb)
 		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(pid, at_nano) DO UPDATE SET
@@ -1057,7 +1109,7 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 		    fgct=excluded.fgct,
 		    heap_mb=excluded.heap_mb`)
 	if err != nil {
-		return fmt.Errorf("store: prepare jvm_samples: %w", err)
+		return wrapSave(ctx, "prepare jvm_samples", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {
@@ -1065,29 +1117,110 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 		// GC trends never see zeros.
 		if !sm.NMTOnly {
 			if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
-				return err
+				return wrapSave(ctx, "insert jvm_samples", err)
 			}
 		}
-		if err := saveNMTSample(ctx, tx, sm); err != nil {
+		if err := saveNMTSample(ctx, conn, sm); err != nil {
+			return wrapSave(ctx, "save nmt sample", err)
+		}
+	}
+	return nil
+}
+
+// wrapSave adds the store prefix and, when ctx is done, makes the error match
+// ctx.Err() under errors.Is even though the driver reports its own interrupt
+// error.
+func wrapSave(ctx context.Context, what string, err error) error {
+	if cerr := ctx.Err(); cerr != nil && !errors.Is(err, cerr) {
+		return fmt.Errorf("store: %s: %w: %w", what, cerr, err)
+	}
+	return fmt.Errorf("store: %s: %w", what, err)
+}
+
+// discardConn makes database/sql close the underlying connection instead of
+// returning it to the pool when conn is released.
+func discardConn(conn *sql.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+}
+
+// commitPollSlice is the busy wait of one COMMIT attempt in commitCancellable,
+// and so the worst-case extra latency after ctx is cancelled.
+const commitPollSlice = 50 * time.Millisecond
+
+// commitCancellable commits conn's open transaction, giving up once ctx is
+// done. sqlite3_interrupt (what ExecContext uses on cancel) does not wake a
+// COMMIT sleeping in the busy handler, so a long busy_timeout would otherwise
+// hold the commit past ctx. Instead the busy wait is sliced: COMMIT is retried
+// while it reports SQLITE_BUSY (the transaction stays open and retryable),
+// checking ctx between slices, and the connection's busy_timeout is restored.
+// The caller rolls back on error. A commit already blocked in disk I/O is not
+// interruptible by any means the driver offers.
+func commitCancellable(ctx context.Context, conn *sql.Conn) error {
+	var prev int
+	if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&prev); err != nil {
+		return err
+	}
+	if prev <= int(commitPollSlice/time.Millisecond) {
+		// Already short (the default is 0): a single attempt is bounded.
+		return commitAttempt(ctx, conn)
+	}
+	defer func() {
+		// A conn left with the short slice timeout must not go back to the pool.
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA busy_timeout=%d", prev)); err != nil {
+			discardConn(conn)
+		}
+	}()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", commitPollSlice/time.Millisecond)); err != nil {
+		return err
+	}
+	for attempts := prev / int(commitPollSlice/time.Millisecond); ; attempts-- {
+		err := commitAttempt(ctx, conn)
+		if err == nil || !isBusy(err) {
+			return err
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if attempts <= 0 {
 			return err
 		}
 	}
-	return tx.Commit()
+}
+
+// commitAttempt makes one COMMIT attempt, bounded by the connection's busy
+// timeout. ctx is checked before the attempt but deliberately not passed to
+// it: the driver turns a cancellation that lands while the statement runs into
+// a ctx error even when SQLite already committed, which would make the caller
+// roll back and report failure for data that persisted. An attempt started
+// before cancellation therefore reports its true outcome.
+func commitAttempt(ctx context.Context, conn *sql.Conn) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := conn.ExecContext(context.WithoutCancel(ctx), "COMMIT")
+	return err
+}
+
+// isBusy reports whether err is SQLITE_BUSY (primary code 5), which modernc
+// exposes through Code().
+func isBusy(err error) bool {
+	var coder interface{ Code() int }
+	return errors.As(err, &coder) && coder.Code()&0xff == 5
 }
 
 // saveNMTSample upserts the sample's NMT categories into jvm_nmt_samples and
 // clears any stale row when the sample carries none.
-func saveNMTSample(ctx context.Context, tx *sql.Tx, sm snapshot.JVMSample) error {
+func saveNMTSample(ctx context.Context, conn *sql.Conn, sm snapshot.JVMSample) error {
 	atNano := sm.At.UTC().UnixNano()
 	if len(sm.NMTCommittedKiB) == 0 {
-		_, err := tx.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
+		_, err := conn.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
 		return err
 	}
 	data, err := json.Marshal(sm.NMTCommittedKiB)
 	if err != nil {
 		return fmt.Errorf("store: encode nmt sample: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = conn.ExecContext(ctx, `
 		INSERT INTO jvm_nmt_samples (pid, proc_start_unix, at_nano, committed_json) VALUES (?,?,?,?)
 		ON CONFLICT(pid, at_nano) DO UPDATE SET
 		    proc_start_unix=excluded.proc_start_unix,
