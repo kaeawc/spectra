@@ -43,6 +43,36 @@ spectra -v --network /Applications/Slack.app
 | App has no live sockets | Confirm the app is exercising the failing workflow |
 | Static hosts differ from live sockets | Separate bundled configuration from runtime behavior |
 
+## Compromised CA in the presented chain
+
+`spectra network diagnose` compares every certificate in a presented TLS chain
+(leaf, intermediates, and root) against a table of CAs whose keys are publicly
+known to be compromised. A match produces a `high` finding and
+`compromised_ca=YES` on the port line; JSON output sets `compromised_ca` and
+`compromised_ca_detail` on the TLS probe and on the matching chain entry. The
+check runs whether or not the chain validates against the system trust store,
+because a host that still trusts an affected root would otherwise validate a
+forged chain silently.
+
+The finding means the presented chain includes an affected CA. It does not
+mean the host is compromised. Fix: update the OS and browser trust stores, and
+reissue the certificate from an unaffected CA.
+
+The table is `internal/netdiag/affected_cas.json`, embedded at build time. Each
+entry has a name, a certificate SHA-256 (`cert_sha256`, hex) and/or an SPKI pin
+(`spki_pin`, base64, same format as `leaf_spki_pin`), a role (`root` or
+`intermediate`), a primary-source URL, and the as-of date of that source. To
+update it, copy values only from a primary source (for example the Mozilla
+Bugzilla incident bug, CCADB, or a Chrome Root Program notice); never derive or
+approximate a fingerprint. Entries without a verified value are left out.
+
+The current entries are the 16 eMudhra (emSign) G3B/G3C intermediates, with
+their Sectigo cross-signs, disclosed in
+[Mozilla bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449).
+The distrusted root, `emSign ECC Root CA - G3`, is not in the table because no
+primary source gave its fingerprint. A standalone check of whether the host
+trust store still contains that root is not implemented.
+
 ## Capture bounded packet evidence
 
 Use the privileged helper only for explicit, bounded captures. Keep filters
