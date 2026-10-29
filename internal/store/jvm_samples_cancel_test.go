@@ -54,7 +54,7 @@ func TestSaveJVMSamples_CommitBlockedOnReaderHonorsCancel(t *testing.T) {
 		if err == nil {
 			t.Fatal("SaveJVMSamples succeeded despite a blocked commit")
 		}
-		if !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	case <-time.After(5 * time.Second):

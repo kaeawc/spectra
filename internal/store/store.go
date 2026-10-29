@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1038,7 +1039,7 @@ func scanAppChurnRows(rows *sql.Rows) ([]AppChurnRow, error) {
 // rules. Timestamps are stored as nanoseconds so two parallel diagnose
 // calls within the same wall-clock second produce distinct rows; the
 // upsert clause keeps reruns at literally the same instant idempotent.
-func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) (err error) {
+func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) error {
 	if len(samples) == 0 {
 		return nil
 	}
@@ -1048,18 +1049,42 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) (
 	// ExecContext alone does not bound COMMIT either.
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return err
+		return wrapSave(ctx, "acquire connection", err)
 	}
 	defer conn.Close() //nolint:errcheck
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return err
+		// An interrupted BEGIN may leave the conn in an unknown state.
+		discardConn(conn)
+		return wrapSave(ctx, "begin jvm_samples", err)
 	}
+	committed := false
 	defer func() {
-		if err != nil {
-			// Detached from ctx: the rollback must run even after cancellation.
-			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		// Also runs on panic. Detached from ctx: the rollback must run even
+		// after cancellation. A conn that cannot roll back must not return to
+		// the single-connection pool still inside the transaction.
+		if !committed {
+			if _, err := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK"); err != nil {
+				discardConn(conn)
+			}
 		}
 	}()
+	if err := saveJVMSampleRows(ctx, conn, samples); err != nil {
+		return err
+	}
+	if err := commitCancellable(ctx, conn); err != nil {
+		return wrapSave(ctx, "commit jvm_samples", err)
+	}
+	committed = true
+	return nil
+}
+
+// testHookAfterBegin lets tests inject a failure inside the open transaction.
+var testHookAfterBegin func()
+
+func saveJVMSampleRows(ctx context.Context, conn *sql.Conn, samples []snapshot.JVMSample) error {
+	if testHookAfterBegin != nil {
+		testHookAfterBegin()
+	}
 	stmt, err := conn.PrepareContext(ctx, `
 		INSERT INTO jvm_samples (pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb)
 		VALUES (?,?,?,?,?,?,?)
@@ -1070,7 +1095,7 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) (
 		    fgct=excluded.fgct,
 		    heap_mb=excluded.heap_mb`)
 	if err != nil {
-		return fmt.Errorf("store: prepare jvm_samples: %w", err)
+		return wrapSave(ctx, "prepare jvm_samples", err)
 	}
 	defer stmt.Close() //nolint:errcheck
 	for _, sm := range samples {
@@ -1078,14 +1103,30 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) (
 		// GC trends never see zeros.
 		if !sm.NMTOnly {
 			if _, err := stmt.ExecContext(ctx, sm.PID, procStartUnix(sm.ProcStart), sm.At.UTC().UnixNano(), sm.OldGenPct, sm.FGC, sm.FGCT, sm.HeapMB); err != nil {
-				return err
+				return wrapSave(ctx, "insert jvm_samples", err)
 			}
 		}
 		if err := saveNMTSample(ctx, conn, sm); err != nil {
-			return err
+			return wrapSave(ctx, "save nmt sample", err)
 		}
 	}
-	return commitCancellable(ctx, conn)
+	return nil
+}
+
+// wrapSave adds the store prefix and, when ctx is done, makes the error match
+// ctx.Err() under errors.Is even though the driver reports its own interrupt
+// error.
+func wrapSave(ctx context.Context, what string, err error) error {
+	if cerr := ctx.Err(); cerr != nil && !errors.Is(err, cerr) {
+		return fmt.Errorf("store: %s: %w: %w", what, cerr, err)
+	}
+	return fmt.Errorf("store: %s: %w", what, err)
+}
+
+// discardConn makes database/sql close the underlying connection instead of
+// returning it to the pool when conn is released.
+func discardConn(conn *sql.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 }
 
 // commitPollSlice is the busy wait of one COMMIT attempt in commitCancellable,
@@ -1111,7 +1152,10 @@ func commitCancellable(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	defer func() {
-		_, _ = conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA busy_timeout=%d", prev))
+		// A conn left with the short slice timeout must not go back to the pool.
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA busy_timeout=%d", prev)); err != nil {
+			discardConn(conn)
+		}
 	}()
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", commitPollSlice/time.Millisecond)); err != nil {
 		return err
@@ -1122,7 +1166,7 @@ func commitCancellable(ctx context.Context, conn *sql.Conn) error {
 			return err
 		}
 		if cerr := ctx.Err(); cerr != nil {
-			return fmt.Errorf("store: commit jvm_samples: %w", cerr)
+			return cerr
 		}
 		if attempts <= 0 {
 			return err
@@ -1139,17 +1183,17 @@ func isBusy(err error) bool {
 
 // saveNMTSample upserts the sample's NMT categories into jvm_nmt_samples and
 // clears any stale row when the sample carries none.
-func saveNMTSample(ctx context.Context, tx *sql.Conn, sm snapshot.JVMSample) error {
+func saveNMTSample(ctx context.Context, conn *sql.Conn, sm snapshot.JVMSample) error {
 	atNano := sm.At.UTC().UnixNano()
 	if len(sm.NMTCommittedKiB) == 0 {
-		_, err := tx.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
+		_, err := conn.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
 		return err
 	}
 	data, err := json.Marshal(sm.NMTCommittedKiB)
 	if err != nil {
 		return fmt.Errorf("store: encode nmt sample: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = conn.ExecContext(ctx, `
 		INSERT INTO jvm_nmt_samples (pid, proc_start_unix, at_nano, committed_json) VALUES (?,?,?,?)
 		ON CONFLICT(pid, at_nano) DO UPDATE SET
 		    proc_start_unix=excluded.proc_start_unix,

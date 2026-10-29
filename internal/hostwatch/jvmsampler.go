@@ -106,9 +106,9 @@ func (s *Service) initJVMSampler() {
 // function that cancels it and waits for the pass in flight, so the store is
 // not written after Run returns (the daemon closes it next). The pass context
 // is cancelled first and persistence honors it (lock waits abort and roll
-// back), so the wait is short; it is
-// capped at the pass budget plus a grace period so a write stuck in
-// uninterruptible I/O, or a store that ignores ctx, cannot hang shutdown.
+// back), so the wait is short. It is capped at the pass budget plus a grace
+// period so a write stuck in uninterruptible I/O, or a store that ignores ctx,
+// cannot hang shutdown.
 func (s *Service) startJVMSampler(ctx context.Context) (stop func()) {
 	if s.jvm == nil {
 		return func() {}
