@@ -29,7 +29,18 @@ var affectedCAsJSON []byte
 
 // affectedCAs is the table consulted by analyzeChain. It is a variable so
 // tests can register synthetic CAs.
-var affectedCAs, affectedCAsErr = parseAffectedCAs(affectedCAsJSON)
+var affectedCAs = mustParseAffectedCAs(affectedCAsJSON)
+
+// mustParseAffectedCAs panics on malformed embedded data, matching how
+// internal/rules treats electron_releases.json: the data is compiled in, and a
+// silently empty table would turn this security check into a no-op.
+func mustParseAffectedCAs(data []byte) []AffectedCA {
+	out, err := parseAffectedCAs(data)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
 
 func parseAffectedCAs(data []byte) ([]AffectedCA, error) {
 	var out []AffectedCA

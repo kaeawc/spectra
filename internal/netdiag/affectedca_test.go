@@ -136,9 +136,17 @@ func checkAffectedEntry(t *testing.T, e AffectedCA) {
 }
 
 func TestShippedAffectedCATable(t *testing.T) {
-	if affectedCAsErr != nil {
-		t.Fatal(affectedCAsErr)
+	if _, err := parseAffectedCAs(affectedCAsJSON); err != nil {
+		t.Fatal(err)
 	}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("malformed table should panic")
+			}
+		}()
+		mustParseAffectedCAs([]byte("{"))
+	}()
 	if len(affectedCAs) == 0 {
 		t.Fatal("empty table")
 	}

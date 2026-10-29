@@ -49,7 +49,8 @@ spectra -v --network /Applications/Slack.app
 (leaf, intermediates, and root) against a table of CAs whose keys are publicly
 known to be compromised. A match produces a `high` finding and
 `compromised_ca=YES` on the port line; JSON output sets `compromised_ca` and
-`compromised_ca_detail` on the TLS probe and on the matching chain entry. The
+`compromised_ca_detail` on the TLS probe, and `compromised_ca` on each matching
+chain entry. The
 check runs whether or not the chain validates against the system trust store,
 because a host that still trusts an affected root would otherwise validate a
 forged chain silently.
