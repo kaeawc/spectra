@@ -1038,16 +1038,29 @@ func scanAppChurnRows(rows *sql.Rows) ([]AppChurnRow, error) {
 // rules. Timestamps are stored as nanoseconds so two parallel diagnose
 // calls within the same wall-clock second produce distinct rows; the
 // upsert clause keeps reruns at literally the same instant idempotent.
-func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) error {
+func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) (err error) {
 	if len(samples) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	// A dedicated conn with explicit BEGIN/COMMIT statements instead of
+	// BeginTx/Tx.Commit: modernc.org/sqlite runs Tx.Commit and Tx.Rollback with
+	// context.Background, so they ignore ctx. See commitCancellable for why
+	// ExecContext alone does not bound COMMIT either.
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck
-	stmt, err := tx.PrepareContext(ctx, `
+	defer conn.Close() //nolint:errcheck
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			// Detached from ctx: the rollback must run even after cancellation.
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
+	stmt, err := conn.PrepareContext(ctx, `
 		INSERT INTO jvm_samples (pid, proc_start_unix, at_nano, old_gen_pct, fgc, fgct, heap_mb)
 		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(pid, at_nano) DO UPDATE SET
@@ -1068,16 +1081,65 @@ func (s *DB) SaveJVMSamples(ctx context.Context, samples []snapshot.JVMSample) e
 				return err
 			}
 		}
-		if err := saveNMTSample(ctx, tx, sm); err != nil {
+		if err := saveNMTSample(ctx, conn, sm); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return commitCancellable(ctx, conn)
+}
+
+// commitPollSlice is the busy wait of one COMMIT attempt in commitCancellable,
+// and so the worst-case extra latency after ctx is cancelled.
+const commitPollSlice = 50 * time.Millisecond
+
+// commitCancellable commits conn's open transaction, giving up once ctx is
+// done. sqlite3_interrupt (what ExecContext uses on cancel) does not wake a
+// COMMIT sleeping in the busy handler, so a long busy_timeout would otherwise
+// hold the commit past ctx. Instead the busy wait is sliced: COMMIT is retried
+// while it reports SQLITE_BUSY (the transaction stays open and retryable),
+// checking ctx between slices, and the connection's busy_timeout is restored.
+// The caller rolls back on error. A commit already blocked in disk I/O is not
+// interruptible by any means the driver offers.
+func commitCancellable(ctx context.Context, conn *sql.Conn) error {
+	var prev int
+	if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&prev); err != nil {
+		return err
+	}
+	if prev <= int(commitPollSlice/time.Millisecond) {
+		// Already short (the default is 0): a single attempt is bounded.
+		_, err := conn.ExecContext(ctx, "COMMIT")
+		return err
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA busy_timeout=%d", prev))
+	}()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", commitPollSlice/time.Millisecond)); err != nil {
+		return err
+	}
+	for attempts := prev / int(commitPollSlice/time.Millisecond); ; attempts-- {
+		_, err := conn.ExecContext(ctx, "COMMIT")
+		if err == nil || !isBusy(err) {
+			return err
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return fmt.Errorf("store: commit jvm_samples: %w", cerr)
+		}
+		if attempts <= 0 {
+			return err
+		}
+	}
+}
+
+// isBusy reports whether err is SQLITE_BUSY (primary code 5), which modernc
+// exposes through Code().
+func isBusy(err error) bool {
+	var coder interface{ Code() int }
+	return errors.As(err, &coder) && coder.Code()&0xff == 5
 }
 
 // saveNMTSample upserts the sample's NMT categories into jvm_nmt_samples and
 // clears any stale row when the sample carries none.
-func saveNMTSample(ctx context.Context, tx *sql.Tx, sm snapshot.JVMSample) error {
+func saveNMTSample(ctx context.Context, tx *sql.Conn, sm snapshot.JVMSample) error {
 	atNano := sm.At.UTC().UnixNano()
 	if len(sm.NMTCommittedKiB) == 0 {
 		_, err := tx.ExecContext(ctx, `DELETE FROM jvm_nmt_samples WHERE pid=? AND at_nano=?`, sm.PID, atNano)
