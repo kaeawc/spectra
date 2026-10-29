@@ -1162,8 +1162,7 @@ func commitCancellable(ctx context.Context, conn *sql.Conn) error {
 	}
 	if prev <= int(commitPollSlice/time.Millisecond) {
 		// Already short (the default is 0): a single attempt is bounded.
-		_, err := conn.ExecContext(ctx, "COMMIT")
-		return err
+		return commitAttempt(ctx, conn)
 	}
 	defer func() {
 		// A conn left with the short slice timeout must not go back to the pool.
@@ -1175,7 +1174,7 @@ func commitCancellable(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	for attempts := prev / int(commitPollSlice/time.Millisecond); ; attempts-- {
-		_, err := conn.ExecContext(ctx, "COMMIT")
+		err := commitAttempt(ctx, conn)
 		if err == nil || !isBusy(err) {
 			return err
 		}
@@ -1186,6 +1185,20 @@ func commitCancellable(ctx context.Context, conn *sql.Conn) error {
 			return err
 		}
 	}
+}
+
+// commitAttempt makes one COMMIT attempt, bounded by the connection's busy
+// timeout. ctx is checked before the attempt but deliberately not passed to
+// it: the driver turns a cancellation that lands while the statement runs into
+// a ctx error even when SQLite already committed, which would make the caller
+// roll back and report failure for data that persisted. An attempt started
+// before cancellation therefore reports its true outcome.
+func commitAttempt(ctx context.Context, conn *sql.Conn) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := conn.ExecContext(context.WithoutCancel(ctx), "COMMIT")
+	return err
 }
 
 // isBusy reports whether err is SQLITE_BUSY (primary code 5), which modernc
