@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
@@ -57,7 +58,7 @@ func OpenWithOptions(path string, opts Options) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", connDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
@@ -81,6 +82,19 @@ func OpenWithOptions(path string, opts Options) (*DB, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// connDSN appends per-connection pragmas to path. foreign_keys and synchronous
+// are connection-scoped, and the pool opens a replacement whenever a conn is
+// discarded (discardConn) or dropped as bad, so applying them once with Exec
+// after Open would leave that replacement on SQLite defaults. journal_mode=WAL
+// persists in the database file and stays in applyPragmas.
+func connDSN(path string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "_pragma=foreign_keys(1)&_pragma=synchronous(1)"
 }
 
 // Close releases the database connection.

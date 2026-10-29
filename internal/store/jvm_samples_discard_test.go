@@ -51,4 +51,12 @@ func TestDiscardConnDropsConnectionFromPool(t *testing.T) {
 	if err := db.SaveJVMSamples(ctx, []snapshot.JVMSample{{PID: 3, At: time.Unix(3, 0)}}); err != nil {
 		t.Fatalf("SaveJVMSamples on fresh conn: %v", err)
 	}
+	// The replacement connection must carry the same per-connection pragmas.
+	var fk, sync int
+	if err := db.db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("foreign_keys after discard = %d, %v; want 1", fk, err)
+	}
+	if err := db.db.QueryRow(`PRAGMA synchronous`).Scan(&sync); err != nil || sync != 1 {
+		t.Fatalf("synchronous after discard = %d, %v; want 1 (NORMAL)", sync, err)
+	}
 }
