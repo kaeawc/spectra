@@ -85,3 +85,37 @@ func detectDarwinFaked(tb testing.TB, app string, f *toolFake, opts Options) (Re
 	opts.Runner = f
 	return DetectWith(app, opts)
 }
+
+// plutilVariant lets one test body run against both the canned fake and the
+// real plutil, so converting a test to the fake does not drop its macOS
+// coverage.
+type plutilVariant struct{ real bool }
+
+// detect runs the pipeline through the fake, or through the host's real tools
+// (the original Detect path) for the real variant; f is ignored there.
+func (v plutilVariant) detect(tb testing.TB, app string, f *toolFake, opts Options) (Result, error) {
+	tb.Helper()
+	if v.real {
+		return DetectWith(app, opts)
+	}
+	return detectDarwinFaked(tb, app, f, opts)
+}
+
+// runner returns the Runner to inject: the fake, or nil for real plutil.
+func (v plutilVariant) runner(f *toolFake) proc.Runner {
+	if v.real {
+		return nil
+	}
+	return f
+}
+
+// withPlutil runs body as a "fake plutil" subtest everywhere and as a
+// "real plutil" subtest that is skipped off macOS.
+func withPlutil(t *testing.T, body func(t *testing.T, v plutilVariant)) {
+	t.Helper()
+	t.Run("fake plutil", func(t *testing.T) { body(t, plutilVariant{}) })
+	t.Run("real plutil", func(t *testing.T) {
+		requireMacOS(t)
+		body(t, plutilVariant{real: true})
+	})
+}
