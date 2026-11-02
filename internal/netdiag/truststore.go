@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"crypto/sha256"
 
@@ -46,9 +47,18 @@ type TrustStoreOptions struct {
 type TrustStoreResult struct {
 	// Sources lists the bundle files or keychains that were read.
 	Sources []string `json:"sources,omitempty"`
+	// Skipped lists bundle files that exist but could not be read.
+	Skipped []string `json:"skipped,omitempty"`
 	// Present lists affected roots found in the store.
 	Present []AffectedCA `json:"present,omitempty"`
+	// OS is the resolved host OS the check ran on; it selects the wording
+	// and severity of the finding.
+	OS hostos.Kind `json:"-"`
 }
+
+// trustStoreTimeout bounds the default host check so a hung `security`
+// cannot stall Diagnose.
+const trustStoreTimeout = 10 * time.Second
 
 // CheckTrustStore reports whether the host trust store still contains a root
 // from the affected-CA table. Presence is not trust: a store may carry the
@@ -66,11 +76,13 @@ func CheckTrustStore(ctx context.Context, opts TrustStoreOptions) (TrustStoreRes
 	var (
 		fps     map[string]bool
 		sources []string
+		skipped []string
 		err     error
 	)
-	switch k := hostos.Resolve(opts.OS); k {
+	kind := hostos.Resolve(opts.OS)
+	switch kind {
 	case hostos.Linux:
-		fps, sources, err = linuxTrustFingerprints(opts.ReadFile)
+		fps, sources, skipped, err = linuxTrustFingerprints(opts.ReadFile)
 	case hostos.Darwin:
 		fps, sources, err = darwinTrustFingerprints(ctx, opts.Runner)
 	default:
@@ -79,7 +91,7 @@ func CheckTrustStore(ctx context.Context, opts TrustStoreOptions) (TrustStoreRes
 	if err != nil {
 		return TrustStoreResult{}, err
 	}
-	return TrustStoreResult{Sources: sources, Present: affectedRootsIn(opts.Table, fps)}, nil
+	return TrustStoreResult{Sources: sources, Skipped: skipped, Present: affectedRootsIn(opts.Table, fps), OS: kind}, nil
 }
 
 func affectedRootsIn(table []AffectedCA, fps map[string]bool) []AffectedCA {
@@ -92,16 +104,24 @@ func affectedRootsIn(table []AffectedCA, fps map[string]bool) []AffectedCA {
 	return out
 }
 
-func linuxTrustFingerprints(readFile func(string) ([]byte, error)) (map[string]bool, []string, error) {
+// linuxTrustFingerprints reads every bundle it can. A bundle that is absent is
+// ignored; one that exists but is unreadable (for example EACCES) is recorded
+// and skipped. It fails only when no bundle could be read at all.
+func linuxTrustFingerprints(readFile func(string) ([]byte, error)) (map[string]bool, []string, []string, error) {
 	fps := map[string]bool{}
-	var sources []string
+	var sources, skipped []string
+	var firstErr error
 	for _, path := range linuxCABundles {
 		data, err := readFile(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("read CA bundle %s: %w", path, err)
+			skipped = append(skipped, path)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("read CA bundle %s: %w", path, err)
+			}
+			continue
 		}
 		sources = append(sources, path)
 		for _, fp := range pemFingerprints(data) {
@@ -109,13 +129,20 @@ func linuxTrustFingerprints(readFile func(string) ([]byte, error)) (map[string]b
 		}
 	}
 	if len(sources) == 0 {
-		return nil, nil, fmt.Errorf("no CA bundle found among %s", strings.Join(linuxCABundles, ", "))
+		if firstErr != nil {
+			return nil, nil, nil, firstErr
+		}
+		return nil, nil, nil, fmt.Errorf("no CA bundle found among %s", strings.Join(linuxCABundles, ", "))
 	}
-	return fps, sources, nil
+	return fps, sources, skipped, nil
 }
 
 // pemFingerprints returns the lowercase hex SHA-256 of the DER of every
-// CERTIFICATE block in data. Malformed blocks are skipped.
+// CERTIFICATE block in data. Blocks of other types are skipped, notably
+// OpenSSL "TRUSTED CERTIFICATE" blocks (which carry trust attributes after the
+// DER and so cannot be hashed this way); distribution bundles use plain
+// CERTIFICATE blocks. Parsing stops at the first malformed block, keeping the
+// fingerprints found before it.
 func pemFingerprints(data []byte) []string {
 	var out []string
 	for {
@@ -175,17 +202,28 @@ func darwinTrustFingerprints(ctx context.Context, run proc.Runner) (map[string]b
 }
 
 // trustStoreFindings turns a result into report findings. The wording states
-// presence only; it never claims the host is compromised.
+// presence only; it never claims the host is compromised. Remediation is
+// OS-specific: updating the CA bundle works on Linux, while on macOS the
+// vendor's trust status for the root decides what the user can do.
 func trustStoreFindings(res TrustStoreResult) []Finding {
 	var out []Finding
 	for _, e := range res.Present {
-		out = append(out, Finding{
+		f := Finding{
 			Severity: "high",
 			Title:    fmt.Sprintf("the host trust store still contains %s", e.Name),
 			Detail: fmt.Sprintf("%s (SHA-256 %s) is affected by a CA key compromise (as of %s, source %s). "+
 				"Update the OS/browser trust store. This does not mean the host is compromised.",
 				e.Name, e.CertSHA256, e.AsOf, e.Source),
-		})
+		}
+		if res.OS == hostos.Darwin {
+			f.Severity = "medium"
+			f.Detail = fmt.Sprintf("%s (SHA-256 %s) is affected by a CA key compromise (source %s). "+
+				"At the time this table was last updated (as of %s), Apple still listed this root as included while Mozilla had removed it and Chrome had blocked it, "+
+				"so macOS may still trust it. Check for a macOS update, or adjust the certificate's trust settings in Keychain Access. "+
+				"This does not mean the host is compromised.",
+				e.Name, e.CertSHA256, e.Source, e.AsOf)
+		}
+		out = append(out, f)
 	}
 	return out
 }
@@ -196,6 +234,8 @@ func trustStoreFindings(res TrustStoreResult) []Finding {
 func hostTrustFindings(ctx context.Context, check func(context.Context) (TrustStoreResult, error)) []Finding {
 	if check == nil {
 		check = func(ctx context.Context) (TrustStoreResult, error) {
+			ctx, cancel := context.WithTimeout(ctx, trustStoreTimeout)
+			defer cancel()
 			return CheckTrustStore(ctx, TrustStoreOptions{})
 		}
 	}

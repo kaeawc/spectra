@@ -18,6 +18,7 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 	}
 	report, err := Diagnose(context.Background(), Options{
+		TrustStore: noTrustStore,
 		AppPath:    "/Applications/Slack.app",
 		NetRunner:  run,
 		ProcRunner: procRun,
@@ -57,6 +58,7 @@ func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
 		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 	}
 	if _, err := Diagnose(context.Background(), Options{
+		TrustStore: noTrustStore,
 		AppPath:    "/Applications/Slack.app",
 		NetRunner:  run,
 		ProcRunner: procRun,
@@ -89,6 +91,7 @@ func TestDiagnoseProbesEndpointsInOrder(t *testing.T) {
 		}
 	}
 	opts := Options{
+		TrustStore: noTrustStore,
 		Targets:    []string{"c.example", "a.example", "b.example", "d.example"},
 		Ports:      []int{443},
 		NetRunner:  run,
@@ -156,8 +159,9 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 		return nil, nil
 	}
 	report, err := Diagnose(context.Background(), Options{
-		Targets:   []string{"blocked.example:443"},
-		NetRunner: run,
+		TrustStore: noTrustStore,
+		Targets:    []string{"blocked.example:443"},
+		NetRunner:  run,
 		ProcRunner: func(context.Context, process.CollectOptions) []process.Info {
 			return nil
 		},
@@ -180,10 +184,11 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 func TestDiagnoseEndpointFilterNoMatches(t *testing.T) {
 	run := appBehaviorRunner(t)
 	report, err := Diagnose(context.Background(), Options{
-		AppPath:   "/Applications/Slack.app",
-		Targets:   []string{"other.example"},
-		Ports:     []int{443, 9443},
-		NetRunner: run,
+		TrustStore: noTrustStore,
+		AppPath:    "/Applications/Slack.app",
+		Targets:    []string{"other.example"},
+		Ports:      []int{443, 9443},
+		NetRunner:  run,
 		ProcRunner: func(context.Context, process.CollectOptions) []process.Info {
 			return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 		},
