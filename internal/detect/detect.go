@@ -1793,10 +1793,6 @@ func (d detector) plistMentionsAppPath(plistPath, appPath string) bool {
 // the given key immediately followed by a <true/> element.
 // It reads the plist once and checks both RunAtLoad and KeepAlive so the
 // caller gets both flags from a single plutil invocation.
-func parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
-	return newDetector(Options{}).parsePlistLaunchFlags(plistPath)
-}
-
 func (d detector) parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
 	out, err := d.output("plutil", "-convert", "xml1", "-o", "-", plistPath)
 	if err != nil {
