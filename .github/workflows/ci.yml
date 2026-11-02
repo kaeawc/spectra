@@ -87,7 +87,11 @@ jobs:
             ./internal/netstate/... \
             ./internal/sysinfo/... \
             ./internal/toolchain/... \
-            ./internal/helper/...
+            ./internal/helper/... \
+            ./cmd/spectra/ \
+            ./internal/detect/ \
+            ./internal/netdiag/ \
+            ./internal/snapshot/
       - name: Smoke test OS-aware commands
         run: |
           set -x
