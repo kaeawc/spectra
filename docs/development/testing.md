@@ -76,6 +76,12 @@ go test ./... -count=1 -race
 
 See `.github/workflows/ci.yml`.
 
+CI steps that only fetch from the network (`go install` of tools,
+`go mod download`) run through `scripts/retry.sh`, which retries up to 3
+attempts with 5s/15s backoff so a transient module-proxy error does not fail
+a required check. Scan, test, and lint steps are never wrapped, so a real
+failure still fails the job immediately.
+
 ## Adding a test for a new framework
 
 When you add detection for a new framework, the test pattern:
