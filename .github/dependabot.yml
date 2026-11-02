@@ -24,11 +24,3 @@ updates:
     groups:
       go-minor-patch:
         update-types: [minor, patch]
-
-  # pip (mkdocs + plugins, used by docs CI)
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: monthly
-    labels: [dependencies, docs]
-    open-pull-requests-limit: 5
