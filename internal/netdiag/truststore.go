@@ -230,6 +230,14 @@ func trustStoreFindings(res TrustStoreResult) []Finding {
 		}
 		out = append(out, f)
 	}
+	if len(res.Skipped) > 0 {
+		out = append(out, Finding{
+			Severity: "info",
+			Title:    "host trust store check was partial",
+			Detail: "these CA bundles exist but could not be read, so an affected root in them would not be reported: " +
+				strings.Join(res.Skipped, ", "),
+		})
+	}
 	return out
 }
 

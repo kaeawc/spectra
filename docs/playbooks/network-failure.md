@@ -97,7 +97,10 @@ disabled is still reported. Severity and advice depend on the OS:
 - Linux: parses the PEM bundles `/etc/ssl/certs/ca-certificates.crt`,
   `/etc/pki/tls/certs/ca-bundle.crt`, and `/etc/ssl/cert.pem` and compares the
   SHA-256 of each certificate's DER. An unreadable bundle is skipped and
-  recorded; only when no bundle can be read is the check reported as skipped.
+  recorded; the report then carries one `info` finding, "host trust store check
+  was partial", listing the unreadable bundles (in addition to any hit), because
+  an affected root in them would not be reported. Only when no bundle can be
+  read is the whole check reported as skipped.
   Only plain `CERTIFICATE` PEM blocks are parsed, not OpenSSL `TRUSTED
   CERTIFICATE` blocks. Browser-private stores (for example
   Firefox's NSS database) are not read.

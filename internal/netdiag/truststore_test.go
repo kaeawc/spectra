@@ -297,6 +297,36 @@ func TestPEMFingerprintsKeepsEarlierCertsAndIgnoresTrustedBlocks(t *testing.T) {
 	}
 }
 
+func TestTrustStorePartialCoverageFinding(t *testing.T) {
+	hit := AffectedCA{Name: "Bad Root", CertSHA256: "ab", AsOf: "2026-11-02", Source: "https://example.test"}
+	skipped := []string{"/etc/ssl/certs/ca-certificates.crt"}
+
+	got := trustStoreFindings(TrustStoreResult{OS: hostos.Linux, Skipped: skipped})
+	if len(got) != 1 || got[0].Severity != "info" || got[0].Title != "host trust store check was partial" ||
+		!strings.Contains(got[0].Detail, skipped[0]) {
+		t.Errorf("skipped only: %+v", got)
+	}
+
+	got = trustStoreFindings(TrustStoreResult{OS: hostos.Linux, Skipped: skipped, Present: []AffectedCA{hit}})
+	if len(got) != 2 || got[0].Severity != "high" || got[1].Severity != "info" {
+		t.Errorf("hit plus skipped: %+v", got)
+	}
+
+	if got = trustStoreFindings(TrustStoreResult{OS: hostos.Linux}); len(got) != 0 {
+		t.Errorf("no skipped: %+v", got)
+	}
+}
+
+func TestDiagnoseReportsPartialTrustStoreOnce(t *testing.T) {
+	partial := func(context.Context) (TrustStoreResult, error) {
+		return TrustStoreResult{OS: hostos.Linux, Skipped: []string{"/etc/ssl/cert.pem"}}, nil
+	}
+	got := diagnoseWithTrust(t, partial)
+	if n := countTitle(got, "host trust store check was partial"); n != 1 {
+		t.Fatalf("want one partial finding across 2 targets x 2 ports, got %d: %+v", n, got)
+	}
+}
+
 func TestTrustStoreDarwinFindingIsMediumAndActionable(t *testing.T) {
 	e := AffectedCA{Name: "Mac Root", CertSHA256: "ab", AsOf: "2026-11-02", Source: "https://example.test"}
 	got := trustStoreFindings(TrustStoreResult{OS: hostos.Darwin, Present: []AffectedCA{e}})
