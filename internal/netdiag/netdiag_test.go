@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
 func TestDiagnoseAppNetworkBehavior(t *testing.T) {
+	pinDarwin(t)
 	run := appBehaviorRunner(t)
 	procRun := func(context.Context, process.CollectOptions) []process.Info {
 		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
@@ -45,6 +47,7 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 }
 
 func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
+	pinDarwin(t)
 	base := appBehaviorRunner(t)
 	var connLsofCalls int
 	run := func(name string, args ...string) ([]byte, error) {
@@ -115,6 +118,14 @@ func TestDiagnoseProbesEndpointsInOrder(t *testing.T) {
 	}
 }
 
+// pinDarwin makes netstate collect through the macOS commands the fake
+// runners in this file answer (lsof, scutil, route, ifconfig), regardless of
+// the host running the tests.
+func pinDarwin(t *testing.T) {
+	t.Helper()
+	t.Cleanup(hostos.SetForTest(hostos.Darwin))
+}
+
 func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 	t.Helper()
 	fixtures := map[string][]byte{
@@ -141,6 +152,7 @@ func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 }
 
 func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
+	pinDarwin(t)
 	run := func(name string, args ...string) ([]byte, error) {
 		cmd := fakeCommand(name, args...)
 		switch {
@@ -178,6 +190,7 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 }
 
 func TestDiagnoseEndpointFilterNoMatches(t *testing.T) {
+	pinDarwin(t)
 	run := appBehaviorRunner(t)
 	report, err := Diagnose(context.Background(), Options{
 		AppPath:   "/Applications/Slack.app",
