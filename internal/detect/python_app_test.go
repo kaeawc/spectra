@@ -106,8 +106,8 @@ func TestPythonAppScannerExternalInterpreterAndEnvironmentRisk(t *testing.T) {
 }
 
 func TestDetectPopulatesPythonAppWithoutOverridingQt(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeQtPython")
+	f := newToolFake().bundlePlist(t, app, nil)
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestDetectPopulatesPythonAppWithoutOverridingQt(t *testing.T) {
 	writeFile(t, filepath.Join(app, "Contents/Resources/app/main.py"), "print('hello')\n")
 	writeFile(t, filepath.Join(app, "Contents/Resources/app_packages/numpy-2.0.0.dist-info/METADATA"), "Name: numpy\nVersion: 2.0.0\n")
 
-	r, err := Detect(app)
+	r, err := detectDarwinFaked(t, app, f, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

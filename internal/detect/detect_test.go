@@ -211,14 +211,14 @@ func writeFrameworkPlist(t *testing.T, path, version string) {
 }
 
 func TestDetectElectron(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeElectron")
+	f := newToolFake().bundlePlist(t, app, nil)
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
 
-	r, err := Detect(app)
+	r, err := detectDarwinFaked(t, app, f, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,13 +234,14 @@ func TestDetectElectron(t *testing.T) {
 }
 
 func TestDetectFlutter(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeFlutter")
+	f := newToolFake().bundlePlist(t, app, nil)
+	f.frameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.UI != "Flutter" || r.Language != "Dart" {
 		t.Errorf("got UI=%q lang=%q", r.UI, r.Language)
 	}
@@ -250,13 +251,14 @@ func TestDetectFlutter(t *testing.T) {
 }
 
 func TestDetectQt(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeQt")
+	f := newToolFake().bundlePlist(t, app, nil)
+	f.frameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.UI != "Qt" {
 		t.Errorf("UI = %q, want Qt", r.UI)
 	}
@@ -334,42 +336,42 @@ func TestTauriInspectionDoesNotPromoteWeakRustMarkers(t *testing.T) {
 }
 
 func TestDetectComposeDesktop(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeKMP")
+	f := newToolFake().bundlePlist(t, app, nil)
 	// Bundled JVM
 	jvmDir := filepath.Join(app, "Contents/runtime/Contents/Home/lib/server")
 	touch(t, filepath.Join(jvmDir, "libjvm.dylib"))
 	// skiko marker
 	touch(t, filepath.Join(app, "Contents/app/libskiko-macos-arm64.dylib"))
 
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.UI != "ComposeDesktop" || r.Language != "Kotlin" {
 		t.Errorf("got UI=%q lang=%q signals=%v", r.UI, r.Language, r.Signals)
 	}
 }
 
 func TestDetectEclipseRCPNoBundledJVM(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeMAT")
+	f := newToolFake().bundlePlist(t, app, nil)
 	// Mimic Memory Analyzer: many jars + an Eclipse OSGi plugin, no bundled JVM.
 	for i := 0; i < 6; i++ {
 		touch(t, filepath.Join(app, "Contents/Eclipse/plugins", "lib"+string(rune('a'+i))+".jar"))
 	}
 	touch(t, filepath.Join(app, "Contents/Eclipse/plugins/org.eclipse.osgi_3.18.jar"))
 
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.UI != "EclipseRCP" {
 		t.Errorf("UI = %q, want EclipseRCP. signals=%v", r.UI, r.Signals)
 	}
 }
 
 func TestDetectRustOverridesAppKit(t *testing.T) {
-	requireMacOS(t)
 	// Synthetic binary with Rust panic strings. We cannot synthesize otool
 	// output, but classifyByLinkedLibs is a no-op when otool returns empty
 	// (otool will report no libs for a non-Mach-O file). So Layer 3 owns
 	// the verdict here and should pick Native (Rust).
 	app := makeBundle(t, "FakeRust")
+	f := newToolFake().bundlePlist(t, app, nil)
 	bin := filepath.Join(app, "Contents/MacOS/main")
 	body := make([]byte, 0, 64*1024)
 	for i := 0; i < 200; i++ {
@@ -379,7 +381,7 @@ func TestDetectRustOverridesAppKit(t *testing.T) {
 	if err := os.WriteFile(bin, body, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.Runtime != "Rust" {
 		t.Errorf("Runtime = %q, want Rust. signals=%v", r.Runtime, r.Signals)
 	}
@@ -394,7 +396,6 @@ func TestDetectUnknown(t *testing.T) {
 }
 
 func TestMetadataPopulated(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeMeta")
 	// Add fields to the synthetic Info.plist by overwriting it.
 	plist := `<?xml version="1.0" encoding="UTF-8"?>
@@ -410,7 +411,28 @@ func TestMetadataPopulated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, _ := Detect(app)
+	fake := newToolFake().bundlePlist(t, app, map[string]any{
+		"CFBundleIdentifier":         "com.example.fake",
+		"CFBundleShortVersionString": "1.2.3",
+		"CFBundleVersion":            "456",
+		"SUFeedURL":                  "https://example.com/appcast.xml",
+	})
+	run := func(t *testing.T, opts Options) {
+		r, _ := DetectWith(app, opts)
+		checkMetadata(t, r)
+	}
+	t.Run("fake plutil", func(t *testing.T) {
+		run(t, Options{OS: hostos.Darwin, Runner: fake})
+	})
+	// Real plutil parsing the on-disk XML plist is the point of this variant.
+	t.Run("real plutil", func(t *testing.T) {
+		requireMacOS(t)
+		run(t, Options{})
+	})
+}
+
+func checkMetadata(t *testing.T, r Result) {
+	t.Helper()
 	if r.BundleID != "com.example.fake" {
 		t.Errorf("BundleID = %q", r.BundleID)
 	}
@@ -429,8 +451,8 @@ func TestMetadataPopulated(t *testing.T) {
 }
 
 func TestWKWebViewWrapper(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeWebApp")
+	f := newToolFake().bundlePlist(t, app, nil)
 	// We cannot synthesize a Mach-O linking AppKit+WebKit, so simulate
 	// the post-Layer-2 state by writing the same markers via a custom
 	// test helper would require exporting internals. Instead, we test
@@ -438,7 +460,7 @@ func TestWKWebViewWrapper(t *testing.T) {
 	// returns nothing and Layer 3 sees a normal binary — and confirm
 	// at minimum that bundling index.html doesn't crash detection.
 	touch(t, filepath.Join(app, "Contents/Resources/index.html"))
-	r, err := Detect(app)
+	r, err := detectDarwinFaked(t, app, f, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,8 +489,11 @@ func TestCatalystMarkerStringsRecognized(t *testing.T) {
 }
 
 func TestPrivacyDescriptionsParsed(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakePrivacy")
+	f := newToolFake().bundlePlist(t, app, map[string]any{
+		"NSCameraUsageDescription":     "Need camera for video calls",
+		"NSMicrophoneUsageDescription": "Need mic for voice notes",
+	})
 	plist := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -479,7 +504,7 @@ func TestPrivacyDescriptionsParsed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(app, "Contents/Info.plist"), []byte(plist), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.PrivacyDescriptions["NSCameraUsageDescription"] != "Need camera for video calls" {
 		t.Errorf("camera description = %q", r.PrivacyDescriptions["NSCameraUsageDescription"])
 	}
@@ -489,8 +514,8 @@ func TestPrivacyDescriptionsParsed(t *testing.T) {
 }
 
 func TestDependenciesNPMPackages(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeNPM")
+	f := newToolFake().bundlePlist(t, app, nil)
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +529,7 @@ func TestDependenciesNPMPackages(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.Dependencies == nil {
 		t.Fatal("Dependencies nil")
 	}
@@ -598,8 +623,8 @@ func TestNodeAppInspectorNetworkEndpointsWithFakeFS(t *testing.T) {
 }
 
 func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeNativeModules")
+	f := newToolFake().bundlePlist(t, app, nil)
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +659,7 @@ func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := Detect(app)
+	r, err := detectDarwinFaked(t, app, f, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,14 +835,14 @@ func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {
 }
 
 func TestNetworkEndpointsExtraction(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeNet")
+	f := newToolFake().bundlePlist(t, app, nil)
 	bin := filepath.Join(app, "Contents/MacOS/main")
 	body := []byte("noise https://api.example.com/v1 padding https://cdn.foo.io/asset.png and HTTP://Mixed.Case.NET/x")
 	if err := os.WriteFile(bin, body, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := DetectWith(app, Options{ScanNetwork: true})
+	r, _ := detectDarwinFaked(t, app, f, Options{ScanNetwork: true})
 	want := map[string]bool{"api.example.com": true, "cdn.foo.io": true, "mixed.case.net": true}
 	for _, h := range r.NetworkEndpoints {
 		if !want[h] {
@@ -831,8 +856,8 @@ func TestNetworkEndpointsExtraction(t *testing.T) {
 }
 
 func TestHelpersScanned(t *testing.T) {
-	requireMacOS(t)
 	app := makeBundle(t, "FakeHelpers")
+	f := newToolFake().bundlePlist(t, app, nil)
 	// Helper sub-app
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Foo Helper.app/Contents/MacOS"), 0o755); err != nil {
 		t.Fatal(err)
@@ -845,7 +870,7 @@ func TestHelpersScanned(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(app, "Contents/PlugIns/SomeExt.appex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := Detect(app)
+	r, _ := detectDarwinFaked(t, app, f, Options{})
 	if r.Helpers == nil {
 		t.Fatal("Helpers nil")
 	}
@@ -941,7 +966,6 @@ func TestPlistXMLBool(t *testing.T) {
 }
 
 func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
-	requireMacOS(t)
 	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -963,17 +987,27 @@ func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
-	if !runAtLoad {
-		t.Error("RunAtLoad: got false, want true")
+	check := func(t *testing.T, d detector) {
+		runAtLoad, keepAlive := d.parsePlistLaunchFlags(path)
+		if !runAtLoad {
+			t.Error("RunAtLoad: got false, want true")
+		}
+		if keepAlive {
+			t.Error("KeepAlive: got true, want false")
+		}
 	}
-	if keepAlive {
-		t.Error("KeepAlive: got true, want false")
-	}
+	t.Run("fake plutil", func(t *testing.T) {
+		check(t, newDetector(Options{Runner: newToolFake().xmlPlist(path, plistContent)}))
+	})
+	// The real plutil run is the point of this variant: it proves the canned
+	// xml1 output above matches what the tool emits for the same plist.
+	t.Run("real plutil", func(t *testing.T) {
+		requireMacOS(t)
+		check(t, newDetector(Options{}))
+	})
 }
 
 func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
-	requireMacOS(t)
 	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
@@ -990,7 +1024,8 @@ func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
 	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
+	d := newDetector(Options{Runner: newToolFake().xmlPlist(path, plistContent)})
+	runAtLoad, keepAlive := d.parsePlistLaunchFlags(path)
 	if !runAtLoad {
 		t.Error("RunAtLoad: got false, want true")
 	}
