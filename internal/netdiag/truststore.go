@@ -47,7 +47,7 @@ type TrustStoreOptions struct {
 type TrustStoreResult struct {
 	// Sources lists the bundle files or keychains that were read.
 	Sources []string `json:"sources,omitempty"`
-	// Skipped lists bundle files that exist but could not be read.
+	// Skipped lists bundle files or keychains that could not be read.
 	Skipped []string `json:"skipped,omitempty"`
 	// Present lists affected roots found in the store.
 	Present []AffectedCA `json:"present,omitempty"`
@@ -84,7 +84,7 @@ func CheckTrustStore(ctx context.Context, opts TrustStoreOptions) (TrustStoreRes
 	case hostos.Linux:
 		fps, sources, skipped, err = linuxTrustFingerprints(opts.ReadFile)
 	case hostos.Darwin:
-		fps, sources, err = darwinTrustFingerprints(ctx, opts.Runner)
+		fps, sources, skipped, err = darwinTrustFingerprints(ctx, opts.Runner)
 	default:
 		return TrustStoreResult{}, hostos.Unsupported("trust store check")
 	}
@@ -171,7 +171,18 @@ func parseSecurityFingerprints(out []byte) []string {
 	return fps
 }
 
-func darwinTrustFingerprints(ctx context.Context, run proc.Runner) (map[string]bool, []string, error) {
+// securityNoItemsExit is the exit status `security find-certificate` uses for
+// "no items found" (errSecItemNotFound), which is what an empty keychain
+// yields. This comes from the tool's documented behaviour, not from a captured
+// macOS sample, consistent with the macOS path being untested on a real Mac.
+const securityNoItemsExit = 44
+
+// darwinTrustFingerprints queries each keychain source. Exit 0 is read; exit
+// 44 with no output is an empty source (neither skipped nor an error); any
+// other non-zero exit without fingerprints is recorded in skipped so partial
+// coverage is reported. A runner error, or no readable source at all, is an
+// error.
+func darwinTrustFingerprints(ctx context.Context, run proc.Runner) (map[string]bool, []string, []string, error) {
 	queries := []struct {
 		label string
 		args  []string
@@ -180,14 +191,15 @@ func darwinTrustFingerprints(ctx context.Context, run proc.Runner) (map[string]b
 		{"default keychain search list", []string{"find-certificate", "-a", "-Z"}},
 	}
 	fps := map[string]bool{}
-	var sources []string
+	var sources, skipped []string
 	for _, q := range queries {
 		res, err := run.Run(ctx, proc.Cmd{Name: "security", Args: q.args})
 		if err != nil {
-			return nil, nil, fmt.Errorf("security %s: %w", strings.Join(q.args, " "), err)
+			return nil, nil, nil, fmt.Errorf("security %s: %w", strings.Join(q.args, " "), err)
 		}
 		found := parseSecurityFingerprints(res.Stdout)
-		if res.ExitCode != 0 && len(found) == 0 {
+		if res.ExitCode != 0 && res.ExitCode != securityNoItemsExit && len(found) == 0 {
+			skipped = append(skipped, q.label)
 			continue
 		}
 		sources = append(sources, q.label)
@@ -196,9 +208,9 @@ func darwinTrustFingerprints(ctx context.Context, run proc.Runner) (map[string]b
 		}
 	}
 	if len(sources) == 0 {
-		return nil, nil, errors.New("security find-certificate returned no certificates")
+		return nil, nil, nil, errors.New("security find-certificate could not read any keychain")
 	}
-	return fps, sources, nil
+	return fps, sources, skipped, nil
 }
 
 // trustStoreFindings turns a result into report findings. The wording states
@@ -234,7 +246,7 @@ func trustStoreFindings(res TrustStoreResult) []Finding {
 		out = append(out, Finding{
 			Severity: "info",
 			Title:    "host trust store check was partial",
-			Detail: "these CA bundles exist but could not be read, so an affected root in them would not be reported: " +
+			Detail: "these sources (CA bundles or keychains) exist but could not be read, so an affected root in them would not be reported: " +
 				strings.Join(res.Skipped, ", "),
 		})
 	}

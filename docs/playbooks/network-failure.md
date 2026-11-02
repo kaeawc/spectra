@@ -106,7 +106,11 @@ disabled is still reported. Severity and advice depend on the OS:
   Firefox's NSS database) are not read.
 - macOS: runs `security find-certificate -a -Z` against the system roots
   keychain and the default keychain search list and compares the reported
-  `SHA-256 hash` values. The parser is unit-tested on sample output; it has not
+  `SHA-256 hash` values. Exit status 44 ("no items", an empty keychain) is
+  treated as an empty source; any other failure of one query is listed in the
+  "host trust store check was partial" `info` finding, and the check errors
+  only if neither keychain could be read. The 44 handling comes from the tool's
+  documented behaviour, not a captured sample. The parser is unit-tested on sample output; it has not
   been run against a real macOS keychain.
 - If no store can be read, the report carries an `info` finding saying the check
   was skipped (the check is bounded to 10 seconds); other operating systems skip the check silently.

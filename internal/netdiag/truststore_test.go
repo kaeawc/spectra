@@ -114,8 +114,8 @@ func TestTrustStoreDarwin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Present) != 1 || len(res.Sources) != 1 {
-		t.Fatalf("result: %+v", res)
+	if len(res.Present) != 1 || len(res.Sources) != 2 || len(res.Skipped) != 0 {
+		t.Fatalf("exit 44 (no items) must be an empty source, not skipped: %+v", res)
 	}
 
 	failing := proc.NewFake().On(func(proc.Cmd) bool { return true }, proc.Response{Err: errors.New("no security")})
@@ -125,6 +125,42 @@ func TestTrustStoreDarwin(t *testing.T) {
 	empty := proc.NewFake().On(func(proc.Cmd) bool { return true }, proc.Response{Result: proc.Result{ExitCode: 1}})
 	if _, err := CheckTrustStore(context.Background(), TrustStoreOptions{OS: hostos.Darwin, Runner: empty, Table: []AffectedCA{entry}}); err == nil {
 		t.Error("no certificates should be an error")
+	}
+}
+
+func darwinFake(sys, def proc.Result) *proc.Fake {
+	return proc.NewFake().
+		On(proc.MatchExact("security", "find-certificate", "-a", "-Z", darwinSystemRoots), proc.Response{Result: sys}).
+		On(proc.MatchExact("security", "find-certificate", "-a", "-Z"), proc.Response{Result: def})
+}
+
+func TestTrustStoreDarwinPartialCoverage(t *testing.T) {
+	entry := AffectedCA{Name: "Mac Root", CertSHA256: "abababababababababababababababababababababababababababababababab", Role: "root", AsOf: "2026-11-02", Source: "https://example.test"}
+	ok := proc.Result{Stdout: []byte(securityOutput)}
+	check := func(sys, def proc.Result) (TrustStoreResult, error) {
+		return CheckTrustStore(context.Background(), TrustStoreOptions{OS: hostos.Darwin, Runner: darwinFake(sys, def), Table: []AffectedCA{entry}})
+	}
+
+	// (b) default list fails with a real error: reported as partial; the hit
+	// in the readable keychain is still reported (e).
+	res, err := check(ok, proc.Result{ExitCode: 1, Stderr: []byte("denied")})
+	if err != nil || len(res.Skipped) != 1 || res.Skipped[0] != "default keychain search list" || len(res.Present) != 1 {
+		t.Fatalf("default list failed: %+v %v", res, err)
+	}
+	got := trustStoreFindings(res)
+	if len(got) != 2 || got[1].Title != "host trust store check was partial" || !strings.Contains(got[1].Detail, "default keychain search list") {
+		t.Errorf("findings: %+v", got)
+	}
+
+	// (c) system roots fail, default list readable.
+	res, err = check(proc.Result{ExitCode: 1}, ok)
+	if err != nil || len(res.Skipped) != 1 || res.Skipped[0] != darwinSystemRoots || len(res.Present) != 1 {
+		t.Fatalf("system roots failed: %+v %v", res, err)
+	}
+
+	// (d) both fail: error.
+	if _, err = check(proc.Result{ExitCode: 1}, proc.Result{ExitCode: 2}); err == nil {
+		t.Error("both failing should be an error")
 	}
 }
 
