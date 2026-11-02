@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 type fakeNodeFS struct {
@@ -147,6 +149,16 @@ func (c fakeNodeCommands) OtoolL(path string) []string {
 	return c.libs[filepath.Clean(path)]
 }
 
+// requireMacOS skips tests that exercise real .app inspection, which shells
+// out to macOS-only tools (plutil, otool, codesign) and is refused with
+// hostos.Unsupported elsewhere (see os_gate_test.go for the Linux contract).
+func requireMacOS(t testing.TB) {
+	t.Helper()
+	if hostos.Current() != hostos.Darwin {
+		t.Skipf("requires macOS app-bundle tooling (plutil/otool); host OS is %s", hostos.Current())
+	}
+}
+
 // makeBundle creates a synthetic .app skeleton at t.TempDir()/Name.app
 // and returns its path. Subsequent helpers add markers.
 func makeBundle(tb testing.TB, name string) string {
@@ -199,6 +211,7 @@ func writeFrameworkPlist(t *testing.T, path, version string) {
 }
 
 func TestDetectElectron(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeElectron")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
@@ -221,6 +234,7 @@ func TestDetectElectron(t *testing.T) {
 }
 
 func TestDetectFlutter(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeFlutter")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework"), 0o755); err != nil {
 		t.Fatal(err)
@@ -236,6 +250,7 @@ func TestDetectFlutter(t *testing.T) {
 }
 
 func TestDetectQt(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeQt")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
 		t.Fatal(err)
@@ -319,6 +334,7 @@ func TestTauriInspectionDoesNotPromoteWeakRustMarkers(t *testing.T) {
 }
 
 func TestDetectComposeDesktop(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeKMP")
 	// Bundled JVM
 	jvmDir := filepath.Join(app, "Contents/runtime/Contents/Home/lib/server")
@@ -333,6 +349,7 @@ func TestDetectComposeDesktop(t *testing.T) {
 }
 
 func TestDetectEclipseRCPNoBundledJVM(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeMAT")
 	// Mimic Memory Analyzer: many jars + an Eclipse OSGi plugin, no bundled JVM.
 	for i := 0; i < 6; i++ {
@@ -347,6 +364,7 @@ func TestDetectEclipseRCPNoBundledJVM(t *testing.T) {
 }
 
 func TestDetectRustOverridesAppKit(t *testing.T) {
+	requireMacOS(t)
 	// Synthetic binary with Rust panic strings. We cannot synthesize otool
 	// output, but classifyByLinkedLibs is a no-op when otool returns empty
 	// (otool will report no libs for a non-Mach-O file). So Layer 3 owns
@@ -376,6 +394,7 @@ func TestDetectUnknown(t *testing.T) {
 }
 
 func TestMetadataPopulated(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeMeta")
 	// Add fields to the synthetic Info.plist by overwriting it.
 	plist := `<?xml version="1.0" encoding="UTF-8"?>
@@ -410,6 +429,7 @@ func TestMetadataPopulated(t *testing.T) {
 }
 
 func TestWKWebViewWrapper(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeWebApp")
 	// We cannot synthesize a Mach-O linking AppKit+WebKit, so simulate
 	// the post-Layer-2 state by writing the same markers via a custom
@@ -447,6 +467,7 @@ func TestCatalystMarkerStringsRecognized(t *testing.T) {
 }
 
 func TestPrivacyDescriptionsParsed(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakePrivacy")
 	plist := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -468,6 +489,7 @@ func TestPrivacyDescriptionsParsed(t *testing.T) {
 }
 
 func TestDependenciesNPMPackages(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeNPM")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
@@ -576,6 +598,7 @@ func TestNodeAppInspectorNetworkEndpointsWithFakeFS(t *testing.T) {
 }
 
 func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeNativeModules")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 		t.Fatal(err)
@@ -787,6 +810,7 @@ func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {
 }
 
 func TestNetworkEndpointsExtraction(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeNet")
 	bin := filepath.Join(app, "Contents/MacOS/main")
 	body := []byte("noise https://api.example.com/v1 padding https://cdn.foo.io/asset.png and HTTP://Mixed.Case.NET/x")
@@ -807,6 +831,7 @@ func TestNetworkEndpointsExtraction(t *testing.T) {
 }
 
 func TestHelpersScanned(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeHelpers")
 	// Helper sub-app
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Foo Helper.app/Contents/MacOS"), 0o755); err != nil {
@@ -916,6 +941,7 @@ func TestPlistXMLBool(t *testing.T) {
 }
 
 func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
+	requireMacOS(t)
 	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -947,6 +973,7 @@ func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
 }
 
 func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
+	requireMacOS(t)
 	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>

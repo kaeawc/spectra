@@ -81,6 +81,7 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 		"last\x00reboot": "reboot time                                Sun May 17 08:34\n",
 	}}
 	collector := LiveHostCollector{Options: HostCollectOptions{
+		OS:       hostos.Darwin,
 		Hostname: func() (string, error) { return "test-host", nil },
 		Runner:   runner,
 		Now:      func() time.Time { return time.Unix(4600, 0) },
@@ -140,6 +141,7 @@ func TestLiveHostCollectorUsesInjectedRunner(t *testing.T) {
 
 func TestLiveHostCollectorToleratesMissingMachineUUID(t *testing.T) {
 	collector := LiveHostCollector{Options: HostCollectOptions{
+		OS:       hostos.Darwin,
 		Hostname: func() (string, error) { return "fallback-host", nil },
 		Runner: fakeHostRunner{responses: map[string]string{
 			"sw_vers\x00-productVersion": "15.6.1",
