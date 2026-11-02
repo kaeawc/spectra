@@ -8,7 +8,16 @@ import (
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
+
+// hermeticDetectOpts pins the macOS app-inspection path and gives it a runner
+// that answers no commands, so these cache tests never shell out to
+// plutil/otool and behave the same on any host OS.
+func hermeticDetectOpts() detect.Options {
+	return detect.Options{OS: hostos.Darwin, Runner: proc.NewFake()}
+}
 
 // makeTestBundle creates a minimal .app directory in dir and returns its path.
 func makeTestBundle(t *testing.T, dir, name, bundleID, execName string) string {
@@ -77,7 +86,7 @@ func TestDetectWithCacheNilStoreCallsLiveDetect(t *testing.T) {
 	dir := t.TempDir()
 	app := makeTestBundle(t, dir, "TestApp", "com.test.app", "TestApp")
 	// nil store → falls through to live detect
-	r, err := detectWithCache(app, detect.Options{}, nil, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), nil, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache(nil store): %v", err)
 	}
@@ -105,7 +114,7 @@ func TestDetectWithCacheStoresAndRetrieves(t *testing.T) {
 	}
 
 	// detectWithCache should return the sentinel without running live detect.
-	r, err := detectWithCache(app, detect.Options{}, st, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
@@ -122,7 +131,7 @@ func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	st := cache.NewShardedStore(storeDir, "detect")
 
 	// Empty cache → live detect runs and result is stored.
-	r, err := detectWithCache(app, detect.Options{}, st, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
@@ -146,7 +155,7 @@ func TestDetectWithCacheUsesAsyncWriter(t *testing.T) {
 	writer := cache.NewAsyncWriter(st, 8, 1)
 	defer writer.Close()
 
-	if _, err := detectWithCache(app, detect.Options{}, st, writer); err != nil {
+	if _, err := detectWithCache(app, hermeticDetectOpts(), st, writer); err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
 	writer.Close()

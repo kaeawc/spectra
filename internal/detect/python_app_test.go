@@ -106,6 +106,7 @@ func TestPythonAppScannerExternalInterpreterAndEnvironmentRisk(t *testing.T) {
 }
 
 func TestDetectPopulatesPythonAppWithoutOverridingQt(t *testing.T) {
+	requireMacOS(t)
 	app := makeBundle(t, "FakeQtPython")
 	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
 		t.Fatal(err)

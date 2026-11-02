@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -21,10 +22,16 @@ func TestBuildHostOnly(t *testing.T) {
 	// Skip slow collectors (process list, ~/Library walk) for test speed.
 	snap := Build(context.Background(), Options{
 		SpectraVersion: "test",
-		AppPaths:       []string{"/dev/null/__skip__"},
-		SkipProcesses:  true,
-		SkipStorage:    true,
-		SkipJVMs:       true,
+		// Pin the macOS host backend (fed by a runner that answers nothing)
+		// so the OSName assertion below holds on any machine.
+		HostCollector: LiveHostCollector{Options: HostCollectOptions{
+			OS:     hostos.Darwin,
+			Runner: fakeHostRunner{},
+		}},
+		AppPaths:      []string{"/dev/null/__skip__"},
+		SkipProcesses: true,
+		SkipStorage:   true,
+		SkipJVMs:      true,
 	})
 
 	if snap.ID == "" {
@@ -225,6 +232,7 @@ func TestBuildAttributesProcessesToConfiguredAppPaths(t *testing.T) {
 		SkipStorage: true,
 		SkipJVMs:    true,
 		ProcessOpts: process.CollectOptions{
+			OS: hostos.Darwin, // the ps(1) backend this fixture is written for
 			CmdRunner: func(name string, args ...string) ([]byte, error) {
 				if name == "ps" {
 					return []byte(psOut), nil
