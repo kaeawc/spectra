@@ -3,8 +3,8 @@ module github.com/kaeawc/spectra
 go 1.26.6
 
 require (
+	cel.dev/cel-go v0.33.2
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/google/cel-go v0.30.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/kaeawc/spectra-protocol v0.3.0
 	github.com/redis/go-redis/v9 v9.23.0
