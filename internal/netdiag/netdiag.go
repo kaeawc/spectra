@@ -54,6 +54,9 @@ type Options struct {
 	ProcRunner func(context.Context, process.CollectOptions) []process.Info
 	Dialer     Dialer
 	TLSProbe   TLSProber
+	// TrustStore checks the host trust store for affected roots. Nil uses
+	// CheckTrustStore against the real host.
+	TrustStore func(context.Context) (TrustStoreResult, error)
 }
 
 // Dialer is the subset of net.Dialer used by diagnosis probes.
@@ -240,6 +243,7 @@ func Diagnose(ctx context.Context, opts Options) (Report, error) {
 	// Results are written by index to keep output ordering deterministic.
 	report.Endpoints = diagnoseEndpoints(ctx, run, dialer, tlsProbe, targets, opts.Timeout)
 	report.Findings = findings(report)
+	report.Findings = append(report.Findings, hostTrustFindings(ctx, opts.TrustStore)...)
 	if diagnosticNoEndpoints {
 		report.Findings = append(report.Findings, Finding{
 			Severity: "warning",
