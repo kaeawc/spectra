@@ -999,8 +999,10 @@ func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
 	t.Run("fake plutil", func(t *testing.T) {
 		check(t, newDetector(Options{Runner: newToolFake().xmlPlist(path, plistContent)}))
 	})
-	// The real plutil run is the point of this variant: it proves the canned
-	// xml1 output above matches what the tool emits for the same plist.
+	// Runs the same assertions through the real plutil on macOS. It does not
+	// prove the canned xml1 output is byte-identical to the tool's: real plutil
+	// adds a DOCTYPE and its own indentation that some canned plists omit, which
+	// is fine because plistXMLBool tolerates whitespace between key and value.
 	t.Run("real plutil", func(t *testing.T) {
 		requireMacOS(t)
 		check(t, newDetector(Options{}))
