@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 func syntheticRoot(t *testing.T, cn string) (AffectedCA, []byte) {
@@ -166,5 +168,125 @@ func TestShippedTableHasEmSignECCRoot(t *testing.T) {
 	}
 	if !found {
 		t.Error("emSign ECC Root CA - G3 missing from shipped table")
+	}
+}
+
+// noTrustStore keeps Diagnose tests off the real host trust store.
+func noTrustStore(context.Context) (TrustStoreResult, error) { return TrustStoreResult{}, nil }
+
+func diagnoseWithTrust(t *testing.T, check func(context.Context) (TrustStoreResult, error)) []Finding {
+	t.Helper()
+	pinDarwin(t)
+	run := func(name string, args ...string) ([]byte, error) {
+		cmd := fakeCommand(name, args...)
+		switch {
+		case cmd == "route -n get default", cmd == "scutil --dns", cmd == "scutil --proxy",
+			cmd == "ifconfig", strings.HasPrefix(cmd, "lsof "), strings.HasPrefix(cmd, "nettop "):
+			return []byte(""), nil
+		case strings.HasPrefix(cmd, "dig "):
+			return []byte(digNOERRORFixture), nil
+		case strings.HasPrefix(cmd, "traceroute "):
+			return []byte("1 192.0.2.1 1.0 ms\n"), nil
+		default:
+			return nil, errors.New("unexpected command: " + cmd)
+		}
+	}
+	report, err := Diagnose(context.Background(), Options{
+		TrustStore: check,
+		Targets:    []string{"a.example", "b.example"},
+		Ports:      []int{443, 8443},
+		NetRunner:  run,
+		ProcRunner: func(context.Context, process.CollectOptions) []process.Info { return nil },
+		Dialer:     fakeDialer{},
+		TLSProbe:   fakeTLS{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report.Findings
+}
+
+func countTitle(rows []Finding, substr string) int {
+	n := 0
+	for _, f := range rows {
+		if strings.Contains(f.Title, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestDiagnoseReportsTrustStoreHitOnce(t *testing.T) {
+	hit := func(context.Context) (TrustStoreResult, error) {
+		return TrustStoreResult{OS: hostos.Linux, Present: []AffectedCA{{Name: "Bad Root", CertSHA256: "ab", AsOf: "2026-11-02", Source: "https://example.test"}}}, nil
+	}
+	got := diagnoseWithTrust(t, hit)
+	if n := countTitle(got, "the host trust store still contains Bad Root"); n != 1 {
+		t.Fatalf("want exactly one trust-store finding across 2 targets x 2 ports, got %d: %+v", n, got)
+	}
+	b, err := json.Marshal(Report{Findings: got})
+	if err != nil || !strings.Contains(string(b), `"severity":"high","title":"the host trust store still contains Bad Root"`) {
+		t.Errorf("json shape: %s %v", b, err)
+	}
+}
+
+func TestDiagnoseTrustStoreErrorIsInfo(t *testing.T) {
+	failed := func(context.Context) (TrustStoreResult, error) {
+		return TrustStoreResult{}, errors.New("keychain unavailable")
+	}
+	got := diagnoseWithTrust(t, failed)
+	if countTitle(got, "host trust store check skipped") != 1 {
+		t.Fatalf("want one info finding: %+v", got)
+	}
+}
+
+func TestDiagnoseTrustStoreUnsupportedIsSilent(t *testing.T) {
+	unsupported := func(context.Context) (TrustStoreResult, error) {
+		return TrustStoreResult{}, hostos.Unsupported("trust store check")
+	}
+	got := diagnoseWithTrust(t, unsupported)
+	if countTitle(got, "trust store") != 0 {
+		t.Fatalf("unsupported OS must emit nothing: %+v", got)
+	}
+}
+
+func TestTrustStoreLinuxSkipsUnreadableBundle(t *testing.T) {
+	bad, badPEM := syntheticRoot(t, "Bad Root")
+	denied := errors.New("permission denied")
+	read := func(p string) ([]byte, error) {
+		switch p {
+		case "/etc/ssl/certs/ca-certificates.crt":
+			return nil, denied
+		case "/etc/pki/tls/certs/ca-bundle.crt":
+			return badPEM, nil
+		}
+		return nil, fs.ErrNotExist
+	}
+	res, err := CheckTrustStore(context.Background(), TrustStoreOptions{OS: hostos.Linux, ReadFile: read, Table: []AffectedCA{bad}})
+	if err != nil || len(res.Present) != 1 || len(res.Skipped) != 1 || res.Skipped[0] != "/etc/ssl/certs/ca-certificates.crt" {
+		t.Fatalf("got %+v %v", res, err)
+	}
+}
+
+func TestPEMFingerprintsKeepsEarlierCertsAndIgnoresTrustedBlocks(t *testing.T) {
+	e, p := syntheticRoot(t, "Good")
+	data := append([]byte{}, p...)
+	data = append(data, pem.EncodeToMemory(&pem.Block{Type: "TRUSTED CERTIFICATE", Bytes: []byte("x")})...)
+	data = append(data, []byte("-----BEGIN CERTIFICATE-----\n!!!not base64\n-----END CERTIFICATE-----\n")...)
+	got := pemFingerprints(data)
+	if len(got) != 1 || got[0] != e.CertSHA256 {
+		t.Fatalf("got %v want [%s]", got, e.CertSHA256)
+	}
+}
+
+func TestTrustStoreDarwinFindingIsMediumAndActionable(t *testing.T) {
+	e := AffectedCA{Name: "Mac Root", CertSHA256: "ab", AsOf: "2026-11-02", Source: "https://example.test"}
+	got := trustStoreFindings(TrustStoreResult{OS: hostos.Darwin, Present: []AffectedCA{e}})
+	if len(got) != 1 || got[0].Severity != "medium" ||
+		!strings.Contains(got[0].Detail, "as of 2026-11-02") ||
+		!strings.Contains(got[0].Detail, "Keychain Access") ||
+		strings.Contains(got[0].Detail, "Update the OS/browser trust store") ||
+		!strings.Contains(got[0].Detail, "does not mean the host is compromised") {
+		t.Fatalf("got %+v", got)
 	}
 }

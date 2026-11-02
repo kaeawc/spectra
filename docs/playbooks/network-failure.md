@@ -80,23 +80,33 @@ cross-signs chain elsewhere.
 
 ### Host trust-store check
 
-`spectra network diagnose` also checks whether the host trust store still
-contains an affected root from the table. A hit produces a `high` finding,
-"the host trust store still contains emSign ECC Root CA - G3", with the fix:
-update the OS and browser trust stores. The finding reports presence only; it
-does not mean the host is compromised, and it does not inspect per-certificate
-trust settings, so a certificate present with trust disabled is still reported.
+`spectra network diagnose` also checks, once per run, whether the host trust
+store still contains an affected root from the table. The finding reports
+presence only; it does not mean the host is compromised, and it does not
+inspect per-certificate trust settings, so a certificate present with trust
+disabled is still reported. Severity and advice depend on the OS:
+
+- On Linux the finding is `high` ("the host trust store still contains emSign
+  ECC Root CA - G3") and the fix is to update the OS and browser trust stores.
+- On macOS the finding is `medium`. At the time the table was last updated (the
+  entry's `as_of`), CCADB listed Apple's status for this root as Included while
+  Mozilla had removed it and Chrome had blocked it, so updating the trust store
+  may not help yet. The finding says so, and suggests checking for a macOS
+  update or adjusting the certificate's trust settings in Keychain Access.
 
 - Linux: parses the PEM bundles `/etc/ssl/certs/ca-certificates.crt`,
   `/etc/pki/tls/certs/ca-bundle.crt`, and `/etc/ssl/cert.pem` and compares the
-  SHA-256 of each certificate's DER. Browser-private stores (for example
+  SHA-256 of each certificate's DER. An unreadable bundle is skipped and
+  recorded; only when no bundle can be read is the check reported as skipped.
+  Only plain `CERTIFICATE` PEM blocks are parsed, not OpenSSL `TRUSTED
+  CERTIFICATE` blocks. Browser-private stores (for example
   Firefox's NSS database) are not read.
 - macOS: runs `security find-certificate -a -Z` against the system roots
   keychain and the default keychain search list and compares the reported
   `SHA-256 hash` values. The parser is unit-tested on sample output; it has not
   been run against a real macOS keychain.
 - If no store can be read, the report carries an `info` finding saying the check
-  was skipped; other operating systems skip the check silently.
+  was skipped (the check is bounded to 10 seconds); other operating systems skip the check silently.
 
 ## Capture bounded packet evidence
 
