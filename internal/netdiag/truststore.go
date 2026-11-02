@@ -215,6 +215,11 @@ func trustStoreFindings(res TrustStoreResult) []Finding {
 				"Update the OS/browser trust store. This does not mean the host is compromised.",
 				e.Name, e.CertSHA256, e.AsOf, e.Source),
 		}
+		// The vendor-status sentence below (Apple included, Mozilla removed,
+		// Chrome blocked) is hardcoded for every root and is only true for
+		// the single root currently in the table. Before adding another root,
+		// add per-entry vendor-status data or revise this wording
+		// (TestShippedTableRootsHaveKnownVendorStatus enforces this).
 		if res.OS == hostos.Darwin {
 			f.Severity = "medium"
 			f.Detail = fmt.Sprintf("%s (SHA-256 %s) is affected by a CA key compromise (source %s). "+

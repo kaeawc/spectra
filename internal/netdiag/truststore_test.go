@@ -171,6 +171,24 @@ func TestShippedTableHasEmSignECCRoot(t *testing.T) {
 	}
 }
 
+func TestShippedTableRootsHaveKnownVendorStatus(t *testing.T) {
+	known := map[string]bool{"86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b": true}
+	for _, e := range affectedCAs {
+		if e.Role == "root" && !known[strings.ToLower(e.CertSHA256)] {
+			t.Errorf("root %q (%s) is new: the macOS finding text in trustStoreFindings hardcodes Apple/Mozilla/Chrome status for the emSign ECC root; add per-entry vendor-status data (or revise the wording) before adding another root", e.Name, e.CertSHA256)
+		}
+	}
+	for fp := range known {
+		var found bool
+		for _, e := range affectedCAs {
+			found = found || (e.Role == "root" && strings.EqualFold(e.CertSHA256, fp))
+		}
+		if !found {
+			t.Errorf("expected root %s missing from table", fp)
+		}
+	}
+}
+
 // noTrustStore keeps Diagnose tests off the real host trust store.
 func noTrustStore(context.Context) (TrustStoreResult, error) { return TrustStoreResult{}, nil }
 
