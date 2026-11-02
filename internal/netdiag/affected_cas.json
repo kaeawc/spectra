@@ -110,5 +110,12 @@
     "role": "intermediate",
     "source": "https://bugzilla.mozilla.org/show_bug.cgi?id=2083449#c2",
     "as_of": "2026-10-18"
+  },
+  {
+    "name": "emSign ECC Root CA - G3",
+    "cert_sha256": "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b",
+    "role": "root",
+    "source": "https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatv4",
+    "as_of": "2026-11-02"
   }
 ]

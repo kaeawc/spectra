@@ -69,10 +69,34 @@ approximate a fingerprint. Entries without a verified value are left out.
 
 The current entries are the 16 eMudhra (emSign) G3B/G3C intermediates, with
 their Sectigo cross-signs, disclosed in
-[Mozilla bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449).
-The distrusted root, `emSign ECC Root CA - G3`, is not in the table because no
-primary source gave its fingerprint. A standalone check of whether the host
-trust store still contains that root is not implemented.
+[Mozilla bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449),
+and the distrusted root `emSign ECC Root CA - G3`. The root's SHA-256 comes
+from the [CCADB all-certificate records report](https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatv4)
+(record A005756; Mozilla status Removed, Chrome status Blocked) and agrees with
+Mozilla's removed-roots report. In CCADB the G3B/G3C TLS and code-signing
+intermediates are issued by `emSign Root TLS CA - G3` and `emSign Root CS CA - G3`,
+whose cross-certificates are signed by `emSign ECC Root CA - G3`; the Sectigo
+cross-signs chain elsewhere.
+
+### Host trust-store check
+
+`spectra network diagnose` also checks whether the host trust store still
+contains an affected root from the table. A hit produces a `high` finding,
+"the host trust store still contains emSign ECC Root CA - G3", with the fix:
+update the OS and browser trust stores. The finding reports presence only; it
+does not mean the host is compromised, and it does not inspect per-certificate
+trust settings, so a certificate present with trust disabled is still reported.
+
+- Linux: parses the PEM bundles `/etc/ssl/certs/ca-certificates.crt`,
+  `/etc/pki/tls/certs/ca-bundle.crt`, and `/etc/ssl/cert.pem` and compares the
+  SHA-256 of each certificate's DER. Browser-private stores (for example
+  Firefox's NSS database) are not read.
+- macOS: runs `security find-certificate -a -Z` against the system roots
+  keychain and the default keychain search list and compares the reported
+  `SHA-256 hash` values. The parser is unit-tested on sample output; it has not
+  been run against a real macOS keychain.
+- If no store can be read, the report carries an `info` finding saying the check
+  was skipped; other operating systems skip the check silently.
 
 ## Capture bounded packet evidence
 
