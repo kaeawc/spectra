@@ -21,21 +21,59 @@ func fixture(t *testing.T, name string) string {
 	return string(b)
 }
 
+// The sample fixtures are real macOS 26 captures of a throwaway NSXPC service
+// (pid 93407): clients 93403 and 93404 connected through an anonymous
+// listener endpoint, 93405 through the named Mach service.
 func testProcs() []process.Info {
 	return []process.Info{
 		{PID: 1, Command: "launchd"},
 		{PID: 17491, PPID: 1, Command: "xcodebuil", ExecutablePath: "/usr/bin/xcodebuild", FullCommandLine: "xcodebuild test"},
 		{PID: 17500, PPID: 17491, Command: "xctest-helper"},
-		{PID: 17649, PPID: 17500, Command: "CtrlProxyUITests-Ru",
+		{PID: 93404, PPID: 17500, Command: "CtrlProxyUITests-Ru",
 			ExecutablePath: "/x/CtrlProxyUITests-Runner", FullCommandLine: "/x/CtrlProxyUITests-Runner"},
-		{PID: 20001, PPID: 1, Command: "Terminal"},
+		{PID: 93403, PPID: 1, Command: "Terminal"},
 	}
 }
 
 func TestParseQueueClientsMulti(t *testing.T) {
 	got := ParseQueueClients(fixture(t, "sample_multi_client.txt"))
-	if len(got) != 2 || got[17649] != 800 || got[20001] != 200 {
+	// Both anonymous-listener and named-service queues carry the client PID.
+	if len(got) != 3 || got[93404] != 270 || got[93403] != 269 || got[93405] != 269 {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestParseQueueClientsLabelForms(t *testing.T) {
+	cases := map[string]int{
+		"    7 Thread_1   DispatchQueue_3: com.apple.NSXPCConnection.user.anonymous.42  (serial)":                42,
+		"    7 Thread_<multiple>   DispatchQueue_3: com.apple.NSXPCConnection.user.com.example.svc.42  (serial)": 42,
+		"    7 Thread_1: Main Thread   DispatchQueue_3: com.apple.NSXPCConnection.user.anonymous.42":             42,
+		"    + 7 Thread_1   DispatchQueue_3: com.apple.NSXPCConnection.user.anonymous.42  (serial)":              42,
+		"    7 Thread_1   DispatchQueue_3: com.apple.NSXPCConnection.m-user.com.apple.logd  (serial)":            0,
+		"    7 Thread_1   DispatchQueue_3: com.apple.NSXPCConnection.user.com.example.svc  (serial)":             0,
+		"    7 Thread_1   DispatchQueue_3: com.apple.NSXPCConnection.user.anonymous.-3  (serial)":                0,
+	}
+	for line, want := range cases {
+		got := ParseQueueClients(line)
+		if want == 0 && len(got) != 0 || want != 0 && (len(got) != 1 || got[want] != 7) {
+			t.Errorf("%q: got %v", line, got)
+		}
+	}
+}
+
+func TestParseQueueClientsDropsTruncatedLabel(t *testing.T) {
+	// sample cuts queue labels at 127 characters; the PID suffix of this long
+	// service name was lost, and a partial PID must not be attributed.
+	out := fixture(t, "sample_truncated_label.txt")
+	if !strings.Contains(out, "com.apple.NSXPCConnection.user.") {
+		t.Fatal("fixture lost its queue line")
+	}
+	if got := ParseQueueClients(out); len(got) != 0 {
+		t.Errorf("got %v", got)
+	}
+	label := "com.apple.NSXPCConnection.user.anonymous." + strings.Repeat("9", maxQueueLabel-len("com.apple.NSXPCConnection.user.anonymous."))
+	if got := ParseQueueClients("  5 Thread_1   DispatchQueue_2: " + label + "  (serial)"); len(got) != 0 {
+		t.Errorf("label at the cutoff: got %v", got)
 	}
 }
 
@@ -52,15 +90,15 @@ func TestParseQueueClientsNoPIDAndGarbage(t *testing.T) {
 }
 
 func TestResolveChainAndLauncher(t *testing.T) {
-	cs := Resolve(map[int]int{17649: 800, 20001: 200}, testProcs())
+	cs := Resolve(map[int]int{93404: 800, 93403: 200}, testProcs())
 	top := cs[0]
-	if top.PID != 17649 || top.Share != 0.8 || top.Name != "CtrlProxyUITests-Runner" {
+	if top.PID != 93404 || top.Share != 0.8 || top.Name != "CtrlProxyUITests-Runner" {
 		t.Fatalf("top = %+v", top)
 	}
 	if len(top.Chain) != 2 || top.Launcher == nil || top.Launcher.Name != "xcodebuild" || top.Launcher.PID != 17491 {
 		t.Errorf("chain/launcher = %+v %+v", top.Chain, top.Launcher)
 	}
-	if cs[1].PID != 20001 || cs[1].Launcher != nil {
+	if cs[1].PID != 93403 || cs[1].Launcher != nil {
 		t.Errorf("Terminal under launchd should have no launcher: %+v", cs[1])
 	}
 	cs = Resolve(map[int]int{999: 1}, nil)
@@ -79,8 +117,8 @@ func TestResolveCycle(t *testing.T) {
 }
 
 func TestFromSampleSummary(t *testing.T) {
-	a := FromSample(17874, "OSLogService", fixture(t, "sample_multi_client.txt"), "", testProcs())
-	want := "OSLogService (17874) busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)"
+	a := FromSample(93407, "xpcattr-test-service", fixture(t, "sample_multi_client.txt"), "", testProcs())
+	want := "xpcattr-test-service (93407) busy, driven by CtrlProxyUITests-Runner (93404), launched by xcodebuild (17491)"
 	if a.Source != SourceSample || a.Summary() != want {
 		t.Errorf("source=%s summary=%q", a.Source, a.Summary())
 	}
@@ -122,7 +160,7 @@ func TestCaptureDarwinFallsBackToLsmp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Source != SourceLsmp || a.Name != "OSLogService" || strings.Join(cmds, ",") != "/usr/bin/sample,/usr/bin/lsmp" {
+	if a.Source != SourceLsmp || a.Name != "cfprefsd" || strings.Join(cmds, ",") != "/usr/bin/sample,/usr/bin/lsmp" {
 		t.Errorf("a=%+v cmds=%v", a, cmds)
 	}
 }
@@ -174,21 +212,60 @@ func TestCaptureSampleFailureIncludesStderr(t *testing.T) {
 	}
 }
 
-func TestCaptureSudoUsesNonInteractiveAndSurfacesError(t *testing.T) {
-	var sudoArgs []string
-	boom := errors.New("sudo: a password is required")
+func TestCaptureSudoRunsBothToolsNonInteractively(t *testing.T) {
+	var cmds []string
+	boom := errors.New("lsmp crashed")
 	_, err := captureWith(t, Options{Sudo: true, Runner: runnerFunc(func(c proc.Cmd) (proc.Result, error) {
-		if c.Name == "/usr/bin/sample" {
+		cmds = append(cmds, strings.Join(append([]string{c.Name}, c.Args[:2]...), " "))
+		if c.Args[1] == "/usr/bin/sample" {
 			return proc.Result{Stdout: []byte(fixture(t, "sample_no_pid.txt"))}, nil
 		}
-		sudoArgs = append([]string{c.Name}, c.Args...)
 		return proc.Result{}, boom
 	})})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
-	if strings.Join(sudoArgs[:3], " ") != "/usr/bin/sudo -n /usr/bin/lsmp" {
-		t.Errorf("args = %v", sudoArgs)
+	if strings.Join(cmds, ",") != "/usr/bin/sudo -n /usr/bin/sample,/usr/bin/sudo -n /usr/bin/lsmp" {
+		t.Errorf("cmds = %v", cmds)
+	}
+}
+
+func TestCaptureSampleWritesToStdoutOnly(t *testing.T) {
+	var args []string
+	_, _ = captureWith(t, Options{Runner: runnerFunc(func(c proc.Cmd) (proc.Result, error) {
+		if c.Name == "/usr/bin/sample" {
+			args = c.Args
+		}
+		return proc.Result{Stdout: []byte(fixture(t, "sample_multi_client.txt"))}, nil
+	})})
+	if strings.Join(args, " ") != "17874 3 10 -file /dev/stdout" {
+		t.Errorf("sample args = %v", args)
+	}
+}
+
+// Real macOS stderr for each permission failure maps to an actionable hint.
+func TestCapturePermissionHints(t *testing.T) {
+	cases := []struct {
+		name, stderr, want string
+		exit               int
+		sudo               bool
+	}{
+		{"root service", "sample_permission_denied.stderr", "retry with --sudo", 255, false},
+		{"sudo needs password", "sudo_password_required.stderr", "run `sudo -v` first", 1, true},
+	}
+	for _, c := range cases {
+		_, err := captureWith(t, Options{Sudo: c.sudo, Runner: runnerFunc(func(proc.Cmd) (proc.Result, error) {
+			return proc.Result{ExitCode: c.exit, Stderr: []byte(fixture(t, c.stderr))}, nil
+		})})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v", c.name, err)
+		}
+	}
+	if h := hint(fixture(t, "lsmp_task_for_pid_failed.stderr"), false); !strings.Contains(h, "--sudo") {
+		t.Errorf("lsmp task_for_pid hint = %q", h)
+	}
+	if h := hint("no such process", false); h != "" {
+		t.Errorf("unknown failure hint = %q", h)
 	}
 }
 

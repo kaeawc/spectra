@@ -27,7 +27,7 @@ func runWhoisWithIO(args []string, stdout, stderr io.Writer, capture whoisCaptur
 	fs := flag.NewFlagSet("spectra whois", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
-	sudo := fs.Bool("sudo", false, "Run the lsmp fallback under sudo")
+	sudo := fs.Bool("sudo", false, "Run sample and lsmp under sudo -n (run sudo -v first)")
 	duration := fs.Duration("duration", 3*time.Second, "Sample duration")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -63,7 +63,7 @@ func runWhoisWithIO(args []string, stdout, stderr io.Writer, capture whoisCaptur
 
 func printWhois(w io.Writer, a xpcattr.Attribution) {
 	if len(a.Clients) == 0 {
-		fmt.Fprintf(w, "No XPC/Mach clients found for pid %d (no NSXPCConnection queue PIDs in the sample; lsmp may need --sudo).\n", a.PID)
+		fmt.Fprintf(w, "No XPC/Mach clients found for pid %d (no NSXPCConnection queue PIDs in the sample; the lsmp fallback needs --sudo).\n", a.PID)
 		return
 	}
 	fmt.Fprintln(w, a.Summary())
