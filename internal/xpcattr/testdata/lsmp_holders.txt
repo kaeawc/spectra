@@ -1,8 +1,126 @@
-Process (17874) : OSLogService
-  name      ipc-object    rights     flags   boost  reqs  recv  send sonce oref  qlimit msgcount context            identifier  type
----------   ----------  ----------  -------- -----  ---- ----- ----- ----- ---- ------ -------- ------------------ ----------  -----------
-0x00001003  0x1a        send        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 17649)
-0x00001107  0x2b        send        --------        ---   0     1     0     0    0      0        0x0                0x0 (17649) CtrlProxyUITests-Runner
-0x00001203  0x3c        send-once   --------        ---   0     1     0     0    0      0        0x0                0x0 (20001) Terminal
-0x00001303  0x4d        recv        --------        ---   0     1     0     0    0      0        0x0                0x0 (pid 17874)
-0x00001403  0x5e        recv        --------        ---   0     1     0     0    0      0        0x0                0x0 (30000) notifyd
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (os/kern) invalid argument
+task_threads() failed: pid:0 error: (os/kern) invalid argument
+mach_port_space_info() failed: pid:0 error: (os/kern) invalid argument
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+task_get_exception_ports_info() failed: pid:-1 error: (ipc/send) invalid destination port
+task_threads() failed: pid:0 error: (ipc/send) invalid destination port
+mach_port_space_info() failed: pid:0 error: (ipc/send) invalid destination port
+Ignoring failure of mach_port_space_info() for task 197891 for '-all'
+Ignoring failure of mach_port_space_info() for task 243203 for '-all'
+Ignoring failure of mach_port_space_info() for task 198147 for '-all'
+Ignoring failure of mach_port_space_info() for task 198403 for '-all'
+Ignoring failure of mach_port_space_info() for task 198659 for '-all'
+Ignoring failure of mach_port_space_info() for task 242947 for '-all'
+Ignoring failure of mach_port_space_info() for task 198915 for '-all'
+Ignoring failure of mach_port_space_info() for task 242691 for '-all'
+Ignoring failure of mach_port_space_info() for task 242435 for '-all'
+Ignoring failure of mach_port_space_info() for task 199171 for '-all'
+Ignoring failure of mach_port_space_info() for task 199427 for '-all'
+Ignoring failure of mach_port_space_info() for task 199683 for '-all'
+Process (4701) : xpcattr-test-service
+  name      ipc-object    rights     flags   boost  reqs  recv  send sonce oref  qlimit  msgcount  context            identifier  type
+---------   ----------  ----------  -------- -----  ---- ----- ----- ----- ----  ------  --------  ------------------ ----------- ------------
+0x00000103  0xfbed5ebf  send        --------        ---            2                                                  0x00000000  THREAD-CONTROL (0xa86ce74)
+0x00000203  0xbbc574fb  send        --------        ---            3                                                  0x00000000  TASK-CONTROL SELF (4701) xpcattr-test-service
+0x00000303  0x5bf646c0  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x00000403  0xbbc09208  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x00000503  0x92e1bd8f  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x00000603  0x68625fd8  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x0000070f  0x315c1387  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x0000080f  0x0f052898  send        --------        ---            4                                                  0x00000000  UNKNOWN
+0x00000903  0x1def4714  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00000a03  0x121f4a0b  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00000b03  0x045e18bd  recv        ---GS---     0  ---      1               Y        6         0  0x0000000000000000
+                  +     send        --------        ---            1         <-                                       0x00099d0f  (377) opendirectoryd
+0x00000c03  0x3d4f0ea7  recv,send   ---GS---     0  ---      1     1         Y        5         0  0x0000000000000000
+                  +     send        --------        ---            1         <-                                       0x00043063  (336) logd
+0x00000d03  0xedffd1ac  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00000e07  0xf43bff69  recv        --------     0  ---      1               Y       16         0  0x0000000000000000
+                  +     send        --------        D--            1         <-                                       0x0002ea23  (401) notifyd
+0x00000f03  0xb2fc097f  recv,send   ---GSI--     0  --P      1     1         Y       16         0  0x0000000000000000
+                  +     send        --------        ---            2         <-                                       0x000e2fbf  (1) launchd
+                  +     send        --------        ---            1         <-                                       0x00000c03  (4694) xpcattr-test-client-with-a-long
+                  +     send        --------        ---            1         <-                                       0x00001b03  (4695) client-b
+0x00001003  0x05e46f83  recv,send   ---GS---     0  ---      1     1         Y        5         0  0x0000000000000000
+0x00001103  0x552b95e3  send        --------        ---            1                                                  0x00000000  THREAD-CONTROL (0xa86ce74)
+0x00001203  0x96f282f1  recv        --------     0  ---      1               Y        5         0  0x0000000000000000
+0x0000130f  0xc4019891  recv        -----I--     0  -NP      1           1   Y        6         0  0x0000000000000000
+                  +     send        --------        ---            1         <-                                       0x00001003  (4694) xpcattr-test-client-with-a-long
+0x00001403  0xc487624a  port-set    --------        ---      1                                                        4  members
+ -          0x05e46f83  recv,send   ---GS---     0  ---      1     1         Y        5         0  0x0000000000000000 0x00001003  (4701) xpcattr-test-service
+ -          0x96f282f1  recv        --------     0  ---      1               Y        5         0  0x0000000000000000 0x00001203  (4701) xpcattr-test-service
+ -          0xf2775418  recv,send   ---GS---     0  ---      1     1         Y        1         0  0x0000000000000000 0x00001503  (4701) xpcattr-test-service
+ -          0xddfb71fe  recv,send   ---GS---     0  ---      1     1         Y        1         0  0x0000000000000000 0x00002803  (4701) xpcattr-test-service
+0x00001503  0xf2775418  recv,send   ---GS---     0  ---      1     1         Y        1         0  0x0000000000000000
+0x00001603  0x525c23bf  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x0000170f  0x15080426  recv,send   ---GSI--     0  ---      1     1         Y       16         0  0x0000000000000000
+                  +     send        --------        ---            2         <-                                       0x00000e03  (4694) xpcattr-test-client-with-a-long
+0x00001803  0xf3cfa98d  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00001903  0xc086f151  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00001a03  0xd077ffe8  recv,send   ---GS---     0  ---      1     2         Y        5         0  0x0000000000000000
+0x00001b03  0xa2e4fa56  send        --------        ---            1                                                  0x00000000  VOUCHER
+0x00001c03  0xb10645fa  send        --------        ---            1                                                  0x00000000  HOST
+0x00001d03  0x74ecc349  recv,send   --------     0  ---      1     1         Y        5         0  0x0000000000000000
+0x00001e03  0x351c4f13  send        --------        ---            1                                                  0x00000000  SEMAPHORE
+0x00001f03  0x90e33f8f  send        --------        ---            1                                                  0x00000000  CLOCK
+0x00002003  0x180a1595  recv        -----I--     0  -NP      1           1   Y        6         0  0x0000000000000000
+                  +     send        --------        ---            1         <-                                       0x00001b03  (4694) xpcattr-test-client-with-a-long
+0x00002103  0x3fa2bc31  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00002203  0xfd790af3  recv        -----I--     0  -NP      1           1   Y        6         0  0x0000000000000000
+                  +     send        --------        ---            1         <-                                       0x00000b03  (4695) client-b
+0x00002303  0x7c69750b  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00002493  0xba85593c  send        --------        ---            1                                                  0x00000000  (-) Unknown Process
+0x0000257f  0x81199153  send-once   --------        ---                     ->        5         0  0x0000000000000000 0x00001d03  (4694) xpcattr-test-client-with-a-long
+0x00002603  0x6e632f2e  send        --------        ---            1                                                  0x00000000  THREAD-CONTROL (0xa86ce74)
+0x0000275f  0x9ea959da  send        --------        ---            1                                                  0x00000000  VOUCHER
+0x00002803  0xddfb71fe  recv,send   ---GS---     0  ---      1     1         Y        1         0  0x0000000000000000
+0x00002903  0xfb5ed6e3  recv        --------     0  ---      1               N        5         0  0x0000000000000000
+0x00002a03  0x82058d33  send        --------        ---            1                                                  0x00000000  UNKNOWN
+0x00003f3f  0x30ba4bae  send-once   --------        ---                     ->        5         0  0x0000000000000000 0x00000a03  (4695) client-b
+
+total     = 43
+SEND      = 28
+RECEIVE   = 20
+SEND_ONCE = 2
+PORT_SET  = 1
+DEAD_NAME = 0
+DNREQUEST = 0
+VOUCHERS  = 2
+    exc_port_object    receiver_task    flavor  <behaviors>           mask
+    0x469174e3         (-1) Unknown       0x001  <MACH + UNKNOWN>          RESOURCE
+
+Thread_KObject  Thread-ID     Port Description.
+
+            Voucher: 0x0
+
+
+            Voucher: 0x0

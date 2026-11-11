@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,10 +59,8 @@ var (
 	// its last dot-separated component is the client PID. Client-side queues
 	// ("...NSXPCConnection.m-user.<service>") carry no PID and do not match.
 	queueLine = regexp.MustCompile(`^[\s+!:|]*(\d+)\s+.*?(com\.apple\.NSXPCConnection\.user\.\S+)`)
-	// lsmpPID matches the peer annotation on an lsmp port row: either
-	// "(pid N)" or "(N) procname". The exact column format is unverified on
-	// real macOS output, so both shapes are accepted.
-	lsmpPID = regexp.MustCompile(`\((?:pid )?(\d+)\)`)
+	// lsmpPID matches the "(N) procname" peer annotation on an lsmp row.
+	lsmpPID = regexp.MustCompile(`\((\d+)\)`)
 	lsmpHex = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
 	// launchers are build/test drivers worth naming as "launched by".
 	launchers = map[string]bool{
@@ -97,22 +96,27 @@ func ParseQueueClients(out string) map[int]int {
 	return res
 }
 
-// ParseLsmpHolders counts, per remote PID, the send and send-once port rows of
-// `lsmp -p` output that name a peer. Receive rights belong to the service
-// itself and are ignored, as is the service's own PID.
+// ParseLsmpHolders counts, per remote PID, the rights in `lsmp -p` output
+// that tie a client to the service. lsmp lists other tasks' send and
+// send-once rights to one of the service's receive ports as indented
+// "+ send ... <- 0x... (PID) name" rows under that port, and a send-once
+// right the service holds to a client's reply port as a top-level
+// "send-once ... -> ... (PID) name" row. Top-level send rows are the
+// service's own outbound connections and are ignored, as are launchd (which
+// holds every Mach service port) and the service's own PID.
 func ParseLsmpHolders(out string, self int) map[int]int {
 	res := map[int]int{}
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 || !lsmpHex.MatchString(fields[0]) || !hasClientRight(fields) {
+		arrow := lsmpClientArrow(strings.Fields(line))
+		if arrow == "" {
 			continue
 		}
-		m := lsmpPID.FindStringSubmatch(line)
+		m := lsmpPID.FindStringSubmatch(line[strings.Index(line, arrow):])
 		if m == nil {
 			continue
 		}
 		pid, err := strconv.Atoi(m[1])
-		if err != nil || pid <= 0 || pid == self {
+		if err != nil || pid <= 1 || pid == self {
 			continue
 		}
 		res[pid]++
@@ -120,16 +124,16 @@ func ParseLsmpHolders(out string, self int) map[int]int {
 	return res
 }
 
-func hasClientRight(fields []string) bool {
-	for _, f := range fields {
-		switch f {
-		case "send", "send-once":
-			return true
-		case "recv", "port-set":
-			return false
-		}
+// lsmpClientArrow returns the arrow that precedes the peer annotation on a
+// row naming a client, or "" for any other row.
+func lsmpClientArrow(fields []string) string {
+	switch {
+	case len(fields) > 2 && fields[0] == "+" && (fields[1] == "send" || fields[1] == "send-once") && slices.Contains(fields, "<-"):
+		return "<-"
+	case len(fields) > 3 && lsmpHex.MatchString(fields[0]) && fields[2] == "send-once" && slices.Contains(fields, "->"):
+		return "->"
 	}
-	return false
+	return ""
 }
 
 // Resolve turns raw per-PID weights into clients with command line, parent
