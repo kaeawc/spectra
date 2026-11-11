@@ -3,6 +3,7 @@ package xpcattr
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -124,11 +125,55 @@ func TestFromSampleSummary(t *testing.T) {
 	}
 }
 
+// lsmp_holders.txt is a real root capture of the same test service (pid
+// 4701) while client 4694 used the anonymous endpoint and 4695 the named
+// service, both connected and idle.
+func TestParseLsmpHoldersRealCapture(t *testing.T) {
+	got := ParseLsmpHolders(fixture(t, "lsmp_holders.txt"), 4701)
+	// Clients hold send rights to the listener and connection ports, and the
+	// service owes each a reply on a send-once right. opendirectoryd, logd and
+	// notifyd hold one send right each to ports the service registered with
+	// them; launchd and the service itself are never clients.
+	want := map[int]int{4694: 5, 4695: 3, 377: 1, 336: 1, 401: 1}
+	if !maps.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseLsmpHoldersRowShapes(t *testing.T) {
+	cases := map[string]int{
+		"                  +     send        --------        ---            1         <-                                       0x00001b03  (4695) client-b": 4695,
+		"                  +     send-once   --------        ---            1         <-                                       0x00001b03  (4695) client-b": 4695,
+		"0x00003f3f  0x30ba4bae  send-once   --------        ---                     ->        5         0  0x0000000000000000 0x00000a03  (4695) client-b": 4695,
+		// The service's own outbound send right is not a client.
+		"0x00000903  0x1def4714  send        --------        ---            1         ->                                       0x00000000  (4695) client-b":              0,
+		"0x00000203  0xbbc574fb  send        --------        ---            3                                                  0x00000000  TASK-CONTROL SELF (4701) svc": 0,
+		" -          0x05e46f83  recv,send   ---GS---     0  ---      1     1         Y        5         0  0x0000000000000000 0x00001003  (4701) svc":                   0,
+		"                  +     send        --------        ---            2         <-                                       0x000e2fbf  (1) launchd":                  0,
+		"0x00002493  0xba85593c  send        --------        ---            1                                                  0x00000000  (-) Unknown Process":          0,
+		"task_threads() failed: pid:0 error: (ipc/send) invalid destination port":                                                                                        0,
+	}
+	for line, want := range cases {
+		got := ParseLsmpHolders(line, 4701)
+		if want == 0 && len(got) != 0 || want != 0 && (len(got) != 1 || got[want] != 1) {
+			t.Errorf("%q: got %v", line, got)
+		}
+	}
+}
+
 func TestFromSampleLsmpFallback(t *testing.T) {
-	a := FromSample(17874, "OSLogService", fixture(t, "sample_no_pid.txt"), fixture(t, "lsmp_holders.txt"), testProcs())
-	// Both "(pid N)" and "(N) name" forms count; recv rows are ignored.
-	if a.Source != SourceLsmp || len(a.Clients) != 2 || a.Clients[0].PID != 17649 || a.Clients[0].Weight != 2 || a.Clients[1].PID != 20001 {
+	procs := []process.Info{
+		{PID: 1, Command: "launchd"},
+		{PID: 4694, PPID: 1, Command: "xpcattr-test-cli", ExecutablePath: "/x/xpcattr-test-client-with-a-long-name"},
+		{PID: 4695, PPID: 1, Command: "client-b"},
+	}
+	a := FromSample(4701, "xpcattr-test-service", fixture(t, "sample_no_pid.txt"), fixture(t, "lsmp_holders.txt"), procs)
+	if a.Source != SourceLsmp || len(a.Clients) != 5 || a.Clients[0].PID != 4694 || a.Clients[0].Weight != 5 || a.Clients[1].PID != 4695 {
 		t.Errorf("attribution = %+v", a)
+	}
+	want := "xpcattr-test-service (4701) busy, driven by xpcattr-test-client-with-a-long-name (4694)"
+	if a.Summary() != want {
+		t.Errorf("summary = %q", a.Summary())
 	}
 }
 
