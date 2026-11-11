@@ -38,10 +38,14 @@ members; `--json` adds a `families` array. See
 
 `spectra whois [--json] [--sudo] [--duration 3s] <pid>` (macOS only) attributes a
 busy XPC/Mach service to the processes driving it. It samples the service, reads
-the PID from `com.apple.NSXPCConnection...anonymous.<pid>` dispatch queue names,
-and resolves each client to its command line, parent chain, and launching tool
-(for example `xcodebuild`) with its share of the sampled work. When the queue
-names carry no PID it falls back to `lsmp` port ownership (`--sudo` for root).
+the client PID from its `com.apple.NSXPCConnection.user.<service>.<pid>` (or
+`.user.anonymous.<pid>`) dispatch queue names, and resolves each client to its
+command line, parent chain, and launching tool (for example `xcodebuild`) with
+its share of the sampled work. When the queue names carry no PID it falls back
+to `lsmp` port ownership, which needs root. Root-owned services such as
+`diagnosticd`, `logd`, and `mds_stores` can only be sampled with `--sudo`, which
+runs `sample` and `lsmp` through `sudo -n`; run `sudo -v` first so it does not
+need to prompt.
 `spectra whatswrong` adds the same attribution, such as `OSLogService (17874)
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.

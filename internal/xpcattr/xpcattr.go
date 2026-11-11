@@ -1,8 +1,8 @@
 // Package xpcattr attributes a busy XPC/Mach service to the client processes
-// driving it. NSXPCConnection names its dispatch queues
-// "com.apple.NSXPCConnection.user.anonymous.<pid>", so sample(1) and
-// spindump output carries the client PID; when it does not, lsmp port
-// ownership is the fallback. Parsing is pure Go so it runs on any host;
+// driving it. NSXPCConnection names the queue of each accepted connection
+// "com.apple.NSXPCConnection.user.<service>.<pid>" (or ".user.anonymous.<pid>"
+// for anonymous listeners), so sample(1) and spindump output carries the
+// client PID; when it does not, lsmp port ownership is the fallback. Parsing is pure Go so it runs on any host;
 // only capturing the evidence is macOS-only.
 package xpcattr
 
@@ -54,8 +54,10 @@ type Attribution struct {
 
 var (
 	// queueLine matches a call-graph line that starts with a sample count and
-	// names an anonymous NSXPCConnection queue carrying the client PID.
-	queueLine = regexp.MustCompile(`^[\s+!:|]*(\d+)\s+.*com\.apple\.NSXPCConnection\.[\w.\-]*?anonymous\.(\d+)`)
+	// names a server-side NSXPCConnection queue. Group 2 is the full label;
+	// its last dot-separated component is the client PID. Client-side queues
+	// ("...NSXPCConnection.m-user.<service>") carry no PID and do not match.
+	queueLine = regexp.MustCompile(`^[\s+!:|]*(\d+)\s+.*?(com\.apple\.NSXPCConnection\.user\.\S+)`)
 	// lsmpPID matches the peer annotation on an lsmp port row: either
 	// "(pid N)" or "(N) procname". The exact column format is unverified on
 	// real macOS output, so both shapes are accepted.
@@ -69,18 +71,24 @@ var (
 	processLine = regexp.MustCompile(`(?m)^Process:\s+(.+?)\s+\[\d+\]`)
 )
 
+// maxQueueLabel is the length at which sample(1) truncates dispatch queue
+// labels. A label this long may have lost digits of its PID, so it is dropped
+// rather than attributed to the wrong process.
+const maxQueueLabel = 127
+
 // ParseQueueClients sums the sample counts of threads whose dispatch queue is
-// an anonymous NSXPCConnection queue, keyed by client PID. Lines without a
-// leading count, with an unparseable PID, or of any other shape are ignored.
+// a server-side NSXPCConnection queue, keyed by client PID. Lines without a
+// leading count, with an unparseable or possibly truncated PID, or of any
+// other shape are ignored.
 func ParseQueueClients(out string) map[int]int {
 	res := map[int]int{}
 	for _, line := range strings.Split(out, "\n") {
 		m := queueLine.FindStringSubmatch(line)
-		if m == nil {
+		if m == nil || len(m[2]) >= maxQueueLabel {
 			continue
 		}
 		n, err1 := strconv.Atoi(m[1])
-		pid, err2 := strconv.Atoi(m[2])
+		pid, err2 := strconv.Atoi(m[2][strings.LastIndexByte(m[2], '.')+1:])
 		if err1 != nil || err2 != nil || pid <= 0 || n <= 0 {
 			continue
 		}
@@ -248,14 +256,11 @@ func Capture(ctx context.Context, o Options) (Attribution, error) {
 	} else {
 		procs = process.CollectAll(ctx, process.CollectOptions{})
 	}
-	res, err := o.Runner.Run(ctx, proc.Cmd{Name: "/usr/bin/sample", Args: []string{strconv.Itoa(o.PID), strconv.Itoa(secs), "10"}})
+	// -file /dev/stdout stops sample from also leaving a report in /tmp.
+	sampleOut, err := o.run(ctx, "sample", "/usr/bin/sample", strconv.Itoa(o.PID), strconv.Itoa(secs), "10", "-file", "/dev/stdout")
 	if err != nil {
-		return Attribution{}, fmt.Errorf("sample pid %d: %w", o.PID, err)
+		return Attribution{}, err
 	}
-	if res.ExitCode != 0 {
-		return Attribution{}, fmt.Errorf("sample pid %d: exit %d: %s", o.PID, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
-	}
-	sampleOut := string(res.Stdout)
 	var lsmpOut string
 	if len(ParseQueueClients(sampleOut)) == 0 {
 		var lerr error
@@ -268,18 +273,40 @@ func Capture(ctx context.Context, o Options) (Attribution, error) {
 }
 
 func (o Options) lsmp(ctx context.Context) (string, error) {
-	cmd := proc.Cmd{Name: "/usr/bin/lsmp", Args: []string{"-p", strconv.Itoa(o.PID)}}
+	return o.run(ctx, "lsmp", "/usr/bin/lsmp", "-p", strconv.Itoa(o.PID))
+}
+
+// run executes a capture tool, under non-interactive sudo when o.Sudo is set,
+// and returns its stdout. Failures name the tool and, where the cause is
+// known, what to do about it.
+func (o Options) run(ctx context.Context, tool, path string, args ...string) (string, error) {
+	cmd := proc.Cmd{Name: path, Args: args}
 	if o.Sudo {
-		cmd = proc.Cmd{Name: "/usr/bin/sudo", Args: append([]string{"-n", cmd.Name}, cmd.Args...)}
+		cmd = proc.Cmd{Name: "/usr/bin/sudo", Args: append([]string{"-n", path}, args...)}
 	}
 	res, err := o.Runner.Run(ctx, cmd)
 	if err != nil {
-		return "", fmt.Errorf("lsmp pid %d: %w", o.PID, err)
+		return "", fmt.Errorf("%s pid %d: %w", tool, o.PID, err)
 	}
 	if res.ExitCode != 0 {
-		return "", fmt.Errorf("lsmp pid %d: exit %d: %s", o.PID, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+		msg := strings.TrimSpace(string(res.Stderr))
+		return "", fmt.Errorf("%s pid %d: exit %d: %s%s", tool, o.PID, res.ExitCode, msg, hint(msg, o.Sudo))
 	}
 	return string(res.Stdout), nil
+}
+
+// hint suggests a fix for the permission failures sample, lsmp and sudo -n
+// report on macOS.
+func hint(stderr string, sudo bool) string {
+	switch {
+	case strings.Contains(stderr, "a password is required"):
+		return " (--sudo runs sudo -n, which cannot prompt; run `sudo -v` first, then retry)"
+	case sudo:
+		return ""
+	case strings.Contains(stderr, "appropriate privileges"), strings.Contains(stderr, "task_for_pid"):
+		return " (the process is not inspectable as this user; run `sudo -v`, then retry with --sudo)"
+	}
+	return ""
 }
 
 func nameFromSample(out string) string {

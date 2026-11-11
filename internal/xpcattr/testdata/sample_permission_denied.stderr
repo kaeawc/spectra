@@ -1,0 +1,1 @@
+sample[85129]: sample cannot examine process 3416 (diagnosticd) because you do not have appropriate privileges to examine it; try running with `sudo`.
