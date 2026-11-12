@@ -1,7 +1,6 @@
 package detect
 
 import (
-	"context"
 	"encoding/xml"
 	"path/filepath"
 	"sort"
@@ -66,7 +65,9 @@ func (s objcSystemSources) LinkedLibraries(exe string) ([]string, error) {
 	if exe == "" {
 		return nil, nil
 	}
-	res, err := s.runner.Run(context.Background(), proc.Cmd{Name: "otool", Args: []string{"-L", exe}})
+	ctx, cancel := toolContext()
+	defer cancel()
+	res, err := s.runner.Run(ctx, proc.Cmd{Name: "otool", Args: []string{"-L", exe}})
 	if err != nil || res.ExitCode != 0 {
 		return nil, err
 	}
@@ -74,7 +75,9 @@ func (s objcSystemSources) LinkedLibraries(exe string) ([]string, error) {
 }
 
 func (s objcSystemSources) PlistXML(path string) ([]byte, error) {
-	res, err := s.runner.Run(context.Background(), proc.Cmd{Name: "plutil", Args: []string{"-convert", "xml1", "-o", "-", path}})
+	ctx, cancel := toolContext()
+	defer cancel()
+	res, err := s.runner.Run(ctx, proc.Cmd{Name: "plutil", Args: []string{"-convert", "xml1", "-o", "-", path}})
 	if err != nil || res.ExitCode != 0 {
 		return nil, err
 	}
@@ -82,7 +85,9 @@ func (s objcSystemSources) PlistXML(path string) ([]byte, error) {
 }
 
 func (s objcSystemSources) Entitlements(appPath string) ([]string, error) {
-	res, err := s.runner.Run(context.Background(), proc.Cmd{Name: "codesign", Args: []string{"-d", "--entitlements", ":-", appPath}})
+	ctx, cancel := toolContext()
+	defer cancel()
+	res, err := s.runner.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"-d", "--entitlements", ":-", appPath}})
 	if err != nil || res.ExitCode != 0 {
 		return nil, err
 	}

@@ -2,9 +2,10 @@ package crashready
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // liveHost reads crash-capture facts from the running machine.
@@ -16,7 +17,7 @@ type liveHost struct {
 // RLIMIT_CORE, and /cores).
 func NewLiveHost() Host {
 	return liveHost{run: func(name string, args ...string) ([]byte, error) {
-		return exec.Command(name, args...).Output()
+		return proc.BoundedOutput(name, args...)
 	}}
 }
 

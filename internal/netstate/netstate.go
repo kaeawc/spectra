@@ -10,11 +10,11 @@ import (
 	"bufio"
 	"encoding/csv"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // State is the NetworkState slice of a Spectra snapshot.
@@ -72,7 +72,7 @@ type CmdRunner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner runs the real command.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // Collect gathers network state. Any sub-command failure is silently

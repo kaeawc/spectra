@@ -1,13 +1,14 @@
 package toolchain
 
 import (
-	"os/exec"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // execRunner is the default CmdRunner that shells out for real.
 func execRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // lines splits output into trimmed non-empty lines.

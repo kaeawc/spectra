@@ -1,14 +1,15 @@
 package jvm
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // DefaultRunner runs the real command.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // discoverPIDs runs `jps -l` and returns a map of PID → main class, plus

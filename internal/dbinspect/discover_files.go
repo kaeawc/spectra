@@ -1,9 +1,10 @@
 package dbinspect
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // CmdRunner runs an external command and returns combined stdout. Injected
@@ -12,7 +13,7 @@ type CmdRunner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner runs the real command.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // FileCandidate is one SQLite database file a running process holds open.

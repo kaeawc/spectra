@@ -5,11 +5,12 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 var errStopPythonWalk = errors.New("stop python app walk")
@@ -49,7 +50,7 @@ func (osPythonAppFS) WalkDir(root string, fn fs.WalkDirFunc) error {
 type execPythonCommandRunner struct{}
 
 func (execPythonCommandRunner) Run(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 type pythonAppScanner struct {

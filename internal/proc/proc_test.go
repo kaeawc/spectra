@@ -3,10 +3,12 @@ package proc
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestOS_Run_StdoutCaptured(t *testing.T) {
@@ -269,3 +271,42 @@ var (
 	_ Runner = OS{}
 	_ Runner = (*Fake)(nil)
 )
+
+func TestBoundedOutputTimesOut(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	start := time.Now()
+	// The backgrounded sleep keeps stdout open after the shell is killed;
+	// WaitDelay must still let the call return.
+	_, err := BoundedOutputTimeout(100*time.Millisecond, "sh", "-c", "sleep 30 & sleep 30")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("returned after %s; timeout not enforced", elapsed)
+	}
+}
+
+func TestBoundedOutputKeepsExitError(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	_, err := BoundedOutput("sh", "-c", "echo oops >&2; exit 3")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 || !strings.Contains(string(exitErr.Stderr), "oops") {
+		t.Fatalf("err = %v, want *exec.ExitError code 3 with stderr", err)
+	}
+}
+
+func TestOSRunReportsContextTimeout(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := OS{}.Run(ctx, Cmd{Name: "sleep", Args: []string{"30"}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+}
