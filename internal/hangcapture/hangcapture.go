@@ -145,13 +145,13 @@ func mainThreadChain(out string) ([]string, bool) {
 			break // next thread
 		}
 		if indent <= curIndent {
-			continue // sibling or shallower; keep the first (heaviest) chosen path
+			// A sibling or shallower frame: the chosen (heaviest, listed
+			// first) branch has ended. Continuing would splice a lighter
+			// branch's descendants onto it.
+			break
 		}
-		// First child one level deeper: take it and descend.
-		if indent == curIndent+2 || indent > curIndent {
-			chain = append(chain, cleanSymbol(m[3]))
-			curIndent = indent
-		}
+		chain = append(chain, cleanSymbol(m[3]))
+		curIndent = indent
 	}
 	return chain, true
 }

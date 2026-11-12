@@ -141,6 +141,8 @@ func TestAnalyzeRealSampleMarkers(t *testing.T) {
     +     790 pthread_mutex_lock  (in libsystem_pthread.dylib) + 96  [0x187f46a1c]
     +     ! 790 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x187f0a5f0]
     +     10 helper  (in lock) + 8  [0x100003f00]
+    +       10 inner  (in lock) + 8  [0x100003f10]
+    +         10 spin_leaf  (in lock) + 8  [0x100003f20]
     800 Thread_185646497
     + 800 thread_start  (in libsystem_pthread.dylib) + 8  [0x187f45b8c]
     +   800 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x187f0b2c0]
