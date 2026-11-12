@@ -50,6 +50,10 @@ need to prompt.
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.
 
+On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc`
+and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
+see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
