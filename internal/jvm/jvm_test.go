@@ -3,6 +3,7 @@ package jvm
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/toolchain"
@@ -552,5 +553,50 @@ func TestAttributeJDKsUpdatesExistingInfos(t *testing.T) {
 	}})
 	if infos[0].JDKInstallID != "system-eclipse-adoptium-21.0.6" {
 		t.Errorf("JDKInstallID = %q", infos[0].JDKInstallID)
+	}
+}
+
+// jcmd exits 0 when the diagnostic command fails; these are real JDK 21
+// outputs for failures that must surface as errors.
+func TestJcmdFailuresWithZeroExit(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		call func(CmdRunner) error
+		want string
+	}{
+		{"heap dump dir missing", "36387:\nDumping heap to /nonexistent/dir/x.hprof ...\nUnable to create /nonexistent/dir/x.hprof: No such file or directory\n",
+			func(r CmdRunner) error { return HeapDump(36387, "/nonexistent/dir/x.hprof", r) }, "No such file or directory"},
+		{"heap dump file exists", "36387:\nDumping heap to /tmp/ok.hprof ...\nUnable to create /tmp/ok.hprof: File exists\n",
+			func(r CmdRunner) error { return HeapDump(36387, "/tmp/ok.hprof", r) }, "File exists"},
+		{"jfr start unwritable", "36387:\nCould not start recording, not able to write to file /nonexistent/u.jfr. /nonexistent/u.jfr \n",
+			func(r CmdRunner) error { return JFRStart(36387, "u", r) }, "Could not start recording"},
+		{"jfr dump failed", "36387:\nDump failed. Could not copy recording data. /nonexistent/x.jfr\n",
+			func(r CmdRunner) error { return JFRDump(36387, "s", "/nonexistent/x.jfr", r) }, "Dump failed"},
+		{"jfr dump no recording", "36387:\nNo recordings to dump from. Use JFR.start to start a recording.\n",
+			func(r CmdRunner) error { return JFRDump(36387, "nope", "/tmp/n.jfr", r) }, "No recordings"},
+		{"jfr stop twice", "36387:\nCould not stop recording \"t\".\n",
+			func(r CmdRunner) error { return JFRStop(36387, "t", "", r) }, "Could not stop recording"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(string, ...string) ([]byte, error) { return []byte(tc.out), nil }
+			err := tc.call(run)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want error containing %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "36387:") {
+				t.Errorf("error kept the pid banner: %v", err)
+			}
+		})
+	}
+}
+
+func TestJcmdRealSuccessOutput(t *testing.T) {
+	run := func(string, ...string) ([]byte, error) {
+		return []byte("36387:\nStopped recording \"t\", 404.9 kB written to:\n\n/tmp/t.jfr\n"), nil
+	}
+	if err := JFRStop(36387, "t", "/tmp/t.jfr", run); err != nil {
+		t.Fatalf("JFRStop: %v", err)
 	}
 }
