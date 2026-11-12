@@ -33,7 +33,10 @@ type Analysis struct {
 	MainThread MainThread `json:"main_thread"`
 }
 
-var frameLine = regexp.MustCompile(`^(\s+)(\d+)\s+(.*\S)\s*$`)
+// frameLine matches a call-graph row. Real `sample` output prefixes nested
+// frames with tree-drawing markers ("+", "!", ":", "|"), so the indent group
+// absorbs them; its length is the frame's depth.
+var frameLine = regexp.MustCompile(`^([ \t]+[ \t+!:|]*?)(\d+)\s+(.*\S)\s*$`)
 
 // lockWaits are leaf symbols that mean the thread is blocked on a lock.
 var lockWaits = map[string]bool{
