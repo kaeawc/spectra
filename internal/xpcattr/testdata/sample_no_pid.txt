@@ -1,0 +1,38 @@
+Analysis of sampling cfprefsd (pid 632) every 10 milliseconds
+Process:         cfprefsd [632]
+Path:            /usr/sbin/cfprefsd
+Load Address:    0x102f6c000
+Identifier:      cfprefsd
+Version:         5026.6.7
+Code Type:       ARM64E
+Platform:        macOS
+Parent Process:  launchd [1]
+Target Type:     live task
+
+Date/Time:       2026-11-10 20:43:55.848 -0600
+Launch Time:     2026-10-26 09:09:59.860 -0500
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         6960K
+Physical footprint (peak):  11.0M
+Idle exit:                  clean
+----
+
+Call graph:
+    92 Thread_6596: Main Thread   DispatchQueue_<multiple>
+    + 92 _dispatch_sig_thread  (in libdispatch.dylib) + 56  [0x187da3098]
+    +   92 __sigsuspend_nocancel  (in libsystem_kernel.dylib) + 8  [0x187f0f558]
+    92 Thread_169157621
+    + 92 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f46c10]
+    +   92 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x187f099f0]
+    92 Thread_169158548
+      92 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f46c10]
+        92 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x187f099f0]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        184
+        __sigsuspend_nocancel  (in libsystem_kernel.dylib)        92

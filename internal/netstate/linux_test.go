@@ -108,6 +108,11 @@ func TestHostsDefaultsLinux(t *testing.T) {
 }
 
 func TestProxyFromEnv(t *testing.T) {
+	// Clear every variant so ambient proxy settings on the host (CI sandboxes,
+	// corporate machines) cannot shadow the values under test.
+	for _, k := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("http_proxy", "http://proxy:3128")
 	t.Setenv("HTTPS_PROXY", "http://sproxy:3129")
 	t.Setenv("all_proxy", "socks5://sox:1080")

@@ -1,0 +1,27 @@
+48213:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=5790814KB +34816KB, committed=344242KB +4100KB
+
+-                 Java Heap (reserved=4194304KB, committed=262144KB)
+                            (mmap: reserved=4194304KB, committed=262144KB)
+
+-                     Class (reserved=1056922KB +14KB, committed=5018KB +14KB)
+                            (classes #6201)
+                            (malloc=154KB +14KB #9216 +196)
+                            (mmap: reserved=1056768KB, committed=4864KB)
+
+-                    Thread (reserved=58612KB +32816KB, committed=3204KB +2100KB)
+                            (thread #57 +32)
+                            (stack: reserved=58380KB +32704KB, committed=2972KB +1988KB)
+                            (malloc=184KB +112KB #312 +160)
+
+-                     Other (reserved=26608KB +2000KB, committed=26608KB +2000KB)
+                            (malloc=26608KB +2000KB #14 +2)
+
+-                  Internal (reserved=529KB -14KB, committed=529KB -14KB)
+                            (malloc=493KB -14KB #1390 -17)
+

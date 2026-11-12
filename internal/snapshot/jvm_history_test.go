@@ -3,7 +3,21 @@ package snapshot
 import (
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/jvm"
 )
+
+func TestJVMSampleFrom_CopiesNMTCategories(t *testing.T) {
+	info := jvm.Info{PID: 5, GC: &jvm.GCStats{OC: 10}, NMTCommittedKiB: map[string]int64{"Thread": 64}}
+	s, ok := JVMSampleFrom(info, time.Unix(100, 0))
+	if !ok || s.NMTCommittedKiB["Thread"] != 64 {
+		t.Fatalf("sample = %+v ok=%v", s, ok)
+	}
+	info.NMTCommittedKiB["Thread"] = 999 // sample must not alias the live map
+	if s.NMTCommittedKiB["Thread"] != 64 {
+		t.Fatal("sample aliases Info map")
+	}
+}
 
 func TestJVMHistory_SamplesFor(t *testing.T) {
 	now := time.Now()

@@ -14,6 +14,21 @@ import (
 	"github.com/kaeawc/spectra/internal/watchclient"
 )
 
+func TestPrintAlertsSustainedCPU(t *testing.T) {
+	fired := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	a := hostwatch.Alert{ID: "s1", Key: "cpu.sustained:diagnosticd:412", Severity: "warn", Title: "diagnosticd sustained high CPU", State: "firing", FiredAt: fired,
+		Detail: "diagnosticd (pid 412) averaged 87% CPU for 3h0m0s since 2026-09-27T09:00:00Z; owner chain: launchd(1) > diagnosticd(412); next: sample 412 10"}
+	var out bytes.Buffer
+	if err := printAlerts(&out, []hostwatch.Alert{a}, false, fired.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"cpu.sustained:diagnosticd:412", "for 3h0m0s", "owner chain: launchd(1) > diagnosticd(412)", "next: sample 412 10", "3h0m0s ago"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q: %s", want, out.String())
+		}
+	}
+}
+
 func alertTestServer(t *testing.T) daemon.Paths {
 	t.Helper()
 	// A short /tmp path stays below the Unix socket sun_path limit.

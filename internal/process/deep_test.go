@@ -164,6 +164,29 @@ func TestParseLSOFDeepLogFiles(t *testing.T) {
 	}
 }
 
+func TestParseLSOFDeepCwd(t *testing.T) {
+	procs := []Info{
+		{PID: 412, Command: "Slack"},
+		{PID: 999, Command: "bash"},
+	}
+	parseLSOFDeep(procs, lsofDeepFixture)
+
+	if procs[0].Cwd != "/Applications/Slack.app" {
+		t.Errorf("Slack Cwd = %q, want /Applications/Slack.app", procs[0].Cwd)
+	}
+	if procs[1].Cwd != "/home/alice" {
+		t.Errorf("bash Cwd = %q, want /home/alice", procs[1].Cwd)
+	}
+}
+
+func TestParseLSOFDeepCwdWithSpaces(t *testing.T) {
+	procs := []Info{{PID: 7}}
+	parseLSOFDeep(procs, "java 7 bob cwd DIR 1,15 512 2 /srv/my app\n")
+	if procs[0].Cwd != "/srv/my app" {
+		t.Errorf("Cwd = %q, want %q", procs[0].Cwd, "/srv/my app")
+	}
+}
+
 func TestIsLogShapedPath(t *testing.T) {
 	cases := map[string]bool{
 		"/tmp/slack.log":                                      true,

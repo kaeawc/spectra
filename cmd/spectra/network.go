@@ -219,6 +219,9 @@ func printNetworkDiagnosisPort(p netdiag.PortDiagnosis) {
 		if p.TLS.Intercepted {
 			fmt.Printf(" intercepted=%s", truncate(p.TLS.InterceptionReason, 48))
 		}
+		if p.TLS.CompromisedCA {
+			fmt.Print(" compromised_ca=YES")
+		}
 	}
 	fmt.Println()
 }

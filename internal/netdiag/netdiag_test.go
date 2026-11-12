@@ -8,16 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
 func TestDiagnoseAppNetworkBehavior(t *testing.T) {
+	pinDarwin(t)
 	run := appBehaviorRunner(t)
 	procRun := func(context.Context, process.CollectOptions) []process.Info {
 		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 	}
 	report, err := Diagnose(context.Background(), Options{
+		TrustStore: noTrustStore,
 		AppPath:    "/Applications/Slack.app",
 		NetRunner:  run,
 		ProcRunner: procRun,
@@ -45,6 +48,7 @@ func TestDiagnoseAppNetworkBehavior(t *testing.T) {
 }
 
 func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
+	pinDarwin(t)
 	base := appBehaviorRunner(t)
 	var connLsofCalls int
 	run := func(name string, args ...string) ([]byte, error) {
@@ -57,6 +61,7 @@ func TestDiagnoseCollectsConnectionsOnce(t *testing.T) {
 		return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 	}
 	if _, err := Diagnose(context.Background(), Options{
+		TrustStore: noTrustStore,
 		AppPath:    "/Applications/Slack.app",
 		NetRunner:  run,
 		ProcRunner: procRun,
@@ -89,6 +94,7 @@ func TestDiagnoseProbesEndpointsInOrder(t *testing.T) {
 		}
 	}
 	opts := Options{
+		TrustStore: noTrustStore,
 		Targets:    []string{"c.example", "a.example", "b.example", "d.example"},
 		Ports:      []int{443},
 		NetRunner:  run,
@@ -113,6 +119,14 @@ func TestDiagnoseProbesEndpointsInOrder(t *testing.T) {
 				i, report.Endpoints[i].Host, want[i].host)
 		}
 	}
+}
+
+// pinDarwin makes netstate collect through the macOS commands the fake
+// runners in this file answer (lsof, scutil, route, ifconfig), regardless of
+// the host running the tests.
+func pinDarwin(t *testing.T) {
+	t.Helper()
+	t.Cleanup(hostos.SetForTest(hostos.Darwin))
 }
 
 func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
@@ -141,6 +155,7 @@ func appBehaviorRunner(t *testing.T) func(string, ...string) ([]byte, error) {
 }
 
 func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
+	pinDarwin(t)
 	run := func(name string, args ...string) ([]byte, error) {
 		cmd := fakeCommand(name, args...)
 		switch {
@@ -156,8 +171,9 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 		return nil, nil
 	}
 	report, err := Diagnose(context.Background(), Options{
-		Targets:   []string{"blocked.example:443"},
-		NetRunner: run,
+		TrustStore: noTrustStore,
+		Targets:    []string{"blocked.example:443"},
+		NetRunner:  run,
 		ProcRunner: func(context.Context, process.CollectOptions) []process.Info {
 			return nil
 		},
@@ -178,12 +194,14 @@ func TestDiagnoseExplicitTargetAndFailures(t *testing.T) {
 }
 
 func TestDiagnoseEndpointFilterNoMatches(t *testing.T) {
+	pinDarwin(t)
 	run := appBehaviorRunner(t)
 	report, err := Diagnose(context.Background(), Options{
-		AppPath:   "/Applications/Slack.app",
-		Targets:   []string{"other.example"},
-		Ports:     []int{443, 9443},
-		NetRunner: run,
+		TrustStore: noTrustStore,
+		AppPath:    "/Applications/Slack.app",
+		Targets:    []string{"other.example"},
+		Ports:      []int{443, 9443},
+		NetRunner:  run,
 		ProcRunner: func(context.Context, process.CollectOptions) []process.Info {
 			return []process.Info{{PID: 412, Command: "Slack", ExecutablePath: "/Applications/Slack.app/Contents/MacOS/Slack", AppPath: "/Applications/Slack.app"}}
 		},

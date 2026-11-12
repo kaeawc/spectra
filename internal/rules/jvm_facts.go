@@ -27,6 +27,10 @@ type VMArgsFacts struct {
 	GCAlgorithm   string
 	NMTEnabled    bool
 	HeapDumpOnOOM bool
+	// GCLogging is true when any flag enables GC logging: unified -Xlog with a
+	// gc (or all) selector, or the legacy -verbose:gc / -XX:+PrintGC* /
+	// -Xloggc: flags.
+	GCLogging bool
 
 	Raw string
 }
@@ -53,6 +57,7 @@ func ParseVMArgs(raw string) VMArgsFacts {
 	if raw == "" {
 		return f
 	}
+	f.NMTEnabled = jvm.NMTEnabledInArgs(raw)
 	for _, tok := range strings.Fields(raw) {
 		if applyVMArgToken(&f, tok) {
 			continue
@@ -63,9 +68,43 @@ func ParseVMArgs(raw string) VMArgsFacts {
 		}
 		if tok == "-XX:+HeapDumpOnOutOfMemoryError" {
 			f.HeapDumpOnOOM = true
+			continue
+		}
+		if enablesGCLogging(tok) {
+			f.GCLogging = true
 		}
 	}
 	return f
+}
+
+// enablesGCLogging reports whether a single VM-args token turns on GC logging.
+func enablesGCLogging(tok string) bool {
+	switch {
+	case tok == "-verbose:gc", tok == "-Xlog":
+		return true
+	case strings.HasPrefix(tok, "-XX:+PrintGC"), strings.HasPrefix(tok, "-Xloggc:"):
+		return true
+	case strings.HasPrefix(tok, "-Xlog:"):
+		return xlogSelectsGC(tok[len("-Xlog:"):])
+	}
+	return false
+}
+
+// xlogSelectsGC inspects the selector part of a unified -Xlog option
+// ("gc*,safepoint=info:file=gc.log") for a gc or all tag set.
+func xlogSelectsGC(spec string) bool {
+	selectors, _, _ := strings.Cut(spec, ":")
+	for _, sel := range strings.Split(selectors, ",") {
+		tag, level, _ := strings.Cut(sel, "=")
+		if level == "off" {
+			continue
+		}
+		tag = strings.TrimSuffix(tag, "*")
+		if tag == "all" || tag == "gc" || strings.HasPrefix(tag, "gc+") {
+			return true
+		}
+	}
+	return false
 }
 
 // applyVMArgToken handles prefix-style flags. Returns true if tok matched.
@@ -87,9 +126,6 @@ func applyVMArgToken(f *VMArgsFacts, tok string) bool {
 		f.MaxMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MaxMetaspaceFreeRatio="):])
 	case strings.HasPrefix(tok, "-XX:MinMetaspaceFreeRatio="):
 		f.MinMetaspaceFreeRatio = atoiOrNeg1(tok[len("-XX:MinMetaspaceFreeRatio="):])
-	case strings.HasPrefix(tok, "-XX:NativeMemoryTracking="):
-		v := tok[len("-XX:NativeMemoryTracking="):]
-		f.NMTEnabled = v == "summary" || v == "detail"
 	default:
 		return false
 	}

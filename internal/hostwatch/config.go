@@ -52,6 +52,83 @@ type Config struct {
 		TotalWarnPct     float64       `yaml:"total_warn_pct"`
 		TotalCriticalPct float64       `yaml:"total_critical_pct"`
 	} `yaml:"spawn"`
+	Sustained  SustainedConfig  `yaml:"sustained"`
+	JVMHistory JVMHistoryConfig `yaml:"jvm_history"`
+}
+
+// JVMHistoryConfig tunes the opt-in background JVM history sampler. It is off
+// by default: sampling attaches jcmd/jstat to every JVM of the user, which an
+// operator should choose.
+type JVMHistoryConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Interval is the time between samples. Minutes-scale: the NMT growth rule
+	// needs 4 samples spanning 15 minutes, so 5m builds that in 15 minutes.
+	Interval time.Duration `yaml:"interval"`
+	// Timeout is the hard budget for one sampling pass (discovery, per-JVM
+	// jcmd/jstat calls and persistence); children are killed when it expires.
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+const (
+	minJVMHistoryInterval = time.Minute
+	maxJVMHistoryInterval = time.Hour
+	minJVMHistoryTimeout  = time.Second
+)
+
+// DefaultJVMHistoryConfig is disabled with a conservative cadence.
+func DefaultJVMHistoryConfig() JVMHistoryConfig {
+	return JVMHistoryConfig{Interval: 5 * time.Minute, Timeout: 30 * time.Second}
+}
+
+// validate clamps out-of-range values to defaults and reports each problem.
+// The timeout must fit inside the interval so passes never overlap.
+func (j *JVMHistoryConfig) validate() []error {
+	d := DefaultJVMHistoryConfig()
+	var problems []error
+	if j.Interval < minJVMHistoryInterval || j.Interval > maxJVMHistoryInterval {
+		problems = append(problems, fmt.Errorf("jvm_history.interval must be between %s and %s", minJVMHistoryInterval, maxJVMHistoryInterval))
+		j.Interval = d.Interval
+	}
+	if j.Timeout < minJVMHistoryTimeout || j.Timeout > j.Interval {
+		problems = append(problems, fmt.Errorf("jvm_history.timeout must be between %s and the interval (%s)", minJVMHistoryTimeout, j.Interval))
+		j.Timeout = min(d.Timeout, j.Interval)
+	}
+	return problems
+}
+
+// SustainedConfig tunes the sustained per-process CPU detector.
+type SustainedConfig struct {
+	CPUPct      float64       `yaml:"cpu_pct"`
+	Window      time.Duration `yaml:"window"`
+	MinFraction float64       `yaml:"min_fraction"`
+	// Allowlist holds case-insensitive process-name patterns (path.Match
+	// syntax) for expected long-running work that must not alert.
+	Allowlist []string `yaml:"allowlist"`
+	// Interval is the base watch sampling interval and MaxGap the observation
+	// gap treated as a suspend (sized for worst-case backoff). Both are set by
+	// the service, not YAML.
+	Interval time.Duration `yaml:"-"`
+	MaxGap   time.Duration `yaml:"-"`
+}
+
+// sustainedWindowIntervals is the minimum window in base watch intervals:
+// four samples even when self-guard backoff stretches the tick to 4x.
+const sustainedWindowIntervals = 16
+
+// ValidateWatchInterval checks the sustained window against the watch
+// interval, widening the window if it cannot hold enough samples.
+func (c *Config) ValidateWatchInterval(interval time.Duration) error {
+	minWindow := sustainedWindowIntervals * interval
+	if c.Sustained.Window >= minWindow {
+		return nil
+	}
+	got := c.Sustained.Window
+	c.Sustained.Window = minWindow
+	return fmt.Errorf("sustained.window %s must be at least %d times the watch interval (%s); using %s", got, sustainedWindowIntervals, interval, minWindow)
+}
+
+func DefaultSustainedConfig() SustainedConfig {
+	return SustainedConfig{CPUPct: 50, Window: 15 * time.Minute, MinFraction: 0.9}
 }
 
 func DefaultConfig() Config {
@@ -82,6 +159,8 @@ func DefaultConfig() Config {
 	c.Spawn.UIDCriticalPct = 70
 	c.Spawn.TotalWarnPct = 50
 	c.Spawn.TotalCriticalPct = 80
+	c.Sustained = DefaultSustainedConfig()
+	c.JVMHistory = DefaultJVMHistoryConfig()
 	return c
 }
 func LoadConfig(path string, readFile func(string) ([]byte, error)) (Config, error) {
@@ -156,6 +235,8 @@ func validateConfig(c Config) (Config, error) {
 		problems = append(problems, fmt.Errorf("spawn.interval must be at least 1s"))
 		c.Spawn.Interval = d.Spawn.Interval
 	}
+	problems = append(problems, validateSustained(&c.Sustained)...)
+	problems = append(problems, c.JVMHistory.validate()...)
 	for _, field := range []struct {
 		name           string
 		warn, critical *float64
@@ -170,4 +251,22 @@ func validateConfig(c Config) (Config, error) {
 		}
 	}
 	return c, errors.Join(problems...)
+}
+
+func validateSustained(s *SustainedConfig) []error {
+	d := DefaultSustainedConfig()
+	var problems []error
+	if !(s.CPUPct > 0) {
+		problems = append(problems, fmt.Errorf("sustained.cpu_pct must be positive"))
+		s.CPUPct = d.CPUPct
+	}
+	if s.Window < time.Minute {
+		problems = append(problems, fmt.Errorf("sustained.window must be at least 1m"))
+		s.Window = d.Window
+	}
+	if !(s.MinFraction > 0.5 && s.MinFraction <= 1) {
+		problems = append(problems, fmt.Errorf("sustained.min_fraction must be above 0.5 and at most 1"))
+		s.MinFraction = d.MinFraction
+	}
+	return problems
 }

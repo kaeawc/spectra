@@ -28,6 +28,28 @@ local ranking and adds active daemon alerts and a five-minute trend when availab
 Both commands accept `--no-daemon`, and `SPECTRA_NO_DAEMON=1` disables daemon
 access globally.
 
+`whatswrong` also sums CPU per process family and reports multi-process
+simulator/emulator families at 100% CPU or more (browser, build and Xcode
+families need a higher bar) as "`<family>` uses N% of machine CPU", ranked above
+single-process findings. Each names the family (for iOS simulators, the device
+UDID), its process count, the age of its oldest member, and its heaviest
+members; `--json` adds a `families` array. See
+[Running processes](../inspection/running-processes.md#process-families).
+
+`spectra whois [--json] [--sudo] [--duration 3s] <pid>` (macOS only) attributes a
+busy XPC/Mach service to the processes driving it. It samples the service, reads
+the client PID from its `com.apple.NSXPCConnection.user.<service>.<pid>` (or
+`.user.anonymous.<pid>`) dispatch queue names, and resolves each client to its
+command line, parent chain, and launching tool (for example `xcodebuild`) with
+its share of the sampled work. When the queue names carry no PID it falls back
+to `lsmp` port ownership, which needs root. Root-owned services such as
+`diagnosticd`, `logd`, and `mds_stores` can only be sampled with `--sudo`, which
+runs `sample` and `lsmp` through `sudo -n`; run `sudo -v` first so it does not
+need to prompt.
+`spectra whatswrong` adds the same attribution, such as `OSLogService (17874)
+busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
+when the busiest process is over 80% CPU.
+
 On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc`
 and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
 see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).

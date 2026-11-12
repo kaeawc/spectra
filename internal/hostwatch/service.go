@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idgen"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -44,6 +46,18 @@ type ServiceOptions struct {
 	Notifier     Notifier
 	SpawnBackend SpawnBackend
 	UID          func() int
+	// Runner and OS drive the sustained-CPU probe. When unset they are taken
+	// from a *Collector Collector; a custom Collector without a Runner
+	// leaves the probe disabled.
+	Runner proc.Runner
+	OS     hostos.Kind
+	// ReadFile reads /proc files for the Linux sustained-CPU delta.
+	ReadFile func(string) ([]byte, error)
+	// JVMSource and JVMHistory drive the opt-in JVM history sampler
+	// (Config.JVMHistory). JVMSource defaults to NewJVMSource over Runner/OS;
+	// JVMHistory defaults to Store when it implements JVMHistoryStore.
+	JVMSource  JVMSource
+	JVMHistory JVMHistoryStore
 }
 type subscriber struct {
 	ch      chan notification
@@ -58,6 +72,10 @@ type Service struct {
 	engine               *Engine
 	mu                   sync.RWMutex
 	sampleMu             sync.Mutex
+	sustMu               sync.Mutex
+	sustained            *sustainedState
+	jvmMu                sync.Mutex
+	jvm                  *jvmSamplerState
 	spawnMu              sync.Mutex
 	spawnTracker         spawnTracker
 	spawnOverrun         bool
@@ -110,6 +128,8 @@ func NewService(opts ServiceOptions) *Service {
 		opts.UID = currentUID
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
+	svc.initSustained()
+	svc.initJVMSampler()
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {
 		collector.Spawn = func() *SpawnState {
 			svc.mu.RLock()
@@ -123,10 +143,10 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	return svc
 }
-func (s *Service) Run(ctx context.Context) error {
-	if s.opts.Store == nil {
-		return fmt.Errorf("watch store is required")
-	}
+
+// restore loads firing alerts into the engine and seeds the sustained tracker
+// with the restored sustained alerts so they survive warm-up unresolved.
+func (s *Service) restore(ctx context.Context) error {
 	rows, err := s.opts.Store.ListAlerts(ctx, "firing", 2000)
 	if err != nil {
 		return fmt.Errorf("watch restore alerts: %w", err)
@@ -138,13 +158,25 @@ func (s *Service) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.engine.Restore(restored)
 	s.mu.Unlock()
+	s.seedSustained(s.opts.Clock.Now(), restored)
+	return nil
+}
+func (s *Service) Run(ctx context.Context) error {
+	if s.opts.Store == nil {
+		return fmt.Errorf("watch store is required")
+	}
+	if err := s.restore(ctx); err != nil {
+		return err
+	}
 	spawnCtx, cancelSpawn := context.WithCancel(ctx)
 	spawnDone := make(chan struct{})
 	go func() { defer close(spawnDone); s.runSpawn(spawnCtx) }()
+	stopJVM := s.startJVMSampler(ctx)
 	defer func() {
 		cancelSpawn()
 		s.waitForSpawn(spawnDone)
 		s.stopSpawnPersister()
+		stopJVM()
 	}()
 	var inFlight <-chan error
 	timer := time.NewTimer(s.interval)
@@ -155,13 +187,7 @@ func (s *Service) Run(ctx context.Context) error {
 			s.waitForTick(inFlight)
 			return nil
 		case <-timer.C:
-			if inFlight != nil {
-				select {
-				case <-inFlight:
-					inFlight = nil
-				default:
-				}
-			}
+			inFlight = s.drainTick(inFlight)
 			if ctx.Err() != nil {
 				s.waitForTick(inFlight)
 				return nil
@@ -193,6 +219,24 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// drainTick returns nil if the in-flight tick has finished (logging its
+// error), or the same channel if it is still running.
+func (s *Service) drainTick(inFlight <-chan error) <-chan error {
+	if inFlight == nil {
+		return nil
+	}
+	select {
+	case err := <-inFlight:
+		if err != nil {
+			s.opts.Logger.Warn("watch tick failed", "error", err)
+		}
+		return nil
+	default:
+		return inFlight
+	}
+}
+
 func (s *Service) waitForTick(done <-chan error) {
 	if done == nil {
 		return
@@ -200,7 +244,10 @@ func (s *Service) waitForTick(done <-chan error) {
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			s.opts.Logger.Warn("watch tick failed", "error", err)
+		}
 	case <-timer.C:
 		s.opts.Logger.Warn("watch tick still running after shutdown wait")
 	}
@@ -271,6 +318,11 @@ func (s *Service) Tick(ctx context.Context) error {
 		}
 	}
 	s.maintenance(ctx, sample.At)
+	// Last, so a slow one-shot `sample` (3s cap) never delays the slow-tick
+	// alert persistence, notifications or maintenance. It takes its own
+	// timestamp: sample.At predates collection, persistence and maintenance,
+	// and ps etime is only meaningful against the time of the ps snapshot.
+	s.TickSustained(ctx, s.opts.Clock.Now().UTC())
 	return nil
 }
 func (s *Service) updateSelfGuard(cpu float64) {

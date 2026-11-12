@@ -1,0 +1,87 @@
+91377:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=1772146KB, committed=187214KB
+       malloc: 52546KB #120917
+       mmap:   reserved=1719600KB, committed=134668KB
+
+-                 Java Heap (reserved=524288KB, committed=65536KB)
+                            (mmap: reserved=524288KB, committed=65536KB)
+
+-                     Class (reserved=1048754KB, committed=1010KB)
+                            (classes #1528)
+                            (  instance classes #1356, array classes #172)
+                            (malloc=178KB #2417) (at peak)
+                            (mmap: reserved=1048576KB, committed=832KB)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=6912KB)
+                            (    used=6735KB)
+                            (    waste=177KB =2.56%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=832KB)
+                            (    used=711KB)
+                            (    waste=121KB =14.54%)
+
+-                    Thread (reserved=21562KB, committed=1082KB)
+                            (thread #21)
+                            (stack: reserved=21504KB, committed=1024KB)
+                            (malloc=36KB #130) (at peak)
+                            (arena=22KB #40) (peak=2117KB #6)
+
+-                      Code (reserved=50114KB, committed=7962KB)
+                            (malloc=1986KB #3810) (peak=1990KB #3820)
+                            (mmap: reserved=48128KB, committed=5976KB)
+
+-                        GC (reserved=25622KB, committed=12722KB)
+                            (malloc=6542KB #1215) (at peak)
+                            (mmap: reserved=19080KB, committed=6180KB)
+
+-                  Internal (reserved=40242KB, committed=40242KB)
+                            (malloc=40206KB #2148) (at peak)
+                            (mmap: reserved=36KB, committed=36KB)
+
+-                 Metaspace (reserved=65808KB, committed=7184KB)
+                            (malloc=272KB #93) (at peak)
+                            (mmap: reserved=65536KB, committed=6912KB)
+
+-                    Symbol (reserved=1714KB, committed=1714KB)
+                            (malloc=1714KB #22016) (at peak)
+
+-    Native Memory Tracking (reserved=2042KB, committed=2042KB)
+                            (malloc=8KB #138) (peak=9KB #142)
+                            (tracking overhead=2034KB)
+
+Virtual memory map:
+
+[0x00000000e0000000 - 0x0000000100000000] reserved 524288KB for Java Heap from
+    [0x0000ffff8f4f6d18] ReservedHeapSpace::try_reserve_heap(unsigned long, unsigned long, unsigned long, char*, bool)+0x1b8
+    [0x0000ffff8f4f73e4] ReservedHeapSpace::initialize_compressed_heap(unsigned long, unsigned long, bool)+0x5a4
+    [0x0000ffff8f4f7798] ReservedHeapSpace::ReservedHeapSpace(unsigned long, unsigned long, unsigned long)+0x1a8
+    [0x0000ffff8f4a4c20] Universe::reserve_heap(unsigned long, unsigned long)+0x80
+
+	[0x00000000e0000000 - 0x00000000e4000000] committed 65536KB from
+            [0x0000ffff8f0a7d84] G1PageBasedVirtualSpace::commit(unsigned long, unsigned long)+0x174
+            [0x0000ffff8f0b9a60] G1RegionsLargerThanCommitSizeMapper::commit_regions(unsigned int, unsigned long, WorkerThreads*)+0x140
+            [0x0000ffff8f164d64] HeapRegionManager::expand(unsigned int, unsigned int, WorkerThreads*)+0x84
+            [0x0000ffff8f165130] HeapRegionManager::expand_by(unsigned int, WorkerThreads*)+0x70
+
+Details:
+
+[0x0000ffff8f37f53c] Unsafe_AllocateMemory0+0x8c
+[0x0000ffff7400e4a8]
+                             (malloc=32768KB type=Internal #4) (at peak)
+
+[0x0000ffff8f2e1f30] Arena::grow(unsigned long, AllocFailStrategy::AllocFailEnum)+0x110
+[0x0000ffff8ef8ab88] Chunk::operator new(unsigned long, AllocFailStrategy::AllocFailEnum, unsigned long)+0xb8
+[0x0000ffff8ef8b0e4] Arena::Arena(MEMFLAGS, unsigned long)+0x44
+                             (malloc=1024KB type=Compiler #2) (peak=2048KB #4)
+
+[0x0000ffff8f4f6d18] ReservedHeapSpace::try_reserve_heap(unsigned long, unsigned long, unsigned long, char*, bool)+0x1b8
+[0x0000ffff8f4f73e4] ReservedHeapSpace::initialize_compressed_heap(unsigned long, unsigned long, bool)+0x5a4
+[0x0000ffff8f4f7798] ReservedHeapSpace::ReservedHeapSpace(unsigned long, unsigned long, unsigned long)+0x1a8
+[0x0000ffff8f4a4c20] Universe::reserve_heap(unsigned long, unsigned long)+0x80
+                             (mmap: reserved=524288KB, committed=65536KB Java Heap)
+

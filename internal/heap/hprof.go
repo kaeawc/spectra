@@ -197,14 +197,31 @@ func ParseHPROF(r io.Reader) (Histogram, error) {
 	return buildHistogram(st), nil
 }
 
+// maxHPROFHeaderName bounds the format-name read; real names are ~18 bytes
+// ("JAVA PROFILE 1.0.2"), so a longer run without a NUL is not an HPROF file.
+const maxHPROFHeaderName = 32
+
+var errNotHPROF = errors.New("hprof: not a JAVA PROFILE dump")
+
 func readHPROFHeader(hr *hprofReader) error {
-	// Null-terminated format-name string, e.g. "JAVA PROFILE 1.0.2".
-	name, err := hr.r.ReadString(0x00)
-	if err != nil {
-		return fmt.Errorf("hprof: read header name: %w", err)
+	// Null-terminated format-name string, e.g. "JAVA PROFILE 1.0.2". The read
+	// is bounded and the error never echoes file bytes.
+	name := make([]byte, 0, maxHPROFHeaderName)
+	for {
+		c, err := hr.r.ReadByte()
+		if err != nil {
+			return fmt.Errorf("hprof: read header name: %w", err)
+		}
+		if c == 0 {
+			break
+		}
+		if len(name) == maxHPROFHeaderName {
+			return errNotHPROF
+		}
+		name = append(name, c)
 	}
-	if !strings.HasPrefix(name, "JAVA PROFILE") {
-		return fmt.Errorf("hprof: not a JAVA PROFILE dump (got %q)", strings.TrimRight(name, "\x00"))
+	if !strings.HasPrefix(string(name), "JAVA PROFILE") {
+		return errNotHPROF
 	}
 	idSize, err := hr.u4()
 	if err != nil {

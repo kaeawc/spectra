@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 type fakeNodeFS struct {
@@ -147,6 +149,16 @@ func (c fakeNodeCommands) OtoolL(path string) []string {
 	return c.libs[filepath.Clean(path)]
 }
 
+// requireMacOS skips tests that exercise real .app inspection, which shells
+// out to macOS-only tools (plutil, otool, codesign) and is refused with
+// hostos.Unsupported elsewhere (see os_gate_test.go for the Linux contract).
+func requireMacOS(t testing.TB) {
+	t.Helper()
+	if hostos.Current() != hostos.Darwin {
+		t.Skipf("requires macOS app-bundle tooling (plutil/otool); host OS is %s", hostos.Current())
+	}
+}
+
 // makeBundle creates a synthetic .app skeleton at t.TempDir()/Name.app
 // and returns its path. Subsequent helpers add markers.
 func makeBundle(tb testing.TB, name string) string {
@@ -199,55 +211,66 @@ func writeFrameworkPlist(t *testing.T, path, version string) {
 }
 
 func TestDetectElectron(t *testing.T) {
-	app := makeBundle(t, "FakeElectron")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeElectron")
+		f := newToolFake().bundlePlist(t, app, nil)
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
 
-	r, err := Detect(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.UI != "Electron" {
-		t.Errorf("UI = %q, want Electron", r.UI)
-	}
-	if r.Runtime != "Node+Chromium" {
-		t.Errorf("Runtime = %q", r.Runtime)
-	}
-	if r.Confidence != "high" {
-		t.Errorf("Confidence = %q", r.Confidence)
-	}
+		r, err := v.detect(t, app, f, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.UI != "Electron" {
+			t.Errorf("UI = %q, want Electron", r.UI)
+		}
+		if r.Runtime != "Node+Chromium" {
+			t.Errorf("Runtime = %q", r.Runtime)
+		}
+		if r.Confidence != "high" {
+			t.Errorf("Confidence = %q", r.Confidence)
+		}
+	})
 }
 
 func TestDetectFlutter(t *testing.T) {
-	app := makeBundle(t, "FakeFlutter")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
-	r, _ := Detect(app)
-	if r.UI != "Flutter" || r.Language != "Dart" {
-		t.Errorf("got UI=%q lang=%q", r.UI, r.Language)
-	}
-	if r.FrameworkVersions["Flutter"] != "3.22.0" {
-		t.Errorf("Flutter version = %q", r.FrameworkVersions["Flutter"])
-	}
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeFlutter")
+		f := newToolFake().bundlePlist(t, app, nil)
+		f.frameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/FlutterMacOS.framework/Resources/Info.plist"), "3.22.0")
+		r, _ := v.detect(t, app, f, Options{})
+		if r.UI != "Flutter" || r.Language != "Dart" {
+			t.Errorf("got UI=%q lang=%q", r.UI, r.Language)
+		}
+		if r.FrameworkVersions["Flutter"] != "3.22.0" {
+			t.Errorf("Flutter version = %q", r.FrameworkVersions["Flutter"])
+		}
+	})
 }
 
 func TestDetectQt(t *testing.T) {
-	app := makeBundle(t, "FakeQt")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
-	r, _ := Detect(app)
-	if r.UI != "Qt" {
-		t.Errorf("UI = %q, want Qt", r.UI)
-	}
-	if r.FrameworkVersions["Qt"] != "6.7.2" {
-		t.Errorf("Qt version = %q", r.FrameworkVersions["Qt"])
-	}
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeQt")
+		f := newToolFake().bundlePlist(t, app, nil)
+		f.frameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFrameworkPlist(t, filepath.Join(app, "Contents/Frameworks/QtCore.framework/Resources/Info.plist"), "6.7.2")
+		r, _ := v.detect(t, app, f, Options{})
+		if r.UI != "Qt" {
+			t.Errorf("UI = %q, want Qt", r.UI)
+		}
+		if r.FrameworkVersions["Qt"] != "6.7.2" {
+			t.Errorf("Qt version = %q", r.FrameworkVersions["Qt"])
+		}
+	})
 }
 
 func TestReadTauriVersion(t *testing.T) {
@@ -319,52 +342,61 @@ func TestTauriInspectionDoesNotPromoteWeakRustMarkers(t *testing.T) {
 }
 
 func TestDetectComposeDesktop(t *testing.T) {
-	app := makeBundle(t, "FakeKMP")
-	// Bundled JVM
-	jvmDir := filepath.Join(app, "Contents/runtime/Contents/Home/lib/server")
-	touch(t, filepath.Join(jvmDir, "libjvm.dylib"))
-	// skiko marker
-	touch(t, filepath.Join(app, "Contents/app/libskiko-macos-arm64.dylib"))
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeKMP")
+		f := newToolFake().bundlePlist(t, app, nil)
+		// Bundled JVM
+		jvmDir := filepath.Join(app, "Contents/runtime/Contents/Home/lib/server")
+		touch(t, filepath.Join(jvmDir, "libjvm.dylib"))
+		// skiko marker
+		touch(t, filepath.Join(app, "Contents/app/libskiko-macos-arm64.dylib"))
 
-	r, _ := Detect(app)
-	if r.UI != "ComposeDesktop" || r.Language != "Kotlin" {
-		t.Errorf("got UI=%q lang=%q signals=%v", r.UI, r.Language, r.Signals)
-	}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.UI != "ComposeDesktop" || r.Language != "Kotlin" {
+			t.Errorf("got UI=%q lang=%q signals=%v", r.UI, r.Language, r.Signals)
+		}
+	})
 }
 
 func TestDetectEclipseRCPNoBundledJVM(t *testing.T) {
-	app := makeBundle(t, "FakeMAT")
-	// Mimic Memory Analyzer: many jars + an Eclipse OSGi plugin, no bundled JVM.
-	for i := 0; i < 6; i++ {
-		touch(t, filepath.Join(app, "Contents/Eclipse/plugins", "lib"+string(rune('a'+i))+".jar"))
-	}
-	touch(t, filepath.Join(app, "Contents/Eclipse/plugins/org.eclipse.osgi_3.18.jar"))
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeMAT")
+		f := newToolFake().bundlePlist(t, app, nil)
+		// Mimic Memory Analyzer: many jars + an Eclipse OSGi plugin, no bundled JVM.
+		for i := 0; i < 6; i++ {
+			touch(t, filepath.Join(app, "Contents/Eclipse/plugins", "lib"+string(rune('a'+i))+".jar"))
+		}
+		touch(t, filepath.Join(app, "Contents/Eclipse/plugins/org.eclipse.osgi_3.18.jar"))
 
-	r, _ := Detect(app)
-	if r.UI != "EclipseRCP" {
-		t.Errorf("UI = %q, want EclipseRCP. signals=%v", r.UI, r.Signals)
-	}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.UI != "EclipseRCP" {
+			t.Errorf("UI = %q, want EclipseRCP. signals=%v", r.UI, r.Signals)
+		}
+	})
 }
 
 func TestDetectRustOverridesAppKit(t *testing.T) {
-	// Synthetic binary with Rust panic strings. We cannot synthesize otool
-	// output, but classifyByLinkedLibs is a no-op when otool returns empty
-	// (otool will report no libs for a non-Mach-O file). So Layer 3 owns
-	// the verdict here and should pick Native (Rust).
-	app := makeBundle(t, "FakeRust")
-	bin := filepath.Join(app, "Contents/MacOS/main")
-	body := make([]byte, 0, 64*1024)
-	for i := 0; i < 200; i++ {
-		body = append(body, []byte("rustc/library/core/src/panicking.rs:42:5\n")...)
-		body = append(body, []byte("panicked at thread 'main'\n")...)
-	}
-	if err := os.WriteFile(bin, body, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r, _ := Detect(app)
-	if r.Runtime != "Rust" {
-		t.Errorf("Runtime = %q, want Rust. signals=%v", r.Runtime, r.Signals)
-	}
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		// Synthetic binary with Rust panic strings. We cannot synthesize otool
+		// output, but classifyByLinkedLibs is a no-op when otool returns empty
+		// (otool will report no libs for a non-Mach-O file). So Layer 3 owns
+		// the verdict here and should pick Native (Rust).
+		app := makeBundle(t, "FakeRust")
+		f := newToolFake().bundlePlist(t, app, nil)
+		bin := filepath.Join(app, "Contents/MacOS/main")
+		body := make([]byte, 0, 64*1024)
+		for i := 0; i < 200; i++ {
+			body = append(body, []byte("rustc/library/core/src/panicking.rs:42:5\n")...)
+			body = append(body, []byte("panicked at thread 'main'\n")...)
+		}
+		if err := os.WriteFile(bin, body, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.Runtime != "Rust" {
+			t.Errorf("Runtime = %q, want Rust. signals=%v", r.Runtime, r.Signals)
+		}
+	})
 }
 
 func TestDetectUnknown(t *testing.T) {
@@ -391,7 +423,28 @@ func TestMetadataPopulated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, _ := Detect(app)
+	fake := newToolFake().bundlePlist(t, app, map[string]any{
+		"CFBundleIdentifier":         "com.example.fake",
+		"CFBundleShortVersionString": "1.2.3",
+		"CFBundleVersion":            "456",
+		"SUFeedURL":                  "https://example.com/appcast.xml",
+	})
+	run := func(t *testing.T, opts Options) {
+		r, _ := DetectWith(app, opts)
+		checkMetadata(t, r)
+	}
+	t.Run("fake plutil", func(t *testing.T) {
+		run(t, Options{OS: hostos.Darwin, Runner: fake})
+	})
+	// Real plutil parsing the on-disk XML plist is the point of this variant.
+	t.Run("real plutil", func(t *testing.T) {
+		requireMacOS(t)
+		run(t, Options{})
+	})
+}
+
+func checkMetadata(t *testing.T, r Result) {
+	t.Helper()
 	if r.BundleID != "com.example.fake" {
 		t.Errorf("BundleID = %q", r.BundleID)
 	}
@@ -410,25 +463,28 @@ func TestMetadataPopulated(t *testing.T) {
 }
 
 func TestWKWebViewWrapper(t *testing.T) {
-	app := makeBundle(t, "FakeWebApp")
-	// We cannot synthesize a Mach-O linking AppKit+WebKit, so simulate
-	// the post-Layer-2 state by writing the same markers via a custom
-	// test helper would require exporting internals. Instead, we test
-	// hasBundledWebApp directly through a Detect call where Layer 2
-	// returns nothing and Layer 3 sees a normal binary — and confirm
-	// at minimum that bundling index.html doesn't crash detection.
-	touch(t, filepath.Join(app, "Contents/Resources/index.html"))
-	r, err := Detect(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The synthetic binary doesn't link AppKit, so verdict stays Unknown.
-	// What we want to confirm is that Detect returns cleanly with the
-	// web-asset bundle — full integration tested via `spectra` against
-	// real apps.
-	if r.Path != app {
-		t.Errorf("path mismatch")
-	}
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeWebApp")
+		f := newToolFake().bundlePlist(t, app, nil)
+		// We cannot synthesize a Mach-O linking AppKit+WebKit, so simulate
+		// the post-Layer-2 state by writing the same markers via a custom
+		// test helper would require exporting internals. Instead, we test
+		// hasBundledWebApp directly through a Detect call where Layer 2
+		// returns nothing and Layer 3 sees a normal binary — and confirm
+		// at minimum that bundling index.html doesn't crash detection.
+		touch(t, filepath.Join(app, "Contents/Resources/index.html"))
+		r, err := v.detect(t, app, f, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The synthetic binary doesn't link AppKit, so verdict stays Unknown.
+		// What we want to confirm is that Detect returns cleanly with the
+		// web-asset bundle — full integration tested via `spectra` against
+		// real apps.
+		if r.Path != app {
+			t.Errorf("path mismatch")
+		}
+	})
 }
 
 func TestCatalystMarkerStringsRecognized(t *testing.T) {
@@ -447,55 +503,64 @@ func TestCatalystMarkerStringsRecognized(t *testing.T) {
 }
 
 func TestPrivacyDescriptionsParsed(t *testing.T) {
-	app := makeBundle(t, "FakePrivacy")
-	plist := `<?xml version="1.0" encoding="UTF-8"?>
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakePrivacy")
+		f := newToolFake().bundlePlist(t, app, map[string]any{
+			"NSCameraUsageDescription":     "Need camera for video calls",
+			"NSMicrophoneUsageDescription": "Need mic for voice notes",
+		})
+		plist := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>main</string>
 <key>NSCameraUsageDescription</key><string>Need camera for video calls</string>
 <key>NSMicrophoneUsageDescription</key><string>Need mic for voice notes</string>
 </dict></plist>`
-	if err := os.WriteFile(filepath.Join(app, "Contents/Info.plist"), []byte(plist), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, _ := Detect(app)
-	if r.PrivacyDescriptions["NSCameraUsageDescription"] != "Need camera for video calls" {
-		t.Errorf("camera description = %q", r.PrivacyDescriptions["NSCameraUsageDescription"])
-	}
-	if r.PrivacyDescriptions["NSMicrophoneUsageDescription"] != "Need mic for voice notes" {
-		t.Errorf("mic description = %q", r.PrivacyDescriptions["NSMicrophoneUsageDescription"])
-	}
+		if err := os.WriteFile(filepath.Join(app, "Contents/Info.plist"), []byte(plist), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.PrivacyDescriptions["NSCameraUsageDescription"] != "Need camera for video calls" {
+			t.Errorf("camera description = %q", r.PrivacyDescriptions["NSCameraUsageDescription"])
+		}
+		if r.PrivacyDescriptions["NSMicrophoneUsageDescription"] != "Need mic for voice notes" {
+			t.Errorf("mic description = %q", r.PrivacyDescriptions["NSMicrophoneUsageDescription"])
+		}
+	})
 }
 
 func TestDependenciesNPMPackages(t *testing.T) {
-	app := makeBundle(t, "FakeNPM")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
-	for _, p := range []string{"node-pty", "better-sqlite3"} {
-		if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules", p), 0o755); err != nil {
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeNPM")
+		f := newToolFake().bundlePlist(t, app, nil)
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-	}
-	// Scoped package
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r, _ := Detect(app)
-	if r.Dependencies == nil {
-		t.Fatal("Dependencies nil")
-	}
-	want := map[string]bool{"node-pty": true, "better-sqlite3": true, "@scope/pkg": true}
-	for _, p := range r.Dependencies.NPMPackages {
-		if !want[p] {
-			t.Errorf("unexpected pkg %q", p)
+		touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
+		for _, p := range []string{"node-pty", "better-sqlite3"} {
+			if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules", p), 0o755); err != nil {
+				t.Fatal(err)
+			}
 		}
-		delete(want, p)
-	}
-	if len(want) != 0 {
-		t.Errorf("missing packages: %v", want)
-	}
+		// Scoped package
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/@scope/pkg"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.Dependencies == nil {
+			t.Fatal("Dependencies nil")
+		}
+		want := map[string]bool{"node-pty": true, "better-sqlite3": true, "@scope/pkg": true}
+		for _, p := range r.Dependencies.NPMPackages {
+			if !want[p] {
+				t.Errorf("unexpected pkg %q", p)
+			}
+			delete(want, p)
+		}
+		if len(want) != 0 {
+			t.Errorf("missing packages: %v", want)
+		}
+	})
 }
 
 func TestNodeAppInspectorDependenciesWithFakeFS(t *testing.T) {
@@ -576,63 +641,66 @@ func TestNodeAppInspectorNetworkEndpointsWithFakeFS(t *testing.T) {
 }
 
 func TestElectronNativeModulesScannedFromAsarUnpackedAndAppDir(t *testing.T) {
-	app := makeBundle(t, "FakeNativeModules")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeNativeModules")
+		f := newToolFake().bundlePlist(t, app, nil)
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Electron Framework.framework"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		touch(t, filepath.Join(app, "Contents/Resources/app.asar"))
 
-	appDirModule := filepath.Join(app, "Contents/Resources/app/node_modules/plain/build/Release/plain.node")
-	if err := os.MkdirAll(filepath.Dir(appDirModule), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(appDirModule, []byte("native addon"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+		appDirModule := filepath.Join(app, "Contents/Resources/app/node_modules/plain/build/Release/plain.node")
+		if err := os.MkdirAll(filepath.Dir(appDirModule), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(appDirModule, []byte("native addon"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	rustModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node")
-	if err := os.MkdirAll(filepath.Dir(rustModule), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/package.json"), []byte(`{"name":"custom-native","version":"1.2.3"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	body := strings.Repeat("rustc/library/core/src/panicking.rs core::panicking\n", 60)
-	if err := os.WriteFile(rustModule, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+		rustModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node")
+		if err := os.MkdirAll(filepath.Dir(rustModule), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/package.json"), []byte(`{"name":"custom-native","version":"1.2.3"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		body := strings.Repeat("rustc/library/core/src/panicking.rs core::panicking\n", 60)
+		if err := os.WriteFile(rustModule, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	// Debug-symbol bundles should not produce separate native modules.
-	dsymModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node.dSYM/Contents/Resources/DWARF/custom.node")
-	if err := os.MkdirAll(filepath.Dir(dsymModule), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dsymModule, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+		// Debug-symbol bundles should not produce separate native modules.
+		dsymModule := filepath.Join(app, "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node.dSYM/Contents/Resources/DWARF/custom.node")
+		if err := os.MkdirAll(filepath.Dir(dsymModule), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dsymModule, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	r, err := Detect(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(r.NativeModules) != 2 {
-		t.Fatalf("NativeModules len = %d, want 2: %#v", len(r.NativeModules), r.NativeModules)
-	}
-	if r.NativeModules[0].Path != "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node" {
-		t.Errorf("first module path = %q", r.NativeModules[0].Path)
-	}
-	if r.NativeModules[0].Language != "Rust" {
-		t.Errorf("custom module language = %q, want Rust; hints=%v", r.NativeModules[0].Language, r.NativeModules[0].Hints)
-	}
-	if r.NativeModules[0].PackageName != "custom-native" || r.NativeModules[0].PackageVersion != "1.2.3" {
-		t.Errorf("custom module package = %q@%q, want custom-native@1.2.3", r.NativeModules[0].PackageName, r.NativeModules[0].PackageVersion)
-	}
-	if r.NativeModules[1].Path != "Contents/Resources/app/node_modules/plain/build/Release/plain.node" {
-		t.Errorf("second module path = %q", r.NativeModules[1].Path)
-	}
-	if r.NativeModules[1].Language != "C++" {
-		t.Errorf("plain module language = %q, want C++", r.NativeModules[1].Language)
-	}
+		r, err := v.detect(t, app, f, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(r.NativeModules) != 2 {
+			t.Fatalf("NativeModules len = %d, want 2: %#v", len(r.NativeModules), r.NativeModules)
+		}
+		if r.NativeModules[0].Path != "Contents/Resources/app.asar.unpacked/node_modules/custom/build/Release/custom.node" {
+			t.Errorf("first module path = %q", r.NativeModules[0].Path)
+		}
+		if r.NativeModules[0].Language != "Rust" {
+			t.Errorf("custom module language = %q, want Rust; hints=%v", r.NativeModules[0].Language, r.NativeModules[0].Hints)
+		}
+		if r.NativeModules[0].PackageName != "custom-native" || r.NativeModules[0].PackageVersion != "1.2.3" {
+			t.Errorf("custom module package = %q@%q, want custom-native@1.2.3", r.NativeModules[0].PackageName, r.NativeModules[0].PackageVersion)
+		}
+		if r.NativeModules[1].Path != "Contents/Resources/app/node_modules/plain/build/Release/plain.node" {
+			t.Errorf("second module path = %q", r.NativeModules[1].Path)
+		}
+		if r.NativeModules[1].Language != "C++" {
+			t.Errorf("plain module language = %q, want C++", r.NativeModules[1].Language)
+		}
+	})
 }
 
 func TestNativeModulePackageRootHandlesScopedPackages(t *testing.T) {
@@ -787,52 +855,58 @@ func TestNativeModuleRootsOnlyExistingElectronPayloads(t *testing.T) {
 }
 
 func TestNetworkEndpointsExtraction(t *testing.T) {
-	app := makeBundle(t, "FakeNet")
-	bin := filepath.Join(app, "Contents/MacOS/main")
-	body := []byte("noise https://api.example.com/v1 padding https://cdn.foo.io/asset.png and HTTP://Mixed.Case.NET/x")
-	if err := os.WriteFile(bin, body, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r, _ := DetectWith(app, Options{ScanNetwork: true})
-	want := map[string]bool{"api.example.com": true, "cdn.foo.io": true, "mixed.case.net": true}
-	for _, h := range r.NetworkEndpoints {
-		if !want[h] {
-			t.Errorf("unexpected host %q", h)
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeNet")
+		f := newToolFake().bundlePlist(t, app, nil)
+		bin := filepath.Join(app, "Contents/MacOS/main")
+		body := []byte("noise https://api.example.com/v1 padding https://cdn.foo.io/asset.png and HTTP://Mixed.Case.NET/x")
+		if err := os.WriteFile(bin, body, 0o755); err != nil {
+			t.Fatal(err)
 		}
-		delete(want, h)
-	}
-	if len(want) != 0 {
-		t.Errorf("missing hosts: %v", want)
-	}
+		r, _ := v.detect(t, app, f, Options{ScanNetwork: true})
+		want := map[string]bool{"api.example.com": true, "cdn.foo.io": true, "mixed.case.net": true}
+		for _, h := range r.NetworkEndpoints {
+			if !want[h] {
+				t.Errorf("unexpected host %q", h)
+			}
+			delete(want, h)
+		}
+		if len(want) != 0 {
+			t.Errorf("missing hosts: %v", want)
+		}
+	})
 }
 
 func TestHelpersScanned(t *testing.T) {
-	app := makeBundle(t, "FakeHelpers")
-	// Helper sub-app
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Foo Helper.app/Contents/MacOS"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// XPC service
-	if err := os.MkdirAll(filepath.Join(app, "Contents/XPCServices/Updater.xpc/Contents/MacOS"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Plugin
-	if err := os.MkdirAll(filepath.Join(app, "Contents/PlugIns/SomeExt.appex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r, _ := Detect(app)
-	if r.Helpers == nil {
-		t.Fatal("Helpers nil")
-	}
-	if len(r.Helpers.HelperApps) != 1 || r.Helpers.HelperApps[0] != "Foo Helper" {
-		t.Errorf("HelperApps = %v", r.Helpers.HelperApps)
-	}
-	if len(r.Helpers.XPCServices) != 1 || r.Helpers.XPCServices[0] != "Updater" {
-		t.Errorf("XPCServices = %v", r.Helpers.XPCServices)
-	}
-	if len(r.Helpers.Plugins) != 1 || r.Helpers.Plugins[0] != "SomeExt.appex" {
-		t.Errorf("Plugins = %v", r.Helpers.Plugins)
-	}
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeHelpers")
+		f := newToolFake().bundlePlist(t, app, nil)
+		// Helper sub-app
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/Foo Helper.app/Contents/MacOS"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// XPC service
+		if err := os.MkdirAll(filepath.Join(app, "Contents/XPCServices/Updater.xpc/Contents/MacOS"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Plugin
+		if err := os.MkdirAll(filepath.Join(app, "Contents/PlugIns/SomeExt.appex"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r, _ := v.detect(t, app, f, Options{})
+		if r.Helpers == nil {
+			t.Fatal("Helpers nil")
+		}
+		if len(r.Helpers.HelperApps) != 1 || r.Helpers.HelperApps[0] != "Foo Helper" {
+			t.Errorf("HelperApps = %v", r.Helpers.HelperApps)
+		}
+		if len(r.Helpers.XPCServices) != 1 || r.Helpers.XPCServices[0] != "Updater" {
+			t.Errorf("XPCServices = %v", r.Helpers.XPCServices)
+		}
+		if len(r.Helpers.Plugins) != 1 || r.Helpers.Plugins[0] != "SomeExt.appex" {
+			t.Errorf("Plugins = %v", r.Helpers.Plugins)
+		}
+	})
 }
 
 func TestBundleIDPrefix(t *testing.T) {
@@ -937,17 +1011,31 @@ func TestParsePlistLaunchFlagsFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
-	if !runAtLoad {
-		t.Error("RunAtLoad: got false, want true")
+	check := func(t *testing.T, d detector) {
+		runAtLoad, keepAlive := d.parsePlistLaunchFlags(path)
+		if !runAtLoad {
+			t.Error("RunAtLoad: got false, want true")
+		}
+		if keepAlive {
+			t.Error("KeepAlive: got true, want false")
+		}
 	}
-	if keepAlive {
-		t.Error("KeepAlive: got true, want false")
-	}
+	t.Run("fake plutil", func(t *testing.T) {
+		check(t, newDetector(Options{Runner: newToolFake().xmlPlist(path, plistContent)}))
+	})
+	// Runs the same assertions through the real plutil on macOS. It does not
+	// prove the canned xml1 output is byte-identical to the tool's: real plutil
+	// adds a DOCTYPE and its own indentation that some canned plists omit, which
+	// is fine because plistXMLBool tolerates whitespace between key and value.
+	t.Run("real plutil", func(t *testing.T) {
+		requireMacOS(t)
+		check(t, newDetector(Options{}))
+	})
 }
 
 func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
-	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		plistContent := `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
 	<key>Label</key>
@@ -958,18 +1046,20 @@ func TestParsePlistLaunchFlagsBothTrue(t *testing.T) {
 	<true/>
 </dict>
 </plist>`
-	dir := t.TempDir()
-	path := filepath.Join(dir, "com.example.daemon.plist")
-	if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-	runAtLoad, keepAlive := parsePlistLaunchFlags(path)
-	if !runAtLoad {
-		t.Error("RunAtLoad: got false, want true")
-	}
-	if !keepAlive {
-		t.Error("KeepAlive: got false, want true")
-	}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "com.example.daemon.plist")
+		if err := os.WriteFile(path, []byte(plistContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+		d := newDetector(Options{Runner: v.runner(newToolFake().xmlPlist(path, plistContent))})
+		runAtLoad, keepAlive := d.parsePlistLaunchFlags(path)
+		if !runAtLoad {
+			t.Error("RunAtLoad: got false, want true")
+		}
+		if !keepAlive {
+			t.Error("KeepAlive: got false, want true")
+		}
+	})
 }
 
 func TestLstartLayoutParse(t *testing.T) {

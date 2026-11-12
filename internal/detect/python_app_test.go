@@ -106,32 +106,35 @@ func TestPythonAppScannerExternalInterpreterAndEnvironmentRisk(t *testing.T) {
 }
 
 func TestDetectPopulatesPythonAppWithoutOverridingQt(t *testing.T) {
-	app := makeBundle(t, "FakeQtPython")
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app_packages"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(app, "Contents/Resources/app/main.py"), "print('hello')\n")
-	writeFile(t, filepath.Join(app, "Contents/Resources/app_packages/numpy-2.0.0.dist-info/METADATA"), "Name: numpy\nVersion: 2.0.0\n")
+	withPlutil(t, func(t *testing.T, v plutilVariant) {
+		app := makeBundle(t, "FakeQtPython")
+		f := newToolFake().bundlePlist(t, app, nil)
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Frameworks/QtCore.framework"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(app, "Contents/Resources/app_packages"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(app, "Contents/Resources/app/main.py"), "print('hello')\n")
+		writeFile(t, filepath.Join(app, "Contents/Resources/app_packages/numpy-2.0.0.dist-info/METADATA"), "Name: numpy\nVersion: 2.0.0\n")
 
-	r, err := Detect(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.UI != "Qt" {
-		t.Fatalf("UI = %q, want Qt", r.UI)
-	}
-	if r.PythonApp == nil {
-		t.Fatal("PythonApp nil")
-	}
-	if r.PythonApp.Packaging != "briefcase" {
-		t.Fatalf("Packaging = %q, want briefcase", r.PythonApp.Packaging)
-	}
-	if len(r.PythonApp.Packages) != 1 || r.PythonApp.Packages[0].Name != "numpy" {
-		t.Fatalf("Packages = %#v, want numpy", r.PythonApp.Packages)
-	}
+		r, err := v.detect(t, app, f, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.UI != "Qt" {
+			t.Fatalf("UI = %q, want Qt", r.UI)
+		}
+		if r.PythonApp == nil {
+			t.Fatal("PythonApp nil")
+		}
+		if r.PythonApp.Packaging != "briefcase" {
+			t.Fatalf("Packaging = %q, want briefcase", r.PythonApp.Packaging)
+		}
+		if len(r.PythonApp.Packages) != 1 || r.PythonApp.Packages[0].Name != "numpy" {
+			t.Fatalf("Packages = %#v, want numpy", r.PythonApp.Packages)
+		}
+	})
 }
 
 func writeFile(t *testing.T, path, body string) {

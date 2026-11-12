@@ -1,9 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -363,4 +367,90 @@ type fixedClock struct {
 
 func (f fixedClock) Now() time.Time {
 	return f.t
+}
+
+func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
+	s := newHostServer(t, Collectors{})
+	for _, tc := range []struct {
+		params jvmParams
+		want   string
+	}{
+		{jvmParams{Dest: "x.hprof"}, "confirm_sensitive"},
+		{jvmParams{ConfirmSensitive: true}, "requires dest"},
+		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "missing.hprof")}, "does not exist"},
+		{jvmParams{ConfirmSensitive: true, Dest: t.TempDir()}, ".hprof extension"},
+		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "dir.hprof")}, "does not exist"},
+	} {
+		res := s.toolJVMHeapLeakSuspects(tc.params)
+		if !res.IsError || !strings.Contains(res.Content[0].Text, tc.want) {
+			t.Errorf("params %+v: result = %+v, want error containing %q", tc.params, res, tc.want)
+		}
+	}
+
+	var dump bytes.Buffer
+	dump.WriteString("JAVA PROFILE 1.0.2\x00")
+	_ = binary.Write(&dump, binary.BigEndian, uint32(8))
+	_ = binary.Write(&dump, binary.BigEndian, uint64(0))
+	path := filepath.Join(t.TempDir(), "empty.hprof")
+	if err := os.WriteFile(path, dump.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: path})
+	if res.IsError || !strings.Contains(res.Content[0].Text, "0 leak suspect(s)") {
+		t.Fatalf("empty dump result = %+v", res)
+	}
+}
+
+func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
+	s := newHostServer(t, Collectors{})
+	dir := t.TempDir()
+
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET-CONTENT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: secret})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, ".hprof extension") {
+		t.Errorf("non-.hprof path result = %+v, want extension error", res)
+	}
+
+	asDir := filepath.Join(dir, "d.hprof")
+	if err := os.Mkdir(asDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: asDir})
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "regular file") {
+		t.Errorf("directory result = %+v, want regular-file error", res)
+	}
+
+	// A .hprof-named file with arbitrary content must not have its bytes echoed.
+	fake := filepath.Join(dir, "fake.hprof")
+	if err := os.WriteFile(fake, []byte("TOP-SECRET-CONTENT"+strings.Repeat("x", 4096)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: fake})
+	if !res.IsError || strings.Contains(res.Content[0].Text, "TOP-SECRET") {
+		t.Errorf("fake hprof result = %+v, want an error without file content", res)
+	}
+}
+
+func TestValidateHPROFPathRejectsSymlinkAndRelative(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.hprof")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateHPROFPath(target); err != nil {
+		t.Errorf("regular absolute path rejected: %v", err)
+	}
+	link := filepath.Join(dir, "link.hprof")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := validateHPROFPath(link); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Errorf("symlink err = %v, want regular-file error", err)
+	}
+	if err := validateHPROFPath("rel/real.hprof"); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("relative err = %v, want absolute error", err)
+	}
 }

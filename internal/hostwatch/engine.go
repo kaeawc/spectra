@@ -2,6 +2,7 @@ package hostwatch
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/idgen"
@@ -38,6 +39,7 @@ func NewEngine(ids idgen.Generator) *Engine {
 }
 func (e *Engine) Evaluate(at time.Time, conditions []Condition) []Event {
 	out := append(e.EvaluateSlow(at, conditions), e.evaluate(at, conditions, "spawn", 3, -1)...)
+	out = append(out, e.EvaluateSustained(at, conditions)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Alert.Key < out[j].Alert.Key })
 	return out
 }
@@ -58,11 +60,19 @@ func spawnKey(key string) bool {
 	return key == "spawn.rate" || key == "procs.uid" || key == "procs.total"
 }
 
+func (e *Engine) EvaluateSustained(at time.Time, conditions []Condition) []Event {
+	return e.evaluate(at, conditions, "sustained", 2, -1)
+}
+
 func withinScope(scope, key string) bool {
-	if scope == "spawn" {
+	sustained := strings.HasPrefix(key, sustainedKeyPrefix)
+	switch scope {
+	case "spawn":
 		return spawnKey(key)
+	case "sustained":
+		return sustained
 	}
-	return scope != "slow" || !spawnKey(key)
+	return !spawnKey(key) && !sustained
 }
 
 func (e *Engine) evaluate(at time.Time, conditions []Condition, scope string, clearAfter int, topPID int) []Event {
@@ -131,6 +141,19 @@ func (e *Engine) resolveMissing(at time.Time, seen map[string]bool, scope string
 		delete(e.parents, key)
 	}
 	return out
+}
+
+// SetDetail replaces an active alert's detail without touching its severity or
+// clear counter. It reports the updated alert, or false if the key is not
+// active or the detail is unchanged.
+func (e *Engine) SetDetail(key, detail string) (Alert, bool) {
+	a, ok := e.active[key]
+	if !ok || a.Detail == detail {
+		return Alert{}, false
+	}
+	a.Detail = detail
+	e.active[key] = a
+	return a, true
 }
 func (e *Engine) Active() []Alert {
 	out := make([]Alert, 0, len(e.active))

@@ -1,0 +1,183 @@
+
+Analysis of sampling xpcattr-test-service (pid 93407) every 10 milliseconds
+Process:         xpcattr-test-service [93407]
+Path:            /private/tmp/*/xpcattr-test-service
+Load Address:    0x100cf8000
+Identifier:      xpcattr-test-service
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  launchd [1]
+Target Type:     live task
+
+Date/Time:       2026-11-10 20:47:31.016 -0600
+Launch Time:     2026-11-10 20:47:29.463 -0600
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         2208K
+Physical footprint (peak):  2208K
+Idle exit:                  untracked
+----
+
+Call graph:
+    271 Thread_169181862   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 271 start  (in dyld) + 6992  [0x187b804e4]
+    +   271 main  (in xpcattr-test-service) + 220  [0x100cf91b0]
+    +     271 -[NSRunLoop(NSRunLoop) run]  (in Foundation) + 64  [0x1898cc0d0]
+    +       271 -[NSRunLoop(NSRunLoop) runMode:beforeDate:]  (in Foundation) + 212  [0x189853c34]
+    +         271 _CFRunLoopRunSpecificWithOptions  (in CoreFoundation) + 532  [0x1880da264]
+    +           271 __CFRunLoopRun  (in CoreFoundation) + 1188  [0x1880079f4]
+    +             271 __CFRunLoopServiceMachPort  (in CoreFoundation) + 160  [0x188009108]
+    +               271 mach_msg  (in libsystem_kernel.dylib) + 24  [0x187f07fc0]
+    +                 271 mach_msg_overwrite  (in libsystem_kernel.dylib) + 480  [0x187f109c0]
+    +                   271 mach_msg2_internal  (in libsystem_kernel.dylib) + 76  [0x187f1a5a4]
+    +                     271 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x187f07c34]
+    270 Thread_<multiple>   DispatchQueue_43: com.apple.NSXPCConnection.user.anonymous.93404  (serial)
+    + 270 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f46c10]
+    +   270 _pthread_wqthread  (in libsystem_pthread.dylib) + 292  [0x187f47ec0]
+    +     270 _dispatch_workloop_worker_thread  (in libdispatch.dylib) + 720  [0x187da2734]
+    +       270 _dispatch_root_queue_drain_deferred_wlh  (in libdispatch.dylib) + 284  [0x187da2e34]
+    +         270 _dispatch_lane_invoke  (in libdispatch.dylib) + 448  [0x187d98b64]
+    +           270 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +             270 _dispatch_mach_invoke  (in libdispatch.dylib) + 472  [0x187dacbec]
+    +               270 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +                 270 _dispatch_mach_msg_invoke  (in libdispatch.dylib) + 480  [0x187dabe94]
+    +                   270 _dispatch_client_callout4  (in libdispatch.dylib) + 16  [0x187da94f8]
+    +                     270 _xpc_connection_mach_event  (in libxpc.dylib) + 1488  [0x187c24cdc]
+    +                       270 _xpc_connection_call_event_handler  (in libxpc.dylib) + 112  [0x187c2648c]
+    +                         270 message_handler  (in Foundation) + 152  [0x189819a34]
+    +                           270 message_handler_message  (in Foundation) + 88  [0x18a3c6ec0]
+    +                             270 -[NSXPCConnection _decodeAndInvokeMessageWithEvent:reply:flags:]  (in Foundation) + 1208  [0x18a3c56b0]
+    +                               270 __NSXPCCONNECTION_IS_CALLING_OUT_TO_EXPORTED_OBJECT__  (in Foundation) + 16  [0x1898a3130]
+    +                                 270 -[NSInvocation invoke]  (in CoreFoundation) + 424  [0x187fe94f0]
+    +                                   270 __invoking___  (in CoreFoundation) + 148  [0x187fe9664]
+    +                                     270 @objc Impl.burn(_:reply:)  (in xpcattr-test-service) + 64  [0x100cf933c]
+    +                                       267 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 180  [0x100cf96c0]
+    +                                       ! 251 Date.init()  (in Foundation) + 56  [0x18a0e7d18]
+    +                                       ! : 244 clock_gettime  (in libsystem_c.dylib) + 256  [0x187de7e24]
+    +                                       ! : | 237 gettimeofday  (in libsystem_c.dylib) + 56  [0x187ddfdc0]
+    +                                       ! : | + 229 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x187f09c24]
+    +                                       ! : | + ! 229 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x187f0810c,0x187f08110,...]
+    +                                       ! : | + 5 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 0  [0x187e522b0]
+    +                                       ! : | + 3 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 80  [0x187f09c48]
+    +                                       ! : | 6 gettimeofday  (in libsystem_c.dylib) + 72  [0x187ddfdd0]
+    +                                       ! : | + 6 __gettimeofday  (in libsystem_kernel.dylib) + 12  [0x187f0bb60]
+    +                                       ! : | 1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 164  [0x187f09c9c]
+    +                                       ! : 7 clock_gettime  (in libsystem_c.dylib) + 120,392,...  [0x187de7d9c,0x187de7eac,...]
+    +                                       ! 10 Date.init()  (in Foundation) + 36,56,...  [0x18a0e7d04,0x18a0e7d18,...]
+    +                                       ! 5 Date.init()  (in Foundation) + 24  [0x18a0e96e4]
+    +                                       ! 1 static Date.now.getter  (in Foundation) + 56  [0x18a0e7cc0]
+    +                                       2 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 192  [0x100cf96cc]
+    +                                       1 static Date.now.getter  (in Foundation) + 68  [0x18a0e7ccc]
+    269 Thread_<multiple>   DispatchQueue_41: com.apple.NSXPCConnection.user.anonymous.93403  (serial)
+    + 269 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f46c10]
+    +   269 _pthread_wqthread  (in libsystem_pthread.dylib) + 292  [0x187f47ec0]
+    +     269 _dispatch_workloop_worker_thread  (in libdispatch.dylib) + 720  [0x187da2734]
+    +       269 _dispatch_root_queue_drain_deferred_wlh  (in libdispatch.dylib) + 284  [0x187da2e34]
+    +         269 _dispatch_lane_invoke  (in libdispatch.dylib) + 448  [0x187d98b64]
+    +           269 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +             269 _dispatch_mach_invoke  (in libdispatch.dylib) + 472  [0x187dacbec]
+    +               269 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +                 269 _dispatch_mach_msg_invoke  (in libdispatch.dylib) + 480  [0x187dabe94]
+    +                   269 _dispatch_client_callout4  (in libdispatch.dylib) + 16  [0x187da94f8]
+    +                     269 _xpc_connection_mach_event  (in libxpc.dylib) + 1488  [0x187c24cdc]
+    +                       269 _xpc_connection_call_event_handler  (in libxpc.dylib) + 112  [0x187c2648c]
+    +                         269 message_handler  (in Foundation) + 152  [0x189819a34]
+    +                           269 message_handler_message  (in Foundation) + 88  [0x18a3c6ec0]
+    +                             269 -[NSXPCConnection _decodeAndInvokeMessageWithEvent:reply:flags:]  (in Foundation) + 1208  [0x18a3c56b0]
+    +                               269 __NSXPCCONNECTION_IS_CALLING_OUT_TO_EXPORTED_OBJECT__  (in Foundation) + 16  [0x1898a3130]
+    +                                 269 -[NSInvocation invoke]  (in CoreFoundation) + 424  [0x187fe94f0]
+    +                                   269 __invoking___  (in CoreFoundation) + 148  [0x187fe9664]
+    +                                     269 @objc Impl.burn(_:reply:)  (in xpcattr-test-service) + 64  [0x100cf933c]
+    +                                       261 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 180  [0x100cf96c0]
+    +                                       ! 240 Date.init()  (in Foundation) + 56  [0x18a0e7d18]
+    +                                       ! : 228 clock_gettime  (in libsystem_c.dylib) + 256  [0x187de7e24]
+    +                                       ! : | 220 gettimeofday  (in libsystem_c.dylib) + 56  [0x187ddfdc0]
+    +                                       ! : | + 215 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x187f09c24]
+    +                                       ! : | + ! 215 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x187f0810c,0x187f08110,...]
+    +                                       ! : | + 4 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 0  [0x187e522b0]
+    +                                       ! : | + 1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 80  [0x187f09c48]
+    +                                       ! : | 5 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 164  [0x187f09c9c]
+    +                                       ! : | 3 gettimeofday  (in libsystem_c.dylib) + 72  [0x187ddfdd0]
+    +                                       ! : |   3 __gettimeofday  (in libsystem_kernel.dylib) + 12  [0x187f0bb60]
+    +                                       ! : 12 clock_gettime  (in libsystem_c.dylib) + 120,392  [0x187de7d9c,0x187de7eac]
+    +                                       ! 7 Date.init()  (in Foundation) + 132,36,...  [0x18a0e7d64,0x18a0e7d04,...]
+    +                                       ! 7 Date.init()  (in Foundation) + 24  [0x18a0e96e4]
+    +                                       ! 7 static Date.now.getter  (in Foundation) + 0,56  [0x18a0e7c88,0x18a0e7cc0]
+    +                                       6 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 192  [0x100cf96cc]
+    +                                       1 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 208  [0x100cf96dc]
+    +                                       ! 1 __swift_noop_void_return  (in Foundation) + 0  [0x189922abc]
+    +                                       1 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 232  [0x100cf96f4]
+    +                                         1 __forwarding_prep_b___  (in CoreFoundation) + 92  [0x18806884c]
+    +                                           1 __64-[NSXPCConnection _decodeAndInvokeMessageWithEvent:reply:flags:]_block_invoke.38  (in Foundation) + 180  [0x18a3c6780]
+    +                                             1 -[_NSXPCConnectionRequestedReplies endTransactionForSequence:completionHandler:]  (in Foundation) + 192  [0x18985dc78]
+    +                                               1 __64-[NSXPCConnection _decodeAndInvokeMessageWithEvent:reply:flags:]_block_invoke_2.39  (in Foundation) + 388  [0x18a3c692c]
+    +                                                 1 xpc_connection_send_message  (in libxpc.dylib) + 136  [0x187c255f4]
+    +                                                   1 _xpc_connection_enqueue  (in libxpc.dylib) + 208  [0x187c25734]
+    +                                                     1 dispatch_mach_send_with_result  (in libdispatch.dylib) + 52  [0x187daa9a0]
+    +                                                       1 _dispatch_mach_send_msg  (in libdispatch.dylib) + 312  [0x187daa88c]
+    +                                                         1 _dispatch_mach_msg_send  (in libdispatch.dylib) + 900  [0x187dae784]
+    +                                                           1 mach_msg2_internal  (in libsystem_kernel.dylib) + 76  [0x187f1a5a4]
+    +                                                             1 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x187f07c34]
+    269 Thread_<multiple>   DispatchQueue_39: com.apple.NSXPCConnection.user.dev.spectra.xpcattr-test.93405  (serial)
+    + 269 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f46c10]
+    +   269 _pthread_wqthread  (in libsystem_pthread.dylib) + 292  [0x187f47ec0]
+    +     269 _dispatch_workloop_worker_thread  (in libdispatch.dylib) + 720  [0x187da2734]
+    +       269 _dispatch_root_queue_drain_deferred_wlh  (in libdispatch.dylib) + 284  [0x187da2e34]
+    +         269 _dispatch_lane_invoke  (in libdispatch.dylib) + 448  [0x187d98b64]
+    +           269 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +             269 _dispatch_mach_invoke  (in libdispatch.dylib) + 472  [0x187dacbec]
+    +               269 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+    +                 269 _dispatch_mach_msg_invoke  (in libdispatch.dylib) + 480  [0x187dabe94]
+    +                   269 _dispatch_client_callout4  (in libdispatch.dylib) + 16  [0x187da94f8]
+    +                     269 _xpc_connection_mach_event  (in libxpc.dylib) + 1488  [0x187c24cdc]
+    +                       269 _xpc_connection_call_event_handler  (in libxpc.dylib) + 112  [0x187c2648c]
+    +                         269 message_handler  (in Foundation) + 152  [0x189819a34]
+    +                           269 message_handler_message  (in Foundation) + 88  [0x18a3c6ec0]
+    +                             269 -[NSXPCConnection _decodeAndInvokeMessageWithEvent:reply:flags:]  (in Foundation) + 1208  [0x18a3c56b0]
+    +                               269 __NSXPCCONNECTION_IS_CALLING_OUT_TO_EXPORTED_OBJECT__  (in Foundation) + 16  [0x1898a3130]
+    +                                 269 -[NSInvocation invoke]  (in CoreFoundation) + 424  [0x187fe94f0]
+    +                                   269 __invoking___  (in CoreFoundation) + 148  [0x187fe9664]
+    +                                     269 @objc Impl.burn(_:reply:)  (in xpcattr-test-service) + 64  [0x100cf933c]
+    +                                       263 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 180  [0x100cf96c0]
+    +                                       ! 243 Date.init()  (in Foundation) + 56  [0x18a0e7d18]
+    +                                       ! : 234 clock_gettime  (in libsystem_c.dylib) + 256  [0x187de7e24]
+    +                                       ! : | 225 gettimeofday  (in libsystem_c.dylib) + 56  [0x187ddfdc0]
+    +                                       ! : | + 220 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x187f09c24]
+    +                                       ! : | + ! 220 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x187f0810c,0x187f08110,...]
+    +                                       ! : | + 4 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 0  [0x187e522b0]
+    +                                       ! : | + 1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 80  [0x187f09c48]
+    +                                       ! : | 5 gettimeofday  (in libsystem_c.dylib) + 72  [0x187ddfdd0]
+    +                                       ! : | + 5 __gettimeofday  (in libsystem_kernel.dylib) + 12  [0x187f0bb60]
+    +                                       ! : | 4 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 164  [0x187f09c9c]
+    +                                       ! : 9 clock_gettime  (in libsystem_c.dylib) + 392,120  [0x187de7eac,0x187de7d9c]
+    +                                       ! 11 static Date.now.getter  (in Foundation) + 56,0  [0x18a0e7cc0,0x18a0e7c88]
+    +                                       ! 6 Date.init()  (in Foundation) + 132  [0x18a0e7d64]
+    +                                       ! 3 Date.init()  (in Foundation) + 24  [0x18a0e96e4]
+    +                                       5 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 192,180  [0x100cf96cc,0x100cf96c0]
+    +                                       1 specialized Impl.burn(_:reply:)  (in xpcattr-test-service) + 208  [0x100cf96dc]
+    +                                         1 __swift_noop_void_return  (in Foundation) + 0  [0x189922abc]
+    2 Thread_169181864
+    + 2 start_wqthread  (in libsystem_pthread.dylib) + 0  [0x187f46c08]
+    2 Thread_169181865
+    + 2 start_wqthread  (in libsystem_pthread.dylib) + 0  [0x187f46c08]
+    1 Thread_169181863
+      1 start_wqthread  (in libsystem_pthread.dylib) + 0  [0x187f46c08]
+
+Total number in stack (recursive counted multiple, when >=5):
+        6       __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 0  [0x187f09bf8]
+        6       _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x187d97e98]
+
+Sort by top of stack, same collapsed (when >= 5):
+        mach_absolute_time  (in libsystem_kernel.dylib)        664
+        mach_msg2_trap  (in libsystem_kernel.dylib)        272
+        Date.init()  (in Foundation)        38
+        clock_gettime  (in libsystem_c.dylib)        28
+        static Date.now.getter  (in Foundation)        20
+        __commpage_gettimeofday_internal  (in libsystem_kernel.dylib)        15
+        __gettimeofday  (in libsystem_kernel.dylib)        14
+        DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib)        13
+        specialized Impl.burn(_:reply:)  (in xpcattr-test-service)        13
+        start_wqthread  (in libsystem_pthread.dylib)        5

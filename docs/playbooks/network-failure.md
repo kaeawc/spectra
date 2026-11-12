@@ -43,6 +43,78 @@ spectra -v --network /Applications/Slack.app
 | App has no live sockets | Confirm the app is exercising the failing workflow |
 | Static hosts differ from live sockets | Separate bundled configuration from runtime behavior |
 
+## Compromised CA in the presented chain
+
+`spectra network diagnose` compares every certificate in a presented TLS chain
+(leaf, intermediates, and root) against a table of CAs whose keys are publicly
+known to be compromised. A match produces a `high` finding and
+`compromised_ca=YES` on the port line; JSON output sets `compromised_ca` and
+`compromised_ca_detail` on the TLS probe, and `compromised_ca` on each matching
+chain entry. The
+check runs whether or not the chain validates against the system trust store,
+because a host that still trusts an affected root would otherwise validate a
+forged chain silently.
+
+The finding means the presented chain includes an affected CA. It does not
+mean the host is compromised. Fix: update the OS and browser trust stores, and
+reissue the certificate from an unaffected CA.
+
+The table is `internal/netdiag/affected_cas.json`, embedded at build time. Each
+entry has a name, a certificate SHA-256 (`cert_sha256`, hex) and/or an SPKI pin
+(`spki_pin`, base64, same format as `leaf_spki_pin`), a role (`root` or
+`intermediate`), a primary-source URL, and the as-of date of that source. To
+update it, copy values only from a primary source (for example the Mozilla
+Bugzilla incident bug, CCADB, or a Chrome Root Program notice); never derive or
+approximate a fingerprint. Entries without a verified value are left out.
+
+The current entries are the 16 eMudhra (emSign) G3B/G3C intermediates, with
+their Sectigo cross-signs, disclosed in
+[Mozilla bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449),
+and the distrusted root `emSign ECC Root CA - G3`. The root's SHA-256 comes
+from the [CCADB all-certificate records report](https://ccadb.my.salesforce-sites.com/ccadb/AllCertificateRecordsCSVFormatv4)
+(record A005756; Mozilla status Removed, Chrome status Blocked) and agrees with
+Mozilla's removed-roots report. In CCADB the G3B/G3C TLS and code-signing
+intermediates are issued by `emSign Root TLS CA - G3` and `emSign Root CS CA - G3`,
+whose cross-certificates are signed by `emSign ECC Root CA - G3`; the Sectigo
+cross-signs chain elsewhere.
+
+### Host trust-store check
+
+`spectra network diagnose` also checks, once per run, whether the host trust
+store still contains an affected root from the table. The finding reports
+presence only; it does not mean the host is compromised, and it does not
+inspect per-certificate trust settings, so a certificate present with trust
+disabled is still reported. Severity and advice depend on the OS:
+
+- On Linux the finding is `high` ("the host trust store still contains emSign
+  ECC Root CA - G3") and the fix is to update the OS and browser trust stores.
+- On macOS the finding is `medium`. At the time the table was last updated (the
+  entry's `as_of`), CCADB listed Apple's status for this root as Included while
+  Mozilla had removed it and Chrome had blocked it, so updating the trust store
+  may not help yet. The finding says so, and suggests checking for a macOS
+  update or adjusting the certificate's trust settings in Keychain Access.
+
+- Linux: parses the PEM bundles `/etc/ssl/certs/ca-certificates.crt`,
+  `/etc/pki/tls/certs/ca-bundle.crt`, and `/etc/ssl/cert.pem` and compares the
+  SHA-256 of each certificate's DER. An unreadable bundle is skipped and
+  recorded; the report then carries one `info` finding, "host trust store check
+  was partial", listing the unreadable bundles (in addition to any hit), because
+  an affected root in them would not be reported. Only when no bundle can be
+  read is the whole check reported as skipped.
+  Only plain `CERTIFICATE` PEM blocks are parsed, not OpenSSL `TRUSTED
+  CERTIFICATE` blocks. Browser-private stores (for example
+  Firefox's NSS database) are not read.
+- macOS: runs `security find-certificate -a -Z` against the system roots
+  keychain and the default keychain search list and compares the reported
+  `SHA-256 hash` values. Exit status 44 ("no items", an empty keychain) is
+  treated as an empty source; any other failure of one query is listed in the
+  "host trust store check was partial" `info` finding, and the check errors
+  only if neither keychain could be read. The 44 handling comes from the tool's
+  documented behaviour, not a captured sample. The parser is unit-tested on sample output; it has not
+  been run against a real macOS keychain.
+- If no store can be read, the report carries an `info` finding saying the check
+  was skipped (the check is bounded to 10 seconds); other operating systems skip the check silently.
+
 ## Capture bounded packet evidence
 
 Use the privileged helper only for explicit, bounded captures. Keep filters

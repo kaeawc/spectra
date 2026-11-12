@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/jvm"
@@ -19,6 +20,28 @@ type JVMSample struct {
 	FGC       int64     `json:"fgc"`     // cumulative full-GC count
 	FGCT      float64   `json:"fgct"`    // cumulative full-GC seconds
 	HeapMB    int64     `json:"heap_mb"` // jstat OC + EC + survivor in MiB; 0 if unknown
+	// NMTCommittedKiB is committed KiB per Native Memory Tracking category.
+	// Nil when NMT is off for the JVM or the sample failed.
+	NMTCommittedKiB map[string]int64 `json:"nmt_committed_kib,omitempty"`
+	// NMTOnly marks a sample taken when jstat GC counters were unavailable but
+	// the NMT probe succeeded. Its GC fields are unknown, not zero, so
+	// SamplesFor (used by GC trend rules) excludes it; NMTSamplesFor includes it.
+	NMTOnly bool `json:"nmt_only,omitempty"`
+}
+
+// NMTSampleFrom builds an NMT-only sample for a JVM with no GC stats but a
+// successful NMT reading. ok=false when there is no NMT data or GC stats exist
+// (use JVMSampleFrom then).
+func NMTSampleFrom(j jvm.Info, at time.Time) (JVMSample, bool) {
+	if j.GC != nil || len(j.NMTCommittedKiB) == 0 {
+		return JVMSample{}, false
+	}
+	return JVMSample{
+		PID:             j.PID,
+		At:              at.UTC(),
+		NMTCommittedKiB: maps.Clone(j.NMTCommittedKiB),
+		NMTOnly:         true,
+	}, true
 }
 
 // JVMSampleFrom builds a sample from a live jvm.Info reading. Returns ok=false
@@ -39,6 +62,8 @@ func JVMSampleFrom(j jvm.Info, at time.Time) (JVMSample, bool) {
 		FGC:       j.GC.FGC,
 		FGCT:      j.GC.FGCT,
 		HeapMB:    int64(heapKiB) / 1024,
+
+		NMTCommittedKiB: maps.Clone(j.NMTCommittedKiB),
 	}, true
 }
 
@@ -54,6 +79,18 @@ func (h JVMHistory) SamplesFor(pid int) []JVMSample {
 	if len(h) == 0 {
 		return nil
 	}
+	var out []JVMSample
+	for _, s := range h {
+		if s.PID == pid && !s.NMTOnly {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// NMTSamplesFor returns every sample for one PID in order, including
+// NMT-only samples that SamplesFor omits.
+func (h JVMHistory) NMTSamplesFor(pid int) []JVMSample {
 	var out []JVMSample
 	for _, s := range h {
 		if s.PID == pid {
