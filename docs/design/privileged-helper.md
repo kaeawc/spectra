@@ -79,7 +79,7 @@ The helper's RPC surface is intentionally narrow. It listens on
 | Method | Purpose |
 |---|---|
 | `helper.tcc.system.query(bundleID)` | Query system TCC.db for granted services |
-| `helper.powermetrics.sample(duration, samplers?)` | One-shot powermetrics output; `samplers` is an optional allowlisted subset of `tasks,cpu_power,gpu_power,ane_power,network,disk,interrupts,thermal` |
+| `helper.powermetrics.sample(duration_ms?, samplers?)` | One-shot powermetrics output; `duration_ms` defaults to 500 when omitted, must be positive, and is capped at 10000 (10 seconds); `samplers` is an optional allowlisted subset of `tasks,cpu_power,gpu_power,ane_power,network,disk,interrupts,thermal` |
 | `helper.firewall.rules()` | Current pf firewall rules |
 | `helper.fs_usage.start(pid, mode, duration)` | Start a bounded root `fs_usage` trace for one PID |
 | `helper.fs_usage.stop(handle)` | Stop a trace and return captured output |
@@ -92,7 +92,10 @@ The helper's RPC surface is intentionally narrow. It listens on
 (`filesys`, `pathname`, `exec`, `diskio`, or `network`). It defaults to
 `filesys`, caps trace duration at 60 seconds, and never accepts an
 arbitrary command string or file path. Handles are removed when stopped
-or when the bounded trace reaches its duration limit.
+or when the bounded trace reaches its duration limit. Each trace records
+the peer UID that started it; `helper.fs_usage.stop` returns output only
+to that UID or to root, and rejects every other caller without stopping
+the trace.
 
 `helper.net_capture.start` requires an interface name and accepts only
 structured duration, snap length, host, port, and TCP/UDP protocol

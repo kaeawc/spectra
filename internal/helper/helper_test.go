@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -405,6 +406,53 @@ func TestFSUsageStartStop(t *testing.T) {
 	}
 }
 
+func TestFSUsageStopEnforcesOwnership(t *testing.T) {
+	d := NewDispatcher()
+	registerAll(d, nil, func(ctx context.Context, stdout, _ io.Writer, _ string, _ ...string) (fsUsageProcess, error) {
+		_, _ = io.WriteString(stdout, "open /tmp/secret\n")
+		return fakeFSUsageProcess{ctx: ctx}, nil
+	})
+	start := func(uid uint32) string {
+		t.Helper()
+		resp := d.handle(uid, []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.fs_usage.start","params":{"pid":42,"duration_ms":10000}}`))
+		if resp.Error != nil {
+			t.Fatalf("start error: %+v", resp.Error)
+		}
+		handle, _ := resp.Result.(map[string]any)["handle"].(string)
+		if handle == "" {
+			t.Fatal("empty handle")
+		}
+		return handle
+	}
+	stop := func(uid uint32, handle string) Response {
+		t.Helper()
+		return d.handle(uid, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"helper.fs_usage.stop","params":{"handle":%q}}`, handle)))
+	}
+
+	handle := start(501)
+	resp := stop(502, handle)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "another UID") {
+		t.Fatalf("foreign stop error = %+v, want ownership error", resp.Error)
+	}
+	if resp.Result != nil {
+		t.Fatalf("foreign stop leaked result %v", resp.Result)
+	}
+	// The rejected stop must leave the session running for its owner.
+	resp = stop(501, handle)
+	if resp.Error != nil {
+		t.Fatalf("owner stop error: %+v", resp.Error)
+	}
+	if got := resp.Result.(map[string]any)["raw_output"]; got != "open /tmp/secret\n" {
+		t.Fatalf("raw_output = %q", got)
+	}
+
+	// Root may stop any session.
+	handle = start(501)
+	if resp := stop(0, handle); resp.Error != nil {
+		t.Fatalf("root stop error: %+v", resp.Error)
+	}
+}
+
 func TestPowermetricsAcceptsAllowlistedSamplers(t *testing.T) {
 	d := NewDispatcher()
 	var gotArgs []string
@@ -464,5 +512,61 @@ func TestValidatePowermetricsSamplersDedupesAndRejects(t *testing.T) {
 	}
 	if got := validatePowermetricsSamplers(nil); got != "" {
 		t.Errorf("nil input = %q, want empty", got)
+	}
+}
+
+func TestPowermetricsDurationBounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		params  string
+		wantErr bool
+		wantI   string
+	}{
+		{name: "omitted uses default", params: `{}`, wantI: "500"},
+		{name: "no params uses default", params: ``, wantI: "500"},
+		{name: "at max", params: fmt.Sprintf(`{"duration_ms":%d}`, maxPowermetricsDurationMS), wantI: fmt.Sprint(maxPowermetricsDurationMS)},
+		{name: "over max", params: fmt.Sprintf(`{"duration_ms":%d}`, maxPowermetricsDurationMS+1), wantErr: true},
+		{name: "huge", params: `{"duration_ms":2147483647}`, wantErr: true},
+		{name: "zero", params: `{"duration_ms":0}`, wantErr: true},
+		{name: "negative", params: `{"duration_ms":-5}`, wantErr: true},
+		{name: "wrong type", params: `{"duration_ms":"forever"}`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewDispatcher()
+			called := false
+			var gotArgs []string
+			RegisterAll(d, func(_ string, args ...string) ([]byte, error) {
+				called = true
+				gotArgs = append([]string(nil), args...)
+				return nil, nil
+			})
+			req := `{"jsonrpc":"2.0","id":1,"method":"helper.powermetrics.sample"`
+			if tc.params != "" {
+				req += `,"params":` + tc.params
+			}
+			resp := d.handle(501, []byte(req+`}`))
+			if tc.wantErr {
+				if resp.Error == nil {
+					t.Fatal("expected error")
+				}
+				if called {
+					t.Fatal("powermetrics should not run for rejected duration")
+				}
+				return
+			}
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %+v", resp.Error)
+			}
+			gotI := ""
+			for i, a := range gotArgs {
+				if a == "-i" && i+1 < len(gotArgs) {
+					gotI = gotArgs[i+1]
+				}
+			}
+			if gotI != tc.wantI {
+				t.Fatalf("-i = %q, want %q (args %v)", gotI, tc.wantI, gotArgs)
+			}
+		})
 	}
 }
