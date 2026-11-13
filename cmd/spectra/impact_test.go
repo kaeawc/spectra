@@ -208,12 +208,21 @@ func TestRunImpactSamplesLiveWithoutFromJSON(t *testing.T) {
 func TestRunImpactLiveUnsupportedExits3(t *testing.T) {
 	deps := testImpactDeps(emptyEnv, noAssertions)
 	deps.power.procs = fakeProcs(map[int]string{1: "launchd"})
-	deps.power.sampleRusage = func(context.Context, time.Duration, []int) ([]sysinfo.EnergyDelta, error) {
-		return nil, sysinfo.ErrRusageUnsupported
+	// Go through the real EnergySampler so a sampler that swallows the
+	// build-wide unsupported error (and returns an empty sample) is caught.
+	deps.power.sampleRusage = func(ctx context.Context, interval time.Duration, pids []int) ([]sysinfo.EnergyDelta, error) {
+		return sysinfo.EnergySampler{
+			Interval: interval,
+			Reader:   func(int) (sysinfo.ProcRusage, error) { return sysinfo.ProcRusage{}, sysinfo.ErrRusageUnsupported },
+			Sleeper:  func(context.Context, time.Duration) error { return nil },
+		}.Sample(ctx, pids)
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runImpactWithIO(nil, nil, &stdout, &stderr, deps); code != 3 {
-		t.Fatalf("exit = %d, want 3; stderr=%q", code, stderr.String())
+		t.Fatalf("exit = %d, want 3; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "per-pid energy unavailable") {
+		t.Fatalf("stdout=%q stderr=%q, want no table and the unavailable message", stdout.String(), stderr.String())
 	}
 }
 
