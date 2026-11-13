@@ -46,7 +46,7 @@ func matchNetworkProxyConfigured(s snapshot.Snapshot) []Finding {
 // ruleNetworkHostsOverride surfaces /etc/hosts entries that pin a real
 // hostname to a non-loopback address, which silently overrides DNS and can
 // redirect or break connectivity. The default macOS loopback/broadcast entries
-// are ignored.
+// and the stock Debian/Ubuntu IPv6 entries are ignored.
 func ruleNetworkHostsOverride() Rule {
 	return Rule{
 		ID:       "network.hosts_override",
@@ -62,7 +62,7 @@ func matchNetworkHostsOverride(s snapshot.Snapshot) []Finding {
 			continue
 		}
 		names := realHostNames(entry.Names)
-		if len(names) == 0 {
+		if len(names) == 0 || isStockIPv6HostsEntry(entry.IP, names) {
 			continue
 		}
 		findings = append(findings, Finding{
@@ -82,6 +82,38 @@ func isDefaultHostsIP(ip string) bool {
 	}
 	parsed := net.ParseIP(ip)
 	return parsed != nil && parsed.IsLoopback()
+}
+
+// stockIPv6Hosts are the IPv6 entries Debian, Ubuntu, and container runtimes
+// write into a stock /etc/hosts, keyed by canonical address. They name
+// well-known multicast/reserved addresses, not real hosts, so they override
+// nothing.
+var stockIPv6Hosts = map[string]map[string]bool{
+	"fe00::":  {"ip6-localnet": true},
+	"ff00::":  {"ip6-mcastprefix": true},
+	"ff02::1": {"ip6-allnodes": true},
+	"ff02::2": {"ip6-allrouters": true},
+	"ff02::3": {"ip6-allhosts": true},
+}
+
+// isStockIPv6HostsEntry reports whether every name on the line is the stock
+// alias for that address. A real hostname added to such a line still counts
+// as an override.
+func isStockIPv6HostsEntry(ip string, names []string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	aliases := stockIPv6Hosts[parsed.String()]
+	if aliases == nil {
+		return false
+	}
+	for _, n := range names {
+		if !aliases[strings.ToLower(n)] {
+			return false
+		}
+	}
+	return true
 }
 
 func realHostNames(names []string) []string {
