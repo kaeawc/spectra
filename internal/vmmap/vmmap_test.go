@@ -1,6 +1,10 @@
 package vmmap
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 const sampleSummary = `Process:         Foo [4012]
 Physical footprint:         1665K
@@ -77,6 +81,82 @@ func TestParseSizes(t *testing.T) {
 		if got := parseSize(in); got != want {
 			t.Errorf("parseSize(%q) = %d, want %d", in, got, want)
 		}
+	}
+}
+
+// Real `vmmap -summary` captures from macOS 26.6 (Finder, and Slack, whose
+// output starts with a malloc-zone warning).
+func parseFixture(t *testing.T, name string) Summary {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Parse(string(b), 0)
+}
+
+func findRegion(t *testing.T, rs []Region, typ string) Region {
+	t.Helper()
+	for _, r := range rs {
+		if r.Type == typ {
+			return r
+		}
+	}
+	t.Fatalf("region %q not parsed; got %+v", typ, rs)
+	return Region{}
+}
+
+func TestParseRealOutputKeepsColumnsForNumericTypeNames(t *testing.T) {
+	const k = int64(1 << 10)
+	m := float64(1 << 20) // a variable so fractional sizes truncate like parseSize
+	cases := []struct {
+		fixture string
+		want    Region
+	}{
+		// "Memory Tag 22  64.0M 16K 16K 0K": the trailing 22 is part of the
+		// name, not the virtual size.
+		{"finder_summary.txt", Region{Type: "Memory Tag 22", VirtualBytes: int64(64.0 * m), ResidentBytes: 16 * k, DirtyBytes: 16 * k}},
+		{"slack_summary.txt", Region{Type: "Memory Tag 253", VirtualBytes: 32 << 30, ResidentBytes: int64(71.5 * m), DirtyBytes: int64(36.4 * m)}},
+		{"slack_summary.txt", Region{Type: "Memory Tag 255 (reserved)", VirtualBytes: 320 * k}},
+		// Bare byte counts without a unit suffix.
+		{"finder_summary.txt", Region{Type: "__CTF", VirtualBytes: 824, ResidentBytes: 824}},
+		{"finder_summary.txt", Region{Type: "dyld private memory", VirtualBytes: 160 * k, ResidentBytes: 56, DirtyBytes: 56}},
+		// Trailing annotation after the REGION COUNT column.
+		{"finder_summary.txt", Region{Type: "MALLOC_SMALL", VirtualBytes: int64(74.3 * m), ResidentBytes: int64(28.7 * m), DirtyBytes: int64(27.5 * m)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture+"/"+tc.want.Type, func(t *testing.T) {
+			got := findRegion(t, parseFixture(t, tc.fixture).Regions, tc.want.Type)
+			if got != tc.want {
+				t.Errorf("got  %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseRealOutputRegionsSumToTotal(t *testing.T) {
+	for _, fixture := range []string{"finder_summary.txt", "slack_summary.txt"} {
+		t.Run(fixture, func(t *testing.T) {
+			s := parseFixture(t, fixture)
+			if s.FootprintBytes == 0 || s.TotalDirtyBytes == 0 {
+				t.Fatalf("footprint/total not parsed: %+v", s)
+			}
+			var dirty, swapped int64
+			for _, r := range s.Regions {
+				if r.Type == "" || r.Type == "TOTAL" {
+					t.Errorf("bad region type %q", r.Type)
+				}
+				dirty += r.DirtyBytes
+				swapped += r.SwappedBytes
+			}
+			// Rows are rounded to 0.1M, so allow 1% drift from TOTAL.
+			if diff := dirty - s.TotalDirtyBytes; diff > s.TotalDirtyBytes/100 || -diff > s.TotalDirtyBytes/100 {
+				t.Errorf("sum of region dirty = %d, TOTAL = %d", dirty, s.TotalDirtyBytes)
+			}
+			if swapped != s.TotalSwappedBytes {
+				t.Errorf("sum of region swapped = %d, TOTAL = %d", swapped, s.TotalSwappedBytes)
+			}
+		})
 	}
 }
 
