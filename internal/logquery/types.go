@@ -4,7 +4,18 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// checkOS reports an unsupported error when q targets a host without the
+// macOS unified log.
+func checkOS(q Query) error {
+	if hostos.Resolve(q.OS) != hostos.Darwin {
+		return hostos.Unsupported("unified log queries")
+	}
+	return nil
+}
 
 var (
 	ErrWindowTooLarge  = errors.New("log query window too large")
@@ -12,6 +23,9 @@ var (
 )
 
 type Query struct {
+	// OS selects the log backend; the zero value resolves to the host.
+	// Only the macOS unified log (`log show` / `log stream`) is implemented.
+	OS                   hostos.Kind
 	Predicate            string
 	Process              string
 	Subsystem            string

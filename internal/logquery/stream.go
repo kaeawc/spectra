@@ -12,6 +12,9 @@ func Stream(ctx context.Context, q Query) (<-chan LogEntry, <-chan error, error)
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := checkOS(q); err != nil {
+		return nil, nil, err
+	}
 	if q.Predicate != "" && !q.AllowUnsafePredicate {
 		return nil, nil, ErrUnsafePredicate
 	}
