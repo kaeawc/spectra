@@ -130,8 +130,7 @@ func HeapDump(pid int, destPath string, run CmdRunner) error {
 	if run == nil {
 		run = DefaultRunner
 	}
-	_, err := run("jcmd", fmt.Sprint(pid), "GC.heap_dump", destPath)
-	return err
+	return runJcmdExpect(run, "Heap dump file created", fmt.Sprint(pid), "GC.heap_dump", destPath)
 }
 
 // JFRStart starts a Java Flight Recorder recording named recordingName on pid.
@@ -140,8 +139,7 @@ func JFRStart(pid int, recordingName string, run CmdRunner) error {
 	if run == nil {
 		run = DefaultRunner
 	}
-	_, err := run("jcmd", fmt.Sprint(pid), "JFR.start", "name="+recordingName)
-	return err
+	return runJcmdExpect(run, "Started recording", fmt.Sprint(pid), "JFR.start", "name="+recordingName)
 }
 
 // JFRDump dumps the named JFR recording for pid to destPath.
@@ -150,9 +148,8 @@ func JFRDump(pid int, recordingName, destPath string, run CmdRunner) error {
 	if run == nil {
 		run = DefaultRunner
 	}
-	_, err := run("jcmd", fmt.Sprint(pid), "JFR.dump",
+	return runJcmdExpect(run, "Dumped recording", fmt.Sprint(pid), "JFR.dump",
 		"name="+recordingName, "filename="+destPath)
-	return err
 }
 
 // JFRStop stops and optionally dumps the named JFR recording.
@@ -166,8 +163,39 @@ func JFRStop(pid int, recordingName, destPath string, run CmdRunner) error {
 	if destPath != "" {
 		args = append(args, "filename="+destPath)
 	}
-	_, err := run("jcmd", args...)
-	return err
+	return runJcmdExpect(run, "Stopped recording", args...)
+}
+
+// runJcmdExpect runs jcmd and requires its confirmation line. jcmd exits 0
+// even when the diagnostic command itself fails ("Unable to create x.hprof:
+// File exists", "Could not stop recording", "Dump failed"), so the exit
+// status alone would report a heap dump or recording that was never written.
+func runJcmdExpect(run CmdRunner, confirmation string, args ...string) error {
+	out, err := run("jcmd", args...)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(out), confirmation) {
+		return fmt.Errorf("jcmd %s: %s", strings.Join(args[1:2], ""), jcmdMessage(out))
+	}
+	return nil
+}
+
+// jcmdMessage condenses jcmd output for an error: it drops the leading
+// "<pid>:" banner and joins the remaining non-empty lines.
+func jcmdMessage(out []byte) string {
+	var parts []string
+	for i, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || (i == 0 && strings.HasSuffix(line, ":")) {
+			continue
+		}
+		parts = append(parts, line)
+	}
+	if len(parts) == 0 {
+		return "no confirmation in output"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // countThreads counts parsed thread entries in `jcmd Thread.print` output.
