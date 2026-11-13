@@ -131,17 +131,45 @@ func (s *Server) Run() {
 			s.log.Error("jsonrpc read failed", "err", err)
 			return
 		}
-		var req Request
-		if err := json.Unmarshal(msg, &req); err != nil {
-			s.sendResponse(nil, &RPCError{Code: -32700, Message: "parse error: " + err.Error()})
-			continue
-		}
-		if req.JSONRPC != "2.0" {
-			s.sendResponse(req.ID, &RPCError{Code: -32600, Message: "invalid request"})
+		req, rpcErr := decodeRequest(msg)
+		if rpcErr != nil {
+			// Errors for messages whose id could not be read are still
+			// answered, with a null id, per JSON-RPC 2.0 section 5.
+			jsonrpc.SendResponse(s.writer, &s.mu, req.ID, nil, rpcErr)
 			continue
 		}
 		s.route(req)
 	}
+}
+
+// nullID is a request id the client sent as an explicit JSON null. It is
+// non-nil so sendResponse answers it, unlike a notification (id absent).
+var nullID = json.RawMessage("null")
+
+// decodeRequest parses one message. Invalid JSON is a parse error (-32700);
+// valid JSON that is not a request object (an array/batch, wrong field
+// types, wrong jsonrpc version) is an invalid request (-32600).
+func decodeRequest(msg []byte) (Request, *RPCError) {
+	var req Request
+	if err := json.Unmarshal(msg, &req); err != nil {
+		if !json.Valid(msg) {
+			return Request{}, &RPCError{Code: -32700, Message: "parse error: " + err.Error()}
+		}
+		return Request{}, &RPCError{Code: -32600, Message: "invalid request: expected a single JSON-RPC request object"}
+	}
+	if req.ID == nil {
+		var probe struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if json.Unmarshal(msg, &probe) == nil && len(probe.ID) > 0 {
+			req.ID = nullID
+		}
+	}
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		id := req.ID
+		return Request{ID: id}, &RPCError{Code: -32600, Message: "invalid request"}
+	}
+	return req, nil
 }
 
 func (s *Server) sendResponse(id interface{}, rpcErr *RPCError, result ...any) {
@@ -159,6 +187,8 @@ func (s *Server) route(req Request) {
 	switch req.Method {
 	case "initialize":
 		s.handleInitialize(req)
+	case "ping":
+		s.sendResponse(req.ID, nil, struct{}{})
 	case "tools/list":
 		s.handleToolsList(req)
 	case "tools/call":
