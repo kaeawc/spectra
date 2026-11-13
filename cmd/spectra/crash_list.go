@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/crashreport"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 // ipsTimeLayout is the timestamp format in an .ips header, e.g.
@@ -95,12 +96,32 @@ func findIPSFiles(dir string) ([]string, error) {
 	return out, nil
 }
 
+// defaultDiagnosticReportsDir is where macOS collects .ips reports, or "" when
+// there is none: off macOS, or when the home directory cannot be resolved.
 func defaultDiagnosticReportsDir() string {
+	if hostos.Current() != hostos.Darwin {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, "Library", "Logs", "DiagnosticReports")
+}
+
+// requireCrashDir reports, and returns false, when no reports directory is
+// known. A missing directory used to read as "0 reports", which on Linux
+// (no DiagnosticReports) looked like a clean machine.
+func requireCrashDir(cmd, dir string, stderr io.Writer) bool {
+	if dir != "" {
+		return true
+	}
+	if hostos.Current() != hostos.Darwin {
+		fmt.Fprintf(stderr, "spectra %s: %v; pass --dir with a directory of .ips reports\n", cmd, hostos.Unsupported("macOS DiagnosticReports"))
+		return false
+	}
+	fmt.Fprintf(stderr, "spectra %s: cannot resolve the home directory; pass --dir\n", cmd)
+	return false
 }
 
 func runCrashList(args []string, stdout, stderr io.Writer) int {
@@ -119,6 +140,9 @@ func runCrashList(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 0 {
 		fs.Usage()
 		return 2
+	}
+	if !requireCrashDir("crash list", *dir, stderr) {
+		return 1
 	}
 	return runCrashListWithDeps(*asJSON, *limit, stdout, stderr, defaultCrashListDeps(*dir))
 }

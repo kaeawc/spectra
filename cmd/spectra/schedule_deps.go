@@ -8,9 +8,13 @@ import (
 	"strconv"
 
 	"github.com/kaeawc/spectra/internal/fsutil"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 type scheduleAgentDeps struct {
+	// os selects the scheduler backend; the zero value resolves to the host.
+	// Only launchd (macOS) is implemented.
+	os         hostos.Kind
 	executable func() (string, error)
 	homeDir    func() (string, error)
 	uid        func() string

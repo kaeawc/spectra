@@ -54,6 +54,15 @@ On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc
 and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
 see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).
 
+Some commands read macOS-only sources. On Linux they exit `1` with an
+"unsupported on host OS (linux)" error instead of returning empty results:
+`spectra logs` (unified log), `spectra updates` (install log and history),
+`spectra schedule` (launchd; use cron or a systemd timer to run
+`spectra snapshot`), and `spectra crash` readiness. `spectra crash
+list|signatures|oom` need `--dir` with copied `.ips` reports there, while
+`crash inspect|resource|state` parse given files on any host.
+`spectra timeline` shows process starts only on Linux.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.

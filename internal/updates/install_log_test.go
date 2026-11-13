@@ -2,11 +2,23 @@ package updates
 
 import (
 	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+// TestQueryInstallLogUnsupportedOffDarwin: Linux has no /var/log/install.log,
+// which used to read as a silent "entries: 0".
+func TestQueryInstallLogUnsupportedOffDarwin(t *testing.T) {
+	result, err := QueryInstallLog(Query{OS: hostos.Linux})
+	if !errors.Is(err, hostos.ErrUnsupported) || len(result.Entries) != 0 {
+		t.Fatalf("result=%+v err=%v, want ErrUnsupported", result, err)
+	}
+}
 
 const preparedLine = `2026-05-01 10:00:00-05 mac softwareupdated[100]: SUOSUBackgroundDownloadEvaluator: <SUOSUMajorProduct: MSU_UPDATE_25F71_patch_26.5_major>(Title:macOS Tahoe 26.5 Version:26.5, Identifier:(null), IconSize:1052006, Size:123456789, Deferred:0) is already prepared`
 const previousLine = `2026-06-01 13:14:29-05 mac softwareupdated[93419]: Previous: SUMacControllerDescriptor(UUID:7B97 SU:macOS Sequoia 15.7.7 24G720 (Customer)(SU) SFR:macOS Sequoia 15.7.7 24G720 (Customer) BRAIN:24G720)`
@@ -55,6 +67,7 @@ func TestQueryInstallLogReadsGzip(t *testing.T) {
 	}
 	writeGzip(t, gzPath, currentLine+"\n")
 	result, err := QueryInstallLog(Query{
+		OS:       hostos.Darwin,
 		Since:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		MaxLines: 10,
 		Paths:    []string{plain, gzPath},

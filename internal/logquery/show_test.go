@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 const ndjsonFixture = `{"timestamp":"2026-06-01 13:27:26.997252-0500","messageType":"Info","eventType":"logEvent","processImagePath":"/usr/libexec/backupd","senderImagePath":"/usr/libexec/backupd","processID":123,"threadID":7,"eventMessage":"fs_snapshot_list failed","formatString":"%{public}s","activityIdentifier":9,"parentActivityIdentifier":8,"traceID":6}
@@ -19,7 +21,7 @@ func TestRunParsesNDJSONAndStderrClockWarning(t *testing.T) {
 		}
 		return []byte(ndjsonFixture), []byte("Wall Clock adjustment detected"), nil
 	})
-	result, err := Run(context.Background(), Query{Process: "backupd", Last: time.Minute, MaxRows: 10, Runner: run})
+	result, err := Run(context.Background(), Query{OS: hostos.Darwin, Process: "backupd", Last: time.Minute, MaxRows: 10, Runner: run})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +40,14 @@ func TestRunParsesNDJSONAndStderrClockWarning(t *testing.T) {
 }
 
 func TestRunRejectsLargeWindow(t *testing.T) {
-	_, err := Run(context.Background(), Query{Last: 30 * 24 * time.Hour})
+	_, err := Run(context.Background(), Query{OS: hostos.Darwin, Last: 30 * 24 * time.Hour})
 	if !errors.Is(err, ErrWindowTooLarge) {
 		t.Fatalf("err = %v, want ErrWindowTooLarge", err)
 	}
 }
 
 func TestRunRejectsUnsafePredicate(t *testing.T) {
-	_, err := Run(context.Background(), Query{Predicate: `eventMessage CONTAINS "x"`})
+	_, err := Run(context.Background(), Query{OS: hostos.Darwin, Predicate: `eventMessage CONTAINS "x"`})
 	if !errors.Is(err, ErrUnsafePredicate) {
 		t.Fatalf("err = %v, want ErrUnsafePredicate", err)
 	}
@@ -55,7 +57,7 @@ func TestRunHonorsMaxRows(t *testing.T) {
 	run := RunnerFunc(func(context.Context, string, ...string) ([]byte, []byte, error) {
 		return []byte(strings.Repeat(ndjsonFixture, 60)), nil, nil
 	})
-	result, err := Run(context.Background(), Query{Last: time.Minute, MaxRows: 100, Runner: run})
+	result, err := Run(context.Background(), Query{OS: hostos.Darwin, Last: time.Minute, MaxRows: 100, Runner: run})
 	if err != nil {
 		t.Fatal(err)
 	}

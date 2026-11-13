@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/crashready"
 	"github.com/kaeawc/spectra/internal/crashreport"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 func runCrash(args []string) int {
@@ -237,6 +238,12 @@ func runCrashReadiness(args []string, stdout, stderr io.Writer, inspect func(str
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	// The audit reads macOS-only state (kern.corefile, /cores, CrashReporter
+	// defaults, .app entitlements); elsewhere it would report nonsense.
+	if hostos.Current() != hostos.Darwin {
+		fmt.Fprintf(stderr, "spectra crash readiness: %v (crash inspect/resource/state and --dir reports still work)\n", hostos.Unsupported("crash-readiness audit"))
+		return 1
 	}
 
 	var app *crashready.AppDebug

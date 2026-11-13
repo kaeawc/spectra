@@ -2,12 +2,37 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/crashready"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+func TestRunCrashMacOnlyPartsUnsupportedOnLinux(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	for _, args := range [][]string{{}, {"readiness"}, {"list"}, {"signatures"}, {"oom"}} {
+		var out, errBuf bytes.Buffer
+		if code := runCrashWithIO(args, &out, &errBuf, nil); code != 1 {
+			t.Errorf("%v: exit = %d, want 1", args, code)
+		}
+		if !strings.Contains(errBuf.String(), "unsupported on host OS (linux)") {
+			t.Errorf("%v: stderr = %q", args, errBuf.String())
+		}
+	}
+	// An explicit --dir of copied reports is plain file parsing and still works.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.ips"), []byte(ipsReport("App", "2026-08-05 10:00:00.00 -0500", "EXC_BAD_ACCESS")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	if code := runCrashWithIO([]string{"list", "--dir", dir}, &out, &errBuf, nil); code != 0 || !strings.Contains(out.String(), "App") {
+		t.Fatalf("list --dir: exit=%d out=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+}
 
 func TestRunCrashUnknownSubcommand(t *testing.T) {
 	var out, errBuf bytes.Buffer

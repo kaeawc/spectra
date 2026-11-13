@@ -5,7 +5,26 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+func TestRunAndStreamUnsupportedOffDarwin(t *testing.T) {
+	called := false
+	run := RunnerFunc(func(context.Context, string, ...string) ([]byte, []byte, error) {
+		called = true
+		return nil, nil, nil
+	})
+	if _, err := Run(context.Background(), Query{OS: hostos.Linux, Runner: run}); !errors.Is(err, hostos.ErrUnsupported) {
+		t.Fatalf("Run err = %v, want ErrUnsupported", err)
+	}
+	if called {
+		t.Fatal("Run must not invoke /usr/bin/log off Darwin")
+	}
+	if _, _, err := Stream(context.Background(), Query{OS: hostos.Linux}); !errors.Is(err, hostos.ErrUnsupported) {
+		t.Fatalf("Stream err = %v, want ErrUnsupported", err)
+	}
+}
 
 func TestStreamReaderEmitsEntries(t *testing.T) {
 	entries, errs := StreamReader(context.Background(), strings.NewReader("Filtering the log data using process == kernel\n"+ndjsonFixture))
@@ -40,7 +59,7 @@ func TestBuildStreamArgs(t *testing.T) {
 }
 
 func TestStreamRejectsUnsafePredicate(t *testing.T) {
-	_, _, err := Stream(context.Background(), Query{Predicate: "eventMessage CONTAINS 'x'"})
+	_, _, err := Stream(context.Background(), Query{OS: hostos.Darwin, Predicate: "eventMessage CONTAINS 'x'"})
 	if !errors.Is(err, ErrUnsafePredicate) {
 		t.Fatalf("err = %v, want ErrUnsafePredicate", err)
 	}

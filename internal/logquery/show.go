@@ -23,6 +23,9 @@ func Run(ctx context.Context, q Query) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := checkOS(q); err != nil {
+		return Result{}, err
+	}
 	q = withDefaults(q)
 	if err := validate(q); err != nil {
 		return Result{}, err
