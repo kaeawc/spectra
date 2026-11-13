@@ -48,20 +48,24 @@ func runInspect(args []string) int {
 	}
 	sort.Strings(paths)
 
-	results := scanInspect(paths, detect.Options{ScanNetwork: *withNetwork})
+	results, failed := scanInspect(paths, detect.Options{ScanNetwork: *withNetwork})
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(results)
-		return 0
+	} else {
+		printTable(results, *verbose)
 	}
-	printTable(results, *verbose)
+	if failed > 0 {
+		return 1
+	}
 	return 0
 }
 
-// scanInspect runs detect.Detect across paths in parallel.
-func scanInspect(paths []string, opts detect.Options) []detect.Result {
+// scanInspect runs detect.Detect across paths in parallel, reporting each
+// failure on stderr. It returns the successful results and the failure count.
+func scanInspect(paths []string, opts detect.Options) ([]detect.Result, int) {
 	type indexed struct {
 		i   int
 		r   detect.Result
@@ -110,7 +114,7 @@ func scanInspect(paths []string, opts detect.Options) []detect.Result {
 			final = append(final, results[i])
 		}
 	}
-	return final
+	return final, len(paths) - len(final)
 }
 
 func scanAppDir(dir string) []string {
