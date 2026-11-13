@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,6 +40,71 @@ func TestNetworkHostsOverrideFlagsRealHostOnly(t *testing.T) {
 	}
 	if !strings.Contains(f[0].Message, "api.example.com") || f[0].Subject != "10.0.0.5" {
 		t.Fatalf("finding = %+v", f[0])
+	}
+}
+
+// hostsFileEntries parses an /etc/hosts fixture the way netstate does,
+// without its per-OS default filtering, so the rule alone must be correct.
+func hostsFileEntries(t *testing.T, path string) []netstate.HostsEntry {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []netstate.HostsEntry
+	for _, line := range strings.Split(string(data), "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		out = append(out, netstate.HostsEntry{IP: fields[0], Names: fields[1:]})
+	}
+	return out
+}
+
+func TestNetworkHostsOverrideIgnoresStockDebianHosts(t *testing.T) {
+	entries := hostsFileEntries(t, filepath.Join("testdata", "hosts-debian"))
+	if len(entries) != 7 {
+		t.Fatalf("fixture parsed to %d entries, want 7", len(entries))
+	}
+	if f := matchNetworkHostsOverride(netSnap(netstate.State{HostsOverrides: entries})); f != nil {
+		t.Fatalf("stock Debian /etc/hosts flagged as overrides: %+v", f)
+	}
+}
+
+func TestNetworkHostsOverrideFlagsRealNameOnStockIPv6Address(t *testing.T) {
+	entries := hostsFileEntries(t, filepath.Join("testdata", "hosts-debian"))
+	entries = append(entries,
+		netstate.HostsEntry{IP: "ff02::1", Names: []string{"ip6-allnodes", "api.example.com"}},
+		netstate.HostsEntry{IP: "2001:db8::5", Names: []string{"ip6-allnodes"}},
+		netstate.HostsEntry{IP: "10.0.0.5", Names: []string{"corp.internal"}},
+	)
+	f := matchNetworkHostsOverride(netSnap(netstate.State{HostsOverrides: entries}))
+	if len(f) != 3 || f[0].Subject != "ff02::1" || f[1].Subject != "2001:db8::5" || f[2].Subject != "10.0.0.5" {
+		t.Fatalf("findings = %+v, want the three non-stock entries", f)
+	}
+}
+
+func TestNetworkHostsOverrideCommentedEntries(t *testing.T) {
+	entries := hostsFileEntries(t, filepath.Join("testdata", "hosts-commented"))
+	f := matchNetworkHostsOverride(netSnap(netstate.State{HostsOverrides: entries}))
+	if len(f) != 1 || f[0].Subject != "10.0.0.5" || strings.Contains(f[0].Message, "#") || strings.Contains(f[0].Message, "outage") {
+		t.Fatalf("findings = %+v, want only the commented 10.0.0.5 override without its comment", f)
+	}
+}
+
+// TestNetworkHostsOverrideIgnoresCommentTokens covers snapshots whose
+// collector kept trailing comment words as names.
+func TestNetworkHostsOverrideIgnoresCommentTokens(t *testing.T) {
+	s := netSnap(netstate.State{HostsOverrides: []netstate.HostsEntry{
+		{IP: "ff02::1", Names: []string{"ip6-allnodes", "#", "IPv6", "multicast"}},
+		{IP: "ff02::2", Names: []string{"ip6-allrouters#routers"}},
+		{IP: "10.0.0.5", Names: []string{"api.example.com", "#pinned", "during", "outage"}},
+	}})
+	f := matchNetworkHostsOverride(s)
+	if len(f) != 1 || f[0].Subject != "10.0.0.5" || !strings.Contains(f[0].Message, "pins api.example.com to") {
+		t.Fatalf("findings = %+v", f)
 	}
 }
 

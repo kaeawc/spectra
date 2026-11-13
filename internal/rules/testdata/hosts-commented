@@ -1,0 +1,10 @@
+127.0.0.1	localhost # loopback
+127.0.1.1	debian.example	debian
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback # IPv6 loopback
+fe00::0 ip6-localnet #local net
+ff00::0 ip6-mcastprefix # multicast prefix
+ff02::1 ip6-allnodes # IPv6 multicast
+ff02::2 ip6-allrouters#all routers
+10.0.0.5 api.example.com # pinned during the outage
