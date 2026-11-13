@@ -78,11 +78,17 @@ func (s EnergySampler) Sample(ctx context.Context, pids []int) ([]EnergyDelta, e
 		sleep = defaultSleep
 	}
 
-	before := readAll(reader, pids)
+	before, err := readAll(reader, pids)
+	if err != nil {
+		return nil, err
+	}
 	if err := sleep(ctx, s.Interval); err != nil {
 		return nil, err
 	}
-	after := readAll(reader, pids)
+	after, err := readAll(reader, pids)
+	if err != nil {
+		return nil, err
+	}
 
 	deltas := make([]EnergyDelta, 0, len(before))
 	for pid, b := range before {
@@ -109,16 +115,22 @@ func defaultSleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func readAll(reader RusageReader, pids []int) map[int]ProcRusage {
+// readAll skips per-pid failures (EPERM, exited) but returns
+// ErrRusageUnsupported at once: it is build-wide, so every pid would fail and
+// the caller would otherwise see an empty, successful sample.
+func readAll(reader RusageReader, pids []int) (map[int]ProcRusage, error) {
 	out := make(map[int]ProcRusage, len(pids))
 	for _, pid := range pids {
 		r, err := reader(pid)
+		if errors.Is(err, ErrRusageUnsupported) {
+			return nil, err
+		}
 		if err != nil {
 			continue
 		}
 		out[pid] = r
 	}
-	return out
+	return out, nil
 }
 
 // sub returns a-b, clamped to zero. Counters can decrease across rusage

@@ -50,6 +50,11 @@ need to prompt.
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.
 
+`spectra impact [--interval 1s] [--top N] [--json]` (macOS only) samples per-pid
+rusage and ranks processes by a documented energy impact score with a
+per-component breakdown. `--from-json file|-` scores supplied records instead;
+see [Power and thermal inspection](../inspection/power-thermal.md#energy-impact-score).
+
 On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc`
 and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
 see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).

@@ -89,6 +89,28 @@ energy top users:
 JSON output preserves the same fields for daemon, snapshot, and remote
 fan-out consumers.
 
+## Energy impact score
+
+`spectra impact` ranks processes by a documented score with a per-component
+breakdown. By default it samples per-pid rusage over `--interval` (default
+`1s`) and shows the top 10 rows (`--top N` to change). This is the same
+source `spectra power --top` and the MCP `power` `impact` op use.
+
+```bash
+spectra impact
+spectra impact --interval 5s --top 20 --json
+spectra impact --from-json deltas.json   # or --from-json - for stdin
+spectra impact --formula
+```
+
+`--from-json` scores a JSON array of records instead of sampling, and shows
+every row unless `--top` is set. Record keys are `pid`, `command`,
+`interval_ns`, `billed_energy_j`, `interrupt_wakeups` (a count over the
+interval), `gpu_time_ns`, and `disk_bytes`. `interrupt_wakeups_per_sec` is
+also accepted as a rate. `--formula` prints the formula and the active
+weights, which `SPECTRA_IMPACT_WEIGHTS` can override (for example
+`energy=120,wake=0.002`).
+
 ## Related docs
 
 - [live-data-sources.md](live-data-sources.md) lists the cost and privilege

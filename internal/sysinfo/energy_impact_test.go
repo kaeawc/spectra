@@ -1,6 +1,7 @@
 package sysinfo
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -184,6 +185,38 @@ func TestLoadWeightsFromEnv(t *testing.T) {
 	}
 	if w.BilledEnergyPerJoule != 150 {
 		t.Fatalf("BilledEnergyPerJoule = %g, want 150", w.BilledEnergyPerJoule)
+	}
+}
+
+func TestImpactInputUnmarshalWakeupKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want uint64
+	}{
+		{"count", `{"pid":1,"interval_ns":2000000000,"interrupt_wakeups":300}`, 300},
+		{"rate over interval", `{"pid":1,"interval_ns":2000000000,"interrupt_wakeups_per_sec":150}`, 300},
+		{"rate without interval", `{"pid":1,"interrupt_wakeups_per_sec":150}`, 150},
+		{"count wins over rate", `{"pid":1,"interrupt_wakeups":7,"interrupt_wakeups_per_sec":150}`, 7},
+		{"explicit zero count wins over rate", `{"pid":1,"interrupt_wakeups":0,"interrupt_wakeups_per_sec":5000}`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var in ImpactInput
+			if err := json.Unmarshal([]byte(tc.raw), &in); err != nil {
+				t.Fatal(err)
+			}
+			if in.InterruptWakeups != tc.want || in.PID != 1 {
+				t.Fatalf("got %+v, want InterruptWakeups=%d", in, tc.want)
+			}
+		})
+	}
+}
+
+func TestImpactFormulaHelpNamesInputKey(t *testing.T) {
+	help := ImpactFormulaHelp(DefaultWeights)
+	if strings.Contains(help, "interrupt_wakeups_per_sec") || !strings.Contains(help, "interrupt_wakeups") {
+		t.Fatalf("help should name the interrupt_wakeups input key:\n%s", help)
 	}
 }
 

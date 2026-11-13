@@ -59,6 +59,20 @@ func TestEnergySamplerZeroDelta(t *testing.T) {
 	}
 }
 
+func TestEnergySamplerUnsupportedPropagates(t *testing.T) {
+	reader := func(int) (ProcRusage, error) { return ProcRusage{}, ErrRusageUnsupported }
+	slept := false
+	sleeper := func(context.Context, time.Duration) error { slept = true; return nil }
+	s := EnergySampler{Interval: time.Second, Reader: reader, Sleeper: sleeper}
+	deltas, err := s.Sample(context.Background(), []int{1, 2})
+	if !errors.Is(err, ErrRusageUnsupported) || deltas != nil {
+		t.Fatalf("deltas, err = %v, %v; want nil, ErrRusageUnsupported", deltas, err)
+	}
+	if slept {
+		t.Fatal("sampler waited the interval before reporting unsupported")
+	}
+}
+
 func TestEnergySamplerEPermSkipped(t *testing.T) {
 	reader := func(pid int) (ProcRusage, error) {
 		if pid == 1 {

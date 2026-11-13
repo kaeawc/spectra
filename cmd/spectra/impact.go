@@ -6,33 +6,50 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
 
+// impactDeps injects env, assertion collection, and live rusage sampling.
+type impactDeps struct {
+	getenv     func(string) string
+	assertions func() []sysinfo.PowerAssertion
+	power      powerDeps
+}
+
+// defaultImpactTop bounds the live table; a host has hundreds of pids.
+const defaultImpactTop = 10
+
 func runImpact(args []string) int {
-	return runImpactWithIO(args, os.Stdin, os.Stdout, os.Stderr, os.Getenv, defaultAssertions)
+	return runImpactWithIO(args, os.Stdin, os.Stdout, os.Stderr, impactDeps{
+		getenv:     os.Getenv,
+		assertions: defaultAssertions,
+		power:      defaultPowerDeps(),
+	})
 }
 
 func defaultAssertions() []sysinfo.PowerAssertion {
 	return sysinfo.CollectAssertions(sysinfo.DefaultRunner)
 }
 
-func runImpactWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string, collectAssertions func() []sysinfo.PowerAssertion) int {
+func runImpactWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer, deps impactDeps) int {
 	fs := flag.NewFlagSet("spectra impact", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human table")
-	fromJSON := fs.String("from-json", "", "Read a JSON array of ImpactInput records (or '-' for stdin)")
+	fromJSON := fs.String("from-json", "", "Score a JSON array of ImpactInput records (or '-' for stdin) instead of sampling live")
+	interval := fs.Duration("interval", time.Second, "Live sampling window (ignored with --from-json)")
+	top := fs.Int("top", 0, "Show the N highest-impact pids (default 10 live, all rows with --from-json)")
 	formula := fs.Bool("formula", false, "Print the impact formula and active weights, then exit")
 
-	weights, err := sysinfo.LoadWeights(getenv)
+	weights, err := sysinfo.LoadWeights(deps.getenv)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: spectra impact [--json] [--from-json file|-] [--formula]")
+		fmt.Fprintln(stderr, "Usage: spectra impact [--json] [--interval d] [--top n] [--from-json file|-] [--formula]")
 		fmt.Fprintln(stderr)
 		fs.PrintDefaults()
 		fmt.Fprintln(stderr)
@@ -47,13 +64,15 @@ func runImpactWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer, g
 		return 0
 	}
 
-	inputs, err := readImpactInputs(*fromJSON, stdin)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	inputs, limit, code := collectImpactInputs(stdin, stderr, deps, *fromJSON, *interval, *top)
+	if code != 0 {
+		return code
 	}
 
-	rows := sysinfo.ScoreImpacts(inputs, collectAssertions(), weights)
+	rows := sysinfo.ScoreImpacts(inputs, deps.assertions(), weights)
+	if limit > 0 && limit < len(rows) {
+		rows = rows[:limit]
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -66,10 +85,48 @@ func runImpactWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer, g
 	return 0
 }
 
-func readImpactInputs(path string, stdin io.Reader) ([]sysinfo.ImpactInput, error) {
-	if path == "" {
-		return nil, nil
+// collectImpactInputs reads --from-json when given and otherwise samples
+// live, returning the row limit to apply and a non-zero exit code on failure.
+func collectImpactInputs(stdin io.Reader, stderr io.Writer, deps impactDeps, fromJSON string, interval time.Duration, top int) ([]sysinfo.ImpactInput, int, int) {
+	if interval <= 0 || top < 0 {
+		fmt.Fprintln(stderr, "impact: --interval must be > 0 and --top must be >= 0")
+		return nil, 0, 2
 	}
+	if fromJSON != "" {
+		inputs, code := fileImpactInputs(stderr, fromJSON, stdin)
+		return inputs, top, code
+	}
+	if top == 0 {
+		top = defaultImpactTop
+	}
+	inputs, code := liveImpactInputs(stderr, deps.power, interval)
+	return inputs, top, code
+}
+
+// liveImpactInputs samples per-pid rusage over interval, the same source
+// `spectra power --top` and the MCP power impact op use.
+func liveImpactInputs(stderr io.Writer, deps powerDeps, interval time.Duration) ([]sysinfo.ImpactInput, int) {
+	deltas, code, ok := collectRusageDeltas(stderr, deps, interval)
+	if !ok {
+		return nil, code
+	}
+	inputs := make([]sysinfo.ImpactInput, 0, len(deltas))
+	for _, d := range deltas {
+		inputs = append(inputs, sysinfo.FromRusage(d))
+	}
+	return inputs, 0
+}
+
+func fileImpactInputs(stderr io.Writer, path string, stdin io.Reader) ([]sysinfo.ImpactInput, int) {
+	inputs, err := readImpactInputs(path, stdin)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return nil, 1
+	}
+	return inputs, 0
+}
+
+func readImpactInputs(path string, stdin io.Reader) ([]sysinfo.ImpactInput, error) {
 	var src io.Reader
 	if path == "-" {
 		src = stdin
