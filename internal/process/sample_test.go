@@ -43,9 +43,83 @@ type fakeCommandCall struct {
 	args []string
 }
 
+// Run mimics sample(1) -file: the report goes to the named file, not stdout.
 func (r *fakeCommandRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	r.calls = append(r.calls, fakeCommandCall{name: name, args: append([]string(nil), args...)})
-	return r.output, r.err
+	if path := fileArg(args); path != "" && r.output != nil {
+		if err := os.WriteFile(path, r.output, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	return []byte("Sampling process...\n"), r.err
+}
+
+func fileArg(args []string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-file" {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// sampleArgs strips the per-run "-file <temp>" suffix.
+func sampleArgs(t *testing.T, args []string) []string {
+	t.Helper()
+	n := len(args)
+	if n < 2 || args[n-2] != "-file" {
+		t.Fatalf("args = %v, want trailing -file <path>", args)
+	}
+	return args[:n-2]
+}
+
+func TestRunSampleReportRemovesTempFile(t *testing.T) {
+	dir := t.TempDir()
+	runner := &fakeCommandRunner{output: []byte("Call graph:\n")}
+	sampler := NewSampler(runner, nil)
+	sampler.tempDir = dir
+
+	res, err := sampler.Capture(context.Background(), SampleOptions{PID: 42})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if res.Output != "Call graph:\n" {
+		t.Errorf("Output = %q, want the -file report", res.Output)
+	}
+	assertDirEmpty(t, dir)
+}
+
+func TestRunSampleReportRemovesTempFileOnError(t *testing.T) {
+	dir := t.TempDir()
+	runner := &fakeCommandRunner{output: []byte("partial"), err: errors.New("killed")}
+	sampler := NewSampler(runner, nil)
+	sampler.tempDir = dir
+
+	if _, err := sampler.Capture(context.Background(), SampleOptions{PID: 42}); err == nil {
+		t.Fatal("Capture succeeded, want error")
+	}
+	assertDirEmpty(t, dir)
+}
+
+func TestRunSampleReportReturnsStdoutOnError(t *testing.T) {
+	run := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("sample: requires root"), errors.New("exit status 1")
+	}
+	_, stdout, err := RunSampleReport(context.Background(), t.TempDir(), run, "1", "1")
+	if err == nil || string(stdout) != "sample: requires root" {
+		t.Fatalf("stdout, err = %q, %v", stdout, err)
+	}
+}
+
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		t.Errorf("leftover file %s", e.Name())
+	}
 }
 
 type fakeSampleStore struct {
@@ -89,7 +163,7 @@ func TestSamplerCaptureRunsSampleCommand(t *testing.T) {
 		t.Fatalf("runner calls = %d, want 1", len(runner.calls))
 	}
 	wantArgs := []string{"4012", "5", "20"}
-	if runner.calls[0].name != "sample" || !reflect.DeepEqual(runner.calls[0].args, wantArgs) {
+	if runner.calls[0].name != "sample" || !reflect.DeepEqual(sampleArgs(t, runner.calls[0].args), wantArgs) {
 		t.Errorf("runner call = %+v, want sample %v", runner.calls[0], wantArgs)
 	}
 	if len(store.samples) != 1 {
@@ -109,7 +183,7 @@ func TestSamplerCaptureDefaults(t *testing.T) {
 		t.Fatalf("Capture: %v", err)
 	}
 	wantArgs := []string{"99", "1", "10"}
-	if !reflect.DeepEqual(runner.calls[0].args, wantArgs) {
+	if !reflect.DeepEqual(sampleArgs(t, runner.calls[0].args), wantArgs) {
 		t.Errorf("runner args = %v, want %v", runner.calls[0].args, wantArgs)
 	}
 }

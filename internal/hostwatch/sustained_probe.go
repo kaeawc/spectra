@@ -12,6 +12,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
+	"github.com/kaeawc/spectra/internal/process"
 )
 
 const (
@@ -212,8 +213,11 @@ func collectSampleSummary(ctx context.Context, runner proc.Runner, kind hostos.K
 	ctx, cancel := context.WithTimeout(ctx, sustainedSampleTimeout)
 	defer cancel()
 	if kind == hostos.Darwin {
-		if out, err := proc.Output(ctx, runner, "sample", strconv.Itoa(pid), "1"); err == nil {
-			if text = summarizeDarwinSample(string(out)); text != "" {
+		run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return proc.Output(ctx, runner, name, args...)
+		}
+		if report, _, err := process.RunSampleReport(ctx, "", run, strconv.Itoa(pid), "1"); err == nil {
+			if text = summarizeDarwinSample(string(report)); text != "" {
 				return text, true
 			}
 		}

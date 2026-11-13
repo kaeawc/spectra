@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -59,6 +60,8 @@ type Sampler struct {
 	runner CommandRunner
 	store  SampleStore
 	now    func() time.Time
+	// tempDir holds sample's report file; "" means os.TempDir().
+	tempDir string
 }
 
 // NewSampler constructs a process sampler. Nil runner uses ExecRunner.
@@ -100,7 +103,7 @@ func (s *Sampler) Capture(ctx context.Context, opts SampleOptions) (SampleResult
 	if durationSeconds <= 0 {
 		durationSeconds = 1
 	}
-	out, err := s.runner.Run(runCtx, "sample",
+	out, _, err := RunSampleReport(runCtx, s.tempDir, s.runner.Run,
 		strconv.Itoa(opts.PID),
 		strconv.Itoa(durationSeconds),
 		strconv.Itoa(opts.IntervalMS),
@@ -121,4 +124,31 @@ func (s *Sampler) Capture(ctx context.Context, opts SampleOptions) (SampleResult
 		}
 	}
 	return result, nil
+}
+
+// RunSampleReport runs `sample <args...> -file <temp>` through run and
+// returns the report read back from that file, plus whatever sample printed
+// to stdout (its progress lines, useful in error messages). The temp file is
+// always removed. Without -file, sample also writes the report to
+// /tmp/<name>_<date>_<rand>.sample.txt and nothing ever cleans it up.
+func RunSampleReport(ctx context.Context, dir string, run func(ctx context.Context, name string, args ...string) ([]byte, error), args ...string) (report, stdout []byte, err error) {
+	f, err := os.CreateTemp(dir, "spectra-*.sample.txt")
+	if err != nil {
+		return nil, nil, fmt.Errorf("sample report file: %w", err)
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	if err := f.Close(); err != nil {
+		return nil, nil, fmt.Errorf("sample report file: %w", err)
+	}
+	full := append(append([]string(nil), args...), "-file", path)
+	stdout, err = run(ctx, "sample", full...)
+	if err != nil {
+		return nil, stdout, err
+	}
+	report, err = os.ReadFile(path)
+	if err != nil {
+		return nil, stdout, fmt.Errorf("read sample report: %w", err)
+	}
+	return report, stdout, nil
 }

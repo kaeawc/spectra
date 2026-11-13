@@ -94,7 +94,7 @@ func (r *psRunner) Run(_ context.Context, cmd proc.Cmd) (proc.Result, error) {
 		etime := fmt.Sprintf("%02d:%02d:%02d", age/3600, age/60%60, age%60)
 		return proc.Result{Stdout: []byte(fmt.Sprintf("1 0 0.0 9-00:00:00 /sbin/launchd\n412 1 %.1f %s /usr/libexec/diagnosticd\n600 1 99.0 01:00:00 /usr/bin/backupd\n", r.cpu, etime))}, nil
 	case "sample":
-		return proc.Result{Stdout: []byte("Sort by top of stack, same collapsing path:\n  __ulock_wait 1000\n\n")}, nil
+		return writeSampleReport(cmd.Args, "Sort by top of stack, same collapsing path:\n  __ulock_wait 1000\n\n")
 	}
 	return proc.Result{ExitCode: -1}, fmt.Errorf("unexpected %s", cmd.Name)
 }
