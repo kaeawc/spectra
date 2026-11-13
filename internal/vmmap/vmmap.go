@@ -42,6 +42,7 @@ var (
 func Parse(out string, topN int) Summary {
 	var s Summary
 	inTable := false
+	valueCols := 0
 
 	for _, line := range strings.Split(out, "\n") {
 		if m := footprintPeakLine.FindStringSubmatch(line); m != nil {
@@ -59,7 +60,13 @@ func Parse(out string, topN int) Summary {
 		if !inTable {
 			continue
 		}
-		name, sizes, ok := parseRegionRow(line)
+		if strings.HasPrefix(line, "===") {
+			// The separator has one run of '=' per column: the type name, then
+			// one per value column.
+			valueCols = len(strings.Fields(line)) - 1
+			continue
+		}
+		name, sizes, ok := parseRegionRow(line, valueCols)
 		if !ok {
 			continue
 		}
@@ -74,40 +81,54 @@ func Parse(out string, topN int) Summary {
 		})
 	}
 
-	sort.SliceStable(s.Regions, func(i, j int) bool {
-		if s.Regions[i].DirtyBytes != s.Regions[j].DirtyBytes {
-			return s.Regions[i].DirtyBytes > s.Regions[j].DirtyBytes
-		}
-		return s.Regions[i].Type < s.Regions[j].Type
-	})
-	if topN > 0 && len(s.Regions) > topN {
-		s.Regions = s.Regions[:topN]
-	}
+	s.Regions = rankRegions(s.Regions, topN)
 	return s
 }
 
+// rankRegions orders regions heaviest-by-dirty first and keeps the top N
+// (0 keeps all).
+func rankRegions(rs []Region, topN int) []Region {
+	sort.SliceStable(rs, func(i, j int) bool {
+		if rs[i].DirtyBytes != rs[j].DirtyBytes {
+			return rs[i].DirtyBytes > rs[j].DirtyBytes
+		}
+		return rs[i].Type < rs[j].Type
+	})
+	if topN > 0 && len(rs) > topN {
+		return rs[:topN]
+	}
+	return rs
+}
+
 // parseRegionRow splits a region-table row into its type name and the first
-// four size columns (virtual, resident, dirty, swapped). The type name may
-// contain spaces, so the split point is the first run of four consecutive size
-// tokens.
-func parseRegionRow(line string) (name string, sizes [4]int64, ok bool) {
-	fields := strings.Fields(line)
-	if len(fields) < 5 {
+// four of its valueCols size columns (virtual, resident, dirty, swapped).
+// Values are anchored from the right because type names can end in a number
+// that looks like a bare byte count ("Memory Tag 22"); a left-to-right scan
+// for size tokens would start the columns one field early. Trailing
+// non-size text is an annotation ("see MALLOC ZONE table below") and is
+// dropped first.
+func parseRegionRow(line string, valueCols int) (name string, sizes [4]int64, ok bool) {
+	if valueCols < len(sizes) {
 		return "", sizes, false
 	}
-	for i := 0; i+4 <= len(fields); i++ {
-		if i == 0 {
-			continue // a row always has a name before its numbers
-		}
-		if isSize(fields[i]) && isSize(fields[i+1]) && isSize(fields[i+2]) && isSize(fields[i+3]) {
-			name = strings.Join(fields[:i], " ")
-			for j := 0; j < 4; j++ {
-				sizes[j] = parseSize(fields[i+j])
-			}
-			return name, sizes, true
+	fields := strings.Fields(line)
+	end := len(fields)
+	for end > 0 && !isSize(fields[end-1]) {
+		end--
+	}
+	start := end - valueCols
+	if start < 1 {
+		return "", sizes, false // a row always has a name before its numbers
+	}
+	for _, f := range fields[start:end] {
+		if !isSize(f) {
+			return "", sizes, false
 		}
 	}
-	return "", sizes, false
+	for j := range sizes {
+		sizes[j] = parseSize(fields[start+j])
+	}
+	return strings.Join(fields[:start], " "), sizes, true
 }
 
 func isSize(s string) bool { return sizeToken.MatchString(s) }
