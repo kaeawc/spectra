@@ -121,6 +121,23 @@ func TestHostsDefaultsLinuxStockDebian(t *testing.T) {
 	}
 }
 
+// TestHostsDefaultsLinuxKeepsRealNameOnStockAddress: a well-known IPv6
+// address is only stock with its stock alias; a real hostname on it is an
+// override the snapshot must keep for the hosts_override rule.
+func TestHostsDefaultsLinuxKeepsRealNameOnStockAddress(t *testing.T) {
+	content := "127.0.0.1\tlocalhost\n::1     localhost ip6-localhost ip6-loopback\n" +
+		"fe00::0 ip6-localnet\nff00::0 ip6-mcastprefix\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters\n" +
+		"ff02::3 api.example.com\nff02::1 ip6-allnodes corp.internal\n"
+	path := filepath.Join(t.TempDir(), "hosts")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := readHostsOverrides(path, hostsDefaultsLinux)
+	if len(entries) != 2 || entries[0].IP != "ff02::3" || entries[0].Names[0] != "api.example.com" || entries[1].IP != "ff02::1" {
+		t.Errorf("entries = %+v, want the ff02::3 api.example.com and ff02::1 corp.internal overrides", entries)
+	}
+}
+
 func TestProxyFromEnv(t *testing.T) {
 	// Clear every variant so ambient proxy settings on the host (CI sandboxes,
 	// corporate machines) cannot shadow the values under test.

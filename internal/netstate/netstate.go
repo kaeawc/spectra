@@ -9,6 +9,7 @@ package netstate
 import (
 	"bufio"
 	"encoding/csv"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -310,18 +311,54 @@ func scutilKV(out string) map[string]string {
 	return m
 }
 
+// hostsDefaults lists stock /etc/hosts addresses, keyed by canonical IP. A
+// nil alias list skips the line whatever it names; a non-nil list skips it
+// only when every name on it is one of those stock aliases, so a real
+// hostname pinned to a well-known address is still reported.
+type hostsDefaults map[string][]string
+
 // hostsDefaultsDarwin are the stock macOS /etc/hosts IPs.
-var hostsDefaultsDarwin = map[string]bool{
-	"127.0.0.1":       true,
-	"255.255.255.255": true,
-	"::1":             true,
-	"fe80::1%lo0":     true,
+var hostsDefaultsDarwin = hostsDefaults{
+	"127.0.0.1":       nil,
+	"255.255.255.255": nil,
+	"::1":             nil,
+	"fe80::1%lo0":     nil,
+}
+
+// isDefault reports whether the hosts line ip/names is a stock entry.
+func (d hostsDefaults) isDefault(ip string, names []string) bool {
+	key := ip
+	if parsed := net.ParseIP(ip); parsed != nil {
+		key = parsed.String()
+	}
+	aliases, ok := d[key]
+	if !ok {
+		return false
+	}
+	if aliases == nil {
+		return true
+	}
+	for _, n := range names {
+		if !containsFold(aliases, n) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsFold(list []string, s string) bool {
+	for _, v := range list {
+		if strings.EqualFold(v, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // readHostsOverrides reads /etc/hosts and returns non-default, non-comment
 // lines. hostsPath and defaults are parameterised for testing and per-OS
 // default filtering.
-func readHostsOverrides(hostsPath string, defaults map[string]bool) []HostsEntry {
+func readHostsOverrides(hostsPath string, defaults hostsDefaults) []HostsEntry {
 	f, err := os.Open(hostsPath)
 	if err != nil {
 		return nil
@@ -340,7 +377,7 @@ func readHostsOverrides(hostsPath string, defaults map[string]bool) []HostsEntry
 			continue
 		}
 		ip := fields[0]
-		if defaults[ip] {
+		if defaults.isDefault(ip, fields[1:]) {
 			continue
 		}
 		entries = append(entries, HostsEntry{IP: ip, Names: fields[1:]})

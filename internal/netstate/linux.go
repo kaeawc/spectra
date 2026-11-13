@@ -110,17 +110,18 @@ func proxyFromEnv() ProxyConfig {
 	}
 }
 
-// hostsDefaultsLinux are the stock /etc/hosts IPs on common distributions,
-// excluded from the "overrides" list.
-var hostsDefaultsLinux = map[string]bool{
-	"127.0.0.1": true,
-	"127.0.1.1": true, // Debian/Ubuntu hostname mapping
-	"::1":       true,
-	"ff02::1":   true,
-	"ff02::2":   true,
-	"fe00::0":   true,
-	"ff00::0":   true,
-	"ff02::3":   true,
+// hostsDefaultsLinux are the stock /etc/hosts entries on common
+// distributions, excluded from the "overrides" list. The well-known IPv6
+// addresses are only stock with their stock aliases.
+var hostsDefaultsLinux = hostsDefaults{
+	"127.0.0.1": nil,
+	"127.0.1.1": nil, // Debian/Ubuntu hostname mapping
+	"::1":       nil,
+	"fe00::":    {"ip6-localnet"},
+	"ff00::":    {"ip6-mcastprefix"},
+	"ff02::1":   {"ip6-allnodes"},
+	"ff02::2":   {"ip6-allrouters"},
+	"ff02::3":   {"ip6-allhosts"},
 }
 
 func collectLinuxListeners(run CmdRunner) []ListeningPort {
