@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -551,6 +552,45 @@ func TestListIssuesFilterByStatus(t *testing.T) {
 	ackOnes, _ := db.ListIssues(ctx, "TEST-UUID-1234", IssueAcknowledged)
 	if len(ackOnes) != 1 {
 		t.Errorf("expected 1 acknowledged issue, got %d", len(ackOnes))
+	}
+}
+
+func TestUpdateIssueStatusRejectsInvalidStatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	snapID := seedSnapshot(t, db)
+	ids, err := db.UpsertIssues(ctx, "TEST-UUID-1234", snapID, []FindingInput{
+		{RuleID: "rule-A", Subject: "S1", Severity: "medium", Message: "m1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []IssueStatus{"", "resolved", "OPEN", "open "} {
+		err := db.UpdateIssueStatus(ctx, ids[0], bad)
+		if !errors.Is(err, ErrInvalidIssueStatus) {
+			t.Errorf("status %q: err = %v, want ErrInvalidIssueStatus", bad, err)
+		}
+	}
+	rows, _ := db.ListIssues(ctx, "TEST-UUID-1234", IssueOpen)
+	if len(rows) != 1 {
+		t.Fatalf("issue left open state after rejected updates: %d open rows", len(rows))
+	}
+}
+
+func TestParseIssueStatus(t *testing.T) {
+	for _, v := range IssueStatuses() {
+		got, err := ParseIssueStatus(string(v))
+		if err != nil || got != v {
+			t.Errorf("ParseIssueStatus(%q) = %q, %v", v, got, err)
+		}
+	}
+	_, err := ParseIssueStatus("resolved")
+	if !errors.Is(err, ErrInvalidIssueStatus) {
+		t.Fatalf("err = %v, want ErrInvalidIssueStatus", err)
+	}
+	if !strings.Contains(err.Error(), "valid: open, acknowledged, dismissed, fixed, closed") {
+		t.Errorf("error %q does not list valid statuses", err)
 	}
 }
 

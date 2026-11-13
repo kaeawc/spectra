@@ -1724,6 +1724,38 @@ const (
 	IssueClosed       IssueStatus = "closed"
 )
 
+// ErrInvalidIssueStatus is returned when a status is not one of IssueStatuses.
+var ErrInvalidIssueStatus = errors.New("store: invalid issue status")
+
+// IssueStatuses returns every valid IssueStatus in lifecycle order.
+func IssueStatuses() []IssueStatus {
+	return []IssueStatus{IssueOpen, IssueAcknowledged, IssueDismissed, IssueFixed, IssueClosed}
+}
+
+// Valid reports whether s is one of IssueStatuses.
+func (s IssueStatus) Valid() bool {
+	for _, v := range IssueStatuses() {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseIssueStatus converts s to an IssueStatus. The error wraps
+// ErrInvalidIssueStatus and lists the valid values.
+func ParseIssueStatus(s string) (IssueStatus, error) {
+	st := IssueStatus(s)
+	if st.Valid() {
+		return st, nil
+	}
+	names := make([]string, 0, len(IssueStatuses()))
+	for _, v := range IssueStatuses() {
+		names = append(names, string(v))
+	}
+	return "", fmt.Errorf("%w %q (valid: %s)", ErrInvalidIssueStatus, s, strings.Join(names, ", "))
+}
+
 // IssueRow is one row from the issues table.
 type IssueRow struct {
 	ID                  string
@@ -1856,6 +1888,9 @@ func (s *DB) ListIssues(ctx context.Context, machineUUID string, status IssueSta
 
 // UpdateIssueStatus transitions an issue to a new status.
 func (s *DB) UpdateIssueStatus(ctx context.Context, id string, status IssueStatus) error {
+	if _, err := ParseIssueStatus(string(status)); err != nil {
+		return err
+	}
 	now := s.nowString()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE issues SET status=?, updated_at=? WHERE id=?`,

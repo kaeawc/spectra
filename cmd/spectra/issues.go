@@ -107,6 +107,11 @@ func runIssuesUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: spectra issues update --status <status> <issue-id>")
 		return 2
 	}
+	newStatus, err := store.ParseIssueStatus(*status)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "spectra issues update: %v\n", err)
+		return 2
+	}
 
 	db, _, err := openIssuesDB()
 	if err != nil {
@@ -117,11 +122,11 @@ func runIssuesUpdate(args []string) int {
 
 	id := fs.Arg(0)
 	svc := issueflow.Service{Store: db}
-	if err := svc.Update(context.Background(), id, store.IssueStatus(*status)); err != nil {
+	if err := svc.Update(context.Background(), id, newStatus); err != nil {
 		fmt.Fprintf(os.Stderr, "update %q: %v\n", id, err)
 		return 1
 	}
-	fmt.Printf("issue %s → %s\n", id, *status)
+	fmt.Printf("issue %s → %s\n", id, newStatus)
 	return 0
 }
 
