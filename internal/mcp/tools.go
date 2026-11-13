@@ -1763,7 +1763,7 @@ func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
 	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).CombinedOutput()
 	}
-	report, out, err := process.RunSampleReport(ctx, "", run, fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS))
+	report, out, err := process.RunSampleReport(ctx, nil, run, fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS))
 	if err != nil {
 		return "", fmt.Errorf("sample pid %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}

@@ -216,7 +216,7 @@ func collectSampleSummary(ctx context.Context, runner proc.Runner, kind hostos.K
 		run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return proc.Output(ctx, runner, name, args...)
 		}
-		if report, _, err := process.RunSampleReport(ctx, "", run, strconv.Itoa(pid), "1"); err == nil {
+		if report, _, err := process.RunSampleReport(ctx, nil, run, strconv.Itoa(pid), "1"); err == nil {
 			if text = summarizeDarwinSample(string(report)); text != "" {
 				return text, true
 			}
