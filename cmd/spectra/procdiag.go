@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -79,12 +82,25 @@ func exitForFindings(rep procdiag.Report) int {
 	return 0
 }
 
+// formatStateCounts renders thread states as " (R=1 S=3)", sorted by state,
+// or "" when there are none.
+func formatStateCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(counts))
+	for _, k := range slices.Sorted(maps.Keys(counts)) {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, counts[k]))
+	}
+	return " (" + strings.Join(parts, " ") + ")"
+}
+
 func printProcdiag(w io.Writer, r procdiag.Report) {
 	fmt.Fprintf(w, "=== pid %d (%s) — %s ===\n", r.PID, r.Comm, r.Verdict)
 	if r.Cmdline != "" {
 		fmt.Fprintf(w, "  cmd:      %s\n", truncate(r.Cmdline, 100))
 	}
-	fmt.Fprintf(w, "  sampled:  %.1fs, %d thread(s) %v\n", r.IntervalSec, r.ThreadCount, r.StateCounts)
+	fmt.Fprintf(w, "  sampled:  %.1fs, %d thread(s)%s\n", r.IntervalSec, r.ThreadCount, formatStateCounts(r.StateCounts))
 	fmt.Fprintf(w, "  cpu:      %.0f%% of one core\n", r.CPUPct)
 	fmt.Fprintf(w, "  memory:   rss %d MiB (%+.1f MiB/s), anon %d MiB, swap %d MiB\n",
 		r.Memory.RSSKiB/1024, r.Memory.RSSRateKiBPS/1024, r.Memory.AnonKiB/1024, r.Memory.SwapKiB/1024)
