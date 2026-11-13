@@ -119,11 +119,23 @@ func isStockIPv6HostsEntry(ip string, names []string) bool {
 func realHostNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		switch strings.ToLower(strings.TrimSpace(n)) {
-		case "", "localhost", "broadcasthost":
-			continue
+		// Snapshots from collectors that kept trailing comments carry them
+		// as names; everything from "#" on is a comment, not a hostname.
+		if i := strings.IndexByte(n, '#'); i >= 0 {
+			if n = n[:i]; n != "" {
+				out = appendRealHostName(out, n)
+			}
+			break
 		}
-		out = append(out, n)
+		out = appendRealHostName(out, n)
 	}
 	return out
+}
+
+func appendRealHostName(out []string, n string) []string {
+	switch strings.ToLower(strings.TrimSpace(n)) {
+	case "", "localhost", "broadcasthost":
+		return out
+	}
+	return append(out, n)
 }

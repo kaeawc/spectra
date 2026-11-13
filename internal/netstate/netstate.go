@@ -368,8 +368,11 @@ func readHostsOverrides(hostsPath string, defaults hostsDefaults) []HostsEntry {
 	var entries []HostsEntry
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		// hosts(5): "#" starts a comment anywhere on the line, so a trailing
+		// comment is not part of the hostname list.
+		line, _, _ := strings.Cut(sc.Text(), "#")
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 		fields := strings.Fields(line)

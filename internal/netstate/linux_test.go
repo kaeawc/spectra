@@ -121,6 +121,23 @@ func TestHostsDefaultsLinuxStockDebian(t *testing.T) {
 	}
 }
 
+// TestHostsOverridesStripInlineComments: a trailing "# ..." is a comment,
+// not hostnames, so a commented stock entry stays stock and a commented
+// override keeps only its real names.
+func TestHostsOverridesStripInlineComments(t *testing.T) {
+	content := "127.0.0.1 localhost # loopback\n::1 localhost ip6-localhost ip6-loopback # IPv6 loopback\n" +
+		"fe00::0 ip6-localnet #local net\nff02::1 ip6-allnodes # IPv6 multicast\nff02::2 ip6-allrouters#routers\n" +
+		"10.0.0.5 api.example.com # pinned during the outage\n   # indented comment\n"
+	path := filepath.Join(t.TempDir(), "hosts")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := readHostsOverrides(path, hostsDefaultsLinux)
+	if len(entries) != 1 || entries[0].IP != "10.0.0.5" || len(entries[0].Names) != 1 || entries[0].Names[0] != "api.example.com" {
+		t.Errorf("entries = %+v, want only 10.0.0.5 [api.example.com]", entries)
+	}
+}
+
 // TestHostsDefaultsLinuxKeepsRealNameOnStockAddress: a well-known IPv6
 // address is only stock with its stock alias; a real hostname on it is an
 // override the snapshot must keep for the hosts_override rule.

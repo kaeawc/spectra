@@ -53,8 +53,9 @@ func hostsFileEntries(t *testing.T, path string) []netstate.HostsEntry {
 	}
 	var out []netstate.HostsEntry
 	for _, line := range strings.Split(string(data), "\n") {
+		line, _, _ = strings.Cut(line, "#")
 		fields := strings.Fields(line)
-		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+		if len(fields) < 2 {
 			continue
 		}
 		out = append(out, netstate.HostsEntry{IP: fields[0], Names: fields[1:]})
@@ -82,6 +83,28 @@ func TestNetworkHostsOverrideFlagsRealNameOnStockIPv6Address(t *testing.T) {
 	f := matchNetworkHostsOverride(netSnap(netstate.State{HostsOverrides: entries}))
 	if len(f) != 3 || f[0].Subject != "ff02::1" || f[1].Subject != "2001:db8::5" || f[2].Subject != "10.0.0.5" {
 		t.Fatalf("findings = %+v, want the three non-stock entries", f)
+	}
+}
+
+func TestNetworkHostsOverrideCommentedEntries(t *testing.T) {
+	entries := hostsFileEntries(t, filepath.Join("testdata", "hosts-commented"))
+	f := matchNetworkHostsOverride(netSnap(netstate.State{HostsOverrides: entries}))
+	if len(f) != 1 || f[0].Subject != "10.0.0.5" || strings.Contains(f[0].Message, "#") || strings.Contains(f[0].Message, "outage") {
+		t.Fatalf("findings = %+v, want only the commented 10.0.0.5 override without its comment", f)
+	}
+}
+
+// TestNetworkHostsOverrideIgnoresCommentTokens covers snapshots whose
+// collector kept trailing comment words as names.
+func TestNetworkHostsOverrideIgnoresCommentTokens(t *testing.T) {
+	s := netSnap(netstate.State{HostsOverrides: []netstate.HostsEntry{
+		{IP: "ff02::1", Names: []string{"ip6-allnodes", "#", "IPv6", "multicast"}},
+		{IP: "ff02::2", Names: []string{"ip6-allrouters#routers"}},
+		{IP: "10.0.0.5", Names: []string{"api.example.com", "#pinned", "during", "outage"}},
+	}})
+	f := matchNetworkHostsOverride(s)
+	if len(f) != 1 || f[0].Subject != "10.0.0.5" || !strings.Contains(f[0].Message, "pins api.example.com to") {
+		t.Fatalf("findings = %+v", f)
 	}
 }
 
