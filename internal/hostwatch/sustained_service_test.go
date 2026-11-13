@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -33,9 +34,23 @@ func (r *scriptRunner) Run(_ context.Context, cmd proc.Cmd) (proc.Result, error)
 		if r.sampleErr {
 			return proc.Result{ExitCode: 1, Stderr: []byte("sample: requires root")}, nil
 		}
-		return proc.Result{Stdout: []byte(r.sampleOut)}, nil
+		return writeSampleReport(cmd.Args, r.sampleOut)
 	}
 	return proc.Result{ExitCode: -1}, errors.New("unexpected " + cmd.Name)
+}
+
+// writeSampleReport mimics sample(1) -file: the report goes to the named
+// file and stdout carries only progress lines.
+func writeSampleReport(args []string, report string) (proc.Result, error) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-file" {
+			if err := os.WriteFile(args[i+1], []byte(report), 0o600); err != nil {
+				return proc.Result{ExitCode: -1}, err
+			}
+			return proc.Result{Stdout: []byte("Sampling process...\n")}, nil
+		}
+	}
+	return proc.Result{ExitCode: -1}, errors.New("sample called without -file")
 }
 
 func (r *scriptRunner) count(name string) int {

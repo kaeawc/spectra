@@ -1760,11 +1760,14 @@ func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "sample", fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS)).CombinedOutput()
+	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	}
+	report, out, err := process.RunSampleReport(ctx, nil, run, fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS))
 	if err != nil {
 		return "", fmt.Errorf("sample pid %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}
-	return string(out), nil
+	return string(report), nil
 }
 
 func summarizeApp(r detect.Result) []string {

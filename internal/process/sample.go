@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -59,6 +60,7 @@ type Sampler struct {
 	runner CommandRunner
 	store  SampleStore
 	now    func() time.Time
+	files  ReportFiles
 }
 
 // NewSampler constructs a process sampler. Nil runner uses ExecRunner.
@@ -70,6 +72,7 @@ func NewSampler(runner CommandRunner, store SampleStore) *Sampler {
 		runner: runner,
 		store:  store,
 		now:    func() time.Time { return time.Now().UTC() },
+		files:  OSReportFiles{},
 	}
 }
 
@@ -100,7 +103,7 @@ func (s *Sampler) Capture(ctx context.Context, opts SampleOptions) (SampleResult
 	if durationSeconds <= 0 {
 		durationSeconds = 1
 	}
-	out, err := s.runner.Run(runCtx, "sample",
+	out, _, err := RunSampleReport(runCtx, s.files, s.runner.Run,
 		strconv.Itoa(opts.PID),
 		strconv.Itoa(durationSeconds),
 		strconv.Itoa(opts.IntervalMS),
@@ -121,4 +124,64 @@ func (s *Sampler) Capture(ctx context.Context, opts SampleOptions) (SampleResult
 		}
 	}
 	return result, nil
+}
+
+// ReportFiles creates, reads, and removes the file sample(1) writes its
+// report to.
+type ReportFiles interface {
+	// CreateTemp creates an empty file matching pattern and returns its path.
+	CreateTemp(pattern string) (string, error)
+	ReadFile(path string) ([]byte, error)
+	Remove(path string) error
+}
+
+// OSReportFiles is the ReportFiles backed by the real filesystem. Dir ""
+// means os.TempDir().
+type OSReportFiles struct{ Dir string }
+
+// CreateTemp creates an empty file in Dir and returns its path.
+func (o OSReportFiles) CreateTemp(pattern string) (string, error) {
+	f, err := os.CreateTemp(o.Dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+// ReadFile reads path.
+func (OSReportFiles) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+
+// Remove removes path.
+func (OSReportFiles) Remove(path string) error { return os.Remove(path) }
+
+// RunSampleReport runs `sample <args...> -file <temp>` through run and
+// returns the report read back from that file, plus whatever sample printed
+// to stdout (its progress lines, useful in error messages). The temp file is
+// always removed. Without -file, sample also writes the report to
+// /tmp/<name>_<date>_<rand>.sample.txt and nothing ever cleans it up.
+// Nil files uses OSReportFiles{}.
+func RunSampleReport(ctx context.Context, files ReportFiles, run func(ctx context.Context, name string, args ...string) ([]byte, error), args ...string) (report, stdout []byte, err error) {
+	if files == nil {
+		files = OSReportFiles{}
+	}
+	path, err := files.CreateTemp("spectra-*.sample.txt")
+	if err != nil {
+		return nil, nil, fmt.Errorf("sample report file: %w", err)
+	}
+	defer func() { _ = files.Remove(path) }()
+	full := append(append([]string(nil), args...), "-file", path)
+	stdout, err = run(ctx, "sample", full...)
+	if err != nil {
+		return nil, stdout, err
+	}
+	report, err = files.ReadFile(path)
+	if err != nil {
+		return nil, stdout, fmt.Errorf("read sample report: %w", err)
+	}
+	return report, stdout, nil
 }
