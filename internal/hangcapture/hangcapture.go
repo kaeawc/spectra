@@ -50,11 +50,17 @@ var lockWaits = map[string]bool{
 // ioWaits are leaf symbols that mean the thread is blocked in a syscall.
 var ioWaits = map[string]bool{
 	"read": true, "__read_nocancel": true, "write": true, "__write_nocancel": true,
-	"__semwait_signal": true, "select": true, "poll": true, "__select": true,
+	"select": true, "poll": true, "__select": true,
 	"open": true, "__open_nocancel": true, "stat64": true, "fstat64": true, "lstat64": true,
 	"connect": true, "__connect_nocancel": true, "recvfrom": true, "recvmsg": true,
 	"sendto": true, "fcntl": true, "__getdirentries64": true, "fsync": true, "flock": true,
 	"waitpid": true, "__wait4": true, "kevent": true, "kevent_id": true, "kevent_qos": true,
+}
+
+// timedSleeps are frames that reach __semwait_signal as a deliberate timed
+// sleep rather than a wait on another thread.
+var timedSleeps = map[string]bool{
+	"nanosleep": true, "usleep": true, "sleep": true, "clock_nanosleep": true,
 }
 
 // machMsg leaf symbols mean the thread is parked in the Mach messaging layer;
@@ -92,6 +98,8 @@ func classify(leaf string, chain []string) (Verdict, string) {
 		return VerdictIdle, "main thread is idle in its run loop waiting for events (" + leaf + ")"
 	case machMsg[leaf]:
 		return VerdictLockBlocked, "main thread is parked in mach_msg outside the run loop (" + leaf + ") — likely a synchronous IPC/wait"
+	case leaf == "__semwait_signal":
+		return classifySemwait(chain)
 	case ioWaits[leaf]:
 		return VerdictIOBlocked, "main thread is blocked in a synchronous syscall (" + leaf + ")"
 	case leaf == "":
@@ -99,6 +107,18 @@ func classify(leaf string, chain []string) (Verdict, string) {
 	default:
 		return VerdictSpinning, "main thread is on-CPU in application code (" + leaf + ") — a compute hang"
 	}
+}
+
+// classifySemwait splits __semwait_signal by caller: nanosleep/usleep/sleep
+// bottom out there, as do semaphore and legacy pthread condition timed waits.
+// Neither is I/O.
+func classifySemwait(chain []string) (Verdict, string) {
+	for i := len(chain) - 2; i >= 0; i-- {
+		if timedSleeps[chain[i]] {
+			return VerdictIdle, "main thread is in a timed sleep (" + chain[i] + " → __semwait_signal), not blocked on I/O or a lock"
+		}
+	}
+	return VerdictLockBlocked, "main thread is waiting on a semaphore or condition variable (__semwait_signal)"
 }
 
 func stackHasRunLoop(chain []string) bool {
