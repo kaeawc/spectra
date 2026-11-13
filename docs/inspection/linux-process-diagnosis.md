@@ -13,7 +13,10 @@ spectra pressure --pid 1234            # plus the process's cgroup v2 limits and
 
 Both exit `3` when they find anything at warning or above, so scripts can gate
 on them, and `1` on non-Linux hosts (use `spectra sample` / `spectra memory`
-there).
+there). For `procdiag` only findings about the process itself count: findings
+about its whole cgroup (PSI, throttling, limits, OOM history) are reported
+with `"scope": "cgroup"` as context but do not set the verdict or the exit
+status. Gate on those with `spectra pressure --pid`.
 
 ## Why two samples
 

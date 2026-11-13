@@ -47,6 +47,34 @@ func TestProcdiagInfoOnlyExitsZeroJSON(t *testing.T) {
 	}
 }
 
+func TestProcdiagStateCountsAreReadable(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	rep := procdiag.Report{PID: 9, Comm: "srv", Verdict: procdiag.KindIdle, IntervalSec: 1, ThreadCount: 5,
+		StateCounts: map[string]int{"S": 3, "R": 1, "D": 1}}
+	var out, errb bytes.Buffer
+	runProcdiagWithIO([]string{"9"}, &out, &errb, fakeInspector(rep, nil))
+	if !strings.Contains(out.String(), "5 thread(s) (D=1 R=1 S=3)\n") || strings.Contains(out.String(), "map[") {
+		t.Fatalf("state counts not formatted:\n%s", out.String())
+	}
+	if got := formatStateCounts(nil); got != "" {
+		t.Fatalf("empty counts = %q", got)
+	}
+}
+
+func TestProcdiagCgroupContextExitsZero(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	rep := procdiag.Report{PID: 9, Comm: "srv", Verdict: procdiag.KindIdle, Findings: []procdiag.Finding{
+		{Kind: "cpu-pressure", Severity: procdiag.SeverityCritical, Summary: "cgroup /app.slice cpu: stalled", Scope: procdiag.ScopeCgroup},
+	}}
+	var out, errb bytes.Buffer
+	if code := runProcdiagWithIO([]string{"9"}, &out, &errb, fakeInspector(rep, nil)); code != 0 {
+		t.Fatalf("exit = %d, want 0 for cgroup-only findings", code)
+	}
+	if !strings.Contains(out.String(), "[critical] (cgroup) cpu-pressure:") {
+		t.Errorf("cgroup finding not labelled:\n%s", out.String())
+	}
+}
+
 func TestProcdiagErrors(t *testing.T) {
 	defer hostos.SetForTest(hostos.Linux)()
 	cases := []struct {

@@ -155,7 +155,18 @@ type Finding struct {
 	Severity Severity `json:"severity"`
 	Summary  string   `json:"summary"`
 	Evidence []string `json:"evidence,omitempty"`
+	// Scope is empty for findings about this process and ScopeCgroup for
+	// findings about its whole cgroup (PSI, limits, throttling, OOM history).
+	Scope string `json:"scope,omitempty"`
 }
+
+// ScopeCgroup marks a finding that belongs to the process's cgroup rather
+// than the process itself. Such findings are context: they do not set the
+// verdict or the exit status.
+const ScopeCgroup = "cgroup"
+
+// ProcessScoped reports whether the finding is about the process itself.
+func (f Finding) ProcessScoped() bool { return f.Scope != ScopeCgroup }
 
 // Report is the result of inspecting one process.
 type Report struct {

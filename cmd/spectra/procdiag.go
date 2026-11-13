@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -66,15 +69,30 @@ func runProcdiagWithIO(args []string, stdout, stderr io.Writer, inspect procdiag
 	return exitForFindings(rep)
 }
 
-// exitForFindings returns 3 when anything at warning or above was found, so a
-// script can gate on it; healthy and info-only reports exit 0.
+// exitForFindings returns 3 when anything at warning or above was found about
+// the process itself, so a script can gate on it; healthy and info-only
+// reports exit 0. Cgroup-wide findings are context for the process, not
+// evidence against it (`spectra pressure --pid` gates on those).
 func exitForFindings(rep procdiag.Report) int {
 	for _, f := range rep.Findings {
-		if f.Severity != procdiag.SeverityInfo {
+		if f.ProcessScoped() && f.Severity != procdiag.SeverityInfo {
 			return 3
 		}
 	}
 	return 0
+}
+
+// formatStateCounts renders thread states as " (R=1 S=3)", sorted by state,
+// or "" when there are none.
+func formatStateCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(counts))
+	for _, k := range slices.Sorted(maps.Keys(counts)) {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, counts[k]))
+	}
+	return " (" + strings.Join(parts, " ") + ")"
 }
 
 func printProcdiag(w io.Writer, r procdiag.Report) {
@@ -82,7 +100,7 @@ func printProcdiag(w io.Writer, r procdiag.Report) {
 	if r.Cmdline != "" {
 		fmt.Fprintf(w, "  cmd:      %s\n", truncate(r.Cmdline, 100))
 	}
-	fmt.Fprintf(w, "  sampled:  %.1fs, %d thread(s) %v\n", r.IntervalSec, r.ThreadCount, r.StateCounts)
+	fmt.Fprintf(w, "  sampled:  %.1fs, %d thread(s)%s\n", r.IntervalSec, r.ThreadCount, formatStateCounts(r.StateCounts))
 	fmt.Fprintf(w, "  cpu:      %.0f%% of one core\n", r.CPUPct)
 	fmt.Fprintf(w, "  memory:   rss %d MiB (%+.1f MiB/s), anon %d MiB, swap %d MiB\n",
 		r.Memory.RSSKiB/1024, r.Memory.RSSRateKiBPS/1024, r.Memory.AnonKiB/1024, r.Memory.SwapKiB/1024)
@@ -112,7 +130,11 @@ func printProcdiag(w io.Writer, r procdiag.Report) {
 		fmt.Fprintln(w, "  no problems found in this window")
 	}
 	for _, f := range r.Findings {
-		fmt.Fprintf(w, "  [%s] %s: %s\n", f.Severity, f.Kind, f.Summary)
+		scope := ""
+		if !f.ProcessScoped() {
+			scope = " (" + f.Scope + ")"
+		}
+		fmt.Fprintf(w, "  [%s]%s %s: %s\n", f.Severity, scope, f.Kind, f.Summary)
 		for _, e := range f.Evidence {
 			fmt.Fprintf(w, "         · %s\n", e)
 		}
