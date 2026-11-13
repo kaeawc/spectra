@@ -153,7 +153,7 @@ timeouts, so inspection cannot write or stall the target server — see
 |---|---|---|---|---|
 | `codesign -dv <app>` | signing identity + flags | user | ~100ms | `TeamID`, `HardenedRuntime` |
 | `codesign -d --entitlements :- <app>` | entitlements XML | user | ~100ms | `Entitlements` |
-| `spctl --assess --type exec <app>` | Gatekeeper status | user | ~100ms | `GatekeeperStatus` |
+| `spctl --assess -v --type exec <app>` | Gatekeeper status | user | ~100ms | `GatekeeperStatus`, `GatekeeperSource` |
 
 ## Permissions
 

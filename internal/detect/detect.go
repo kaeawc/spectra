@@ -112,6 +112,11 @@ type Result struct {
 	// passes Gatekeeper's notarization / Developer ID check; "rejected"
 	// means it would be blocked by Gatekeeper on macOS 10.15+.
 	GatekeeperStatus string
+
+	// GatekeeperSource is the policy source spctl reports for the verdict
+	// ("Apple System", "Mac App Store", "Notarized Developer ID", ...).
+	// Empty when spctl gives none, which is normal for rejections.
+	GatekeeperSource string
 }
 
 // Helpers groups sub-bundles found inside the .app.
@@ -529,7 +534,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 		loginItems []LoginItem
 		running    []ProcessInfo
 		granted    []string
-		gatekeeper string
+		gatekeeper gatekeeperVerdict
 		endpoints  []string
 	)
 	var wg sync.WaitGroup
@@ -563,7 +568,8 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.RunningProcesses = running
 	r.AppStartedAt, r.AppUptimeSeconds = appUptime(running, detectNow(opts))
 	r.GrantedPermissions = granted
-	r.GatekeeperStatus = gatekeeper
+	r.GatekeeperStatus = gatekeeper.status
+	r.GatekeeperSource = gatekeeper.source
 	r.NetworkEndpoints = endpoints
 	return r, nil
 }
@@ -822,32 +828,53 @@ func parseSigningOutput(out string) (teamID string, hardened bool) {
 	return teamID, hardened
 }
 
-// readEntitlements asks codesign for the bundle's entitlements plist
+// readGatekeeperStatus runs `spctl --assess -v --type exec <appPath>`.
+// Without -v spctl only prints on rejection: an accepted bundle exits 0
+// silently, so the verdict has to be requested explicitly.
+func (d detector) readGatekeeperStatus(appPath string) gatekeeperVerdict {
+	return parseGatekeeperOutput(d.stderrOf("spctl", "--assess", "-v", "--type", "exec", appPath))
+}
+
+type gatekeeperVerdict struct {
+	status string // "accepted", "rejected", or "" when unassessable
+	source string
+}
+
+// parseGatekeeperOutput extracts the verdict and policy source from
+// `spctl --assess -v` stderr:
+//
+//	/Applications/Foo.app: accepted
+//	source=Notarized Developer ID
+//
+// The verdict is the text after the last ": " so a bundle path containing
+// "accepted" or "rejected" cannot be mistaken for the verdict, and errors
+// such as "a sealed resource is missing or invalid" yield no status.
+func parseGatekeeperOutput(out string) gatekeeperVerdict {
+	var v gatekeeperVerdict
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if src, ok := strings.CutPrefix(line, "source="); ok {
+			v.source = src
+			continue
+		}
+		i := strings.LastIndex(line, ": ")
+		if i < 0 {
+			continue
+		}
+		switch verdict := line[i+2:]; verdict {
+		case "accepted", "rejected":
+			v.status = verdict
+		}
+	}
+	if v.status == "" {
+		v.source = ""
+	}
+	return v
+}
+
+// readEntitlementsDetail asks codesign for the bundle's entitlements plist
 // (XML form) and extracts the boolean ones set to true. The full set
 // is large and noisy; we keep a curated allowlist of notable ones.
-// readGatekeeperStatus runs `spctl --assess --type exec <appPath>` and
-// returns "accepted", "rejected", or "" when spctl is unavailable or the
-// assessment cannot be completed. spctl writes its verdict to stderr
-// regardless of exit code, so we parse stderr for the verdict string.
-func (d detector) readGatekeeperStatus(appPath string) string {
-	return parseGatekeeperOutput(d.stderrOf("spctl", "--assess", "--type", "exec", appPath))
-}
-
-// parseGatekeeperOutput extracts the Gatekeeper verdict from spctl stderr.
-// Expected formats:
-//
-//	"/Applications/Foo.app: accepted"
-//	"/Applications/Foo.app: rejected"
-func parseGatekeeperOutput(out string) string {
-	if strings.Contains(out, "accepted") {
-		return "accepted"
-	}
-	if strings.Contains(out, "rejected") {
-		return "rejected"
-	}
-	return ""
-}
-
 func (d detector) readEntitlementsDetail(appPath string) (sandboxed bool, notable, appGroups []string) {
 	out, err := d.output("codesign", "-d", "--entitlements", ":-", appPath)
 	if err != nil || len(out) == 0 {

@@ -247,7 +247,11 @@ func printSecurityMeta(r detect.Result) {
 		fmt.Printf("    security: %s\n", strings.Join(security, ", "))
 	}
 	if r.GatekeeperStatus != "" {
-		fmt.Printf("    gatekeeper: %s\n", r.GatekeeperStatus)
+		if r.GatekeeperSource != "" {
+			fmt.Printf("    gatekeeper: %s (%s)\n", r.GatekeeperStatus, r.GatekeeperSource)
+		} else {
+			fmt.Printf("    gatekeeper: %s\n", r.GatekeeperStatus)
+		}
 	}
 	if len(r.Entitlements) > 0 {
 		fmt.Printf("    entitlements: %s\n", strings.Join(r.Entitlements, ", "))
