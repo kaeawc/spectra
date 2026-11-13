@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/timeline"
@@ -20,12 +21,25 @@ import (
 type processLister func() []process.Info
 
 func runTimeline(args []string) int {
-	sources := []timeline.Source{
-		processStartSource{procs: defaultProcessLister},
-		logSource{run: logquery.Run},
-		installSource{fetch: defaultInstallFetch},
+	sources, note := timelineSources(hostos.Current())
+	if note != "" {
+		fmt.Fprintf(os.Stderr, "timeline: %s\n", note)
 	}
 	return runTimelineWithIO(args, os.Stdout, os.Stderr, time.Now, sources...)
+}
+
+// timelineSources returns the production sources for kind. Process starts
+// work everywhere; the unified log and install history are macOS-only, so
+// elsewhere they are left out with a note rather than failing on every run.
+func timelineSources(kind hostos.Kind) ([]timeline.Source, string) {
+	sources := []timeline.Source{processStartSource{procs: defaultProcessLister}}
+	if hostos.Resolve(kind) != hostos.Darwin {
+		return sources, fmt.Sprintf("unified-log errors and install history are macOS-only; showing process starts only (%s)", hostos.Resolve(kind))
+	}
+	return append(sources,
+		logSource{run: logquery.Run},
+		installSource{fetch: defaultInstallFetch},
+	), ""
 }
 
 func runTimelineWithIO(args []string, stdout, stderr io.Writer, now func() time.Time, sources ...timeline.Source) int {

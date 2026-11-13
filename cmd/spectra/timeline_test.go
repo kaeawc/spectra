@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/timeline"
@@ -25,6 +26,27 @@ func fakeTimelineProcs() []process.Info {
 }
 
 func procSource() timeline.Source { return processStartSource{procs: fakeTimelineProcs} }
+
+func TestTimelineSourcesPerOS(t *testing.T) {
+	names := func(srcs []timeline.Source) []string {
+		var out []string
+		for _, s := range srcs {
+			out = append(out, s.Name())
+		}
+		return out
+	}
+	linux, note := timelineSources(hostos.Linux)
+	if got := names(linux); len(got) != 1 || got[0] != "process" {
+		t.Fatalf("linux sources = %v, want only process (log show/system_profiler do not exist there)", got)
+	}
+	if !strings.Contains(note, "macOS-only") || !strings.Contains(note, "linux") {
+		t.Fatalf("linux note = %q", note)
+	}
+	darwin, note := timelineSources(hostos.Darwin)
+	if got := strings.Join(names(darwin), ","); got != "process,log,update" || note != "" {
+		t.Fatalf("darwin sources = %s note=%q", got, note)
+	}
+}
 
 func TestRunTimelineWindowsAndSummary(t *testing.T) {
 	var out, errBuf bytes.Buffer
