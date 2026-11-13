@@ -607,6 +607,10 @@ func runJVMGCStats(args []string) int {
 	return 0
 }
 
+// collectVMMemory is swapped in tests so exit-status handling can be checked
+// without a live JVM.
+var collectVMMemory = jvm.CollectVMMemoryDiagnostics
+
 func runJVMVMMemory(args []string) int {
 	fs := flag.NewFlagSet("spectra jvm vm-memory", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -624,21 +628,26 @@ func runJVMVMMemory(args []string) int {
 		return 2
 	}
 
-	diagnostics := jvm.CollectVMMemoryDiagnostics(pid, nil)
+	diagnostics := collectVMMemory(pid, nil)
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(diagnostics)
-		return 0
+	} else {
+		fmt.Printf("VM memory diagnostics for PID %d\n", pid)
+		printDiagnosticSection("Heap", diagnostics.HeapInfo)
+		printDiagnosticSection("Metaspace", diagnostics.Metaspace)
+		printDiagnosticSection("Native memory", diagnostics.NativeMemory)
+		printDiagnosticSection("Class loaders", diagnostics.ClassLoaderStats)
+		printDiagnosticSection("Code cache", diagnostics.CodeCache)
+		printDiagnosticSection("Code heap", diagnostics.CodeHeap)
 	}
-
-	fmt.Printf("VM memory diagnostics for PID %d\n", pid)
-	printDiagnosticSection("Heap", diagnostics.HeapInfo)
-	printDiagnosticSection("Metaspace", diagnostics.Metaspace)
-	printDiagnosticSection("Native memory", diagnostics.NativeMemory)
-	printDiagnosticSection("Class loaders", diagnostics.ClassLoaderStats)
-	printDiagnosticSection("Code cache", diagnostics.CodeCache)
-	printDiagnosticSection("Code heap", diagnostics.CodeHeap)
+	// Individual sections fail routinely (NMT off, CodeHeap_Analytics absent
+	// on older JDKs); only a total failure means the JVM was never reached.
+	if diagnostics.AllFailed() {
+		fmt.Fprintf(os.Stderr, "jvm vm-memory: no diagnostics collected for PID %d\n", pid)
+		return 1
+	}
 	return 0
 }
 

@@ -36,9 +36,14 @@ func runXattrInspectWithIO(args []string, stdout, stderr io.Writer, deps xattrin
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(report)
-		return 0
+	} else {
+		printXattrReport(stdout, report)
 	}
-	printXattrReport(stdout, report)
+	for _, fr := range report.Files {
+		if fr.Error != "" {
+			return 1
+		}
+	}
 	return 0
 }
 

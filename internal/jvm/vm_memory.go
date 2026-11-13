@@ -45,6 +45,17 @@ func CollectVMMemoryDiagnostics(pid int, run CmdRunner) VMMemoryDiagnostics {
 	}
 }
 
+// AllFailed reports whether every section errored, which means jcmd could
+// not reach the target JVM at all.
+func (d VMMemoryDiagnostics) AllFailed() bool {
+	for _, s := range []DiagnosticSection{d.HeapInfo, d.Metaspace, d.NativeMemory, d.ClassLoaderStats, d.CodeCache, d.CodeHeap} {
+		if s.Error == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // JMXStatus reports the target JVM's management-agent state. When local JMX is
 // enabled, HotSpot prints the local connector URL used by tools such as
 // jconsole and VisualVM.

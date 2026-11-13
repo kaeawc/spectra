@@ -238,6 +238,28 @@ func TestCollectVMMemoryDiagnosticsCapturesSectionsAndErrors(t *testing.T) {
 	}
 }
 
+func TestVMMemoryDiagnosticsAllFailed(t *testing.T) {
+	// What real jcmd does for a PID with no JVM behind it: every section
+	// fails with "exit status 1".
+	unreachable := func(string, ...string) ([]byte, error) {
+		return []byte("999999:\ncom.sun.tools.attach.AttachNotSupportedException: pid: 999999, state is not ready to participate in attach handshake!\n"),
+			fmt.Errorf("exit status 1")
+	}
+	if got := CollectVMMemoryDiagnostics(999999, unreachable); !got.AllFailed() {
+		t.Fatalf("AllFailed() = false for an unreachable PID: %#v", got)
+	}
+
+	nmtOff := func(_ string, args ...string) ([]byte, error) {
+		if args[1] == "VM.native_memory" {
+			return nil, fmt.Errorf("native memory tracking is not enabled")
+		}
+		return []byte("ok\n"), nil
+	}
+	if got := CollectVMMemoryDiagnostics(42, nmtOff); got.AllFailed() {
+		t.Fatalf("AllFailed() = true with only native memory failing: %#v", got)
+	}
+}
+
 func TestAgentStatusFromSysProps(t *testing.T) {
 	got := AgentStatusFromSysProps(42, map[string]string{
 		agentPortProperty:  "49152",
