@@ -345,7 +345,12 @@ func TestRunPowerWatchJSONEmitsNDJSON(t *testing.T) {
 	deps.collect = func() sysinfo.PowerState {
 		frames++
 		if frames >= 3 {
-			sigCh <- os.Interrupt
+			// Non-blocking: the loop may collect again before it reads the
+			// pending signal, and a second send would block it forever.
+			select {
+			case sigCh <- os.Interrupt:
+			default:
+			}
 		}
 		return fakePowerState()
 	}
