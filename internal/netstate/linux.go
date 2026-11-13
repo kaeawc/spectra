@@ -119,6 +119,8 @@ var hostsDefaultsLinux = map[string]bool{
 	"ff02::1":   true,
 	"ff02::2":   true,
 	"fe00::0":   true,
+	"ff00::0":   true,
+	"ff02::3":   true,
 }
 
 func collectLinuxListeners(run CmdRunner) []ListeningPort {
