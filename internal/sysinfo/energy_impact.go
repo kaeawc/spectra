@@ -1,7 +1,9 @@
 package sysinfo
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +22,29 @@ type ImpactInput struct {
 	InterruptWakeups uint64        `json:"interrupt_wakeups,omitempty"`
 	GPUTimeNs        uint64        `json:"gpu_time_ns,omitempty"`
 	DiskBytes        uint64        `json:"disk_bytes,omitempty"`
+}
+
+// UnmarshalJSON also accepts interrupt_wakeups_per_sec, the key the formula
+// help printed before it named the real interrupt_wakeups field. The rate is
+// turned back into a count over Interval so ComputeImpact's math is unchanged.
+func (in *ImpactInput) UnmarshalJSON(data []byte) error {
+	type plain ImpactInput
+	aux := struct {
+		*plain
+		WakeupsPerSec *float64 `json:"interrupt_wakeups_per_sec"`
+	}{plain: (*plain)(in)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.WakeupsPerSec == nil || in.InterruptWakeups != 0 || *aux.WakeupsPerSec <= 0 {
+		return nil
+	}
+	count := *aux.WakeupsPerSec
+	if seconds := in.Interval.Seconds(); seconds > 0 {
+		count *= seconds
+	}
+	in.InterruptWakeups = uint64(math.Round(count))
+	return nil
 }
 
 // FromRusage lifts a rusage delta (nanojoules, separate read/write bytes)
@@ -165,7 +190,7 @@ var weightKeyTable = []weightKey{
 	{"energy", func(w *ImpactWeights) *float64 { return &w.BilledEnergyPerJoule },
 		"energy     = billed_energy_J            × %g  (per joule)"},
 	{"wake", func(w *ImpactWeights) *float64 { return &w.InterruptWakeupCost },
-		"wakeups    = interrupt_wakeups_per_sec  × %g"},
+		"wakeups    = interrupt_wakeups/interval × %g  (per wakeup/s)"},
 	{"gpu", func(w *ImpactWeights) *float64 { return &w.GPUNsCost },
 		"gpu        = gpu_time_ns                × %g"},
 	{"assert", func(w *ImpactWeights) *float64 { return &w.AssertionPenalty },
@@ -232,6 +257,8 @@ func ImpactFormulaHelp(w ImpactWeights) string {
 		fmt.Fprintf(&b, k.help, *k.ptr(&w))
 		b.WriteByte('\n')
 	}
+	b.WriteString("\nInput record keys (--from-json):\n")
+	b.WriteString("  pid, command, interval_ns, billed_energy_j, interrupt_wakeups, gpu_time_ns, disk_bytes\n")
 	b.WriteString("\nOverride weights without recompiling via env, e.g.\n")
 	b.WriteString("  SPECTRA_IMPACT_WEIGHTS=energy=120,wake=0.002,gpu=2e-7,assert=10,io=1e-9\n")
 	return b.String()
