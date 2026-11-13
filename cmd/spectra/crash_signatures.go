@@ -106,6 +106,9 @@ func runCrashSignatures(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if !requireCrashDir("crash signatures", *dir, stderr) {
+		return 1
+	}
 	return runCrashSignaturesWithDeps(*asJSON, *limit, stdout, stderr, defaultCrashListDeps(*dir))
 }
 

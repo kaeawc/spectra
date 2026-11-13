@@ -77,6 +77,9 @@ func runCrashOOM(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if !requireCrashDir("crash oom", *dir, stderr) {
+		return 1
+	}
 	return runCrashOOMWithDeps(*asJSON, *limit, stdout, stderr, defaultCrashListDeps(*dir))
 }
 
