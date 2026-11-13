@@ -29,14 +29,21 @@ type ImpactInput struct {
 // turned back into a count over Interval so ComputeImpact's math is unchanged.
 func (in *ImpactInput) UnmarshalJSON(data []byte) error {
 	type plain ImpactInput
+	// Wakeups shadows the embedded field so an explicit 0 is distinguishable
+	// from an absent key; the canonical key wins whenever it is present.
 	aux := struct {
 		*plain
+		Wakeups       *uint64  `json:"interrupt_wakeups"`
 		WakeupsPerSec *float64 `json:"interrupt_wakeups_per_sec"`
 	}{plain: (*plain)(in)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	if aux.WakeupsPerSec == nil || in.InterruptWakeups != 0 || *aux.WakeupsPerSec <= 0 {
+	if aux.Wakeups != nil {
+		in.InterruptWakeups = *aux.Wakeups
+		return nil
+	}
+	if aux.WakeupsPerSec == nil || *aux.WakeupsPerSec <= 0 {
 		return nil
 	}
 	count := *aux.WakeupsPerSec
