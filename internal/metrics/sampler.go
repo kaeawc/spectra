@@ -2,12 +2,12 @@ package metrics
 
 import (
 	"context"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -15,7 +15,7 @@ import (
 type CmdRunner func(name string, args ...string) ([]byte, error)
 
 func defaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // Sampler collects process metrics at a fixed interval and feeds them

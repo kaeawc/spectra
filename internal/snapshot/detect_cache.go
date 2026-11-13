@@ -3,12 +3,12 @@ package snapshot
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // detectWithCache runs detect.DetectWith, returning a cached result when
@@ -71,7 +71,7 @@ func detectCacheKey(appPath string) []byte {
 // plistExecutableName reads the CFBundleExecutable value from a plist file.
 // Returns "" on any error.
 func plistExecutableName(plistPath string) string {
-	out, err := exec.Command("plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", plistPath).Output()
+	out, err := proc.BoundedOutput("plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", plistPath)
 	if err != nil {
 		return ""
 	}

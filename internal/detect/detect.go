@@ -17,7 +17,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -346,9 +345,36 @@ func plistScalar(dict map[string]any, key string) string {
 
 func (d detector) output(name string, args ...string) ([]byte, error) {
 	if d.opts.Runner != nil {
-		return proc.Output(context.Background(), d.opts.Runner, name, args...)
+		ctx, cancel := toolContext()
+		defer cancel()
+		return proc.Output(ctx, d.opts.Runner, name, args...)
 	}
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
+}
+
+// toolContext bounds one inspection subprocess. Without it a single wedged
+// tool (spctl blocked on syspolicyd is the common case) stalls the whole
+// scan and anything driving it, such as the daemon or the MCP server.
+func toolContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), proc.DefaultTimeout)
+}
+
+// stderrOf runs a tool that reports on stderr regardless of exit status
+// (codesign -dv, spctl --assess) and returns stdout+stderr, or "" when it
+// could not run or timed out.
+func (d detector) stderrOf(name string, args ...string) string {
+	ctx, cancel := toolContext()
+	defer cancel()
+	if d.opts.Runner != nil {
+		if res, err := d.opts.Runner.Run(ctx, proc.Cmd{Name: name, Args: args}); err == nil {
+			return string(append(res.Stdout, res.Stderr...))
+		}
+	}
+	res, err := proc.Default.Run(ctx, proc.Cmd{Name: name, Args: args})
+	if err != nil {
+		return ""
+	}
+	return string(res.Stderr)
 }
 
 type nodeAppFS interface {
@@ -778,17 +804,7 @@ func bundleSize(appPath string) int64 {
 // readSigning parses `codesign -dv` stderr for the team identifier and
 // the hardened-runtime flag (flags=0x10000(runtime)).
 func (d detector) readSigning(appPath string) (teamID string, hardened bool) {
-	if d.opts.Runner != nil {
-		res, err := d.opts.Runner.Run(context.Background(), proc.Cmd{Name: "codesign", Args: []string{"-dv", appPath}})
-		if err == nil {
-			return parseSigningOutput(string(append(res.Stdout, res.Stderr...)))
-		}
-	}
-	cmd := exec.Command("codesign", "-dv", appPath)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	_ = cmd.Run() // codesign writes its info to stderr regardless
-	return parseSigningOutput(stderr.String())
+	return parseSigningOutput(d.stderrOf("codesign", "-dv", appPath))
 }
 
 func parseSigningOutput(out string) (teamID string, hardened bool) {
@@ -814,17 +830,7 @@ func parseSigningOutput(out string) (teamID string, hardened bool) {
 // assessment cannot be completed. spctl writes its verdict to stderr
 // regardless of exit code, so we parse stderr for the verdict string.
 func (d detector) readGatekeeperStatus(appPath string) string {
-	if d.opts.Runner != nil {
-		res, err := d.opts.Runner.Run(context.Background(), proc.Cmd{Name: "spctl", Args: []string{"--assess", "--type", "exec", appPath}})
-		if err == nil {
-			return parseGatekeeperOutput(string(append(res.Stdout, res.Stderr...)))
-		}
-	}
-	cmd := exec.Command("spctl", "--assess", "--type", "exec", appPath)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	_ = cmd.Run()
-	return parseGatekeeperOutput(stderr.String())
+	return parseGatekeeperOutput(d.stderrOf("spctl", "--assess", "--type", "exec", appPath))
 }
 
 // parseGatekeeperOutput extracts the Gatekeeper verdict from spctl stderr.

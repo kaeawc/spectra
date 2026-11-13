@@ -7,11 +7,12 @@ package powerlog
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Runner runs a command and returns combined stdout. Injected for testability.
@@ -19,7 +20,7 @@ type Runner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner runs the real command.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // Event is one sleep/wake power event.

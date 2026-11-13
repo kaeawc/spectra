@@ -5,10 +5,11 @@ package sysload
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Runner runs a command and returns combined stdout. Injected for testability.
@@ -16,7 +17,7 @@ type Runner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner runs the real command.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return proc.BoundedOutput(name, args...)
 }
 
 // Load is the machine's current memory-pressure and swap state.

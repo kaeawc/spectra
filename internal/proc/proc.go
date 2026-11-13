@@ -12,7 +12,17 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
+
+// DefaultTimeout bounds a collector subprocess so a wedged system tool
+// (spctl waiting on syspolicyd, diskutil waiting on diskmanagementd, ...)
+// cannot hang a scan, the daemon, or the MCP server indefinitely.
+const DefaultTimeout = 2 * time.Minute
+
+// waitDelay lets Wait return after cancellation even when the child, or a
+// grandchild still holding its output pipes, does not exit after SIGKILL.
+const waitDelay = 2 * time.Second
 
 // Cmd describes a command invocation. Zero values are sane defaults:
 // no working directory override, no extra environment, empty stdin.
@@ -56,6 +66,7 @@ type OS struct{}
 func (OS) Run(ctx context.Context, cmd Cmd) (Result, error) {
 	// #nosec G204 -- proc.Runner is the abstraction for running caller-supplied subprocess commands
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	c.WaitDelay = waitDelay
 	if cmd.Dir != "" {
 		c.Dir = cmd.Dir
 	}
@@ -79,6 +90,9 @@ func (OS) Run(ctx context.Context, cmd Cmd) (Result, error) {
 		// Start failed (binary not found, fork failure, etc.) so
 		// we never got a process to ask. Convention: -1.
 		res.ExitCode = -1
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return res, fmt.Errorf("%s: %w", cmd.Name, ctxErr)
 	}
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -111,6 +125,28 @@ func Output(ctx context.Context, r Runner, name string, args ...string) ([]byte,
 		return nil, fmt.Errorf("%s exited %d: %s", formatCmd(Cmd{Name: name, Args: args}), res.ExitCode, strings.TrimSpace(string(res.Stderr)))
 	}
 	return res.Stdout, nil
+}
+
+// BoundedOutput is exec.Command(name, args...).Output() with DefaultTimeout
+// applied. It keeps Output's error contract (*exec.ExitError carrying stderr
+// on a non-zero exit) so it can replace that call in default collector
+// runners unchanged.
+func BoundedOutput(name string, args ...string) ([]byte, error) {
+	return BoundedOutputTimeout(DefaultTimeout, name, args...)
+}
+
+// BoundedOutputTimeout is BoundedOutput with an explicit timeout.
+func BoundedOutputTimeout(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	// #nosec G204 -- callers are collector default runners passing fixed tool names
+	c := exec.CommandContext(ctx, name, args...)
+	c.WaitDelay = waitDelay
+	out, err := c.Output()
+	if ctx.Err() != nil {
+		return out, fmt.Errorf("%s timed out after %s: %w", name, timeout, ctx.Err())
+	}
+	return out, err
 }
 
 // Call records a single invocation observed by Fake.

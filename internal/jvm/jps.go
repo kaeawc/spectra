@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-// DefaultRunner runs the real command.
+// DefaultRunner runs the real command. Unlike the passive collectors'
+// runners it is deliberately not bounded by proc.DefaultTimeout: it also
+// carries caller-sized work (async-profiler `-d N` captures, heap dumps of
+// large heaps, JFR analysis), which legitimately outlasts a fixed deadline.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
 }
