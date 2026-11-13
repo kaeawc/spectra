@@ -105,3 +105,57 @@ func TestTopFramesLeafLast(t *testing.T) {
 		t.Errorf("leaf should be last, got %v", frames)
 	}
 }
+
+// Real `sample` output prefixes nested frames with "+" (and "!", ":", "|" at
+// branches). These fixtures are trimmed from real macOS 26 captures.
+func TestAnalyzeRealSampleMarkers(t *testing.T) {
+	cases := []struct {
+		name   string
+		sample string
+		want   Verdict
+		leaf   string
+	}{
+		{
+			name: "idle run loop",
+			sample: `Call graph:
+    170 Thread_6828   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 170 start  (in dyld) + 6992  [0x187b804e4]
+    +   170 ???  (in Dock)  load address 0x1005e0000 + 0x60d0  [0x1005e60d0]
+    +     170 _CFRunLoopRunSpecificWithOptions  (in CoreFoundation) + 532  [0x1880da264]
+    +       170 __CFRunLoopRun  (in CoreFoundation) + 1188  [0x1880079f4]
+    +         170 __CFRunLoopServiceMachPort  (in CoreFoundation) + 160  [0x188009108]
+    +           170 mach_msg  (in libsystem_kernel.dylib) + 24  [0x187f07fc0]
+    +             170 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x187f07c34]
+    170 Thread_6829
+    + 170 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x187f45b80]
+    +   170 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x187f09f0c]
+`,
+			want: VerdictIdle, leaf: "mach_msg2_trap",
+		},
+		{
+			name: "lock with branch markers",
+			sample: `Call graph:
+    800 Thread_185646496   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 800 start  (in dyld) + 6992  [0x187b804e4]
+    +   800 main  (in lock) + 52  [0x100003f34]  lock.c:20
+    +     790 pthread_mutex_lock  (in libsystem_pthread.dylib) + 96  [0x187f46a1c]
+    +     ! 790 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x187f0a5f0]
+    +     10 helper  (in lock) + 8  [0x100003f00]
+    +       10 inner  (in lock) + 8  [0x100003f10]
+    +         10 spin_leaf  (in lock) + 8  [0x100003f20]
+    800 Thread_185646497
+    + 800 thread_start  (in libsystem_pthread.dylib) + 8  [0x187f45b8c]
+    +   800 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x187f0b2c0]
+`,
+			want: VerdictLockBlocked, leaf: "__psynch_mutexwait",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mt := Analyze(tc.sample).MainThread
+			if mt.Verdict != tc.want || mt.Leaf != tc.leaf {
+				t.Errorf("verdict=%s leaf=%q, want %s leaf=%q", mt.Verdict, mt.Leaf, tc.want, tc.leaf)
+			}
+		})
+	}
+}
