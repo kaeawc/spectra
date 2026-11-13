@@ -357,3 +357,51 @@ func TestInspectSelf(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 }
+
+// TestCgroupFindingsDoNotDriveIdleVerdict: an idle process in a throttled,
+// pressured cgroup is still idle; the cgroup findings ride along as context.
+func TestCgroupFindingsDoNotDriveIdleVerdict(t *testing.T) {
+	root := t.TempDir()
+	cgRoot := filepath.Join(root, "cg")
+	cg := filepath.Join(cgRoot, "app.slice")
+	writeFile(t, filepath.Join(cg, "cgroup.controllers"), "cpu memory pids\n")
+	writeFile(t, filepath.Join(cg, "cpu.stat"), "usage_usec 100\nnr_periods 100\nnr_throttled 80\nthrottled_usec 5000000\n")
+	writeFile(t, filepath.Join(cg, "cpu.pressure"), "some avg10=55.00 avg60=40.00 avg300=20.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")
+	p := proc{pid: 90, threads: []thr{{tid: 90, comm: "srv", state: "S", syscall: "232 0x3"}}}
+	writeProc(t, root, p)
+	writeFile(t, filepath.Join(root, "90", "cgroup"), "0::/app.slice\n")
+	r, err := Inspect(context.Background(), 90, Options{
+		ProcRoot: root, CgroupRoot: cgRoot, Arch: "amd64", Interval: time.Second,
+		Sleep: func(context.Context, time.Duration) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Verdict != KindIdle {
+		t.Fatalf("verdict = %q, want idle; findings=%+v", r.Verdict, r.Findings)
+	}
+	throttled, psi := find(r, "cpu-throttled"), find(r, "cpu-pressure")
+	if throttled == nil || psi == nil || throttled.Severity != SeverityWarning || psi.Severity != SeverityCritical {
+		t.Fatalf("cgroup findings missing: %+v", r.Findings)
+	}
+	for _, f := range r.Findings {
+		if f.ProcessScoped() {
+			t.Fatalf("unexpected process finding %+v", f)
+		}
+	}
+}
+
+// TestProcessFindingsLeadCgroupContext: process evidence decides the verdict
+// even when a cgroup finding is more severe.
+func TestProcessFindingsLeadCgroupContext(t *testing.T) {
+	f := []Finding{
+		{Kind: "cgroup-oom-kill", Severity: SeverityCritical, Scope: ScopeCgroup},
+		{Kind: KindFDGrowth, Severity: SeverityWarning},
+	}
+	if v := verdict(f, 0); v != KindFDGrowth {
+		t.Fatalf("verdict = %q", v)
+	}
+	if v := verdict(f[:1], 50); v != KindActive {
+		t.Fatalf("cgroup-only verdict = %q, want active", v)
+	}
+}

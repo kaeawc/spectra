@@ -66,11 +66,13 @@ func runProcdiagWithIO(args []string, stdout, stderr io.Writer, inspect procdiag
 	return exitForFindings(rep)
 }
 
-// exitForFindings returns 3 when anything at warning or above was found, so a
-// script can gate on it; healthy and info-only reports exit 0.
+// exitForFindings returns 3 when anything at warning or above was found about
+// the process itself, so a script can gate on it; healthy and info-only
+// reports exit 0. Cgroup-wide findings are context for the process, not
+// evidence against it (`spectra pressure --pid` gates on those).
 func exitForFindings(rep procdiag.Report) int {
 	for _, f := range rep.Findings {
-		if f.Severity != procdiag.SeverityInfo {
+		if f.ProcessScoped() && f.Severity != procdiag.SeverityInfo {
 			return 3
 		}
 	}
@@ -112,7 +114,11 @@ func printProcdiag(w io.Writer, r procdiag.Report) {
 		fmt.Fprintln(w, "  no problems found in this window")
 	}
 	for _, f := range r.Findings {
-		fmt.Fprintf(w, "  [%s] %s: %s\n", f.Severity, f.Kind, f.Summary)
+		scope := ""
+		if !f.ProcessScoped() {
+			scope = " (" + f.Scope + ")"
+		}
+		fmt.Fprintf(w, "  [%s]%s %s: %s\n", f.Severity, scope, f.Kind, f.Summary)
 		for _, e := range f.Evidence {
 			fmt.Fprintf(w, "         · %s\n", e)
 		}

@@ -67,10 +67,16 @@ func diagnose(r *Report, a, b procSample, totalSysTicks int64) []Finding {
 	f = append(f, diagnoseMemory(r)...)
 	if r.Cgroup != nil {
 		for _, pf := range pressure.AssessCgroup(*r.Cgroup) {
-			f = append(f, Finding{Kind: pf.Kind, Severity: Severity(pf.Severity), Summary: pf.Summary})
+			f = append(f, Finding{Kind: pf.Kind, Severity: Severity(pf.Severity), Summary: pf.Summary, Scope: ScopeCgroup})
 		}
 	}
-	sort.SliceStable(f, func(i, j int) bool { return rank(f[i].Severity) > rank(f[j].Severity) })
+	// Process evidence leads; cgroup-wide findings follow as context.
+	sort.SliceStable(f, func(i, j int) bool {
+		if pi, pj := f[i].ProcessScoped(), f[j].ProcessScoped(); pi != pj {
+			return pi
+		}
+		return rank(f[i].Severity) > rank(f[j].Severity)
+	})
 	return f
 }
 
@@ -285,11 +291,14 @@ func humanDuration(secs float64) string {
 	}
 }
 
-// verdict picks the headline: the kind of the most severe finding, else
-// "active" or "idle" by CPU use.
+// verdict picks the headline: the kind of the most severe process-scoped
+// finding, else "active" or "idle" by CPU use. Cgroup-wide findings describe
+// every task in the cgroup, so they never decide this process's verdict.
 func verdict(f []Finding, cpuPct float64) string {
-	if len(f) > 0 && rank(f[0].Severity) >= rank(SeverityWarning) {
-		return f[0].Kind
+	for _, x := range f {
+		if x.ProcessScoped() && rank(x.Severity) >= rank(SeverityWarning) {
+			return x.Kind
+		}
 	}
 	if cpuPct >= 5 {
 		return KindActive
