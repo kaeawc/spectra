@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 var ErrNeedsFullDiskAccess = errors.New("needs full disk access")
@@ -26,6 +28,9 @@ type InstallLogEntry struct {
 }
 
 type Query struct {
+	// OS selects the install-log backend; the zero value resolves to the
+	// host. Only macOS /var/log/install.log is implemented.
+	OS       hostos.Kind
 	Since    time.Time
 	Until    time.Time
 	Process  string
@@ -56,6 +61,9 @@ type OSControllerTransition struct {
 }
 
 func QueryInstallLog(q Query) (Result, error) {
+	if hostos.Resolve(q.OS) != hostos.Darwin {
+		return Result{}, hostos.Unsupported("macOS install log")
+	}
 	if q.MaxLines <= 0 {
 		q.MaxLines = 5000
 	}

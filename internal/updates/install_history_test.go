@@ -2,10 +2,23 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+func TestCollectHistoryUnsupportedOffDarwin(t *testing.T) {
+	_, err := collectHistoryWith(context.Background(), hostos.Linux, func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("system_profiler must not run off Darwin")
+		return nil, nil
+	}, time.Now)
+	if !errors.Is(err, hostos.ErrUnsupported) {
+		t.Fatalf("err = %v, want ErrUnsupported", err)
+	}
+}
 
 func TestParseInstallHistoryFixture(t *testing.T) {
 	data, err := os.ReadFile("testdata/install_history.xml")
@@ -66,7 +79,7 @@ func TestCollectHistoryUsesRunnerOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls int
-	history, err := collectHistoryWith(context.Background(), func(_ context.Context, name string, args ...string) ([]byte, error) {
+	history, err := collectHistoryWith(context.Background(), hostos.Darwin, func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls++
 		if name != "system_profiler" || len(args) != 2 || args[0] != "-xml" || args[1] != "SPInstallHistoryDataType" {
 			t.Fatalf("unexpected command %s %#v", name, args)

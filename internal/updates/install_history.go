@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"howett.net/plist"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 type InstallEntry struct {
@@ -33,11 +35,16 @@ type HistoryQuery struct {
 
 type historyRunner func(context.Context, string, ...string) ([]byte, error)
 
+// Collect reads install history from system_profiler. It is macOS-only and
+// returns an error wrapping hostos.ErrUnsupported elsewhere.
 func Collect(ctx context.Context) (InstallHistory, error) {
-	return collectHistoryWith(ctx, runHistoryCommand, time.Now)
+	return collectHistoryWith(ctx, hostos.Unknown, runHistoryCommand, time.Now)
 }
 
-func collectHistoryWith(ctx context.Context, run historyRunner, now func() time.Time) (InstallHistory, error) {
+func collectHistoryWith(ctx context.Context, kind hostos.Kind, run historyRunner, now func() time.Time) (InstallHistory, error) {
+	if hostos.Resolve(kind) != hostos.Darwin {
+		return InstallHistory{}, hostos.Unsupported("macOS install history")
+	}
 	out, err := run(ctx, "system_profiler", "-xml", "SPInstallHistoryDataType")
 	if err != nil {
 		return InstallHistory{}, err
