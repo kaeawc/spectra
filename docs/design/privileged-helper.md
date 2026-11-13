@@ -92,7 +92,10 @@ The helper's RPC surface is intentionally narrow. It listens on
 (`filesys`, `pathname`, `exec`, `diskio`, or `network`). It defaults to
 `filesys`, caps trace duration at 60 seconds, and never accepts an
 arbitrary command string or file path. Handles are removed when stopped
-or when the bounded trace reaches its duration limit.
+or when the bounded trace reaches its duration limit. Each trace records
+the peer UID that started it; `helper.fs_usage.stop` returns output only
+to that UID or to root, and rejects every other caller without stopping
+the trace.
 
 `helper.net_capture.start` requires an interface name and accepts only
 structured duration, snap length, host, port, and TCP/UDP protocol

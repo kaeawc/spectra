@@ -31,6 +31,8 @@ type fsUsageManager struct {
 }
 
 type fsUsageSession struct {
+	// uid is the peer UID that started the trace; only it or root may stop it.
+	uid    uint32
 	cancel context.CancelFunc
 	done   chan error
 	buf    lockedBuffer
@@ -53,7 +55,7 @@ func newFSUsageManager(starter fsUsageStarter) *fsUsageManager {
 	return &fsUsageManager{starter: starter, sessions: make(map[string]*fsUsageSession)}
 }
 
-func (m *fsUsageManager) start(p fsUsageStartParams) (map[string]any, error) {
+func (m *fsUsageManager) start(uid uint32, p fsUsageStartParams) (map[string]any, error) {
 	if p.PID <= 0 {
 		return nil, fmt.Errorf("helper.fs_usage.start requires {\"pid\": <pid>}")
 	}
@@ -73,7 +75,7 @@ func (m *fsUsageManager) start(p fsUsageStartParams) (map[string]any, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
-	sess := &fsUsageSession{cancel: cancel, done: make(chan error, 1)}
+	sess := &fsUsageSession{uid: uid, cancel: cancel, done: make(chan error, 1)}
 	handle := fmt.Sprintf("fsu-%d", m.next.Add(1))
 	args := []string{"-w", "-f", mode, strconv.Itoa(p.PID)}
 	proc, err := m.starter(ctx, &sess.buf, &sess.buf, "fs_usage", args...)
@@ -99,18 +101,22 @@ func (m *fsUsageManager) start(p fsUsageStartParams) (map[string]any, error) {
 	}, nil
 }
 
-func (m *fsUsageManager) stop(p fsUsageStopParams) (map[string]any, error) {
+func (m *fsUsageManager) stop(uid uint32, p fsUsageStopParams) (map[string]any, error) {
 	if p.Handle == "" {
 		return nil, fmt.Errorf("helper.fs_usage.stop requires {\"handle\": \"...\"}")
 	}
 	m.mu.Lock()
 	sess, ok := m.sessions[p.Handle]
-	if ok {
+	owned := ok && (uid == 0 || uid == sess.uid)
+	if owned {
 		delete(m.sessions, p.Handle)
 	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("helper.fs_usage.stop unknown handle %q", p.Handle)
+	}
+	if !owned {
+		return nil, fmt.Errorf("helper.fs_usage.stop handle %q belongs to another UID", p.Handle)
 	}
 
 	sess.cancel()

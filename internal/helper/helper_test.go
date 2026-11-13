@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -402,6 +403,53 @@ func TestFSUsageStartStop(t *testing.T) {
 	}
 	if stopResult["stopped"] != true {
 		t.Fatalf("stopped = %v, want true", stopResult["stopped"])
+	}
+}
+
+func TestFSUsageStopEnforcesOwnership(t *testing.T) {
+	d := NewDispatcher()
+	registerAll(d, nil, func(ctx context.Context, stdout, _ io.Writer, _ string, _ ...string) (fsUsageProcess, error) {
+		_, _ = io.WriteString(stdout, "open /tmp/secret\n")
+		return fakeFSUsageProcess{ctx: ctx}, nil
+	})
+	start := func(uid uint32) string {
+		t.Helper()
+		resp := d.handle(uid, []byte(`{"jsonrpc":"2.0","id":1,"method":"helper.fs_usage.start","params":{"pid":42,"duration_ms":10000}}`))
+		if resp.Error != nil {
+			t.Fatalf("start error: %+v", resp.Error)
+		}
+		handle, _ := resp.Result.(map[string]any)["handle"].(string)
+		if handle == "" {
+			t.Fatal("empty handle")
+		}
+		return handle
+	}
+	stop := func(uid uint32, handle string) Response {
+		t.Helper()
+		return d.handle(uid, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"helper.fs_usage.stop","params":{"handle":%q}}`, handle)))
+	}
+
+	handle := start(501)
+	resp := stop(502, handle)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "another UID") {
+		t.Fatalf("foreign stop error = %+v, want ownership error", resp.Error)
+	}
+	if resp.Result != nil {
+		t.Fatalf("foreign stop leaked result %v", resp.Result)
+	}
+	// The rejected stop must leave the session running for its owner.
+	resp = stop(501, handle)
+	if resp.Error != nil {
+		t.Fatalf("owner stop error: %+v", resp.Error)
+	}
+	if got := resp.Result.(map[string]any)["raw_output"]; got != "open /tmp/secret\n" {
+		t.Fatalf("raw_output = %q", got)
+	}
+
+	// Root may stop any session.
+	handle = start(501)
+	if resp := stop(0, handle); resp.Error != nil {
+		t.Fatalf("root stop error: %+v", resp.Error)
 	}
 }
 

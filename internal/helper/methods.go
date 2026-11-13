@@ -139,20 +139,20 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 		return map[string]any{"raw_rules": string(out)}, nil
 	})
 
-	d.Register("helper.fs_usage.start", func(_ uint32, params json.RawMessage) (any, error) {
+	d.Register("helper.fs_usage.start", func(uid uint32, params json.RawMessage) (any, error) {
 		var p fsUsageStartParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("helper.fs_usage.start invalid params: %w", err)
 		}
-		return fsUsage.start(p)
+		return fsUsage.start(uid, p)
 	})
 
-	d.Register("helper.fs_usage.stop", func(_ uint32, params json.RawMessage) (any, error) {
+	d.Register("helper.fs_usage.stop", func(uid uint32, params json.RawMessage) (any, error) {
 		var p fsUsageStopParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("helper.fs_usage.stop invalid params: %w", err)
 		}
-		return fsUsage.stop(p)
+		return fsUsage.stop(uid, p)
 	})
 
 	d.Register("helper.net_capture.start", func(uid uint32, params json.RawMessage) (any, error) {
