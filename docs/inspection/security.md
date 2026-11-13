@@ -23,9 +23,13 @@ security regression.
 
 ## Gatekeeper assessment
 
-Collected with `spctl --assess --type exec <app>`. Spectra records the
-coarse verdict as `accepted` or `rejected` and leaves the field empty
-when `spctl` is unavailable or cannot assess the bundle.
+Collected with `spctl --assess -v --type exec <app>`. The `-v` is
+required: without it `spctl` prints nothing for an accepted bundle.
+Spectra records the coarse verdict as `accepted` or `rejected` and
+leaves the field empty when `spctl` is unavailable or cannot assess the
+bundle (for example a damaged signature). The `source=` line, when
+present, is recorded as `GatekeeperSource` (`Apple System`,
+`Mac App Store`, `Notarized Developer ID`, ...).
 
 This is separate from code signing metadata. A bundle can expose a Team
 ID and entitlements but still be rejected by Gatekeeper because it is

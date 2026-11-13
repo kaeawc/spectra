@@ -48,7 +48,8 @@ check `result_schema` before decoding JSON.
 | `Entitlements` | []string | Curated boolean entitlements set true |
 | `PrivacyDescriptions` | map[string]string | `NS*UsageDescription` keys + values |
 | `GrantedPermissions` | []string | TCC.db `auth_value >= 2` services |
-| `GatekeeperStatus` | string | `spctl --assess --type exec`: `accepted`, `rejected`, or empty when unavailable |
+| `GatekeeperStatus` | string | `spctl --assess -v --type exec`: `accepted`, `rejected`, or empty when unavailable |
+| `GatekeeperSource` | string | `source=` line from the same assessment (e.g. `Apple System`, `Mac App Store`, `Notarized Developer ID`); empty when spctl reports none |
 
 ## Live + structural fields
 

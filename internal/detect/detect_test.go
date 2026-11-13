@@ -2,16 +2,19 @@ package detect
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 type fakeNodeFS struct {
@@ -948,22 +951,63 @@ func TestDetectRejectsNonBundle(t *testing.T) {
 	}
 }
 
+// Fixtures are real `spctl --assess -v --type exec` stderr from macOS 26.
 func TestParseGatekeeperOutput(t *testing.T) {
 	cases := []struct {
-		input string
-		want  string
+		name   string
+		input  string
+		status string
+		source string
 	}{
-		{"/Applications/Foo.app: accepted\n", "accepted"},
-		{"/Applications/Foo.app: rejected\n", "rejected"},
-		{"", ""},
-		{"error: some other failure\n", ""},
-		{"/Applications/Foo.app: accepted source=Apple\n", "accepted"},
+		{"apple system", "/System/Applications/Calculator.app: accepted\nsource=Apple System\n", "accepted", "Apple System"},
+		{"app store", "/Applications/Slack.app: accepted\nsource=Mac App Store\n", "accepted", "Mac App Store"},
+		{"notarized", "/Applications/Zed.app: accepted\nsource=Notarized Developer ID\n", "accepted", "Notarized Developer ID"},
+		{"ad-hoc rejected", "/tmp/Fake.app: rejected\n", "rejected", ""},
+		{"damaged bundle", "/Applications/MemoryAnalyzer.app: a sealed resource is missing or invalid\n", "", ""},
+		{"api error", "/Applications/Arbigent.app: invalid API object reference\n", "", ""},
+		{"path names a verdict", "/Users/me/accepted/Foo.app: rejected\n", "rejected", ""},
+		{"silent", "", "", ""},
 	}
 	for _, tc := range cases {
-		got := parseGatekeeperOutput(tc.input)
-		if got != tc.want {
-			t.Errorf("parseGatekeeperOutput(%q) = %q, want %q", tc.input, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseGatekeeperOutput(tc.input)
+			if got.status != tc.status || got.source != tc.source {
+				t.Errorf("parseGatekeeperOutput(%q) = %+v, want status=%q source=%q", tc.input, got, tc.status, tc.source)
+			}
+		})
+	}
+}
+
+// spctlFake answers spctl the way the real tool does: silent on acceptance
+// unless -v is passed.
+type spctlFake struct{ args []string }
+
+func (f *spctlFake) Run(_ context.Context, cmd proc.Cmd) (proc.Result, error) {
+	f.args = cmd.Args
+	if !slices.Contains(cmd.Args, "-v") {
+		return proc.Result{}, nil
+	}
+	app := cmd.Args[len(cmd.Args)-1]
+	return proc.Result{Stderr: []byte(app + ": accepted\nsource=Notarized Developer ID\n")}, nil
+}
+
+func TestReadGatekeeperStatusRequestsVerdict(t *testing.T) {
+	f := &spctlFake{}
+	got := newDetector(Options{Runner: f}).readGatekeeperStatus("/Applications/Zed.app")
+	if got.status != "accepted" || got.source != "Notarized Developer ID" {
+		t.Fatalf("readGatekeeperStatus = %+v (spctl args %q), want accepted / Notarized Developer ID", got, f.args)
+	}
+}
+
+func TestReadGatekeeperStatusRealSpctl(t *testing.T) {
+	requireMacOS(t)
+	const calc = "/System/Applications/Calculator.app"
+	if _, err := os.Stat(calc); err != nil {
+		t.Skipf("%s not present: %v", calc, err)
+	}
+	got := newDetector(Options{}).readGatekeeperStatus(calc)
+	if got.status != "accepted" || got.source != "Apple System" {
+		t.Fatalf("readGatekeeperStatus(%s) = %+v, want accepted / Apple System", calc, got)
 	}
 }
 
