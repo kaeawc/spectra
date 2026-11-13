@@ -105,9 +105,10 @@ func (c *Client) Health() (map[string]any, error) {
 }
 
 // PowermetricsSample requests a one-shot powermetrics sample.
-// durationMS is the sample window in milliseconds (0 → default 500ms).
+// durationMS is the sample window in milliseconds (<= 0 → helper default
+// 500ms). The helper rejects windows longer than 10s.
 func (c *Client) PowermetricsSample(durationMS int) (map[string]any, error) {
-	raw, err := c.call("helper.powermetrics.sample", map[string]any{"duration_ms": durationMS})
+	raw, err := c.call("helper.powermetrics.sample", powermetricsParams(durationMS, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -115,13 +116,24 @@ func (c *Client) PowermetricsSample(durationMS int) (map[string]any, error) {
 	return m, json.Unmarshal(raw, &m)
 }
 
+// powermetricsParams omits duration_ms when it is not positive so the helper
+// applies its default; the helper rejects an explicit non-positive value.
+func powermetricsParams(durationMS int, samplers []string) map[string]any {
+	p := map[string]any{}
+	if durationMS > 0 {
+		p["duration_ms"] = durationMS
+	}
+	if samplers != nil {
+		p["samplers"] = samplers
+	}
+	return p
+}
+
 // PowermetricsTasks requests a tasks-sampler powermetrics plist and returns
 // the raw plist bytes. Caller parses with sysinfo.ParseTasksPlist.
 func (c *Client) PowermetricsTasks(durationMS int) ([]byte, error) {
-	raw, err := c.call("helper.powermetrics.sample", map[string]any{
-		"duration_ms": durationMS,
-		"samplers":    []string{"tasks", "cpu_power", "gpu_power", "ane_power"},
-	})
+	raw, err := c.call("helper.powermetrics.sample",
+		powermetricsParams(durationMS, []string{"tasks", "cpu_power", "gpu_power", "ane_power"}))
 	if err != nil {
 		return nil, err
 	}

@@ -466,3 +466,59 @@ func TestValidatePowermetricsSamplersDedupesAndRejects(t *testing.T) {
 		t.Errorf("nil input = %q, want empty", got)
 	}
 }
+
+func TestPowermetricsDurationBounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		params  string
+		wantErr bool
+		wantI   string
+	}{
+		{name: "omitted uses default", params: `{}`, wantI: "500"},
+		{name: "no params uses default", params: ``, wantI: "500"},
+		{name: "at max", params: fmt.Sprintf(`{"duration_ms":%d}`, maxPowermetricsDurationMS), wantI: fmt.Sprint(maxPowermetricsDurationMS)},
+		{name: "over max", params: fmt.Sprintf(`{"duration_ms":%d}`, maxPowermetricsDurationMS+1), wantErr: true},
+		{name: "huge", params: `{"duration_ms":2147483647}`, wantErr: true},
+		{name: "zero", params: `{"duration_ms":0}`, wantErr: true},
+		{name: "negative", params: `{"duration_ms":-5}`, wantErr: true},
+		{name: "wrong type", params: `{"duration_ms":"forever"}`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewDispatcher()
+			called := false
+			var gotArgs []string
+			RegisterAll(d, func(_ string, args ...string) ([]byte, error) {
+				called = true
+				gotArgs = append([]string(nil), args...)
+				return nil, nil
+			})
+			req := `{"jsonrpc":"2.0","id":1,"method":"helper.powermetrics.sample"`
+			if tc.params != "" {
+				req += `,"params":` + tc.params
+			}
+			resp := d.handle(501, []byte(req+`}`))
+			if tc.wantErr {
+				if resp.Error == nil {
+					t.Fatal("expected error")
+				}
+				if called {
+					t.Fatal("powermetrics should not run for rejected duration")
+				}
+				return
+			}
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %+v", resp.Error)
+			}
+			gotI := ""
+			for i, a := range gotArgs {
+				if a == "-i" && i+1 < len(gotArgs) {
+					gotI = gotArgs[i+1]
+				}
+			}
+			if gotI != tc.wantI {
+				t.Fatalf("-i = %q, want %q (args %v)", gotI, tc.wantI, gotArgs)
+			}
+		})
+	}
+}

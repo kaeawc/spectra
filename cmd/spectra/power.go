@@ -151,7 +151,7 @@ func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int
 	top := fs.Int("top", 0, "Rank top-N pids by ΔbilledEnergy over --interval (per-pid kernel-billed nanojoules via proc_pid_rusage)")
 	interval := fs.Duration("interval", time.Second, "Sampling window for --joules / --top, and tick for --watch")
 	deep := fs.Bool("deep", false, "Ground-truth per-pid energy via powermetrics (requires privileged helper)")
-	deepDurationMS := fs.Int("deep-duration", 500, "Sample window in ms for --deep (min 100)")
+	deepDurationMS := fs.Int("deep-duration", 500, "Sample window in ms for --deep (100-10000)")
 	watch := fs.Bool("watch", false, "Re-run the chosen mode every --interval until SIGINT (NDJSON with --json)")
 
 	if err := fs.Parse(args); err != nil {
@@ -187,7 +187,7 @@ func printPowerUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --top N           Top N pids by rusage energy delta              (no privilege)")
 	fmt.Fprintln(w, "  --joules          Per-package joules via IOReport (Apple Silicon) (no privilege)")
 	fmt.Fprintln(w, "  --deep            Powermetrics ground truth                       (requires helper)")
-	fmt.Fprintln(w, "  --deep-duration   Sample window in ms for --deep (default 500)")
+	fmt.Fprintln(w, "  --deep-duration   Sample window in ms for --deep (default 500, max 10000)")
 	fmt.Fprintln(w, "  --watch           Re-run every --interval; emits NDJSON with --json (inherits)")
 	fmt.Fprintln(w, "  --json            Structured output (stable schema across modes)   (inherits)")
 	fmt.Fprintln(w, "  --interval D      Sample window or watch tick (default 1s)        (inherits)")

@@ -47,6 +47,41 @@ func validatePowermetricsSamplers(in []string) string {
 	return strings.Join(out, ",")
 }
 
+const (
+	defaultPowermetricsDurationMS = 500
+	// maxPowermetricsDurationMS bounds how long one request can hold the root
+	// helper inside a powermetrics sample.
+	maxPowermetricsDurationMS   = 10_000
+	defaultPowermetricsSamplers = "cpu_power,gpu_power,network,disk"
+)
+
+// parsePowermetricsParams validates helper.powermetrics.sample params. An
+// omitted duration_ms uses the default; an explicit value must be in
+// (0, maxPowermetricsDurationMS].
+func parsePowermetricsParams(params json.RawMessage) (int, string, error) {
+	var p struct {
+		DurationMS *int     `json:"duration_ms"`
+		Samplers   []string `json:"samplers"`
+	}
+	if len(params) != 0 && string(params) != "null" {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return 0, "", fmt.Errorf("helper.powermetrics.sample invalid params: %w", err)
+		}
+	}
+	durationMS := defaultPowermetricsDurationMS
+	if p.DurationMS != nil {
+		durationMS = *p.DurationMS
+	}
+	if durationMS <= 0 || durationMS > maxPowermetricsDurationMS {
+		return 0, "", fmt.Errorf("helper.powermetrics.sample requires 0 < duration_ms <= %d", maxPowermetricsDurationMS)
+	}
+	samplers := validatePowermetricsSamplers(p.Samplers)
+	if samplers == "" {
+		samplers = defaultPowermetricsSamplers
+	}
+	return durationMS, samplers, nil
+}
+
 // defaultRunner runs the real command.
 func defaultRunner(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
@@ -70,22 +105,14 @@ func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {
 	})
 
 	d.Register("helper.powermetrics.sample", func(_ uint32, params json.RawMessage) (any, error) {
-		var p struct {
-			DurationMS int      `json:"duration_ms"`
-			Samplers   []string `json:"samplers"`
-		}
-		_ = json.Unmarshal(params, &p)
-		if p.DurationMS <= 0 {
-			p.DurationMS = 500
-		}
-		samplers := validatePowermetricsSamplers(p.Samplers)
-		if samplers == "" {
-			samplers = "cpu_power,gpu_power,network,disk"
+		durationMS, samplers, err := parsePowermetricsParams(params)
+		if err != nil {
+			return nil, err
 		}
 		out, err := run("powermetrics",
 			"--samplers", samplers,
 			"-n", "1",
-			"-i", fmt.Sprint(p.DurationMS),
+			"-i", fmt.Sprint(durationMS),
 			"--format", "plist",
 		)
 		if err != nil {
