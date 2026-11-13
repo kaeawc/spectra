@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
 
 const scheduleAgentLabel = "dev.spectra.snapshot"
@@ -35,6 +37,10 @@ func runScheduleWithIO(args []string, stdout, stderr io.Writer, deps scheduleAge
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: spectra schedule <install [--interval 1h] [--no-load] | uninstall | status | print-plist>")
 		return 2
+	}
+	if hostos.Resolve(deps.os) != hostos.Darwin {
+		fmt.Fprintf(stderr, "spectra schedule: %v (run `spectra snapshot` from cron or a systemd timer instead)\n", hostos.Unsupported("launchd snapshot scheduling"))
+		return 1
 	}
 	switch args[0] {
 	case "install":

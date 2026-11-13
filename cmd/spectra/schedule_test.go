@@ -6,7 +6,27 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/hostos"
 )
+
+func TestScheduleUnsupportedOffDarwin(t *testing.T) {
+	f := newFakeAgent()
+	deps := f.deps()
+	deps.os = hostos.Linux
+	for _, sub := range []string{"install", "uninstall", "status", "print-plist"} {
+		var out, errBuf bytes.Buffer
+		if code := runScheduleWithIO([]string{sub}, &out, &errBuf, deps); code != 1 {
+			t.Errorf("%s: exit = %d, want 1", sub, code)
+		}
+		if !strings.Contains(errBuf.String(), "unsupported on host OS") {
+			t.Errorf("%s: stderr = %q", sub, errBuf.String())
+		}
+	}
+	if len(f.written) != 0 || len(f.runs) != 0 {
+		t.Fatalf("nothing may be written or launched off Darwin: written=%v runs=%v", f.written, f.runs)
+	}
+}
 
 type fakeAgent struct {
 	written  map[string][]byte
@@ -20,6 +40,7 @@ func newFakeAgent() *fakeAgent { return &fakeAgent{written: map[string][]byte{}}
 
 func (f *fakeAgent) deps() scheduleAgentDeps {
 	return scheduleAgentDeps{
+		os:         hostos.Darwin,
 		executable: func() (string, error) { return "/usr/local/bin/spectra", nil },
 		homeDir:    func() (string, error) { return "/home/tester", nil },
 		uid:        func() string { return "501" },
