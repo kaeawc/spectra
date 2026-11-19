@@ -67,7 +67,9 @@ impl Jvm {
         let g = self.gc.clone().unwrap_or_default();
         Sample {
             heap_used_kib: self.heap_used_kib(),
+            heap_max_kib: self.heap_max_kib(),
             old_used_kib: g.ou,
+            metaspace_kib: g.mu,
             gc_seconds: g.gct,
             gc_count: g.ygc + g.fgc,
             classes: self.classes.as_ref().map_or(0, |c| c.loaded),
@@ -80,7 +82,9 @@ impl Jvm {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sample {
     pub heap_used_kib: f64,
+    pub heap_max_kib: f64,
     pub old_used_kib: f64,
+    pub metaspace_kib: f64,
     pub gc_seconds: f64,
     pub gc_count: u64,
     pub classes: u64,
