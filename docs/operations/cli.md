@@ -24,6 +24,31 @@ already-visited directories, lists skipped mounts in `skipped`, and prints a
 partial result (`partial: true`) on interrupt. Paths are reported under the
 path as typed.
 
+`spectra fswatch <path> [--duration 30s] [--interval 1s] [--top 10] [--max-entries N] [--holders-timeout 10s] [--json]`
+answers "what keeps writing here?" by snapshotting the tree under a path each
+interval and streaming created, modified and removed events, each tagged with
+the entry kind (`file`, `dir`, `symlink`, `other`); a path that changes kind is
+reported as a `removed` of the old kind followed by a `created` of the new one.
+It then summarizes counts by kind and the busiest files and directories, naming
+the processes that hold each busiest surviving regular file open when the watch
+ends (symlinks are never looked up). Holder lookup covers at most the top 5
+files and shares one `--holders-timeout` budget (`0` disables it); when owner
+could only see part of the system, or the budget ran out, the output says so and
+JSON sets `summary.holders_incomplete`. It is a polling watcher: files that
+appear and vanish between polls are missed and several writes within one
+interval count once. It never follows symlinks. Past `--max-entries` (default
+200000) the first entries in tree order stay tracked and changes beyond the cap
+are not seen; this is reported once with the tracked count. Unreadable
+subdirectories (including ones that list but whose entries cannot be stat'ed)
+are reported once as warnings (`warnings` in JSON) and produce no removals; a
+`..` after a symlinked component is applied to the resolved path, as the
+filesystem does, and a holder lookup that ignores its timeout is abandoned and
+reported as incomplete; a poll where the root cannot be read is skipped and counted in
+`polls_failed`, and a root that no longer exists ends the watch with
+`ended_reason`. Ctrl-C abandons any scan in progress and prints the summary with
+the actual elapsed time; a second Ctrl-C terminates immediately. `--json` emits
+one object at the end.
+
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
