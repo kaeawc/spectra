@@ -151,7 +151,16 @@ memory that could not be read: it fails closed) or `4`
 (backoff: memory below `--backoff-free-gb` GiB), and attributes CPU and RSS to
 processes, families and git worktrees (`--root DIR`, repeatable, names a
 worktree directory for the `roots` cause). `--json` emits stable snake_case
-fields including `elapsed_ms`.
+fields including `elapsed_ms` and `cpu_window_ms`. On Linux, per-process CPU
+is measured over a short window (`--sample`, default `500ms`) from two
+`/proc/<pid>/stat` readings, matched by pid and start time, so a busy-now
+process outranks one that was only busy earlier; `--sample 0` falls back to
+whole-lifetime averages. `cpu_basis` says what the CPU figures mean:
+`window` (Linux delta over `cpu_window_ms`), `recent` (macOS, where `ps`
+reports a decaying recent average; `cpu_window_ms` is `0`) or `lifetime`
+(Linux with `--sample 0`, or nothing could be diffed; `cpu_window_ms` is
+`0`). A process that started during the window is scored on its CPU over the
+window. The text output has a `cpu` line saying which basis applied.
 
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
