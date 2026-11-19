@@ -157,6 +157,36 @@ func TestRelativeSocketAmbiguousCandidates(t *testing.T) {
 	}
 }
 
+func TestRelativeSocketOneProcessManyInodesNotAmbiguous(t *testing.T) {
+	// Listener (900) and an accepted connection (904) share the bound name and
+	// are both held by pid 60.
+	fsys := relSockFS("/srv/run", false)
+	fsys.files["/proc/net/unix"] += "0005: 2 0 10000 0001 01 904 service.sock\n"
+	fsys.dirs["/proc/60/fd"] = []string{"3", "4"}
+	fsys.links["/proc/60/fd/4"] = "socket:[904]"
+	got, _, ambiguous := procPathHolders(fsys, "/proc", []string{"/srv/run/service.sock"})
+	if ambiguous || len(got) != 2 || got[0].PID != 60 || got[1].PID != 60 {
+		t.Errorf("got %+v ambiguous=%v; want pid 60 once per fd, not ambiguous", got, ambiguous)
+	}
+	f := Finder{OS: hostos.Linux, FS: fsys, Procs: fakeProcs, IsRoot: func() bool { return true }}
+	res, err := f.Find(context.Background(), Target{Kind: KindPath, Path: "/srv/run/service.sock"})
+	if err != nil || res.Incomplete || res.Hint != "" {
+		t.Errorf("res = %+v, err = %v; want complete", res, err)
+	}
+}
+
+// Working directories are not compared, so a forked child sharing its parent's
+// inode counts as a second candidate.
+func TestRelativeSocketForkedChildSharingInodeIsAmbiguous(t *testing.T) {
+	fsys := relSockFS("/srv/run", false)
+	fsys.links["/proc/61/cwd"] = "/srv/run"
+	fsys.links["/proc/61/fd/3"] = "socket:[900]"
+	got, _, ambiguous := procPathHolders(fsys, "/proc", []string{"/srv/run/service.sock"})
+	if !ambiguous || len(got) != 2 {
+		t.Errorf("got %+v ambiguous=%v; want pids 60 and 61, ambiguous", got, ambiguous)
+	}
+}
+
 func TestRelativeSocketSingleCandidateNotAmbiguous(t *testing.T) {
 	got, _, ambiguous := procPathHolders(relSockFS("/srv/run", false), "/proc", []string{"/srv/run/service.sock"})
 	if ambiguous || len(got) != 1 {
