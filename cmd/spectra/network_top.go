@@ -27,9 +27,8 @@ const networkTopUsage = "usage: spectra network top [--duration 10s] [--interval
 
 // networkTopDeps are the seams runNetworkTopWithIO needs; tests replace them.
 type networkTopDeps struct {
-	os  hostos.Kind
-	run netstate.CmdRunner
-	// runner runs the macOS measuring tool, which must die on Ctrl-C.
+	os hostos.Kind
+	// runner runs the sampling tool (nettop or ss), which must die on Ctrl-C.
 	runner proc.Runner
 	procs  func(ctx context.Context) []process.Info
 	conns  func() []netstate.Connection
@@ -40,7 +39,6 @@ type networkTopDeps struct {
 
 func defaultNetworkTopDeps() networkTopDeps {
 	return networkTopDeps{
-		run:    netstate.DefaultRunner,
 		runner: proc.Default,
 		procs: func(ctx context.Context) []process.Info {
 			return process.CollectAll(ctx, process.CollectOptions{
@@ -89,7 +87,12 @@ func parseNetworkTopFlags(args []string, stderr io.Writer) (networkTopOpts, bool
 			"macOS runs one `nettop -d -L 2` per interval, so --interval and --duration\n"+
 			"are rounded up to whole seconds and an interval cut short by Ctrl-C is\n"+
 			"dropped; remote endpoints are the connections open at the end of the window.\n"+
-			"Linux diffs per-socket TCP counters from `ss -tinpH`.\n\n")
+			"Linux diffs per-socket TCP counters from `ss -tinpeH` (sockets identified by\n"+
+			"their sk: cookie); --interval must be at least 100ms; remote endpoints are\n"+
+			"those whose sockets moved the most bytes in the window.\n\n"+
+			"\"started\" lists processes whose first interval with traffic came after the\n"+
+			"first measured interval; \"stopped\" those whose last came before the last\n"+
+			"measured interval. A failed interval counts as neither.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.DurationVar(&o.duration, "duration", 10*time.Second, "How long to sample (Ctrl-C stops early)")
@@ -120,10 +123,14 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 	if !ok {
 		return 2
 	}
-	src, err := nettop.SourceFor(deps.os, deps.run, deps.runner)
+	src, err := nettop.SourceFor(deps.os, deps.runner)
 	if err != nil {
 		fmt.Fprintf(stderr, "network top: %v\n", err)
 		return 1
+	}
+	if src.MinInterval > 0 && opts.interval < src.MinInterval {
+		fmt.Fprintf(stderr, "network top: --interval must be at least %s with %s\n%s\n", src.MinInterval, src.Tool, networkTopUsage)
+		return 2
 	}
 	before := deps.procs(ctx)
 	scope := newTopScope(opts.pid)
@@ -193,7 +200,7 @@ func printInterruptedNetworkTop(ew *errWriter, stderr io.Writer, src nettop.Sour
 	rep := nettop.Report{
 		IntervalMS: opts.interval.Milliseconds(), Basis: src.Basis,
 		RemotesBasis: nettop.RemotesBasisFor(src.Basis), PID: opts.pid,
-		Processes: []nettop.Process{}, Appeared: []nettop.Ref{}, Disappeared: []nettop.Ref{},
+		Processes: []nettop.Process{}, Started: []nettop.Ref{}, Stopped: []nettop.Ref{},
 		Limitations: []string{interruptedNote},
 	}
 	return writeNetworkTopReport(ew, stderr, rep, opts.json)
@@ -327,7 +334,7 @@ func fillRemotes(rep *nettop.Report, conns []netstate.Connection) {
 	if rep.RemotesBasis == nettop.RemotesEndSnapshot {
 		rep.Limitations = append(rep.Limitations, fmt.Sprintf("remote endpoints are the connections open at the end of the window (one listing), not necessarily those that moved the bytes; %d listed process(es) had none open then", missing))
 	} else if missing > 0 {
-		rep.Limitations = append(rep.Limitations, fmt.Sprintf("%d listed process(es) had no busy socket; their remote endpoints come from one connection listing at the end", missing))
+		rep.Limitations = append(rep.Limitations, fmt.Sprintf("%d listed process(es) had no socket with a known remote that moved bytes; their remote endpoints come from one connection listing at the end", missing))
 	}
 }
 
@@ -355,8 +362,8 @@ func printNetworkTopReport(out io.Writer, r nettop.Report) error {
 	} else {
 		printNetworkTopTable(w, r.Processes, r.RemotesBasis)
 	}
-	printNetworkTopRefs(w, "appeared during the window", r.Appeared)
-	printNetworkTopRefs(w, "gone by the end", r.Disappeared)
+	printNetworkTopRefs(w, "started using the network after the first interval", r.Started)
+	printNetworkTopRefs(w, "stopped using the network before the last interval", r.Stopped)
 	if len(r.Limitations) > 0 {
 		fmt.Fprintln(w, "Limitations:")
 		for _, l := range r.Limitations {

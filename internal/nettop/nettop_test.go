@@ -12,6 +12,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // step is one scripted sample: its counters (or error) and how long the
@@ -86,20 +87,45 @@ func TestSteadySender(t *testing.T) {
 	if rep.Totals.PeakTotalRate != 1100 || rep.Totals.BytesOut != 3000 || rep.Totals.ActiveProcesses != 1 {
 		t.Errorf("totals = %+v", rep.Totals)
 	}
-	if p.Appeared || p.Disappeared || len(rep.Appeared) != 0 || len(rep.Disappeared) != 0 {
+	if p.Started || p.Stopped || len(rep.Started) != 0 || len(rep.Stopped) != 0 {
 		t.Errorf("unexpected churn: %+v", rep)
 	}
 }
 
-func TestAppearsMidWindow(t *testing.T) {
-	steps := []step{at(c(10, 0, 0)), at(c(10, 0, 10), c(20, 500, 500)), at(c(10, 0, 20), c(20, 600, 600))}
-	rep := Summarize(runScript(t, newScript(steps...).config(time.Second, 2*time.Second)), nil, 0)
+func TestStartsMidWindow(t *testing.T) {
+	steps := []step{at(c(10, 0, 0)), at(c(10, 0, 10)), at(c(10, 0, 20), c(20, 500, 500)), at(c(10, 0, 30), c(20, 600, 600))}
+	rep := Summarize(runScript(t, newScript(steps...).config(time.Second, 3*time.Second)), nil, 0)
 	p := findProc(rep, 20)
-	if p == nil || p.BytesIn != 600 || p.BytesOut != 600 || p.PeakInRate != 500 || !p.Appeared {
+	if p == nil || p.BytesIn != 600 || p.BytesOut != 600 || p.PeakInRate != 500 || !p.Started || p.Stopped {
 		t.Fatalf("newcomer = %+v, want its whole counter (it started at 0)", p)
 	}
-	if len(rep.Appeared) != 1 || rep.Appeared[0].PID != 20 {
-		t.Errorf("appeared = %+v", rep.Appeared)
+	if len(rep.Started) != 1 || rep.Started[0].PID != 20 {
+		t.Errorf("started = %+v", rep.Started)
+	}
+}
+
+// Started and stopped come from measured activity, not socket presence: a
+// socket open throughout that moved bytes only in the middle is both, and
+// a new socket that moved nothing (SYN-SENT) is neither.
+func TestStartedStoppedFollowActivity(t *testing.T) {
+	sock := func(pid int, name string, in int64) Counter {
+		return Counter{PID: pid, Command: fmt.Sprintf("p%d", pid), Socket: name, In: in}
+	}
+	s := newScript(
+		at(sock(1, "a", 100), sock(3, "c", 0)),
+		at(sock(1, "a", 100), sock(3, "c", 10)),
+		at(sock(1, "a", 900), sock(3, "c", 20), sock(2, "syn", 0)),
+		at(sock(1, "a", 900), sock(3, "c", 30), sock(2, "syn", 0)),
+	)
+	rep := Summarize(runScript(t, s.config(time.Second, 3*time.Second)), nil, 0)
+	if p := findProc(rep, 1); p == nil || p.BytesIn != 800 || !p.Started || !p.Stopped {
+		t.Fatalf("middle-only mover = %+v, want started and stopped", p)
+	}
+	if findProc(rep, 2) != nil || len(rep.Started) != 1 || rep.Started[0].PID != 1 || len(rep.Stopped) != 1 {
+		t.Errorf("started = %+v stopped = %+v, want only pid 1", rep.Started, rep.Stopped)
+	}
+	if p := findProc(rep, 3); p == nil || p.Started || p.Stopped {
+		t.Errorf("steady process = %+v", p)
 	}
 }
 
@@ -119,8 +145,8 @@ func TestLinuxFirstSeenSocketCountsFully(t *testing.T) {
 	if p == nil || p.BytesIn != 700+4_500 || p.BytesOut != 100+50 {
 		t.Fatalf("process = %+v, want baseline socket's growth (700/100) plus the new socket's whole counter (4500/50)", p)
 	}
-	if p.Appeared {
-		t.Errorf("a new socket of a known process is not a new process: %+v", p)
+	if p.Started {
+		t.Errorf("a new socket of a process already moving bytes is not a start: %+v", p)
 	}
 }
 
@@ -139,18 +165,18 @@ func TestSharedSocketReattributedIsNotDoubleCounted(t *testing.T) {
 	}
 }
 
-func TestDisappearsMidWindow(t *testing.T) {
+func TestStopsMidWindow(t *testing.T) {
 	s := newScript(at(c(10, 0, 0), c(30, 0, 0)), at(c(10, 0, 5), c(30, 400, 0)), at(c(10, 0, 9)))
 	rep := Summarize(runScript(t, s.config(time.Second, 2*time.Second)), nil, 0)
 	p := findProc(rep, 30)
-	if p == nil || p.BytesIn != 400 || !p.Disappeared {
+	if p == nil || p.BytesIn != 400 || !p.Stopped {
 		t.Fatalf("leaver = %+v", p)
 	}
 	if p.AvgInRate != 200 || p.PeakInRate != 400 {
 		t.Errorf("leaver rates avg=%v peak=%v, want 200 over the window and 400 peak", p.AvgInRate, p.PeakInRate)
 	}
-	if len(rep.Disappeared) != 1 || rep.Disappeared[0].Command != "p30" {
-		t.Errorf("disappeared = %+v", rep.Disappeared)
+	if len(rep.Stopped) != 1 || rep.Stopped[0].Command != "p30" {
+		t.Errorf("stopped = %+v", rep.Stopped)
 	}
 }
 
@@ -336,63 +362,135 @@ func TestBadConfig(t *testing.T) {
 	}
 }
 
-func TestRemotesKeptFromLatestSample(t *testing.T) {
+// Remotes are ranked by the bytes they moved inside the window: a socket
+// that moved 8 MB and closed before the last poll is kept, and one whose
+// large counter predates the window but stayed idle is dropped.
+func TestRemotesRankedByWindowBytes(t *testing.T) {
 	r := func(remote string, in int64) Counter {
 		return Counter{PID: 3, Socket: remote, Remote: remote, In: in}
 	}
-	s := newScript(at(r("1.1.1.1:443", 0), r("old:80", 0)),
-		at(r("1.1.1.1:443", 10), r("4.4.4.4:443", 50), r("3.3.3.3:443", 0), r("2.2.2.2:443", 0)))
-	rep := Summarize(runScript(t, s.config(time.Second, time.Second)), nil, 0)
+	s := newScript(
+		at(r("idle:443", 10_000_000), r("bulk:443", 0), r("small:443", 0)),
+		at(r("idle:443", 10_000_000), r("bulk:443", 8_000_000), r("small:443", 100)),
+		at(r("idle:443", 10_000_000), r("small:443", 300), r("late:443", 50)),
+	)
+	rep := Summarize(runScript(t, s.config(time.Second, 2*time.Second)), nil, 0)
 	p := findProc(rep, 3)
-	want := []string{"4.4.4.4:443", "1.1.1.1:443", "2.2.2.2:443"}
+	want := []string{"bulk:443", "small:443", "late:443"}
 	if p == nil || strings.Join(p.Remotes, ",") != strings.Join(want, ",") {
-		t.Fatalf("remotes = %+v, want busiest first %v", p, want)
-	}
-	for _, x := range p.Remotes {
-		if x == "old:80" {
-			t.Errorf("stale remote kept: %v", p.Remotes)
-		}
+		t.Fatalf("remotes = %+v, want %v by window bytes", p, want)
 	}
 }
 
-const ssSample = `ESTAB 0 0 192.168.1.10:51000 140.82.112.3:443 users:(("git-remote-http",pid=4242,fd=5))
+const ssSample = `ESTAB 0 0 192.168.1.10:51000 140.82.112.3:443 users:(("git-remote-http",pid=4242,fd=5)) uid:1000 ino:58925 sk:3c cgroup:/user.slice <->
 	 cubic bytes_acked:1200 bytes_received:98000
-ESTAB 0 0 127.0.0.1:5432 127.0.0.1:41000 users:(("psql",pid=50,fd=3))
+ESTAB 0 0 127.0.0.1:5432 127.0.0.1:41000 users:(("psql",pid=50,fd=3)) uid:1000 ino:58926 sk:3d <->
 	 cubic bytes_acked:10 bytes_received:20
-ESTAB 0 0 [::1]:8080 [::1]:40000 users:(("node",pid=60,fd=3))
+ESTAB 0 0 [::1]:8080 [::1]:40000 users:(("node",pid=60,fd=3)) uid:1000 ino:58927 sk:3e <->
 	 cubic bytes_acked:10 bytes_received:20
 ESTAB 0 0 [2001:db8::5]:40112 [2606:4700::1]:443 users:(("curl",pid=70,fd=3))
 	 cubic bytes_acked:5 bytes_received:7
 `
 
-func TestSamplerForLinux(t *testing.T) {
-	run := func(name string, args ...string) ([]byte, error) {
-		if name != "ss" || len(args) != 1 || args[0] != "-tinpH" {
-			return nil, errors.New("unexpected command")
-		}
-		return []byte(ssSample), nil
+// seqRunner returns its outputs in turn (the last repeats); during, if set,
+// runs inside each call and may replace its result.
+type seqRunner struct {
+	outputs []string
+	calls   int
+	during  func(ctx context.Context, call int) error
+}
+
+func (s *seqRunner) Run(ctx context.Context, cmd proc.Cmd) (proc.Result, error) {
+	call := s.calls
+	s.calls++
+	if cmd.Name != "ss" || strings.Join(cmd.Args, " ") != "-tinpeH" {
+		return proc.Result{ExitCode: -1}, errors.New("unexpected command")
 	}
-	src, err := SourceFor(hostos.Linux, run, nil)
-	if err != nil || src.Basis != BasisSSTCP || src.Tool != "ss" || src.Sample == nil || src.Measure != nil || src.Step != 0 {
+	if s.during != nil {
+		if err := s.during(ctx, call); err != nil {
+			return proc.Result{ExitCode: -1}, err
+		}
+	}
+	return proc.Result{Stdout: []byte(s.outputs[min(call, len(s.outputs)-1)])}, nil
+}
+
+func TestSamplerForLinux(t *testing.T) {
+	src, err := SourceFor(hostos.Linux, &seqRunner{outputs: []string{ssSample}})
+	if err != nil || src.Basis != BasisSSTCP || src.Tool != "ss" || src.Sample == nil || src.Measure != nil || src.Step != 0 || src.MinInterval != MinSSInterval {
 		t.Fatalf("source = %+v err = %v", src, err)
 	}
 	cs, err := src.Sample(context.Background())
 	if err != nil || len(cs) != 2 {
 		t.Fatalf("counters = %+v err = %v, want loopback sockets dropped", cs, err)
 	}
-	if cs[0].PID != 4242 || cs[0].In != 98000 || cs[0].Out != 1200 || cs[0].Remote != "140.82.112.3:443" || cs[0].Socket == "" {
-		t.Errorf("counter = %+v", cs[0])
+	if cs[0].PID != 4242 || cs[0].In != 98000 || cs[0].Out != 1200 || cs[0].Remote != "140.82.112.3:443" || cs[0].Socket != "sk:3c" {
+		t.Errorf("counter = %+v, want the sk: cookie as socket identity", cs[0])
 	}
-	if cs[1].PID != 70 || cs[1].Remote != "[2606:4700::1]:443" {
-		t.Errorf("ipv6 counter = %+v", cs[1])
+	if cs[1].PID != 70 || cs[1].Remote != "[2606:4700::1]:443" || cs[1].Socket != "[2001:db8::5]:40112->[2606:4700::1]:443" {
+		t.Errorf("ipv6 counter without sk: = %+v, want the endpoint key", cs[1])
+	}
+}
+
+// A new connection reusing a closed one's endpoints has a new cookie, so
+// its whole counter counts even when it is higher than the old one's; a
+// socket that moves to another pid keeps its cookie and counts once.
+func TestSSCookieIdentifiesSocket(t *testing.T) {
+	line := func(pid int, sk string, in int64) string {
+		return fmt.Sprintf("ESTAB 0 0 10.0.0.5:51000 140.82.112.3:443 users:((\"git\",pid=%d,fd=5)) uid:1000 ino:1 sk:%s <->\n\t cubic bytes_acked:0 bytes_received:%d\n", pid, sk, in)
+	}
+	sr := &seqRunner{outputs: []string{line(5, "a1", 1000), line(5, "a2", 1500), line(9, "a2", 1700)}}
+	src, _ := SourceFor(hostos.Linux, sr)
+	s := newScript()
+	cfg := s.config(time.Second, 2*time.Second)
+	src.Configure(&cfg)
+	rep := Summarize(runScript(t, cfg), nil, 0)
+	if p := findProc(rep, 5); p == nil || p.BytesIn != 1500 {
+		t.Fatalf("pid 5 = %+v, want the replacement socket's whole 1500", p)
+	}
+	if p := findProc(rep, 9); p == nil || p.BytesIn != 200 || rep.Totals.BytesIn != 1700 {
+		t.Fatalf("pid 9 = %+v totals = %+v, want only the shared socket's growth", p, rep.Totals)
+	}
+}
+
+// Ctrl-C during a slow ss ends the poll at once: the completed interval is
+// kept and the interrupted poll is neither a sample nor a failure. Each
+// poll also runs under its own timeout.
+func TestSSPollFollowsContext(t *testing.T) {
+	ss := func(in int64) string {
+		return fmt.Sprintf("ESTAB 0 0 10.0.0.5:51000 140.82.112.3:443 users:((\"git\",pid=5,fd=5))\n\t cubic bytes_received:%d\n", in)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sr := &seqRunner{outputs: []string{ss(0), ss(100)}}
+	sr.during = func(ctx context.Context, call int) error {
+		dl, ok := ctx.Deadline()
+		if !ok || time.Until(dl) > ssTimeout {
+			t.Errorf("poll %d deadline = %v %v, want within %v", call, dl, ok, ssTimeout)
+		}
+		if call == 2 {
+			cancel()
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+	src, _ := SourceFor(hostos.Linux, sr)
+	s := newScript()
+	cfg := s.config(time.Second, 10*time.Second)
+	src.Configure(&cfg)
+	tr, err := Run(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := Summarize(tr, nil, 0)
+	if rep.Samples != 2 || rep.SamplesFailed != 0 || rep.Totals.BytesIn != 100 || sr.calls != 3 {
+		t.Fatalf("report = %+v calls = %d", rep, sr.calls)
 	}
 }
 
 func TestSamplerMissingTool(t *testing.T) {
-	run := func(name string, _ ...string) ([]byte, error) {
-		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
-	}
-	src, _ := SourceFor(hostos.Linux, run, nil)
+	missing := proc.NewFake().On(proc.MatchPrefix("ss"), proc.Response{Err: &exec.Error{Name: "ss", Err: exec.ErrNotFound}})
+	src, _ := SourceFor(hostos.Linux, missing)
 	if _, err := src.Sample(context.Background()); !errors.Is(err, ErrToolMissing) || !strings.Contains(err.Error(), "ss") {
 		t.Fatalf("err = %v", err)
 	}

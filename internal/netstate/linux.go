@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // collectLinux gathers network state on Linux from /proc, /sys, and the
@@ -166,11 +169,15 @@ func parseSSListen(out, proto string) []ListeningPort {
 	return ports
 }
 
-// SocketBytes is one TCP socket's cumulative byte counters from `ss -tinpH`.
+// SocketBytes is one TCP socket's cumulative byte counters from `ss -tinpeH`.
 type SocketBytes struct {
-	PID        int
-	Command    string
-	State      string
+	PID     int
+	Command string
+	State   string
+	// Cookie is the kernel socket identity from ss's `sk:` field, empty when
+	// ss does not print one. Unlike the endpoints, it differs between a
+	// closed socket and a new one that reuses the same addresses.
+	Cookie     string
 	LocalAddr  string
 	RemoteAddr string
 	// BytesIn is bytes_received; BytesOut is bytes_acked (data the peer
@@ -179,18 +186,25 @@ type SocketBytes struct {
 	BytesOut int64
 }
 
-// CollectSocketBytes reads per-socket TCP counters with `ss -tinpH`.
-func CollectSocketBytes(run CmdRunner) ([]SocketBytes, error) {
-	out, err := run("ss", "-tinpH")
+// SocketBytesArgs are the ss arguments CollectSocketBytes runs: TCP, tcp_info
+// (-i), numeric, processes, extended socket info (-e, for the sk: cookie),
+// no header.
+var SocketBytesArgs = []string{"-tinpeH"}
+
+// CollectSocketBytes reads per-socket TCP counters with `ss -tinpeH` through
+// r, so the run ends when ctx does.
+func CollectSocketBytes(ctx context.Context, r proc.Runner) ([]SocketBytes, error) {
+	out, err := proc.Output(ctx, r, "ss", SocketBytesArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("ss: %w", err)
 	}
 	return parseSSTCPInfo(string(out)), nil
 }
 
-// parseSSTCPInfo parses `ss -tinpH`. Each socket is a line starting in
-// column 0 (State Recv-Q Send-Q Local Peer [users:(...)]) followed by an
-// indented tcp_info line. Sockets without a users: field (other users'
+// parseSSTCPInfo parses `ss -tinpeH` (or `-tinpH`). Each socket is a line
+// starting in column 0 (State Recv-Q Send-Q Local Peer [users:(...)] and,
+// with -e, uid: ino: sk: [cgroup:] <->) followed by an indented tcp_info
+// line. Sockets without a users: field (other users'
 // sockets, or orphans) cannot be attributed and are skipped. A socket shared
 // by several processes is attributed to the lowest pid so it counts once.
 func parseSSTCPInfo(out string) []SocketBytes {
@@ -233,13 +247,35 @@ func parseSSTCPRecord(fields []string) (SocketBytes, bool) {
 		return SocketBytes{}, false
 	}
 	for _, f := range fields[5:] {
-		if v, ok := strings.CutPrefix(f, "bytes_acked:"); ok {
-			s.BytesOut = parseCounter(v)
-		} else if v, ok := strings.CutPrefix(f, "bytes_received:"); ok {
-			s.BytesIn = parseCounter(v)
-		}
+		s.noteField(f)
 	}
 	return s, true
+}
+
+// noteField takes what a socket record carries past its endpoints: the
+// counters from tcp_info and the cookie from -e. Everything else (users:,
+// uid:, ino:, cgroup:, <->, rtt:, ...) is ignored. ss prints sk: after
+// users:, so the last hex sk: wins over one inside a command name.
+func (s *SocketBytes) noteField(f string) {
+	if v, ok := strings.CutPrefix(f, "bytes_acked:"); ok {
+		s.BytesOut = parseCounter(v)
+	} else if v, ok := strings.CutPrefix(f, "bytes_received:"); ok {
+		s.BytesIn = parseCounter(v)
+	} else if v, ok := strings.CutPrefix(f, "sk:"); ok && isHex(v) {
+		s.Cookie = v
+	}
+}
+
+func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func parseCounter(s string) int64 {

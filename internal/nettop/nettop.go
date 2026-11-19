@@ -34,8 +34,11 @@ const (
 
 // Remotes bases name where a process's remote endpoints come from.
 const (
-	RemotesEndSnapshot    = "end-snapshot"
-	RemotesBusiestSockets = "busiest-sockets"
+	// RemotesEndSnapshot: one connection listing taken at the end.
+	RemotesEndSnapshot = "end-snapshot"
+	// RemotesWindowBytes: the remotes whose sockets moved the most bytes
+	// over the window, summed from the measured deltas.
+	RemotesWindowBytes = "window-bytes"
 )
 
 // RemotesBasisFor returns the remotes basis for a counter basis.
@@ -43,7 +46,7 @@ func RemotesBasisFor(basis string) string {
 	if basis == BasisNettop {
 		return RemotesEndSnapshot
 	}
-	return RemotesBusiestSockets
+	return RemotesWindowBytes
 }
 
 // MaxRemotes bounds the remote endpoints reported per process.
@@ -53,11 +56,20 @@ const MaxRemotes = 3
 // before it is killed and counted as failed.
 const measureSlack = 30 * time.Second
 
+// ssTimeout bounds one ss poll, so a hung ss counts as a failed sample
+// instead of stalling the window.
+const ssTimeout = 10 * time.Second
+
+// MinSSInterval is the shortest interval the ss source accepts; below it a
+// window is all sampling overhead.
+const MinSSInterval = 100 * time.Millisecond
+
 var (
 	// ErrBadConfig reports a non-positive interval or duration, or a config
 	// with neither or both of Sample and Measure.
 	ErrBadConfig = errors.New("interval and duration must be positive and exactly one source set")
-	// ErrNoData reports that no sample or measurement succeeded.
+	// ErrNoData reports that no interval was measured: no sample or
+	// measurement succeeded, or (polled sources) only one sample did.
 	ErrNoData = errors.New("no usable sample")
 	// ErrInterrupted is wrapped together with ErrNoData when the context
 	// ended before the first interval completed and nothing had failed.
@@ -131,22 +143,25 @@ type delta struct {
 }
 
 type procAcc struct {
-	command     string
-	remotes     map[string]int64
-	remoteIdx   int
-	first, last int
-	deltas      []delta
+	command string
+	// remotes sums the bytes each remote endpoint moved in measured
+	// intervals.
+	remotes map[string]int64
+	deltas  []delta
 }
 
 // Trace is the raw outcome of Run; Summarize turns it into a Report.
 type Trace struct {
-	stamps   []time.Duration
+	stamps []time.Duration
+	// measured[i] says whether span i (stamps[i] to stamps[i+1]) holds a
+	// real observation; a failed measuring run's span does not.
+	measured []bool
 	procs    map[procKey]*procAcc
 	interval time.Duration
 	// Failed counts samples or measurements that errored.
 	Failed int
 	// Skipped counts deadlines missed because a sample overran them.
-	Skipped int
+	Skipped int64
 }
 
 type run struct {
@@ -154,16 +169,19 @@ type run struct {
 	began time.Time
 	tr    *Trace
 	// last holds the previous sample's counters by diffKey.
-	last    map[sockKey]Counter
-	ok      int
-	lastErr error
+	last map[sockKey]Counter
+	// ok counts successful samples or measurements; intervals counts the
+	// intervals they measured (a polled source's first sample is only a
+	// baseline).
+	ok, intervals int
+	lastErr       error
 }
 
 // Run measures until Duration elapses on cfg.Clock or ctx ends. A cancelled
 // context ends the window early and still returns what was measured. A
 // sample that succeeds with no counters is a valid observation of an idle
-// host. Run fails when the tool is missing, or when no sample or
-// measurement succeeded.
+// host. Run fails when the tool is missing, or when no interval was
+// measured.
 func Run(ctx context.Context, cfg Config) (*Trace, error) {
 	if cfg.Interval <= 0 || cfg.Duration <= 0 || (cfg.Sample == nil) == (cfg.Measure == nil) {
 		return nil, fmt.Errorf("nettop: %w", ErrBadConfig)
@@ -182,40 +200,75 @@ func Run(ctx context.Context, cfg Config) (*Trace, error) {
 
 func (r *run) result() (*Trace, error) {
 	switch {
-	case r.ok > 0:
+	case r.intervals > 0:
 		return r.tr, nil
 	case errors.Is(r.lastErr, ErrToolMissing):
 		return nil, fmt.Errorf("%s: %w", r.cfg.Tool, r.lastErr)
+	case r.lastErr != nil && r.ok > 0:
+		return nil, fmt.Errorf("%w from %s: only the baseline sample succeeded and %d attempts failed, so no interval was measured: %w",
+			ErrNoData, r.cfg.Tool, r.tr.Failed, r.lastErr)
 	case r.lastErr != nil:
 		return nil, fmt.Errorf("%w from %s in %d attempts: %w", ErrNoData, r.cfg.Tool, r.tr.Failed, r.lastErr)
 	}
 	return nil, fmt.Errorf("%w from %s: stopped before the first interval completed (%w)", ErrNoData, r.cfg.Tool, ErrInterrupted)
 }
 
-// loop samples at fixed deadlines (start + k×interval, the last clamped to
-// Duration), sleeping only the remainder so a slow sample does not stretch
-// the cadence; deadlines a sample overran are skipped and counted.
+// loop samples at fixed deadlines k×interval for k = 1..n, the last clamped
+// to Duration, sleeping only the remainder so a slow sample does not stretch
+// the cadence. Deadlines a sample overran are skipped and counted in one
+// step, so a tiny interval cannot spin through them one at a time.
 func (r *run) loop(ctx context.Context) {
-	for k := time.Duration(1); ; k++ {
-		due := min(k*r.cfg.Interval, r.cfg.Duration)
-		if wait := due - r.elapsed(); wait < 0 {
-			r.tr.Skipped++
-		} else {
-			if wait > 0 && (r.cfg.Sleep(ctx, wait) != nil || ctx.Err() != nil) {
-				return
-			}
-			r.take(ctx)
-		}
-		if due >= r.cfg.Duration || ctx.Err() != nil {
+	n := ceilDiv(r.cfg.Duration, r.cfg.Interval)
+	for k := int64(1); k <= n && ctx.Err() == nil; k++ {
+		now := r.elapsed()
+		next := r.nextDeadline(k, n, now)
+		r.tr.Skipped += next - k
+		if next > n {
 			return
 		}
+		k = next
+		if wait := r.deadline(k, n) - now; wait > 0 && (r.cfg.Sleep(ctx, wait) != nil || ctx.Err() != nil) {
+			return
+		}
+		r.take(ctx)
 	}
+}
+
+// ceilDiv is ⌈a/b⌉ for a ≥ 0, b > 0.
+func ceilDiv(a, b time.Duration) int64 {
+	q := int64(a / b)
+	if a%b != 0 {
+		q++
+	}
+	return q
+}
+
+// deadline is when sample k of n is due: k×interval, the last clamped to
+// Duration. For k < n, k×interval < Duration, so it cannot overflow.
+func (r *run) deadline(k, n int64) time.Duration {
+	if k >= n {
+		return r.cfg.Duration
+	}
+	return time.Duration(k) * r.cfg.Interval
+}
+
+// nextDeadline returns the first deadline index ≥ k not yet past at now, or
+// n+1 when every remaining one is.
+func (r *run) nextDeadline(k, n int64, now time.Duration) int64 {
+	if now > r.cfg.Duration {
+		return n + 1
+	}
+	if now > 0 {
+		k = max(k, ceilDiv(now, r.cfg.Interval))
+	}
+	return min(k, n)
 }
 
 // measureLoop runs the measurer back to back, each run covering one
 // interval (the last clamped to what remains of Duration), so the spans
 // tile the window. A run interrupted by ctx is dropped. A failed run still
-// takes its interval, so the cadence holds and its span counts no bytes.
+// takes its interval, so the cadence holds; its span counts no bytes and is
+// marked unmeasured, so it is not evidence that anything went idle.
 func (r *run) measureLoop(ctx context.Context) {
 	r.tr.stamps = append(r.tr.stamps, r.elapsed())
 	for planned := time.Duration(0); planned < r.cfg.Duration && ctx.Err() == nil; {
@@ -240,15 +293,20 @@ func (r *run) measureLoop(ctx context.Context) {
 			return
 		}
 		r.tr.stamps = append(r.tr.stamps, r.elapsed())
+		r.tr.measured = append(r.tr.measured, false)
 	}
 }
 
 func (r *run) elapsed() time.Duration { return r.cfg.Clock.Now().Sub(r.began) }
 
-// take stamps the sample with the time its collection finished.
+// take stamps the sample with the time its collection finished. A poll the
+// context interrupted is discarded, neither a sample nor a failure.
 func (r *run) take(ctx context.Context) {
 	cs, err := r.cfg.Sample(ctx)
 	at := r.elapsed()
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		r.tr.Failed++
 		r.lastErr = err
@@ -279,25 +337,37 @@ func diffKey(k sockKey) sockKey {
 	return k
 }
 
-// observe notes that the process was seen at stamp idx and returns its
-// accumulator.
-func (r *run) observe(k procKey, c Counter, idx int) *procAcc {
+// observe returns the process's accumulator, noting its command.
+func (r *run) observe(k procKey, c Counter) *procAcc {
 	acc := r.tr.procs[k]
 	if acc == nil {
-		acc = &procAcc{first: idx, remoteIdx: -1}
+		acc = &procAcc{remotes: map[string]int64{}}
 		r.tr.procs[k] = acc
 	}
-	acc.last = idx
 	if c.Command != "" {
 		acc.command = c.Command
 	}
-	acc.noteRemote(idx, c)
 	return acc
 }
 
-func (a *procAcc) add(span int, in, out int64) {
-	if in > 0 || out > 0 {
-		a.deltas = append(a.deltas, delta{span: span, in: in, out: out})
+// add records what the process moved in span through remote ("" when the
+// source does not say).
+func (a *procAcc) add(span int, remote string, in, out int64) {
+	if in <= 0 && out <= 0 {
+		return
+	}
+	a.deltas = append(a.deltas, delta{span: span, in: in, out: out})
+	if remote != "" {
+		a.remotes[remote] += in + out
+	}
+}
+
+// markMeasured closes span idx-1 as a real observation.
+func (r *run) markMeasured(idx int) {
+	r.tr.measured = append(r.tr.measured, true)
+	r.intervals++
+	if r.cfg.Emit != nil {
+		r.cfg.Emit(r.tick(idx - 1))
 	}
 }
 
@@ -308,33 +378,28 @@ func (r *run) record(cs []Counter, at time.Duration) {
 	cur := aggregate(cs)
 	next := make(map[sockKey]Counter, len(cur))
 	for k, c := range cur {
-		acc := r.observe(k.proc, c, idx)
+		acc := r.observe(k.proc, c)
 		dk := diffKey(k)
 		next[dk] = c
 		if idx > 0 {
 			din, dout := r.deltaFor(dk, c)
-			acc.add(idx-1, din, dout)
+			acc.add(idx-1, c.Remote, din, dout)
 		}
 	}
 	r.last = next
-	if idx > 0 && r.cfg.Emit != nil {
-		r.cfg.Emit(r.tick(idx - 1))
+	if idx > 0 {
+		r.markMeasured(idx)
 	}
 }
 
-// recordSpan adds one measured interval ending at at. A process seen in it
-// counts as present at both of the span's stamps.
+// recordSpan adds one measured interval ending at at.
 func (r *run) recordSpan(cs []Counter, at time.Duration) {
 	idx := len(r.tr.stamps)
 	r.tr.stamps = append(r.tr.stamps, at)
 	for k, c := range aggregate(cs) {
-		acc := r.observe(k.proc, c, idx-1)
-		acc.last = idx
-		acc.add(idx-1, c.In, c.Out)
+		r.observe(k.proc, c).add(idx-1, c.Remote, c.In, c.Out)
 	}
-	if r.cfg.Emit != nil {
-		r.cfg.Emit(r.tick(idx - 1))
-	}
+	r.markMeasured(idx)
 }
 
 // deltaFor diffs c against the previous sample. A counter first seen after
@@ -353,21 +418,14 @@ func (r *run) deltaFor(k sockKey, c Counter) (int64, int64) {
 	return c.In - prev.In, c.Out - prev.Out
 }
 
-// noteRemote keeps the remotes seen in the process's latest sample with
-// their cumulative bytes, so the busiest are reported.
-func (a *procAcc) noteRemote(idx int, c Counter) {
-	if a.remoteIdx != idx {
-		a.remotes, a.remoteIdx = map[string]int64{}, idx
-	}
-	if c.Remote != "" {
-		a.remotes[c.Remote] += c.In + c.Out
-	}
-}
-
+// topRemotes returns the remotes that moved the most bytes in the window,
+// including those whose sockets closed before it ended.
 func (a *procAcc) topRemotes() []string {
 	out := make([]string, 0, len(a.remotes))
-	for r := range a.remotes {
-		out = append(out, r)
+	for r, b := range a.remotes {
+		if b > 0 {
+			out = append(out, r)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		bi, bj := a.remotes[out[i]], a.remotes[out[j]]
@@ -447,11 +505,15 @@ type Process struct {
 	PeakInRate  float64  `json:"peak_in_bytes_per_sec"`
 	PeakOutRate float64  `json:"peak_out_bytes_per_sec"`
 	Remotes     []string `json:"remotes,omitempty"`
-	Appeared    bool     `json:"appeared,omitempty"`
-	Disappeared bool     `json:"disappeared,omitempty"`
+	// Started: the process's first interval that moved bytes came after the
+	// first measured interval. Stopped: its last came before the last
+	// measured interval. Failed intervals are not evidence either way.
+	Started bool `json:"started,omitempty"`
+	Stopped bool `json:"stopped,omitempty"`
 }
 
-// Ref names a process that appeared or disappeared during the window.
+// Ref names a process that started or stopped using the network during the
+// window.
 type Ref struct {
 	PID     int    `json:"pid"`
 	Command string `json:"command"`
@@ -463,17 +525,19 @@ type Report struct {
 	IntervalMS     int64  `json:"interval_ms"`
 	Samples        int    `json:"samples"`
 	SamplesFailed  int    `json:"samples_failed"`
-	SamplesSkipped int    `json:"samples_skipped"`
+	SamplesSkipped int64  `json:"samples_skipped"`
 	Basis          string `json:"basis"`
 	// RemotesBasis says how Processes[].Remotes were chosen: RemotesEndSnapshot
-	// or RemotesBusiestSockets.
+	// or RemotesWindowBytes.
 	RemotesBasis string    `json:"remotes_basis,omitempty"`
 	PID          int       `json:"pid,omitempty"`
 	Totals       Totals    `json:"totals"`
 	Processes    []Process `json:"processes"`
-	Appeared     []Ref     `json:"appeared"`
-	Disappeared  []Ref     `json:"disappeared"`
-	Limitations  []string  `json:"limitations"`
+	// Started and Stopped list the processes whose network activity began
+	// after the first measured interval or ended before the last.
+	Started     []Ref    `json:"started"`
+	Stopped     []Ref    `json:"stopped"`
+	Limitations []string `json:"limitations"`
 }
 
 // Summarize ranks the processes include accepts (nil accepts all) by total
@@ -484,7 +548,7 @@ func Summarize(t *Trace, include func(pid int) bool, top int) Report {
 	rep := Report{
 		IntervalMS: t.interval.Milliseconds(), Samples: len(t.stamps),
 		SamplesFailed: t.Failed, SamplesSkipped: t.Skipped,
-		Processes: []Process{}, Appeared: []Ref{}, Disappeared: []Ref{}, Limitations: []string{},
+		Processes: []Process{}, Started: []Ref{}, Stopped: []Ref{}, Limitations: []string{},
 	}
 	if len(t.stamps) == 0 {
 		return rep
@@ -493,21 +557,25 @@ func Summarize(t *Trace, include func(pid int) bool, top int) Report {
 	rep.DurationMS = window.Milliseconds()
 	spans := len(t.stamps) - 1
 	spanIn, spanOut := make([]int64, spans), make([]int64, spans)
+	firstM, lastM := t.measuredRange()
 	var all []Process
 	for k, acc := range t.procs {
 		if include != nil && !include(k.pid) {
 			continue
 		}
 		p := t.process(k, acc, window.Seconds(), spanIn, spanOut)
-		if p.Appeared {
-			rep.Appeared = append(rep.Appeared, Ref{PID: p.PID, Command: p.Command})
+		if p.BytesIn+p.BytesOut == 0 {
+			continue
 		}
-		if p.Disappeared {
-			rep.Disappeared = append(rep.Disappeared, Ref{PID: p.PID, Command: p.Command})
+		first, last := acc.activeRange()
+		p.Started, p.Stopped = first > firstM, last < lastM
+		if p.Started {
+			rep.Started = append(rep.Started, Ref{PID: p.PID, Command: p.Command})
 		}
-		if p.BytesIn+p.BytesOut > 0 {
-			all = append(all, p)
+		if p.Stopped {
+			rep.Stopped = append(rep.Stopped, Ref{PID: p.PID, Command: p.Command})
 		}
+		all = append(all, p)
 	}
 	rank(all)
 	rep.Totals = t.totals(all, window.Seconds(), spanIn, spanOut)
@@ -515,16 +583,39 @@ func Summarize(t *Trace, include func(pid int) bool, top int) Report {
 		all = all[:top]
 	}
 	rep.Processes = append(rep.Processes, all...)
-	sortRefs(rep.Appeared)
-	sortRefs(rep.Disappeared)
+	sortRefs(rep.Started)
+	sortRefs(rep.Stopped)
 	return rep
 }
 
-func (t *Trace) process(k procKey, acc *procAcc, windowSec float64, spanIn, spanOut []int64) Process {
-	p := Process{
-		PID: k.pid, Command: acc.command, Remotes: acc.topRemotes(),
-		Appeared: acc.first > 0, Disappeared: acc.last < len(t.stamps)-1,
+// measuredRange returns the first and last spans holding a real
+// observation (-1, -1 when none does).
+func (t *Trace) measuredRange() (first, last int) {
+	first, last = -1, -1
+	for i, ok := range t.measured {
+		if !ok {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i
 	}
+	return first, last
+}
+
+// activeRange returns the first and last spans in which the process moved
+// bytes; it must have at least one delta.
+func (a *procAcc) activeRange() (first, last int) {
+	first, last = a.deltas[0].span, a.deltas[0].span
+	for _, d := range a.deltas[1:] {
+		first, last = min(first, d.span), max(last, d.span)
+	}
+	return first, last
+}
+
+func (t *Trace) process(k procKey, acc *procAcc, windowSec float64, spanIn, spanOut []int64) Process {
+	p := Process{PID: k.pid, Command: acc.command, Remotes: acc.topRemotes()}
 	perIn, perOut := map[int]int64{}, map[int]int64{}
 	for _, d := range acc.deltas {
 		p.BytesIn += d.in
@@ -603,6 +694,7 @@ func Limitations(basis string) []string {
 			"sockets of other users are invisible without root",
 			"loopback sockets are not counted",
 			"a socket first seen after the baseline sample counts its whole counter (ss counters start at 0 when the socket opens); a socket that opens and closes between samples is missed",
+			"sockets are told apart by ss's sk: cookie, or by local and remote address when ss prints none (then a new connection reusing a closed one's addresses is diffed against it unless its counters fell)",
 			"bytes out is bytes_acked, so unacknowledged in-flight data is not counted; a socket shared by several processes is attributed to the lowest pid",
 		}
 	}
@@ -618,6 +710,8 @@ type Source struct {
 	Measure Measurer
 	// Step, if set, is the interval granularity the tool supports.
 	Step time.Duration
+	// MinInterval, if set, is the shortest interval the source accepts.
+	MinInterval time.Duration
 }
 
 // Round rounds d up to a multiple of the source's Step.
@@ -633,14 +727,14 @@ func (s Source) Configure(cfg *Config) {
 	cfg.Sample, cfg.Measure, cfg.Tool = s.Sample, s.Measure, s.Tool
 }
 
-// SourceFor returns the source for kind. run serves polled tools; r runs
-// the measuring tool, which must die with its context.
-func SourceFor(kind hostos.Kind, run netstate.CmdRunner, r proc.Runner) (Source, error) {
+// SourceFor returns the source for kind. r runs the tool; each run must die
+// with its context.
+func SourceFor(kind hostos.Kind, r proc.Runner) (Source, error) {
 	switch hostos.Resolve(kind) {
 	case hostos.Darwin:
 		return Source{Basis: BasisNettop, Tool: "nettop", Measure: nettopMeasurer(r), Step: time.Second}, nil
 	case hostos.Linux:
-		return Source{Basis: BasisSSTCP, Tool: "ss", Sample: ssSampler(run)}, nil
+		return Source{Basis: BasisSSTCP, Tool: "ss", Sample: ssSampler(r), MinInterval: MinSSInterval}, nil
 	}
 	return Source{}, hostos.Unsupported("network top")
 }
@@ -668,9 +762,13 @@ func nettopMeasurer(r proc.Runner) Measurer {
 	}
 }
 
-func ssSampler(run netstate.CmdRunner) Sampler {
-	return func(context.Context) ([]Counter, error) {
-		socks, err := netstate.CollectSocketBytes(run)
+// ssSampler polls ss through r under ctx plus ssTimeout, so Ctrl-C ends a
+// slow poll at once.
+func ssSampler(r proc.Runner) Sampler {
+	return func(ctx context.Context) ([]Counter, error) {
+		ctx, cancel := context.WithTimeout(ctx, ssTimeout)
+		defer cancel()
+		socks, err := netstate.CollectSocketBytes(ctx, r)
 		if err != nil {
 			return nil, toolErr(err)
 		}
@@ -680,12 +778,21 @@ func ssSampler(run netstate.CmdRunner) Sampler {
 				continue
 			}
 			cs = append(cs, Counter{
-				PID: s.PID, Command: s.Command, Socket: s.LocalAddr + "->" + s.RemoteAddr,
+				PID: s.PID, Command: s.Command, Socket: socketID(s),
 				Remote: s.RemoteAddr, In: s.BytesIn, Out: s.BytesOut,
 			})
 		}
 		return cs, nil
 	}
+}
+
+// socketID is the socket's identity across polls, independent of the pid
+// holding it: the kernel cookie when ss prints one, else the endpoints.
+func socketID(s netstate.SocketBytes) string {
+	if s.Cookie != "" {
+		return "sk:" + s.Cookie
+	}
+	return s.LocalAddr + "->" + s.RemoteAddr
 }
 
 // isLoopback reports whether an ss "addr:port" ("[v6]:port", "v6%zone:port")

@@ -56,7 +56,7 @@ func moved(cs ...Counter) measured { return measured{cs: cs} }
 // dropped when a flow closed and the interval counted 0).
 func TestMeasureFlowsClosingMidWindowStillCount(t *testing.T) {
 	m := newMeasureScript(
-		moved(c(10, 500, 50), c(11, 0, 0)),
+		moved(c(10, 500, 50), c(11, 70, 0)),
 		moved(c(10, 800, 80)), // three short HTTPS requests opened and closed here
 		moved(c(10, 300, 30), c(20, 4000, 10)),
 	)
@@ -68,17 +68,40 @@ func TestMeasureFlowsClosingMidWindowStillCount(t *testing.T) {
 	if p == nil || p.BytesIn != 1600 || p.BytesOut != 160 || p.PeakInRate != 800 {
 		t.Fatalf("long-lived process = %+v, want every interval counted", p)
 	}
-	if p.Appeared || p.Disappeared {
-		t.Errorf("present in every interval: %+v", p)
+	if p.Started || p.Stopped {
+		t.Errorf("active in every interval: %+v", p)
 	}
-	if q := findProc(rep, 20); q == nil || q.BytesIn != 4000 || !q.Appeared {
+	if q := findProc(rep, 20); q == nil || q.BytesIn != 4000 || !q.Started {
 		t.Errorf("newcomer = %+v, want its first interval counted in full", q)
 	}
 	if rep.Samples != 4 || rep.DurationMS != 3000 || len(ticks) != 3 || ticks[1].InRate != 800 || ticks[2].Active != 2 {
 		t.Errorf("samples=%d duration=%d ticks=%+v", rep.Samples, rep.DurationMS, ticks)
 	}
-	if len(rep.Disappeared) != 1 || rep.Disappeared[0].PID != 11 {
-		t.Errorf("disappeared = %+v", rep.Disappeared)
+	if len(rep.Stopped) != 1 || rep.Stopped[0].PID != 11 {
+		t.Errorf("stopped = %+v", rep.Stopped)
+	}
+}
+
+// A failed last run is not evidence that anything stopped; a successful
+// empty run is.
+func TestMeasureFailedLastRunIsNotAbsence(t *testing.T) {
+	m := newMeasureScript(moved(c(1, 100, 0), c(2, 50, 0)), moved(c(1, 100, 0), c(2, 50, 0)), measured{err: errors.New("flaky")})
+	rep := Summarize(runScript(t, m.config(time.Second, 3*time.Second)), nil, 0)
+	if rep.SamplesFailed != 1 || rep.DurationMS != 3000 || len(rep.Stopped) != 0 || len(rep.Started) != 0 {
+		t.Fatalf("failed last run: report = %+v, want no process marked stopped", rep)
+	}
+
+	m = newMeasureScript(moved(c(1, 100, 0), c(2, 50, 0)), moved(c(1, 100, 0)), moved())
+	rep = Summarize(runScript(t, m.config(time.Second, 3*time.Second)), nil, 0)
+	if len(rep.Stopped) != 2 || rep.Stopped[0].PID != 1 || rep.Stopped[1].PID != 2 {
+		t.Fatalf("empty last run: stopped = %+v, want both", rep.Stopped)
+	}
+
+	// A failed first run does not make the first real activity a start.
+	m = newMeasureScript(measured{err: errors.New("flaky")}, moved(c(1, 100, 0)), moved(c(1, 100, 0)))
+	rep = Summarize(runScript(t, m.config(time.Second, 3*time.Second)), nil, 0)
+	if len(rep.Started) != 0 || rep.Totals.BytesIn != 200 {
+		t.Fatalf("failed first run: report = %+v", rep)
 	}
 }
 
@@ -189,7 +212,7 @@ curl.8183,233783,0,
 func TestSourceForDarwinMeasuresWithNettop(t *testing.T) {
 	f := proc.NewFake().On(proc.MatchPrefix("nettop", "-P", "-x", "-d", "-L", "2", "-s", "2"),
 		proc.Response{Result: proc.Result{Stdout: []byte(nettopRun)}})
-	src, err := SourceFor(hostos.Darwin, nil, f)
+	src, err := SourceFor(hostos.Darwin, f)
 	if err != nil || src.Basis != BasisNettop || src.Tool != "nettop" || src.Measure == nil || src.Sample != nil || src.Step != time.Second {
 		t.Fatalf("source = %+v err = %v", src, err)
 	}
@@ -202,7 +225,7 @@ func TestSourceForDarwinMeasuresWithNettop(t *testing.T) {
 	}
 
 	missing := proc.NewFake().On(proc.MatchPrefix("nettop"), proc.Response{Err: &exec.Error{Name: "nettop", Err: exec.ErrNotFound}})
-	src, _ = SourceFor(hostos.Darwin, nil, missing)
+	src, _ = SourceFor(hostos.Darwin, missing)
 	if _, err := src.Measure(context.Background(), time.Second); !errors.Is(err, ErrToolMissing) {
 		t.Errorf("missing nettop: err = %v", err)
 	}

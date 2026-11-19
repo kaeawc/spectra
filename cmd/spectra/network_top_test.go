@@ -41,21 +41,22 @@ type topFake struct {
 	during func(call int) error
 }
 
-// run is the Linux CmdRunner: one ss sample.
-func (f *topFake) run(name string, _ ...string) ([]byte, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
+// ss is one Linux ss sample.
+func (f *topFake) ss() (proc.Result, error) {
 	out := f.outputs[min(f.calls, len(f.outputs)-1)]
 	f.calls++
 	f.clk.Advance(40 * time.Millisecond) // one ss sample's cost
-	return []byte(out), nil
+	return proc.Result{Stdout: []byte(out)}, nil
 }
 
-// Run is the macOS proc.Runner: one nettop run lasting its -s delay.
+// Run is the proc.Runner: one ss sample on Linux, one nettop run lasting
+// its -s delay on macOS.
 func (f *topFake) Run(_ context.Context, cmd proc.Cmd) (proc.Result, error) {
 	if f.err != nil {
 		return proc.Result{ExitCode: -1}, f.err
+	}
+	if cmd.Name == "ss" {
+		return f.ss()
 	}
 	call := f.calls
 	f.calls++
@@ -81,7 +82,6 @@ func topFakeDeps(kind hostos.Kind, outputs ...string) (networkTopDeps, *topFake)
 	f := &topFake{clk: clk, outputs: outputs}
 	return networkTopDeps{
 		os:     kind,
-		run:    f.run,
 		runner: f,
 		procs: func(context.Context) []process.Info {
 			return []process.Info{
