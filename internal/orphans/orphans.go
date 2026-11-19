@@ -3,7 +3,11 @@
 package orphans
 
 import (
+	"errors"
+	"io/fs"
+	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostload"
@@ -17,60 +21,74 @@ type Options struct {
 	MinAge  time.Duration
 	Now     time.Time
 	SelfPID int
-	// FS.Exists reports whether a path exists; nil assumes every cwd exists.
-	FS hostload.FS
+	// Stat returns the error from stat-ing a path; nil assumes every path
+	// exists. Only fs.ErrNotExist counts as missing.
+	Stat func(path string) error
 }
 
 // Process is one orphan candidate.
 type Process struct {
-	PID           int     `json:"pid"`
-	User          string  `json:"user,omitempty"`
-	AgeSeconds    int64   `json:"age_seconds"`
-	RSSKiB        int64   `json:"rss_kib"`
-	CPUPct        float64 `json:"cpu_pct"`
-	Cwd           string  `json:"cwd"`
-	CwdMissing    bool    `json:"cwd_missing"`
-	Command       string  `json:"command"`
-	Descendants   int     `json:"descendants"`
-	SubtreeRSSKiB int64   `json:"subtree_rss_kib"`
+	PID            int     `json:"pid"`
+	User           string  `json:"user,omitempty"`
+	AgeSeconds     int64   `json:"age_seconds"`
+	RSSKiB         int64   `json:"rss_kib"`
+	CPUPct         float64 `json:"cpu_pct"`
+	Cwd            string  `json:"cwd"`
+	CwdMissing     bool    `json:"cwd_missing"`
+	CwdUnreadable  bool    `json:"cwd_unreadable"`
+	Command        string  `json:"command"`
+	CommandLine    string  `json:"command_line"`
+	Descendants    int     `json:"descendants"`
+	SubtreeRSSKiB  int64   `json:"subtree_rss_kib"`
+	DaemonByDesign bool    `json:"daemon_by_design"`
 }
 
-// Group is the candidates of one worktree.
+// Group is the candidates of one worktree. RSSKiB sums the subtree RSS of the
+// non-daemon candidates; candidates are never each other's descendants, so
+// nothing is counted twice.
 type Group struct {
-	Root      string    `json:"root"`
-	Worktree  string    `json:"worktree"`
-	Processes []Process `json:"processes"`
-	RSSKiB    int64     `json:"rss_kib"`
+	Root            string    `json:"root"`
+	Worktree        string    `json:"worktree"`
+	WorktreeRemoved bool      `json:"worktree_removed"`
+	Processes       []Process `json:"processes"`
+	RSSKiB          int64     `json:"rss_kib"`
 }
 
-// Result is the outcome of Find.
+// Result is the outcome of Find. Total counts non-daemon candidates only;
+// DaemonTotal counts the probably-intentional ones.
 type Result struct {
-	Groups  []Group
-	Total   int
-	Skipped int // reparented processes whose cwd could not be read
+	Groups      []Group
+	Total       int
+	DaemonTotal int
+	Skipped     int // reparented processes whose cwd could not be read
 }
 
-// PIDs lists every candidate pid in report order.
+// PIDs lists every non-daemon candidate pid in report order.
 func (r Result) PIDs() []int {
 	var out []int
 	for _, g := range r.Groups {
 		for _, p := range g.Processes {
-			out = append(out, p.PID)
+			if !p.DaemonByDesign {
+				out = append(out, p.PID)
+			}
 		}
 	}
 	return out
 }
 
+type groupKey struct{ root, worktree string }
+
 // Find returns the orphan candidates in procs. cwds maps pid to working
 // directory; a missing entry counts as unreadable.
 func Find(procs []process.Info, cwds map[int]string, opts Options) Result {
 	excluded := selfAndAncestors(procs, opts.SelfPID)
-	exists := opts.FS.Exists
-	if exists == nil {
-		exists = func(string) bool { return true }
+	stat := opts.Stat
+	if stat == nil {
+		stat = func(string) error { return nil }
 	}
+	exists := func(p string) bool { return stat(p) == nil }
 	var res Result
-	groups := map[[2]string]*Group{}
+	groups := map[groupKey]*Group{}
 	for _, p := range procs {
 		if excluded[p.PID] || len(lineage.Reparented(p)) == 0 || tooYoung(p, opts) {
 			continue
@@ -80,24 +98,73 @@ func Find(procs []process.Info, cwds map[int]string, opts Options) Result {
 			res.Skipped++
 			continue
 		}
+		cwd, deleted := strings.CutSuffix(cwd, deletedSuffix)
 		root := hostload.MatchRoot(cwd, opts.Roots)
 		if root == "" {
 			continue
 		}
-		wt := hostload.RepoRoot(cwd, exists)
-		g := groups[[2]string{root, wt}]
+		wt, removed := worktreeOf(cwd, exists)
+		k := groupKey{root, wt}
+		g := groups[k]
 		if g == nil {
-			g = &Group{Root: root, Worktree: wt}
-			groups[[2]string{root, wt}] = g
+			g = &Group{Root: root, Worktree: wt, WorktreeRemoved: removed}
+			groups[k] = g
 		}
-		row := newProcess(p, cwd, !exists(cwd), opts.Now)
+		row := newProcess(p, cwd, cwdState(cwd, deleted, stat), opts.Now)
 		row.Descendants, row.SubtreeRSSKiB = subtree(procs, p.PID)
 		g.Processes = append(g.Processes, row)
-		g.RSSKiB += p.RSSKiB
+		if row.DaemonByDesign {
+			res.DaemonTotal++
+			continue
+		}
+		g.RSSKiB += row.SubtreeRSSKiB
 		res.Total++
 	}
 	res.Groups = sortGroups(groups)
 	return res
+}
+
+// deletedSuffix is what Linux appends to the cwd link of a removed directory.
+const deletedSuffix = " (deleted)"
+
+type cwdStatus struct{ missing, unreadable bool }
+
+func cwdState(cwd string, deleted bool, stat func(string) error) cwdStatus {
+	if deleted {
+		return cwdStatus{missing: true}
+	}
+	err := stat(cwd)
+	switch {
+	case err == nil:
+		return cwdStatus{}
+	case errors.Is(err, fs.ErrNotExist):
+		return cwdStatus{missing: true}
+	}
+	return cwdStatus{unreadable: true}
+}
+
+// worktreeOf returns the repo or worktree root for cwd. When an ancestor sits
+// directly under a directory named "worktrees", has no .git of its own, and a
+// .git exists further up, that ancestor is a removed worktree and is returned
+// instead of the main repo.
+func worktreeOf(cwd string, exists func(string) bool) (string, bool) {
+	removed := ""
+	for p := cwd; ; {
+		if exists(path.Join(p, ".git")) {
+			if removed != "" {
+				return removed, true
+			}
+			return p, false
+		}
+		parent := path.Dir(p)
+		if parent == p {
+			return cwd, false
+		}
+		if removed == "" && path.Base(parent) == "worktrees" {
+			removed = p
+		}
+		p = parent
+	}
 }
 
 func selfAndAncestors(procs []process.Info, self int) map[int]bool {
@@ -127,15 +194,50 @@ func tooYoung(p process.Info, opts Options) bool {
 	return a > 0 && a < opts.MinAge
 }
 
-func newProcess(p process.Info, cwd string, missing bool, now time.Time) Process {
+func newProcess(p process.Info, cwd string, st cwdStatus, now time.Time) Process {
 	cpu := p.CPUPct
 	if cpu == 0 {
 		cpu = p.CPUPercent
 	}
+	line := p.FullCommandLine
+	if line == "" {
+		line = p.Command
+	}
 	return Process{
 		PID: p.PID, User: p.User, AgeSeconds: int64(age(p, now) / time.Second),
-		RSSKiB: p.RSSKiB, CPUPct: cpu, Cwd: cwd, CwdMissing: missing, Command: p.Command,
+		RSSKiB: p.RSSKiB, CPUPct: cpu, Cwd: cwd, CwdMissing: st.missing, CwdUnreadable: st.unreadable,
+		Command: p.Command, CommandLine: line, DaemonByDesign: daemonByDesign(p),
 	}
+}
+
+var daemonNames = map[string]bool{
+	"tmux": true, "screen": true, "adb": true, "emulator": true, "caffeinate": true,
+	"ssh-agent": true, "gpg-agent": true, "dockerd": true, "containerd": true,
+	"colima": true, "syncthing": true,
+}
+
+var daemonPrefixes = []string{"qemu-system-", "lima"}
+
+// daemonByDesign reports tools that detach from their parent on purpose.
+func daemonByDesign(p process.Info) bool {
+	for _, n := range []string{p.Command, p.ExecutablePath} {
+		if n != "" && daemonName(strings.ToLower(path.Base(strings.TrimSpace(n))), p.FullCommandLine) {
+			return true
+		}
+	}
+	return false
+}
+
+func daemonName(base, cmdline string) bool {
+	if daemonNames[base] {
+		return true
+	}
+	for _, pre := range daemonPrefixes {
+		if strings.HasPrefix(base, pre) {
+			return true
+		}
+	}
+	return base == "java" && (strings.Contains(cmdline, "GradleDaemon") || strings.Contains(cmdline, "KotlinCompileDaemon"))
 }
 
 func subtree(procs []process.Info, pid int) (descendants int, rssKiB int64) {
@@ -146,13 +248,13 @@ func subtree(procs []process.Info, pid int) (descendants int, rssKiB int64) {
 	return res.Tree.Count - 1, res.Tree.SubtreeRSSKiB
 }
 
-func sortGroups(m map[[2]string]*Group) []Group {
+func sortGroups(m map[groupKey]*Group) []Group {
 	out := make([]Group, 0, len(m))
 	for _, g := range m {
 		sort.Slice(g.Processes, func(i, j int) bool {
 			a, b := g.Processes[i], g.Processes[j]
-			if a.RSSKiB != b.RSSKiB {
-				return a.RSSKiB > b.RSSKiB
+			if a.SubtreeRSSKiB != b.SubtreeRSSKiB {
+				return a.SubtreeRSSKiB > b.SubtreeRSSKiB
 			}
 			return a.PID < b.PID
 		})

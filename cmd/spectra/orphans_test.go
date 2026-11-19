@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -36,7 +36,12 @@ func orphansFakeDeps() orphansDeps {
 				13: "/elsewhere", 14: "/private/tmp/work/wt1", 50: "/private/tmp/work/wt1",
 			}
 		},
-		FS:    hostload.FS{Exists: func(p string) bool { return p == "/private/tmp/work/wt1/.git" || p == "/private/tmp/work/wt1/sub" }},
+		Stat: func(p string) error {
+			if p == "/private/tmp/work/wt1/.git" || p == "/private/tmp/work/wt1/sub" {
+				return nil
+			}
+			return fs.ErrNotExist
+		},
 		Now:   func() time.Time { return orphansNow },
 		Getwd: func() (string, error) { return "/private/tmp/work", nil },
 		Pid:   func() int { return 99 },
@@ -81,7 +86,7 @@ func TestRunOrphansFindsAndGroups(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 			t.Fatal(err)
 		}
-		if rep.Total != 2 || len(rep.Groups) != 2 || len(rep.Limitations) != 2 || rep.Roots[0] != root {
+		if rep.Total != 2 || len(rep.Groups) != 2 || len(rep.Limitations) != 3 || rep.Roots[0] != root {
 			t.Fatalf("root %s: %+v", root, rep)
 		}
 		if g := rep.Groups[0]; g.Worktree != "/private/tmp/work/gone" || g.RSSKiB != 4096 || !g.Processes[0].CwdMissing {
@@ -100,10 +105,57 @@ func TestRunOrphansTextDefaultRootAndPids(t *testing.T) {
 		t.Fatalf("code %d: %s", code, errb.String())
 	}
 	s := out.String()
-	for _, want := range []string{"[cwd missing]", "1 skipped", "PPID 1 is a heuristic", "pids: 11 10\n"} {
+	for _, want := range []string{"[cwd missing]", "1 skipped", "PPID 1 is a heuristic", "evidence, not a kill list", "nohup/disown", "incl. descendants"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q:\n%s", want, s)
 		}
+	}
+}
+
+func TestRunOrphansPidsFlagAndDaemons(t *testing.T) {
+	deps := orphansFakeDeps()
+	base := deps.Procs
+	deps.Procs = func(ctx context.Context) []process.Info {
+		ps := base(ctx)
+		ps = append(ps, process.Info{PID: 16, PPID: 1, UID: 501, Command: "tmux", FullCommandLine: "tmux new -s " + strings.Repeat("x", 200), RSSKiB: 9, StartTime: orphansNow.Add(-time.Hour)})
+		return ps
+	}
+	cwds := deps.Cwds
+	deps.Cwds = func(ctx context.Context, p []int) map[int]string {
+		m := cwds(ctx, p)
+		m[16] = "/private/tmp/work/wt1"
+		return m
+	}
+	var out, errb bytes.Buffer
+	if code := runOrphansWithIO(nil, &out, &errb, deps); code != 3 {
+		t.Fatalf("code %d", code)
+	}
+	s := out.String()
+	if strings.Contains(s, "pids:") {
+		t.Fatalf("pids line printed without --pids:\n%s", s)
+	}
+	idx := strings.Index(s, "Probably intentional (daemonize by design)")
+	if idx < 0 || !strings.Contains(s[idx:], "tmux new") || strings.Contains(s[:idx], "tmux new") || !strings.Contains(s, "\u2026") {
+		t.Fatalf("daemon section/truncation wrong:\n%s", s)
+	}
+	out.Reset()
+	runOrphansWithIO([]string{"--pids"}, &out, &errb, deps)
+	if !strings.Contains(out.String(), "pids: 11 10\n") {
+		t.Fatalf("--pids output:\n%s", out.String())
+	}
+	out.Reset()
+	runOrphansWithIO([]string{"--json"}, &out, &errb, deps)
+	if !strings.Contains(out.String(), `"daemon_by_design": true`) || !strings.Contains(out.String(), strings.Repeat("x", 200)) {
+		t.Fatalf("json missing daemon flag or full command_line:\n%s", out.String())
+	}
+	// Only daemons: exit 0.
+	only := orphansFakeDeps()
+	only.Procs = func(context.Context) []process.Info {
+		return []process.Info{{PID: 16, PPID: 1, UID: 501, Command: "tmux", StartTime: orphansNow.Add(-time.Hour)}}
+	}
+	only.Cwds = func(context.Context, []int) map[int]string { return map[int]string{16: "/private/tmp/work/wt1"} }
+	if code := runOrphansWithIO(nil, &bytes.Buffer{}, &errb, only); code != 0 {
+		t.Fatalf("daemon-only code = %d, want 0", code)
 	}
 }
 
