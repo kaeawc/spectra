@@ -145,7 +145,7 @@ func readCooling(fsys fs.FS, r *Report) {
 			continue
 		}
 		maxS, _ := readInt(fsys, path.Join(dir, "max_state"))
-		r.Cooling = append(r.Cooling, Cooling{Name: name, Type: typ, CurState: int(cur), MaxState: int(maxS)})
+		r.Cooling = append(r.Cooling, Cooling{Name: name, Type: typ, CurState: cur, MaxState: maxS})
 		if cur <= 0 {
 			continue
 		}
@@ -192,12 +192,12 @@ func readFreqCaps(fsys fs.FS, r *Report, zoneHot bool) {
 	r.Notes = append(r.Notes, note)
 }
 
-func readThrottleCounts(fsys fs.FS) map[string]int {
-	out := map[string]int{}
+func readThrottleCounts(fsys fs.FS) map[string]int64 {
+	out := map[string]int64{}
 	for _, name := range dirsWithPrefix(fsys, cpuDir, "cpu") {
 		for _, f := range []string{"core_throttle_count", "package_throttle_count"} {
 			if n, ok := readInt(fsys, path.Join(cpuDir, name, "thermal_throttle", f)); ok {
-				out[name+"/thermal_throttle/"+f] = int(n)
+				out[name+"/thermal_throttle/"+f] = n
 			}
 		}
 	}
@@ -207,7 +207,7 @@ func readThrottleCounts(fsys fs.FS) map[string]int {
 	return out
 }
 
-func counterIncreases(first, last map[string]int) []CounterIncrease {
+func counterIncreases(first, last map[string]int64) []CounterIncrease {
 	var out []CounterIncrease
 	for p, to := range last {
 		if from, ok := first[p]; ok && to > from {

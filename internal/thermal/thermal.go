@@ -84,8 +84,8 @@ type Trip struct {
 type Cooling struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
-	CurState int    `json:"cur_state"`
-	MaxState int    `json:"max_state"`
+	CurState int64  `json:"cur_state"`
+	MaxState int64  `json:"max_state"`
 }
 
 // FreqCap is a CPU whose scaling_max_freq sits below its hardware maximum.
@@ -97,23 +97,23 @@ type FreqCap struct {
 
 // Report is the result of one Collect.
 type Report struct {
-	OS       string         `json:"os"`
-	Verdict  Verdict        `json:"verdict"`
-	Evidence string         `json:"evidence"`
-	Findings []Finding      `json:"findings"`
-	Limits   *Limits        `json:"limits,omitempty"`
-	Zones    []Zone         `json:"zones,omitempty"`
-	Cooling  []Cooling      `json:"cooling_devices,omitempty"`
-	FreqCaps []FreqCap      `json:"freq_caps,omitempty"`
-	Counters map[string]int `json:"throttle_counts,omitempty"`
-	Notes    []string       `json:"notes,omitempty"`
+	OS       string           `json:"os"`
+	Verdict  Verdict          `json:"verdict"`
+	Evidence string           `json:"evidence"`
+	Findings []Finding        `json:"findings"`
+	Limits   *Limits          `json:"limits,omitempty"`
+	Zones    []Zone           `json:"zones,omitempty"`
+	Cooling  []Cooling        `json:"cooling_devices,omitempty"`
+	FreqCaps []FreqCap        `json:"freq_caps,omitempty"`
+	Counters map[string]int64 `json:"throttle_counts,omitempty"`
+	Notes    []string         `json:"notes,omitempty"`
 }
 
 // CounterIncrease is a thermal_throttle counter that grew during a watch.
 type CounterIncrease struct {
 	Path string `json:"path"`
-	From int    `json:"from"`
-	To   int    `json:"to"`
+	From int64  `json:"from"`
+	To   int64  `json:"to"`
 }
 
 // WatchReport is the outcome of Watch: the worst sample, with any throttle
