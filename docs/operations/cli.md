@@ -128,6 +128,18 @@ processes, families and git worktrees (`--root DIR`, repeatable, names a
 worktree directory for the `roots` cause). `--json` emits stable snake_case
 fields including `elapsed_ms`.
 
+`spectra orphans [--root DIR]... [--min-age 1m] [--json]` finds leftover
+processes from worktrees and finished jobs: parent pid 1 (a heuristic, since
+per-user launchd and systemd services also have PPID 1), a readable working
+directory under a root (default: the current directory), and older than
+`--min-age`. Spectra itself and its ancestors are excluded. Each candidate
+reports pid, user, age, RSS, CPU, cwd, command, descendant count, subtree RSS
+and `cwd_missing` when its directory was deleted. Output is grouped by
+worktree like `spectra load`, ending with a pid list to review and pass to
+`kill` yourself; the command never kills anything. Processes with an
+unreadable working directory are skipped and counted. Exit codes: `0` none
+found, `3` orphans found, `1` runtime or output error, `2` usage error.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
