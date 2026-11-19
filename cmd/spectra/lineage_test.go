@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -66,5 +67,16 @@ func TestRunLineageErrors(t *testing.T) {
 				t.Errorf("code = %d, want %d (%s)", code, tt.code, errb.String())
 			}
 		})
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
+
+func TestRunLineageWriteError(t *testing.T) {
+	var errb bytes.Buffer
+	if code := runLineageWithIO([]string{"10"}, failWriter{}, &errb, lineageFakeProcs()); code != 1 {
+		t.Fatalf("code = %d, want 1; stderr=%s", code, errb.String())
 	}
 }

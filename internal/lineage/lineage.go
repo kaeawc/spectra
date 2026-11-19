@@ -127,19 +127,27 @@ func buildNode(pr process.Info, byPID map[int]process.Info, children map[int][]i
 
 // IsZombie infers a zombie from the command form because the collector
 // records no process state (the Linux stat state letter is not exposed).
-// "<defunct>" is direct evidence. On Linux an empty cmdline yields
-// FullCommandLine "[comm]"; with zero VSize that is a zombie or a kernel
-// thread, and kernel threads are children of pid 0/2, so PPID > 2 excludes
-// them. macOS "(name)" is deliberately not used: ps prints it for live
-// processes whose arguments it cannot read.
+// A procps-style "name <defunct>" whole command line with zero VSize is
+// direct evidence; a live process merely mentioning "<defunct>" in its
+// arguments is not. On Linux an empty cmdline yields FullCommandLine
+// "[comm]"; with zero VSize that is a zombie or a kernel thread, and kernel
+// threads are children of pid 0/2, so those parents are excluded (pid 1 may
+// adopt orphaned zombies). macOS "(name)" is deliberately not used: ps prints
+// it for live processes whose arguments it cannot read.
 func IsZombie(pr process.Info) bool {
-	for _, s := range []string{pr.Command, pr.FullCommandLine} {
-		if strings.Contains(s, "<defunct>") {
-			return true
-		}
+	if pr.VSizeKiB != 0 {
+		return false
+	}
+	if isDefunct(pr.Command) || isDefunct(pr.FullCommandLine) {
+		return true
 	}
 	return pr.Command != "" && pr.FullCommandLine == "["+pr.Command+"]" &&
-		pr.VSizeKiB == 0 && pr.PPID > 2
+		pr.PPID != 0 && pr.PPID != 2
+}
+
+func isDefunct(s string) bool {
+	name, ok := strings.CutSuffix(s, " <defunct>")
+	return ok && name != "" && !strings.ContainsAny(name, " \t")
 }
 
 // Reparented returns the reparented flag for a non-root process whose parent

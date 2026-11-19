@@ -49,25 +49,45 @@ func runLineageWithIO(args []string, stdout, stderr io.Writer, collector process
 		}
 		return 0
 	}
-	printLineage(stdout, res)
+	if err := printLineage(stdout, res); err != nil {
+		fmt.Fprintf(stderr, "lineage: write output: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
-func printLineage(w io.Writer, r *lineage.Result) {
-	fmt.Fprintf(w, "Ancestors of pid %d (nearest first):\n", r.PID)
+func printLineage(w io.Writer, r *lineage.Result) error {
+	ew := &errWriter{w: w}
+	fmt.Fprintf(ew, "Ancestors of pid %d (nearest first):\n", r.PID)
 	for _, a := range r.Ancestors {
 		start := "-"
 		if !a.StartTime.IsZero() {
 			start = a.StartTime.Format(time.DateTime)
 		}
-		fmt.Fprintf(w, "  %6d  %-12s  %s  %s\n", a.PID, a.User, start, a.Command)
+		fmt.Fprintf(ew, "  %6d  %-12s  %s  %s\n", a.PID, a.User, start, a.Command)
 	}
 	if len(r.Flags) > 0 {
-		fmt.Fprintf(w, "Flags: %s (heuristic: per-user launchd agents also have PPID 1)\n", strings.Join(r.Flags, ", "))
+		fmt.Fprintf(ew, "Flags: %s (heuristic: per-user launchd agents also have PPID 1)\n", strings.Join(r.Flags, ", "))
 	}
-	fmt.Fprintln(w, "Descendants:")
-	printLineageNode(w, r.Tree, 1)
-	fmt.Fprintf(w, "Subtree: %d processes, %d KiB RSS, %.1f%% CPU\n", r.Tree.Count, r.Tree.SubtreeRSSKiB, r.Tree.SubtreeCPUPct)
+	fmt.Fprintln(ew, "Descendants:")
+	printLineageNode(ew, r.Tree, 1)
+	fmt.Fprintf(ew, "Subtree: %d processes, %d KiB RSS, %.1f%% CPU\n", r.Tree.Count, r.Tree.SubtreeRSSKiB, r.Tree.SubtreeCPUPct)
+	return ew.err
+}
+
+// errWriter latches the first write error so the printers can stay linear.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	if e.err != nil {
+		return 0, e.err
+	}
+	n, err := e.w.Write(p)
+	e.err = err
+	return n, err
 }
 
 func printLineageNode(w io.Writer, n *lineage.Node, depth int) {
