@@ -33,14 +33,14 @@ func runDUContext(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintln(stderr, "usage: spectra du [--top N] [--depth N] [--min-size SIZE] [--cross-mounts] [--json] <path>")
 		return 2
 	}
-	min, err := parseProcessSize(*minSize)
+	minBytes, err := parseProcessSize(*minSize)
 	if err != nil {
 		fmt.Fprintf(stderr, "du: invalid --min-size %q: %v\n", *minSize, err)
 		return 2
 	}
 
 	res, err := diskusage.Walk(ctx, fs.Arg(0), diskusage.Options{
-		Top: *top, Depth: *depth, MinSize: int64(min), CrossMounts: *cross,
+		Top: *top, Depth: *depth, MinSize: minBytes, CrossMounts: *cross,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "du: %v\n", err)
@@ -61,21 +61,21 @@ func runDUContext(ctx context.Context, args []string, stdout, stderr io.Writer) 
 
 func printDU(w io.Writer, r *diskusage.Result) {
 	fmt.Fprintf(w, "%s: %s allocated, %d files, %d directories, %dms\n",
-		r.Root, humanSizeBytes(uint64(r.TotalBytes)), r.FileCount, r.DirCount, r.ElapsedMS)
+		r.Root, humanSizeBytes(r.TotalBytes), r.FileCount, r.DirCount, r.ElapsedMS)
 	if r.Partial {
 		fmt.Fprintln(w, "PARTIAL: interrupted before the walk finished")
 	}
 	fmt.Fprintln(w, "\nTop directories (cumulative):")
 	for _, d := range r.Dirs {
-		fmt.Fprintf(w, "  %8s  %s\n", humanSizeBytes(uint64(d.AllocatedBytes)), d.Path)
+		fmt.Fprintf(w, "  %8s  %s\n", humanSizeBytes(d.AllocatedBytes), d.Path)
 	}
 	fmt.Fprintln(w, "\nTop files:")
 	for _, f := range r.Files {
 		note := ""
 		if f.ApparentBytes != 0 {
-			note = fmt.Sprintf("  (apparent %s)", humanSizeBytes(uint64(f.ApparentBytes)))
+			note = fmt.Sprintf("  (apparent %s)", humanSizeBytes(f.ApparentBytes))
 		}
-		fmt.Fprintf(w, "  %8s  %s%s\n", humanSizeBytes(uint64(f.AllocatedBytes)), f.Path, note)
+		fmt.Fprintf(w, "  %8s  %s%s\n", humanSizeBytes(f.AllocatedBytes), f.Path, note)
 	}
 	if len(r.Unreadable) > 0 {
 		fmt.Fprintf(w, "\nUnreadable (%d):\n", len(r.Unreadable))

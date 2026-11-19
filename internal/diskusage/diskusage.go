@@ -17,25 +17,25 @@ import (
 // Options controls a walk. The zero value reports the top 15 entries with
 // no depth limit, staying on the root's filesystem.
 type Options struct {
-	Top         int   // entries per list; <= 0 means 15
-	Depth       int   // deepest directory level reported (root's children are 1); <= 0 means unlimited
-	MinSize     int64 // omit reported entries smaller than this many allocated bytes
-	CrossMounts bool  // descend into directories on other filesystems
+	Top         int    // entries per list; <= 0 means 15
+	Depth       int    // deepest directory level reported (root's children are 1); <= 0 means unlimited
+	MinSize     uint64 // omit reported entries smaller than this many allocated bytes
+	CrossMounts bool   // descend into directories on other filesystems
 	Now         func() time.Time
 }
 
 // DirEntry is a reported directory with its cumulative allocated size.
 type DirEntry struct {
 	Path           string `json:"path"`
-	AllocatedBytes int64  `json:"allocated_bytes"`
+	AllocatedBytes uint64 `json:"allocated_bytes"`
 }
 
 // FileEntry is a reported file. ApparentBytes is set only when it differs
 // from the allocation by more than 10% (sparse or compressed files).
 type FileEntry struct {
 	Path           string `json:"path"`
-	AllocatedBytes int64  `json:"allocated_bytes"`
-	ApparentBytes  int64  `json:"apparent_bytes,omitempty"`
+	AllocatedBytes uint64 `json:"allocated_bytes"`
+	ApparentBytes  uint64 `json:"apparent_bytes,omitempty"`
 }
 
 // Unreadable records a path that could not be read.
@@ -61,7 +61,7 @@ type Result struct {
 	Root         string       `json:"root"`
 	ResolvedRoot string       `json:"resolved_root,omitempty"`
 	Skipped      []Skipped    `json:"skipped"`
-	TotalBytes   int64        `json:"total_bytes"`
+	TotalBytes   uint64       `json:"total_bytes"`
 	FileCount    int64        `json:"file_count"`
 	DirCount     int64        `json:"dir_count"`
 	Dirs         []DirEntry   `json:"top_dirs"`
@@ -72,7 +72,7 @@ type Result struct {
 }
 
 type fileStat struct {
-	alloc int64
+	alloc uint64
 	dev   uint64
 	ino   uint64
 	nlink uint64
@@ -156,14 +156,14 @@ func walkWith(ctx context.Context, root string, opts Options, statFn func(os.Fil
 
 // less orders ascending by size, then descending by path so that the
 // min-heap evicts a deterministic entry on ties.
-func less(sa, sb int64, pa, pb string) bool {
+func less(sa, sb uint64, pa, pb string) bool {
 	if sa != sb {
 		return sa < sb
 	}
 	return pa > pb
 }
 
-func (w *walker) walkDir(path string, fi os.FileInfo, depth int) int64 {
+func (w *walker) walkDir(path string, fi os.FileInfo, depth int) uint64 {
 	w.res.DirCount++
 	total := w.statFn(fi).alloc
 	total += w.readEntries(path, depth)
@@ -177,8 +177,8 @@ func (w *walker) walkDir(path string, fi os.FileInfo, depth int) int64 {
 // readEntries reads path in batches so a huge directory neither sits in
 // memory whole nor delays cancellation. Output order does not depend on
 // entry order: the top-N comparison breaks ties by path.
-func (w *walker) readEntries(path string, depth int) int64 {
-	var total int64
+func (w *walker) readEntries(path string, depth int) uint64 {
+	var total uint64
 	f, err := os.Open(path)
 	if err != nil {
 		w.res.Unreadable = append(w.res.Unreadable, Unreadable{Path: path, Error: err.Error()})
@@ -203,7 +203,7 @@ func (w *walker) readEntries(path string, depth int) int64 {
 	return total
 }
 
-func (w *walker) walkEntry(parent string, e fs.DirEntry, depth int) int64 {
+func (w *walker) walkEntry(parent string, e fs.DirEntry, depth int) uint64 {
 	p := filepath.Join(parent, e.Name())
 	fi, err := e.Info() // lstat semantics: symlinks are not followed
 	if err != nil {
@@ -229,7 +229,7 @@ func (w *walker) walkEntry(parent string, e fs.DirEntry, depth int) int64 {
 	return w.addFile(p, fi, st)
 }
 
-func (w *walker) addFile(p string, fi os.FileInfo, st fileStat) int64 {
+func (w *walker) addFile(p string, fi os.FileInfo, st fileStat) uint64 {
 	if st.ok && st.nlink > 1 {
 		k := inodeKey{st.dev, st.ino}
 		if _, dup := w.seen[k]; dup {
@@ -240,24 +240,30 @@ func (w *walker) addFile(p string, fi os.FileInfo, st fileStat) int64 {
 	w.res.FileCount++
 	if st.alloc >= w.opts.MinSize {
 		fe := FileEntry{Path: p, AllocatedBytes: st.alloc}
-		if differsBy10Pct(st.alloc, fi.Size()) {
-			fe.ApparentBytes = fi.Size()
+		if apparent := widen(fi.Size()); differsBy10Pct(st.alloc, apparent) {
+			fe.ApparentBytes = apparent
 		}
 		w.files.push(fe)
 	}
 	return st.alloc
 }
 
-func differsBy10Pct(alloc, apparent int64) bool {
-	diff := alloc - apparent
-	if diff < 0 {
-		diff = -diff
+// widen converts a stat field of whatever width this OS uses to uint64,
+// clamping negatives to zero. Generic so the per-OS field types need no
+// per-site casts.
+func widen[T ~int32 | ~int64 | ~uint16 | ~uint32 | ~uint64](v T) uint64 {
+	if v < 0 {
+		return 0
 	}
-	base := alloc
+	return uint64(v)
+}
+
+func differsBy10Pct(alloc, apparent uint64) bool {
+	base, small := alloc, apparent
 	if apparent > base {
-		base = apparent
+		base, small = apparent, alloc
 	}
-	return base > 0 && diff*10 > base
+	return base > 0 && (base-small)*10 > base
 }
 
 // topN keeps the n largest items using a bounded min-heap.

@@ -29,7 +29,7 @@ func walk(t *testing.T, root string, o Options) *Result {
 	return r
 }
 
-func dirSize(r *Result, path string) (int64, bool) {
+func dirSize(r *Result, path string) (uint64, bool) {
 	for _, d := range r.Dirs {
 		if d.Path == path {
 			return d.AllocatedBytes, true

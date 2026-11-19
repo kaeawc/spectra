@@ -4,4 +4,4 @@ package diskusage
 
 import "os"
 
-func statOf(fi os.FileInfo) fileStat { return fileStat{alloc: fi.Size()} }
+func statOf(fi os.FileInfo) fileStat { return fileStat{alloc: widen(fi.Size())} }
