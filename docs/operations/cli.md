@@ -161,6 +161,31 @@ reports a decaying recent average; `cpu_window_ms` is `0`) or `lifetime`
 `0`). A process that started during the window is scored on its CPU over the
 window. The text output has a `cpu` line saying which basis applied.
 
+`spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--json]` finds
+leftover processes from worktrees and finished jobs: parent pid 1, a readable
+working directory under a root (default: the current directory), and older than
+`--min-age`. Spectra itself and its ancestors are excluded. PPID 1 is a
+heuristic: it also covers per-user launchd/systemd services, tools that
+daemonize on purpose, and anything started with nohup/disown. The list is
+evidence, not a kill list, and a candidate with descendants may be the parent
+of live work. Each candidate reports pid, user, age, RSS, CPU, cwd, command
+name, full command line (truncated to 120 characters in text, complete as
+`command_line` in JSON), descendant count and subtree RSS. `cwd_missing` is set
+only when the directory does not exist (including a Linux `(deleted)` cwd);
+`cwd_unreadable` marks any other stat failure such as a permission error or an
+unmounted volume. Output is grouped by worktree like `spectra load`; group
+RSS is the sum of subtree RSS ("incl. descendants"). A process whose cwd is
+inside a `.../worktrees/<name>` directory that lost its `.git` is grouped under
+that directory with `worktree_removed: true`. Known daemonize-by-design tools
+(tmux, screen, adb, emulator, qemu-system-*, caffeinate, Gradle and Kotlin
+daemons, ssh-agent, gpg-agent, dockerd, containerd, colima, lima*, syncthing)
+are flagged `daemon_by_design: true`, shown in a trailing "Probably intentional
+(daemonize by design)" section, and excluded from `--pids` and the exit code.
+`--pids` prints a space-separated pid line of the remaining candidates for you
+to review; the command never kills anything. Processes with an unreadable
+working directory are skipped and counted. Exit codes: `0` none found, `3`
+non-daemon orphans found, `1` runtime or output error, `2` usage error.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.

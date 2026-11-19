@@ -95,11 +95,24 @@ func (h Host) Available(ctx context.Context) (uint64, error) {
 // Cwds returns the working directory of as many of pids as are readable.
 // macOS issues one lsof for the whole host; Linux readlinks /proc/<pid>/cwd.
 func (h Host) Cwds(ctx context.Context, pids []int) map[int]string {
+	out := h.CwdsRaw(ctx, pids)
+	for pid, d := range out {
+		out[pid] = strings.TrimSuffix(d, DeletedSuffix)
+	}
+	return out
+}
+
+// DeletedSuffix is what Linux appends to the cwd link of a removed directory.
+const DeletedSuffix = " (deleted)"
+
+// CwdsRaw is Cwds except that a Linux cwd link keeps its DeletedSuffix, so a
+// caller can tell a removed directory from a recreated one at the same path.
+func (h Host) CwdsRaw(ctx context.Context, pids []int) map[int]string {
 	if h.os() == hostos.Linux {
 		out := make(map[int]string, len(pids))
 		for _, pid := range pids {
 			if d, err := h.readlink("/proc/" + strconv.Itoa(pid) + "/cwd"); err == nil && d != "" {
-				out[pid] = strings.TrimSuffix(d, " (deleted)")
+				out[pid] = d
 			}
 		}
 		return out

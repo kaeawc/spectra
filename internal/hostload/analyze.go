@@ -108,7 +108,7 @@ func Analyze(procs []process.Info, cwds map[int]string, opts Options) Analysis {
 		if d, ok := memo[cwd]; ok {
 			return d
 		}
-		d := repoRoot(cwd, exists)
+		d := RepoRoot(cwd, exists)
 		memo[cwd] = d
 		return d
 	}
@@ -205,9 +205,9 @@ func topDirs(dirs map[string]*DirUsage, n int) []DirUsage {
 	return head(out, n)
 }
 
-// repoRoot returns the nearest ancestor of cwd holding a .git entry (file or
+// RepoRoot returns the nearest ancestor of cwd holding a .git entry (file or
 // directory, so linked worktrees match), or cwd itself when there is none.
-func repoRoot(cwd string, exists func(string) bool) string {
+func RepoRoot(cwd string, exists func(string) bool) string {
 	for p := cwd; ; {
 		if exists(path.Join(p, ".git")) {
 			return p
@@ -298,7 +298,7 @@ func classify(rows []ProcRow, roots []Root) Cause {
 func (g *dirGroup) add(r *ProcRow, roots []Root) {
 	g.cpu += r.CPUPct
 	if g.root == "" {
-		g.root = matchRoot(r.Cwd, roots)
+		g.root = MatchRoot(r.Cwd, roots)
 	}
 	if g.top == nil || r.CPUPct > g.top.CPUPct {
 		g.top = r
@@ -314,9 +314,9 @@ func dirCause(dir string, g *dirGroup) Cause {
 		Detail: fmt.Sprintf("directory %s leads the CPU table; top process %s (pid %d)", dir, g.top.Command, g.top.PID)}
 }
 
-// matchRoot returns the root as the user typed it when cwd is under either
+// MatchRoot returns the root as the user typed it when cwd is under either
 // its typed or symlink-resolved form.
-func matchRoot(cwd string, roots []Root) string {
+func MatchRoot(cwd string, roots []Root) string {
 	if cwd == "" {
 		return ""
 	}
