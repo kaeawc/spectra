@@ -147,16 +147,22 @@ func (m pathMatcher) relativeSocketMatches(name string) (matched, denied bool) {
 	if strings.HasSuffix(cwd, " (deleted)") {
 		return false, false
 	}
-	abs := filepath.Join(cwd, name)
-	if slices.Contains(m.paths, abs) {
+	// Not filepath.Join: lexical cleaning would fold "link/.." away, but the
+	// kernel resolved the symlink before applying "..".
+	abs := cwd + "/" + name
+	if !hasDotDot(name) && slices.Contains(m.paths, filepath.Clean(abs)) {
 		return true, false
 	}
 	if m.ref != nil {
-		if fi, err := m.fsys.Stat(abs); err == nil && m.fsys.SameFile(m.ref, fi) {
+		if fi, err := m.fsys.Stat(abs); err == nil && fi.Mode()&os.ModeSocket != 0 && m.fsys.SameFile(m.ref, fi) {
 			return true, false
 		}
 	}
 	return false, false
+}
+
+func hasDotDot(name string) bool {
+	return slices.Contains(strings.Split(name, "/"), "..")
 }
 
 func (m pathMatcher) matchesTarget(link, t string) bool {

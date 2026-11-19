@@ -123,12 +123,15 @@ func (d dent) Info() (fs.FileInfo, error) { return nil, os.ErrNotExist }
 
 type fakeInfo struct {
 	os.FileInfo
-	id string
+	id   string
+	mode os.FileMode
 }
+
+func (f fakeInfo) Mode() os.FileMode { return f.mode }
 
 func (f fakeFS) Stat(n string) (os.FileInfo, error) {
 	if id, ok := f.ids[n]; ok {
-		return fakeInfo{id: id}, nil
+		return fakeInfo{id: id, mode: f.modes[n]}, nil
 	}
 	if f.exist[n] {
 		return fakeInfo{id: n}, nil
@@ -156,6 +159,7 @@ type fakeFS struct {
 	links map[string]string
 	files map[string]string
 	deny  map[string]bool
+	modes map[string]os.FileMode // Stat mode for ids entries
 }
 
 func (f fakeFS) ReadDir(n string) ([]os.DirEntry, error) {

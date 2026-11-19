@@ -2,6 +2,7 @@ package owner
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -86,5 +87,42 @@ func TestRelativeSocketAbsoluteAndAbstractUnchanged(t *testing.T) {
 	// The abstract "@service.sock" (inode 903) is never a relative candidate.
 	if _, rel := unixSocketLinks(fsys, "/proc", []string{"/x/service.sock"}); rel["socket:[903]"] != "" {
 		t.Errorf("abstract entry treated as relative: %v", rel)
+	}
+}
+
+func dotDotFS(name string) fakeFS {
+	fsys := relSockFS("/srv/run", false)
+	fsys.files["/proc/net/unix"] = "Num RefCount Protocol Flags Type St Inode Path\n0001: 2 0 10000 0001 01 900 " + name + "\n"
+	return fsys
+}
+
+func TestRelativeSocketDotDotAfterSymlink(t *testing.T) {
+	const name = "link/../service.sock"
+	fsys := dotDotFS(name)
+	// link -> else/deep, so the kernel binds /srv/run/else/service.sock.
+	fsys.ids = map[string]string{"/srv/run/else/service.sock": "real", "/srv/run/" + name: "real"}
+	fsys.modes = map[string]os.FileMode{"/srv/run/" + name: os.ModeSocket, "/srv/run/else/service.sock": os.ModeSocket}
+	got, _ := procPathHolders(fsys, "/proc", []string{"/srv/run/else/service.sock"})
+	if len(got) != 1 || got[0].PID != 60 {
+		t.Errorf("symlink/.. socket not found by identity: %+v", got)
+	}
+	// An unrelated regular file at the lexically cleaned path is not the socket.
+	fsys.ids = map[string]string{"/srv/run/service.sock": "plain", "/srv/run/" + name: "real"}
+	fsys.modes = map[string]os.FileMode{"/srv/run/" + name: os.ModeSocket}
+	got, _ = procPathHolders(fsys, "/proc", []string{"/srv/run/service.sock"})
+	if len(got) != 0 {
+		t.Errorf("cleaned-path regular file matched: %+v", got)
+	}
+}
+
+func TestRelativeSocketDotDotNeedsSocketIdentity(t *testing.T) {
+	const name = "link/../service.sock"
+	fsys := dotDotFS(name)
+	if got, _ := procPathHolders(fsys, "/proc", []string{"/srv/run/service.sock"}); len(got) != 0 {
+		t.Errorf("no identity available but matched: %+v", got)
+	}
+	fsys.ids = map[string]string{"/srv/run/service.sock": "x", "/srv/run/" + name: "x"}
+	if got, _ := procPathHolders(fsys, "/proc", []string{"/srv/run/service.sock"}); len(got) != 0 {
+		t.Errorf("non-socket identity match accepted: %+v", got)
 	}
 }
