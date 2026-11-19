@@ -16,6 +16,14 @@ The principal commands are `inspect`, `list`, `snapshot`, `diff`, `jvm`,
 `network`, `power`, `storage`, `process`, `toolchain`, `rules`, `issues`, `alerts`,
 `whatswrong`, and `playbook`. Run `spectra help` for the installed command list.
 
+`spectra du [--top N] [--depth N] [--min-size 100M] [--cross-mounts] [--json] <path>`
+lists the largest directories (cumulative) and files under a path by allocated
+size, flagging sparse files with their apparent size. It stays on one
+filesystem by default, never follows symlinks, counts hard links once, skips
+already-visited directories, lists skipped mounts in `skipped`, and prints a
+partial result (`partial: true`) on interrupt. Paths are reported under the
+path as typed.
+
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
