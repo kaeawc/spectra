@@ -76,6 +76,21 @@ On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc
 and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
 see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).
 
+`spectra spawns [--interval 250ms] [--duration 10s] [--pid N] [--json]` traces
+process starts and exits live by polling the process table, to catch
+short-lived children that a one-shot `spectra process --tree` misses. Each
+event carries the pid, ppid, parent chain, command and (on exit) lifetime;
+`--pid` scopes the trace to a process and its descendants. It ends with
+per-parent and per-command spawn counts, the shortest-lived processes and
+respawn loops (the same command started 3+ times under one parent); the
+by-parent and by-command lists are cut to the top 10 and say how many distinct
+entries there were. `--interval` must not exceed `--duration`; a final
+collection runs at the deadline. Lifetimes are approximate (`lived ~0.2s`;
+JSON `lifetime_ms` with `lifetime_max_error_ms`). An unknown `--pid` exits 1;
+if the scoped process exits mid-trace its tracked descendants stay in scope.
+Polling misses processes that live for less than the interval, and a pid
+reused within the same second is not distinguished.
+
 Some commands read macOS-only sources. On Linux they exit `1` with an
 "unsupported on host OS (linux)" error instead of returning empty results:
 `spectra logs` (unified log), `spectra updates` (install log and history),
