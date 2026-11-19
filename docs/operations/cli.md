@@ -110,6 +110,19 @@ if the scoped process exits mid-trace its tracked descendants stay in scope.
 Polling misses processes that live for less than the interval, and a pid
 reused within the same second is not distinguished.
 
+`spectra memtrace <pid> [--tree] [--duration 60s] [--interval 2s] [--json]`
+samples one process's resident memory over time and says whether it is
+growing. It prints one line per sample, then the sample count, min, max,
+first, last, net change, a least-squares growth rate in KiB/minute and a
+verdict: `steady`, `growing` (net rise of 5% or more with a positive slope),
+`shrinking`, `sawtooth` (range of 20% or more of the mean with little net
+change) or `insufficient` (fewer than 5 samples). `--tree` also sums the whole
+descendant subtree (and its process count) per sample and lists the top 5
+descendants by RSS growth. An unknown pid exits 1; if the process exits
+mid-trace, or its pid is reused by another process, the trace stops and
+reports what was collected with exit 0. Ctrl-C ends early and still prints the
+summary. `--json` emits one object with `samples`, `summary` and `growers`.
+
 Some commands read macOS-only sources. On Linux they exit `1` with an
 "unsupported on host OS (linux)" error instead of returning empty results:
 `spectra logs` (unified log), `spectra updates` (install log and history),

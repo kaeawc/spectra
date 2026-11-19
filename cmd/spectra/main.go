@@ -82,6 +82,7 @@ func subcommandList() []subcommand {
 		{"pressure", "Linux: show pressure-stall (PSI) and cgroup v2 memory/CPU/pids accounting", runPressure},
 		{"timeline", "Chronological incident timeline: process starts, unified-log errors, and installs", runTimeline},
 		{"spawns", "Trace process starts and exits live to catch short-lived children (polling; misses processes shorter than --interval)", runSpawns},
+		{"memtrace", "Sample a process's RSS over time (optionally its whole subtree) and say whether it is growing", runMemtrace},
 		{"runtime", "Identify a live PID's language runtime and the diagnostics available for it", runRuntime},
 		{"xattr-inspect", "Show quarantine, provenance, where-froms, and AppleDouble state of files", runXattrInspect},
 		{"core", "Inspect crashed-process core files and suggest offline analyzers", runCore},
