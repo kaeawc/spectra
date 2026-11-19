@@ -68,6 +68,15 @@ list|signatures|oom` need `--dir` with copied `.ips` reports there, while
 `crash inspect|resource|state` parse given files on any host.
 `spectra timeline` shows process starts only on Linux.
 
+`spectra load` answers "can this machine take another job?" in one call. It
+exits `0` (admit), `3` (hold: 1-minute load at or above
+`--max-load-per-cpu` x CPUs, available memory below `--min-free-gb` GiB, or
+memory that could not be read: it fails closed) or `4`
+(backoff: memory below `--backoff-free-gb` GiB), and attributes CPU and RSS to
+processes, families and git worktrees (`--root DIR`, repeatable, names a
+worktree directory for the `roots` cause). `--json` emits stable snake_case
+fields including `elapsed_ms`.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
