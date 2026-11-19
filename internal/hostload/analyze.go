@@ -144,7 +144,7 @@ func Analyze(procs []process.Info, cwds map[int]string, opts Options) Analysis {
 	a.TopRSS = head(byRSS, n)
 	a.Families = topFamilies(procs, opts.Now, n)
 	a.Dirs = topDirs(dirs, n)
-	a.Cause = classify(head(byCPU, max(n, 5)), opts.Roots)
+	a.Cause = classify(rows, opts.Roots)
 	return a
 }
 
@@ -239,7 +239,7 @@ type dirGroup struct {
 	top  *ProcRow
 }
 
-// classify sums CPU per candidate group over the same window of rows (all
+// classify sums CPU per candidate group over every collected row (all
 // indexers together, each directory, each remaining single process) and
 // names the largest. Ties prefer indexing, then directories, then singles.
 func classify(rows []ProcRow, roots []Root) Cause {

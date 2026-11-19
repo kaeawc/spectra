@@ -107,3 +107,21 @@ func TestRunLoadTextAndUsage(t *testing.T) {
 		t.Fatalf("error exit = %d", code)
 	}
 }
+
+func TestRunLoadRelativeRoot(t *testing.T) {
+	deps := fakeLoadDeps("1.00 1 1 1/1 1", "MemAvailable: 16777216 kB\n")
+	deps.Abs = func(p string) (string, error) { return "/" + p, nil }
+	var out, errb bytes.Buffer
+	if code := runLoadWithIO([]string{"--json", "--root", "r"}, &out, &errb, deps); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, errb.String())
+	}
+	var m struct {
+		Cause struct{ Kind, Root, Worktree string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Cause.Kind != "roots" || m.Cause.Root != "r" || m.Cause.Worktree != "wt1" {
+		t.Fatalf("cause = %+v", m.Cause)
+	}
+}

@@ -306,3 +306,20 @@ func TestRootsDoNotMatchSiblingPrefix(t *testing.T) {
 		t.Fatal("underRoot prefix handling")
 	}
 }
+
+func TestAnalyzeCauseIndependentOfTopN(t *testing.T) {
+	fs := fakeFS("/work/roots/wt1/.git")
+	roots := []Root{{Path: "/work/roots", Resolved: "/work/roots"}}
+	procs := []process.Info{pi(1, "mds_stores", 60, 1)}
+	cwds := map[int]string{}
+	for i := 0; i < 10; i++ {
+		procs = append(procs, pi(100+i, "go", 20, 1))
+		cwds[100+i] = "/work/roots/wt1/pkg"
+	}
+	for _, n := range []int{1, 5, 50} {
+		a := Analyze(procs, cwds, Options{TopN: n, Roots: roots, FS: fs})
+		if a.Cause.Kind != CauseRoots || a.Cause.Worktree != "wt1" || a.Cause.CPUPct != 200 {
+			t.Fatalf("top=%d cause = %+v", n, a.Cause)
+		}
+	}
+}

@@ -23,19 +23,27 @@ type loadDeps struct {
 	Procs func(ctx context.Context) []process.Info
 	FS    hostload.FS
 	Now   func() time.Time
+	// Abs makes --root absolute (cwds are absolute); nil leaves it as typed.
+	Abs func(string) (string, error)
 	// EvalSymlinks resolves --root paths; nil means no resolution.
 	EvalSymlinks func(string) (string, error)
 }
 
-func resolveRoots(roots []string, eval func(string) (string, error)) []hostload.Root {
+func resolveRoots(roots []string, abs, eval func(string) (string, error)) []hostload.Root {
 	out := make([]hostload.Root, 0, len(roots))
 	for _, r := range roots {
 		if r == "" {
 			continue
 		}
-		root := hostload.Root{Path: r, Resolved: filepath.Clean(r)}
+		match := filepath.Clean(r)
+		if abs != nil {
+			if a, err := abs(r); err == nil {
+				match = filepath.Clean(a)
+			}
+		}
+		root := hostload.Root{Path: r, Resolved: match}
 		if eval != nil {
-			if res, err := eval(r); err == nil {
+			if res, err := eval(match); err == nil {
 				root.Resolved = res
 			}
 		}
@@ -90,6 +98,7 @@ func defaultLoadDeps() loadDeps {
 		FS:  hostload.FS{Exists: func(p string) bool { _, err := os.Lstat(p); return err == nil }},
 		Now: time.Now,
 
+		Abs:          filepath.Abs,
 		EvalSymlinks: filepath.EvalSymlinks,
 	}
 }
@@ -151,7 +160,7 @@ Exit codes:
 	for i, p := range procs {
 		pids[i] = p.PID
 	}
-	an := hostload.Analyze(procs, deps.Host.Cwds(ctx, pids), hostload.Options{TopN: *top, Roots: resolveRoots(roots, deps.EvalSymlinks), FS: deps.FS, Now: deps.Now()})
+	an := hostload.Analyze(procs, deps.Host.Cwds(ctx, pids), hostload.Options{TopN: *top, Roots: resolveRoots(roots, deps.Abs, deps.EvalSymlinks), FS: deps.FS, Now: deps.Now()})
 
 	rep := loadReport{
 		Verdict: string(dec.Verdict), Reason: dec.Reason, ExitCode: dec.Verdict.ExitCode(),
