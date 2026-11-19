@@ -41,11 +41,14 @@ type pathMatcher struct {
 	// rel holds "socket:[inode]" links of sockets bound to a relative name
 	// whose base name equals the queried one, mapped to that name.
 	rel map[string]string
-	dir string // /proc/<pid> of the process being scanned
+	// relHits collects the distinct relative-bound sockets accepted so far;
+	// the map is shared across the per-process copies of the matcher.
+	relHits map[string]bool
+	dir     string // /proc/<pid> of the process being scanned
 }
 
 func newPathMatcher(fsys FS, procfs string, paths []string) pathMatcher {
-	m := pathMatcher{fsys: fsys, paths: paths}
+	m := pathMatcher{fsys: fsys, paths: paths, relHits: map[string]bool{}}
 	m.socks, m.rel = unixSocketLinks(fsys, procfs, paths)
 	if len(paths) > 0 {
 		if fi, err := fsys.Stat(paths[0]); err == nil {
@@ -131,15 +134,25 @@ func (m pathMatcher) matchesLink(link string) (matched, denied bool) {
 		return false, errors.Is(err, fs.ErrPermission)
 	}
 	if name, ok := m.rel[t]; ok {
-		return m.relativeSocketMatches(name)
+		ok, denied := m.relativeSocketMatches(name)
+		if ok {
+			m.relHits[t] = true
+		}
+		return ok, denied
 	}
 	return m.matchesTarget(link, t), false
 }
 
 // relativeSocketMatches resolves a relative bound name against the holder's
-// current directory. A process that changed directory after bind cannot be
-// confirmed this way and is not reported.
+// current directory, which only proves where it bound if it never changed
+// directory afterwards. The kernel exposes no link from a socket inode to its
+// filesystem inode, so a process that bound elsewhere and then moved into the
+// queried directory is indistinguishable here; procPathHolders reports that
+// as ambiguous when more than one such candidate is accepted.
 func (m pathMatcher) relativeSocketMatches(name string) (matched, denied bool) {
+	if m.ref == nil || m.ref.Mode()&os.ModeSocket == 0 {
+		return false, false
+	}
 	cwd, err := m.fsys.Readlink(filepath.Join(m.dir, "cwd"))
 	if err != nil {
 		return false, errors.Is(err, fs.ErrPermission)
@@ -153,10 +166,8 @@ func (m pathMatcher) relativeSocketMatches(name string) (matched, denied bool) {
 	if !hasDotDot(name) && slices.Contains(m.paths, filepath.Clean(abs)) {
 		return true, false
 	}
-	if m.ref != nil {
-		if fi, err := m.fsys.Stat(abs); err == nil && fi.Mode()&os.ModeSocket != 0 && m.fsys.SameFile(m.ref, fi) {
-			return true, false
-		}
+	if fi, err := m.fsys.Stat(abs); err == nil && fi.Mode()&os.ModeSocket != 0 && m.fsys.SameFile(m.ref, fi) {
+		return true, false
 	}
 	return false, false
 }
@@ -182,11 +193,13 @@ func (m pathMatcher) matchesTarget(link, t string) bool {
 }
 
 // procPathHolders scans procfs for processes holding path as an fd, cwd or
-// executable. denied is true when some process could not be inspected.
-func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, denied bool) {
+// executable. denied is true when some process could not be inspected;
+// ambiguous is true when more than one distinct relative-bound socket was
+// accepted by working directory, so at most one of them is the real holder.
+func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, denied, ambiguous bool) {
 	entries, err := fsys.ReadDir(procfs)
 	if err != nil {
-		return nil, errors.Is(err, fs.ErrPermission)
+		return nil, errors.Is(err, fs.ErrPermission), false
 	}
 	m := newPathMatcher(fsys, procfs, path)
 	for _, e := range entries {
@@ -198,7 +211,7 @@ func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, d
 		holders = append(holders, hs...)
 		denied = denied || d
 	}
-	return holders, denied
+	return holders, denied, len(m.relHits) > 1
 }
 
 func procPidHolders(m pathMatcher, dir string, pid int) (holders []Holder, denied bool) {

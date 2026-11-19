@@ -234,7 +234,7 @@ func procTree() fakeFS {
 }
 
 func TestProcPathHolders(t *testing.T) {
-	got, denied := procPathHolders(procTree(), "/proc", []string{"/srv/data/db.sqlite"})
+	got, denied, _ := procPathHolders(procTree(), "/proc", []string{"/srv/data/db.sqlite"})
 	if !denied {
 		t.Error("pid 1 fd dir is permission denied; want denied")
 	}
@@ -246,7 +246,7 @@ func TestProcPathHolders(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v\nwant %+v", got, want)
 	}
-	got, _ = procPathHolders(procTree(), "/proc", []string{"/srv/data"})
+	got, _, _ = procPathHolders(procTree(), "/proc", []string{"/srv/data"})
 	if len(got) != 1 || got[0].Hold != HoldCwd || got[0].PID != 20 {
 		t.Errorf("cwd match = %+v", got)
 	}
