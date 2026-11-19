@@ -46,6 +46,16 @@ to `lsmp` port ownership, which needs root. Root-owned services such as
 `diagnosticd`, `logd`, and `mds_stores` can only be sampled with `--sudo`, which
 runs `sample` and `lsmp` through `sudo -n`; run `sudo -v` first so it does not
 need to prompt.
+
+`spectra owner [--json] <target>` answers "who has this?" for a port (`:8080`,
+`tcp:8080`, `udp:53`), a file path, or a pid. Ports list the processes listening
+on or connected from that local port; paths list processes holding the file open
+(with fd mode), as their cwd, or as their executable; a pid shows its user,
+executable and start time. Every owner includes its parent chain up to pid 1.
+macOS uses `lsof`, Linux uses `ss` and `/proc`. Without root only your own
+processes are visible, and the output says the result may be incomplete. Exit
+codes: 0 owner found, 1 error, 2 usage, 3 no owner found.
+
 `spectra whatswrong` adds the same attribution, such as `OSLogService (17874)
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.
