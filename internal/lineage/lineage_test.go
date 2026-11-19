@@ -98,6 +98,8 @@ func TestZombieFlag(t *testing.T) {
 		{"macos live parens", process.Info{PID: 5, PPID: 10, Command: "(bash)", FullCommandLine: "(bash)"}, false},
 		{"sd-pam", process.Info{PID: 5, PPID: 10, Command: "(sd-pam)", FullCommandLine: "(sd-pam)"}, false},
 		{"defunct", process.Info{PID: 5, PPID: 10, Command: "sh <defunct>", VSizeKiB: 0}, true},
+		{"macos bare defunct", process.Info{PID: 5, PPID: 10, Command: "<defunct>", FullCommandLine: "<defunct>"}, true},
+		{"macos bare defunct with memory", process.Info{PID: 5, PPID: 10, Command: "<defunct>", FullCommandLine: "<defunct>", VSizeKiB: 8}, false},
 		{"linux zombie", process.Info{PID: 5, PPID: 1234, Command: "sh", FullCommandLine: "[sh]"}, true},
 		{"orphan zombie adopted by init", process.Info{PID: 5, PPID: 1, Command: "sh", FullCommandLine: "[sh]"}, true},
 		{"live arg mentions defunct", process.Info{PID: 5, PPID: 10, Command: "grep", FullCommandLine: "grep x <defunct>", VSizeKiB: 100}, false},
