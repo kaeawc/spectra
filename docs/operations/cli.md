@@ -36,6 +36,15 @@ UDID), its process count, the age of its oldest member, and its heaviest
 members; `--json` adds a `families` array. See
 [Running processes](../inspection/running-processes.md#process-families).
 
+`spectra lineage [--json] <pid>` answers "who started this, and what did it
+start?": the ancestor chain nearest-first up to pid 1 (user, start time,
+command) and the descendant tree with per-node RSS and CPU plus subtree totals.
+Nodes are flagged `zombie` (inferred, since no process state is collected:
+`<defunct>`, or on Linux a bracketed empty-cmdline process with no memory whose
+parent is not a kernel thread) and the target `reparented` (PPID 1 and non-root; a
+heuristic, as per-user launchd agents also match). Exits 2 on bad usage and 1
+for an unknown pid.
+
 `spectra whois [--json] [--sudo] [--duration 3s] <pid>` (macOS only) attributes a
 busy XPC/Mach service to the processes driving it. It samples the service, reads
 the client PID from its `com.apple.NSXPCConnection.user.<service>.<pid>` (or
