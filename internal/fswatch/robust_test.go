@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -180,5 +182,33 @@ func TestCancelledScanIsAbandoned(t *testing.T) {
 	}
 	if _, err := Take(ctx, fsys, "/r", 10); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Take on cancelled ctx err = %v", err)
+	}
+}
+
+func TestOSFSUnstattableChildrenAreUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission checks do not apply to root")
+	}
+	dir := filepath.Join(t.TempDir(), "d")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if es, err := (OSFS{}).ReadDir(dir); err == nil {
+		t.Fatalf("expected error for unstattable children, got %v", es)
+	}
+	snap, err := Take(context.Background(), OSFS{}, filepath.Dir(dir), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.Unreadable[dir] {
+		t.Fatalf("dir not marked unreadable: %+v", snap.Unreadable)
 	}
 }

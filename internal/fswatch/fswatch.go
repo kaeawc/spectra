@@ -88,8 +88,13 @@ func (OSFS) ReadDir(path string) ([]Entry, error) {
 	out := make([]Entry, 0, len(des))
 	for _, de := range des {
 		info, err := de.Info()
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue // vanished between listing and stat
+		}
+		if err != nil {
+			// Listable but not statable (e.g. mode 0400): an empty listing
+			// would read as mass removal, so report the directory unreadable.
+			return nil, fmt.Errorf("stat %s: %w", filepath.Join(path, de.Name()), err)
 		}
 		m := info.Mode()
 		out = append(out, Entry{

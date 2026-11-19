@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/diskusage"
 	"github.com/kaeawc/spectra/internal/fswatch"
 	"github.com/kaeawc/spectra/internal/owner"
 )
@@ -103,7 +104,7 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	ew := &errWriter{w: stdout}
 	cfg := fswatch.Config{
-		Root: filepath.Clean(paths[0]), Interval: *interval, Duration: *duration,
+		Root: fswatchRoot(paths[0]), Interval: *interval, Duration: *duration,
 		Top: *top, MaxEntries: *maxEntries,
 		FS: deps.fs, Clock: deps.clock, Sleep: deps.sleep,
 	}
@@ -126,6 +127,22 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 		return 1
 	}
 	return 0
+}
+
+// fswatchRoot returns the path to watch. The lexically cleaned argument is
+// kept unless it would traverse somewhere other than the real target (for
+// example "link/.." where link is a symlink), in which case the properly
+// resolved root is used.
+func fswatchRoot(arg string) string {
+	clean := filepath.Clean(arg)
+	resolved, err := diskusage.ResolveRoot(arg)
+	if err != nil {
+		return clean
+	}
+	if lex, err := filepath.EvalSymlinks(clean); err == nil && lex == resolved {
+		return clean
+	}
+	return resolved
 }
 
 func writeFswatchResult(w io.Writer, res fswatch.Result, asJSON bool) {
@@ -161,16 +178,45 @@ func attributeHolders(ctx context.Context, res *fswatch.Result, lookup func(cont
 			files[i].HolderError = "holder lookup skipped: " + pctx.Err().Error()
 			continue
 		}
-		hs, incomplete, err := lookup(pctx, files[i].Path)
-		if incomplete {
+		r, ok := runHolderLookup(pctx, lookup, files[i].Path)
+		if !ok {
+			// The lookup ignored the context; stop waiting and skip the rest.
 			res.Summary.HoldersIncomplete = true
-		}
-		if err != nil {
-			res.Summary.HoldersIncomplete = true
-			files[i].HolderError = err.Error()
+			files[i].HolderError = "holder lookup timed out: " + pctx.Err().Error()
 			continue
 		}
-		files[i].Holders = hs
+		if r.incomplete {
+			res.Summary.HoldersIncomplete = true
+		}
+		if r.err != nil {
+			res.Summary.HoldersIncomplete = true
+			files[i].HolderError = r.err.Error()
+			continue
+		}
+		files[i].Holders = r.hs
+	}
+}
+
+type holderResult struct {
+	hs         []fswatch.Holder
+	incomplete bool
+	err        error
+}
+
+// runHolderLookup waits for lookup or ctx, whichever ends first. A lookup that
+// ignores ctx is abandoned and ends with the process; the buffered channel
+// keeps it from blocking forever on send.
+func runHolderLookup(ctx context.Context, lookup func(context.Context, string) ([]fswatch.Holder, bool, error), path string) (holderResult, bool) {
+	ch := make(chan holderResult, 1)
+	go func() {
+		hs, incomplete, err := lookup(ctx, path)
+		ch <- holderResult{hs, incomplete, err}
+	}()
+	select {
+	case r := <-ch:
+		return r, true
+	case <-ctx.Done():
+		return holderResult{}, false
 	}
 }
 

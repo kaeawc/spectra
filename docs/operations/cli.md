@@ -39,8 +39,11 @@ appear and vanish between polls are missed and several writes within one
 interval count once. It never follows symlinks. Past `--max-entries` (default
 200000) the first entries in tree order stay tracked and changes beyond the cap
 are not seen; this is reported once with the tracked count. Unreadable
-subdirectories are reported once as warnings (`warnings` in JSON) and produce no
-removals; a poll where the root cannot be read is skipped and counted in
+subdirectories (including ones that list but whose entries cannot be stat'ed)
+are reported once as warnings (`warnings` in JSON) and produce no removals; a
+`..` after a symlinked component is applied to the resolved path, as the
+filesystem does, and a holder lookup that ignores its timeout is abandoned and
+reported as incomplete; a poll where the root cannot be read is skipped and counted in
 `polls_failed`, and a root that no longer exists ends the watch with
 `ended_reason`. Ctrl-C abandons any scan in progress and prints the summary with
 the actual elapsed time; a second Ctrl-C terminates immediately. `--json` emits

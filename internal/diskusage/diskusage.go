@@ -151,7 +151,7 @@ func walkOpen(ctx context.Context, root string, opts Options, statFn func(os.Fil
 	// Children are opened under the resolved root: joining onto the typed
 	// root would lexically cancel a ".." that follows a symlink.
 	realRoot := root
-	if resolved, rerr := resolveRoot(root); rerr == nil {
+	if resolved, rerr := ResolveRoot(root); rerr == nil {
 		realRoot = resolved
 		if resolved != filepath.Clean(root) {
 			w.res.ResolvedRoot = resolved
@@ -176,10 +176,10 @@ func walkOpen(ctx context.Context, root string, opts Options, statFn func(os.Fil
 	return w.res, nil
 }
 
-// resolveRoot returns the real absolute path of root. EvalSymlinks cleans
+// ResolveRoot returns the real absolute path of root. EvalSymlinks cleans
 // ".." lexically first, which is wrong after a symlink, so ".." components
 // are applied to the already-resolved prefix instead.
-func resolveRoot(root string) (string, error) {
+func ResolveRoot(root string) (string, error) {
 	cur, err := filepath.Abs(".")
 	if err == nil {
 		cur, err = filepath.EvalSymlinks(cur)
