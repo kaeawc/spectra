@@ -32,6 +32,20 @@ const (
 	BasisSSTCP  = "ss-tcp"
 )
 
+// Remotes bases name where a process's remote endpoints come from.
+const (
+	RemotesEndSnapshot    = "end-snapshot"
+	RemotesBusiestSockets = "busiest-sockets"
+)
+
+// RemotesBasisFor returns the remotes basis for a counter basis.
+func RemotesBasisFor(basis string) string {
+	if basis == BasisNettop {
+		return RemotesEndSnapshot
+	}
+	return RemotesBusiestSockets
+}
+
 // MaxRemotes bounds the remote endpoints reported per process.
 const MaxRemotes = 3
 
@@ -45,6 +59,9 @@ var (
 	ErrBadConfig = errors.New("interval and duration must be positive and exactly one source set")
 	// ErrNoData reports that no sample or measurement succeeded.
 	ErrNoData = errors.New("no usable sample")
+	// ErrInterrupted is wrapped together with ErrNoData when the context
+	// ended before the first interval completed and nothing had failed.
+	ErrInterrupted = errors.New("interrupted")
 	// ErrToolMissing reports that the sampling tool is not installed.
 	ErrToolMissing = errors.New("sampling tool not found")
 )
@@ -172,7 +189,7 @@ func (r *run) result() (*Trace, error) {
 	case r.lastErr != nil:
 		return nil, fmt.Errorf("%w from %s in %d attempts: %w", ErrNoData, r.cfg.Tool, r.tr.Failed, r.lastErr)
 	}
-	return nil, fmt.Errorf("%w from %s: stopped before the first interval completed", ErrNoData, r.cfg.Tool)
+	return nil, fmt.Errorf("%w from %s: stopped before the first interval completed (%w)", ErrNoData, r.cfg.Tool, ErrInterrupted)
 }
 
 // loop samples at fixed deadlines (start + k×interval, the last clamped to
@@ -323,20 +340,17 @@ func (r *run) recordSpan(cs []Counter, at time.Duration) {
 // deltaFor diffs c against the previous sample. A counter first seen after
 // the baseline started at 0 when its socket (or process) was created, so its
 // whole value moved since then and counts in full. A counter that went
-// backwards belongs to a new socket reusing the key and counts in full too.
+// backwards in either direction belongs to a new socket reusing the key, so
+// both of its counters count in full.
 func (r *run) deltaFor(k sockKey, c Counter) (int64, int64) {
 	prev, ok := r.last[k]
 	if !ok {
 		return c.In, c.Out
 	}
-	return grow(prev.In, c.In), grow(prev.Out, c.Out)
-}
-
-func grow(prev, cur int64) int64 {
-	if cur < prev {
-		return cur
+	if c.In < prev.In || c.Out < prev.Out {
+		return c.In, c.Out
 	}
-	return cur - prev
+	return c.In - prev.In, c.Out - prev.Out
 }
 
 // noteRemote keeps the remotes seen in the process's latest sample with
@@ -445,18 +459,21 @@ type Ref struct {
 
 // Report is the summary of a Trace.
 type Report struct {
-	DurationMS     int64     `json:"duration_ms"`
-	IntervalMS     int64     `json:"interval_ms"`
-	Samples        int       `json:"samples"`
-	SamplesFailed  int       `json:"samples_failed"`
-	SamplesSkipped int       `json:"samples_skipped"`
-	Basis          string    `json:"basis"`
-	PID            int       `json:"pid,omitempty"`
-	Totals         Totals    `json:"totals"`
-	Processes      []Process `json:"processes"`
-	Appeared       []Ref     `json:"appeared"`
-	Disappeared    []Ref     `json:"disappeared"`
-	Limitations    []string  `json:"limitations"`
+	DurationMS     int64  `json:"duration_ms"`
+	IntervalMS     int64  `json:"interval_ms"`
+	Samples        int    `json:"samples"`
+	SamplesFailed  int    `json:"samples_failed"`
+	SamplesSkipped int    `json:"samples_skipped"`
+	Basis          string `json:"basis"`
+	// RemotesBasis says how Processes[].Remotes were chosen: RemotesEndSnapshot
+	// or RemotesBusiestSockets.
+	RemotesBasis string    `json:"remotes_basis,omitempty"`
+	PID          int       `json:"pid,omitempty"`
+	Totals       Totals    `json:"totals"`
+	Processes    []Process `json:"processes"`
+	Appeared     []Ref     `json:"appeared"`
+	Disappeared  []Ref     `json:"disappeared"`
+	Limitations  []string  `json:"limitations"`
 }
 
 // Summarize ranks the processes include accepts (nil accepts all) by total

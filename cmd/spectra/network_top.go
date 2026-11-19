@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -83,10 +84,12 @@ func parseNetworkTopFlags(args []string, stderr io.Writer) (networkTopOpts, bool
 		fmt.Fprint(stderr, networkTopUsage+"\n\n"+
 			"Show which processes are using the network right now: measure the bytes each\n"+
 			"process moves every interval and rank processes by bytes moved over the\n"+
-			"window. Ctrl-C ends early and still prints the summary.\n\n"+
+			"window. Ctrl-C ends early and still prints the summary (before the first interval\n"+
+			"completes it prints an empty summary marked interrupted and exits 0).\n\n"+
 			"macOS runs one `nettop -d -L 2` per interval, so --interval and --duration\n"+
 			"are rounded up to whole seconds and an interval cut short by Ctrl-C is\n"+
-			"dropped. Linux diffs per-socket TCP counters from `ss -tinpH`.\n\n")
+			"dropped; remote endpoints are the connections open at the end of the window.\n"+
+			"Linux diffs per-socket TCP counters from `ss -tinpH`.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.DurationVar(&o.duration, "duration", 10*time.Second, "How long to sample (Ctrl-C stops early)")
@@ -142,6 +145,9 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 		cfg.Emit = func(t nettop.Tick) { printNetworkTopTick(ew, t) }
 	}
 	tr, err := nettop.Run(ctx, cfg)
+	if errors.Is(err, nettop.ErrInterrupted) {
+		return printInterruptedNetworkTop(ew, stderr, src, opts)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "network top: %v\n", err)
 		return 1
@@ -152,14 +158,18 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 	after := deps.procs(post)
 	scope.extend(after)
 	rep := nettop.Summarize(tr, scope.include(), opts.top)
-	rep.Basis, rep.PID = src.Basis, opts.pid
+	rep.Basis, rep.RemotesBasis, rep.PID = src.Basis, nettop.RemotesBasisFor(src.Basis), opts.pid
 	rep.Limitations = append(rep.Limitations, nettop.Limitations(src.Basis)...)
 	if opts.pid > 0 {
 		rep.Limitations = append(rep.Limitations, pidScopeNote)
 	}
 	enrichNetworkTop(post, &rep, deps, before, after)
 
-	if opts.json {
+	return writeNetworkTopReport(ew, stderr, rep, opts.json)
+}
+
+func writeNetworkTopReport(ew *errWriter, stderr io.Writer, rep nettop.Report, asJSON bool) int {
+	if asJSON {
 		enc := json.NewEncoder(ew)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(rep) // failures latch in ew
@@ -171,6 +181,22 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 		return 1
 	}
 	return 0
+}
+
+// interruptedNote is shown when Ctrl-C ended the window before any interval
+// completed, so there is nothing to rank.
+const interruptedNote = "interrupted before the first interval completed; no samples were taken"
+
+// printInterruptedNetworkTop prints the zero-duration summary for a window
+// cancelled before its first interval and exits 0.
+func printInterruptedNetworkTop(ew *errWriter, stderr io.Writer, src nettop.Source, opts networkTopOpts) int {
+	rep := nettop.Report{
+		IntervalMS: opts.interval.Milliseconds(), Basis: src.Basis,
+		RemotesBasis: nettop.RemotesBasisFor(src.Basis), PID: opts.pid,
+		Processes: []nettop.Process{}, Appeared: []nettop.Ref{}, Disappeared: []nettop.Ref{},
+		Limitations: []string{interruptedNote},
+	}
+	return writeNetworkTopReport(ew, stderr, rep, opts.json)
 }
 
 // pidScopeNote says which processes --pid counts where; text, JSON and help
@@ -298,8 +324,10 @@ func fillRemotes(rep *nettop.Report, conns []netstate.Connection) {
 			missing++
 		}
 	}
-	if missing > 0 {
-		rep.Limitations = append(rep.Limitations, fmt.Sprintf("remote endpoints come from one connection listing at the end; %d listed process(es) had none open then", missing))
+	if rep.RemotesBasis == nettop.RemotesEndSnapshot {
+		rep.Limitations = append(rep.Limitations, fmt.Sprintf("remote endpoints are the connections open at the end of the window (one listing), not necessarily those that moved the bytes; %d listed process(es) had none open then", missing))
+	} else if missing > 0 {
+		rep.Limitations = append(rep.Limitations, fmt.Sprintf("%d listed process(es) had no busy socket; their remote endpoints come from one connection listing at the end", missing))
 	}
 }
 
@@ -320,10 +348,12 @@ func printNetworkTopReport(out io.Writer, r nettop.Report) error {
 	if r.SamplesFailed > 0 || r.SamplesSkipped > 0 {
 		fmt.Fprintf(w, "  samples: %d failed, %d skipped (a sample overran its deadline)\n", r.SamplesFailed, r.SamplesSkipped)
 	}
-	if len(r.Processes) == 0 {
+	if r.Samples == 0 {
+		fmt.Fprintf(w, "  %s\n", interruptedNote)
+	} else if len(r.Processes) == 0 {
 		fmt.Fprintln(w, "  no process moved any bytes in the window")
 	} else {
-		printNetworkTopTable(w, r.Processes)
+		printNetworkTopTable(w, r.Processes, r.RemotesBasis)
 	}
 	printNetworkTopRefs(w, "appeared during the window", r.Appeared)
 	printNetworkTopRefs(w, "gone by the end", r.Disappeared)
@@ -336,9 +366,13 @@ func printNetworkTopReport(out io.Writer, r nettop.Report) error {
 	return w.err
 }
 
-func printNetworkTopTable(w io.Writer, ps []nettop.Process) {
+func printNetworkTopTable(w io.Writer, ps []nettop.Process, remotesBasis string) {
+	remotes := "REMOTES"
+	if remotesBasis == nettop.RemotesEndSnapshot {
+		remotes = "REMOTES (open at end of window)"
+	}
 	fmt.Fprintf(w, "\n  %7s  %-20s  %-10s  %9s  %9s  %11s  %11s  %11s  %11s  %s\n",
-		"PID", "COMMAND", "USER", "IN", "OUT", "AVG IN", "AVG OUT", "PEAK IN", "PEAK OUT", "REMOTES")
+		"PID", "COMMAND", "USER", "IN", "OUT", "AVG IN", "AVG OUT", "PEAK IN", "PEAK OUT", remotes)
 	for _, p := range ps {
 		fmt.Fprintf(w, "  %7d  %-20s  %-10s  %9s  %9s  %11s  %11s  %11s  %11s  %s\n",
 			p.PID, truncate(p.Command, 20), truncate(dashIfEmpty(p.User), 10), humanSize(p.BytesIn), humanSize(p.BytesOut),

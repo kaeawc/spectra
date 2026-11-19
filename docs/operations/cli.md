@@ -28,16 +28,20 @@ socket first seen after the baseline sample counts its whole counter, since ss
 counters start at 0 when the socket opens. It prints one line per interval with
 the total in/out rate, and ends with a table ranking processes by bytes moved:
 bytes in/out, average and peak rates, user, working directory, and up to 3
-remote endpoints (the busiest sockets on Linux; one connection listing at the
-end on macOS). Rates use the actual time each interval took, not the nominal
+remote endpoints (the busiest sockets on Linux, `remotes_basis` `busiest-sockets`;
+on macOS one connection listing taken at the end of the window, `remotes_basis`
+`end-snapshot`, shown under a "REMOTES (open at end of window)" header, since a
+connection that closed earlier is not listed). Rates use the actual time each interval took, not the nominal
 interval. Loopback traffic is not counted; on Linux only TCP is counted and
 other users' sockets need root. `--pid` limits the output to that process and
 its descendants: the per-interval lines count the descendants alive at the
 start, the summary also those alive at the end. Ctrl-C ends early and still
-prints the summary with the actual duration. A host where nothing moved (or,
+prints the summary with the actual duration; if Ctrl-C comes before the first
+interval completes, it prints an empty zero-duration summary marked interrupted
+and exits 0. A host where nothing moved (or,
 unprivileged, nothing is visible) reports "no process moved any bytes" and
 exits 0. `--json` emits one object with `duration_ms`, `interval_ms`,
-`samples`, `basis` (`nettop` or `ss-tcp`), `totals`, `processes`, `appeared`,
+`samples`, `basis` (`nettop` or `ss-tcp`), `remotes_basis`, `totals`, `processes`, `appeared`,
 `disappeared` and `limitations`. Exit codes: 0 ok, 1 runtime or output error
 (a missing sampling tool, or the tool failing on every sample), 2 usage error.
 

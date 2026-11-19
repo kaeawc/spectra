@@ -166,7 +166,7 @@ func TestMeasureCancelDropsInterruptedInterval(t *testing.T) {
 	early := newMeasureScript(moved())
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	cancel2()
-	if _, err := Run(ctx2, early.config(time.Second, time.Second)); !errors.Is(err, ErrNoData) || !strings.Contains(err.Error(), "before the first interval") {
+	if _, err := Run(ctx2, early.config(time.Second, time.Second)); !errors.Is(err, ErrNoData) || !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "before the first interval") {
 		t.Fatalf("cancelled before any interval: err = %v", err)
 	}
 }
