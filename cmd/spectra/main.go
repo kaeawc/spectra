@@ -73,6 +73,7 @@ func subcommandList() []subcommand {
 		{"vmregions", "Composition by sharing/protection/backing, with RWX (W^X) flagging", runVmregions},
 		{"lsmp", "Summarize a process's Mach port table (right counts, leak detection)", runLsmp},
 		{"whois", "Attribute a busy XPC/Mach service to the client processes driving it", runWhois},
+		{"owner", "Who has this? Processes behind a port, an open file, or a pid, with parent chain", runOwner},
 		{"lineage", "Show a process's ancestor chain and descendant subtree with RSS/CPU totals", runLineage},
 		{"malloc-history", "Attribute allocations to call stacks (requires MallocStackLogging)", runMallocHistory},
 		{"flamegraph", "Render a native CPU flamegraph (SVG) from a process sample", runFlamegraph},
