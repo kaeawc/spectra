@@ -145,7 +145,12 @@ func IsZombie(pr process.Info) bool {
 		pr.PPID != 0 && pr.PPID != 2
 }
 
+// isDefunct matches procps "name <defunct>" and the bare "<defunct>" macOS ps
+// prints for a zombie.
 func isDefunct(s string) bool {
+	if s == "<defunct>" {
+		return true
+	}
 	name, ok := strings.CutSuffix(s, " <defunct>")
 	return ok && name != "" && !strings.ContainsAny(name, " \t")
 }
