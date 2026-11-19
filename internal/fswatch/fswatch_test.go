@@ -186,14 +186,14 @@ func TestSymlinkNotFollowed(t *testing.T) {
 		"/r":      {{Name: "link", IsDir: true, IsSymlink: true}},
 		"/r/link": {file("secret", 1, 0)},
 	}
-	snap, err := Take(fsys, "/r", 100)
+	snap, err := Take(context.Background(), fsys, "/r", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := snap.Entries["/r/link/secret"]; ok {
 		t.Fatal("followed symlink")
 	}
-	if m := snap.Entries["/r/link"]; m.IsDir {
+	if m := snap.Entries["/r/link"]; m.Kind != EntrySymlink {
 		t.Fatal("symlink recorded as directory")
 	}
 }

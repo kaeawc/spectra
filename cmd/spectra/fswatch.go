@@ -22,7 +22,7 @@ type fswatchDeps struct {
 	fs      fswatch.FS
 	clock   clock.Clock
 	sleep   func(ctx context.Context, d time.Duration) error
-	holders func(ctx context.Context, path string) ([]fswatch.Holder, error)
+	holders func(ctx context.Context, path string) (hs []fswatch.Holder, incomplete bool, err error)
 }
 
 func defaultFswatchDeps() fswatchDeps {
@@ -34,29 +34,35 @@ func defaultFswatchDeps() fswatchDeps {
 	}
 }
 
-func fswatchHolders(ctx context.Context, path string) ([]fswatch.Holder, error) {
+func fswatchHolders(ctx context.Context, path string) ([]fswatch.Holder, bool, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", path, err)
+		return nil, false, fmt.Errorf("resolve %s: %w", path, err)
 	}
 	res, err := owner.Finder{}.Find(ctx, owner.Target{Kind: owner.KindPath, Raw: path, Path: abs})
 	if err != nil {
-		return nil, fmt.Errorf("owner lookup: %w", err)
+		return nil, false, fmt.Errorf("owner lookup: %w", err)
 	}
 	out := make([]fswatch.Holder, 0, len(res.Holders))
 	for _, h := range res.Holders {
 		out = append(out, fswatch.Holder{PID: h.PID, Command: h.Command, Mode: strings.TrimSpace(h.Hold + " " + h.Mode)})
 	}
-	return out, nil
+	return out, res.Incomplete, nil
 }
 
 func runFswatch(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	// Restore default handling after the first interrupt so a second Ctrl-C
+	// terminates the process even while a scan or lookup is running.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	return runFswatchWithIO(ctx, args, os.Stdout, os.Stderr, defaultFswatchDeps())
 }
 
-const fswatchUsage = "usage: spectra fswatch <path> [--duration 30s] [--interval 1s] [--top 10] [--max-entries N] [--json]"
+const fswatchUsage = "usage: spectra fswatch <path> [--duration 30s] [--interval 1s] [--top 10] [--max-entries N] [--holders-timeout 10s] [--json]"
 
 func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writer, deps fswatchDeps) int {
 	fs := flag.NewFlagSet("spectra fswatch", flag.ContinueOnError)
@@ -70,6 +76,7 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 	interval := fs.Duration("interval", time.Second, "Polling interval")
 	top := fs.Int("top", 10, "Show the top N busiest files and directories")
 	maxEntries := fs.Int("max-entries", fswatch.DefaultMaxEntries, "Maximum tracked entries before the tree is reported as truncated")
+	holdersTimeout := fs.Duration("holders-timeout", 10*time.Second, "Total time allowed for naming holders of the busiest files (0 disables holder lookup)")
 	asJSON := fs.Bool("json", false, "Emit one JSON object at the end instead of streaming text")
 
 	// Accept flags before or after the single path argument.
@@ -85,8 +92,8 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 		paths = append(paths, fs.Arg(0))
 		rest = fs.Args()[1:]
 	}
-	if len(paths) != 1 || *duration <= 0 || *interval <= 0 || *top < 1 || *maxEntries < 1 {
-		fmt.Fprintf(stderr, "fswatch: exactly one <path> is required; --duration, --interval, --top and --max-entries must be positive\n%s\n", fswatchUsage)
+	if len(paths) != 1 || *duration <= 0 || *interval <= 0 || *top < 1 || *maxEntries < 1 || *holdersTimeout < 0 {
+		fmt.Fprintf(stderr, "fswatch: exactly one <path> is required; --duration, --interval, --top and --max-entries must be positive and --holders-timeout must not be negative\n%s\n", fswatchUsage)
 		return 2
 	}
 	if *interval > *duration {
@@ -102,21 +109,18 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if !*asJSON {
 		cfg.Emit = func(e fswatch.Event) { fmt.Fprintln(ew, formatFswatchEvent(e)) }
+		cfg.Warn = func(m string) { fmt.Fprintf(ew, "warning: %s\n", m) }
 	}
 	res, err := fswatch.Run(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "fswatch: %v\n", err)
 		return 1
 	}
-	attributeHolders(ctx, &res, deps.holders)
-
-	if *asJSON {
-		enc := json.NewEncoder(ew)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(res)
-	} else {
-		printFswatchSummary(ew, res)
+	if *holdersTimeout > 0 {
+		attributeHolders(ctx, &res, deps.holders, *holdersTimeout)
 	}
+
+	writeFswatchResult(ew, res, *asJSON)
 	if ew.err != nil {
 		fmt.Fprintf(stderr, "fswatch: write output: %v\n", ew.err)
 		return 1
@@ -124,19 +128,45 @@ func runFswatchWithIO(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-// attributeHolders names holders for busiest files that still exist. It is
-// skipped after cancellation because the lookup would be cut off anyway.
-func attributeHolders(ctx context.Context, res *fswatch.Result, lookup func(context.Context, string) ([]fswatch.Holder, error)) {
-	if lookup == nil || ctx.Err() != nil {
+func writeFswatchResult(w io.Writer, res fswatch.Result, asJSON bool) {
+	if !asJSON {
+		printFswatchSummary(w, res)
 		return
 	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(res) // write errors are latched by the errWriter
+}
+
+// maxHolderFiles caps how many busiest files get a holder lookup; each one
+// costs a full owner scan.
+const maxHolderFiles = 5
+
+// attributeHolders names holders for the busiest files that are still regular
+// files, within one overall timeout. Anything short of a complete answer sets
+// HoldersIncomplete so a missing holder is never read as "nobody has it open".
+func attributeHolders(ctx context.Context, res *fswatch.Result, lookup func(context.Context, string) ([]fswatch.Holder, bool, error), timeout time.Duration) {
+	if lookup == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	files := res.Summary.BusiestFiles
 	for i := range files {
-		if !files[i].Exists {
+		if !files[i].Exists || i >= maxHolderFiles {
 			continue
 		}
-		hs, err := lookup(ctx, files[i].Path)
+		if pctx.Err() != nil {
+			res.Summary.HoldersIncomplete = true
+			files[i].HolderError = "holder lookup skipped: " + pctx.Err().Error()
+			continue
+		}
+		hs, incomplete, err := lookup(pctx, files[i].Path)
+		if incomplete {
+			res.Summary.HoldersIncomplete = true
+		}
 		if err != nil {
+			res.Summary.HoldersIncomplete = true
 			files[i].HolderError = err.Error()
 			continue
 		}
@@ -145,17 +175,19 @@ func attributeHolders(ctx context.Context, res *fswatch.Result, lookup func(cont
 }
 
 func formatFswatchEvent(e fswatch.Event) string {
-	kind := e.Kind
-	if e.IsDir {
-		kind += " dir"
-	}
-	return fmt.Sprintf("%s  %-12s %10d B  %s", e.Time.Format("15:04:05.000"), kind, e.Size, e.Path)
+	return fmt.Sprintf("%s  %-8s %-7s %10d B  %s", e.Time.Format("15:04:05.000"), e.Kind, e.EntryKind, e.Size, e.Path)
 }
 
 func printFswatchSummary(w io.Writer, r fswatch.Result) {
 	s := r.Summary
 	fmt.Fprintf(w, "\nSummary: %d events (%d created, %d modified, %d removed) under %s over %dms (%d polls, interval %dms, %d entries tracked)\n",
 		s.TotalEvents, s.Counts.Created, s.Counts.Modified, s.Counts.Removed, r.Root, r.DurationMS, r.Polls, r.IntervalMS, s.TrackedEntries)
+	if r.EndedReason != "" {
+		fmt.Fprintf(w, "WATCH ENDED EARLY: %s\n", r.EndedReason)
+	}
+	if r.PollsFailed > 0 {
+		fmt.Fprintf(w, "%d polls failed to read the root and were skipped\n", r.PollsFailed)
+	}
 	if s.TruncationNote != "" {
 		fmt.Fprintf(w, "TRUNCATED: %s\n", s.TruncationNote)
 	}
@@ -173,6 +205,9 @@ func printFswatchSummary(w io.Writer, r fswatch.Result) {
 				fmt.Fprintf(w, "         holders unavailable: %s\n", f.HolderError)
 			}
 		}
+	}
+	if s.HoldersIncomplete {
+		fmt.Fprintln(w, "Holders may be incomplete (not root, lookup timed out or was skipped); an empty list does not mean nobody has the file open")
 	}
 	if len(s.BusiestDirs) > 0 {
 		fmt.Fprintf(w, "Busiest directories (top %d of %d):\n", len(s.BusiestDirs), s.DistinctDirs)

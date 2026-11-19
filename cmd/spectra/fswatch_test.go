@@ -39,8 +39,8 @@ func fswatchTestDeps() fswatchDeps {
 			clk.Advance(d)
 			return nil
 		},
-		holders: func(_ context.Context, p string) ([]fswatch.Holder, error) {
-			return []fswatch.Holder{{PID: 42, Command: "writer", Mode: "fd w"}}, nil
+		holders: func(_ context.Context, p string) ([]fswatch.Holder, bool, error) {
+			return []fswatch.Holder{{PID: 42, Command: "writer", Mode: "fd w"}}, false, nil
 		},
 	}
 }
