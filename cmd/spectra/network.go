@@ -55,9 +55,18 @@ func runNetwork(args []string) int {
 	if len(args) > 0 && args[0] == "captive" {
 		return runNetworkCaptive(args[1:])
 	}
+	if len(args) > 0 && args[0] == "top" {
+		return runNetworkTop(args[1:])
+	}
 
 	fs := flag.NewFlagSet("spectra network", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: spectra network [--json]\n"+
+			"       spectra network connections|firewall|capture|diagnose|captive|top ...\n\n"+
+			"  top    rank processes by bytes moved over a window (who is using the network now)\n\n")
+		fs.PrintDefaults()
+	}
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	if err := fs.Parse(args); err != nil {
 		return 2

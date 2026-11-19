@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -163,6 +164,90 @@ func parseSSListen(out, proto string) []ListeningPort {
 		ports = append(ports, lp)
 	}
 	return ports
+}
+
+// SocketBytes is one TCP socket's cumulative byte counters from `ss -tinpH`.
+type SocketBytes struct {
+	PID        int
+	Command    string
+	State      string
+	LocalAddr  string
+	RemoteAddr string
+	// BytesIn is bytes_received; BytesOut is bytes_acked (data the peer
+	// acknowledged, so unacknowledged in-flight data is not counted).
+	BytesIn  int64
+	BytesOut int64
+}
+
+// CollectSocketBytes reads per-socket TCP counters with `ss -tinpH`.
+func CollectSocketBytes(run CmdRunner) ([]SocketBytes, error) {
+	out, err := run("ss", "-tinpH")
+	if err != nil {
+		return nil, fmt.Errorf("ss: %w", err)
+	}
+	return parseSSTCPInfo(string(out)), nil
+}
+
+// parseSSTCPInfo parses `ss -tinpH`. Each socket is a line starting in
+// column 0 (State Recv-Q Send-Q Local Peer [users:(...)]) followed by an
+// indented tcp_info line. Sockets without a users: field (other users'
+// sockets, or orphans) cannot be attributed and are skipped. A socket shared
+// by several processes is attributed to the lowest pid so it counts once.
+func parseSSTCPInfo(out string) []SocketBytes {
+	var records [][]string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if (line[0] != ' ' && line[0] != '\t') || len(records) == 0 {
+			records = append(records, fields)
+			continue
+		}
+		records[len(records)-1] = append(records[len(records)-1], fields...)
+	}
+	var socks []SocketBytes
+	for _, rec := range records {
+		if s, ok := parseSSTCPRecord(rec); ok {
+			socks = append(socks, s)
+		}
+	}
+	return socks
+}
+
+func parseSSTCPRecord(fields []string) (SocketBytes, bool) {
+	if len(fields) < 5 {
+		return SocketBytes{}, false
+	}
+	s := SocketBytes{State: fields[0], LocalAddr: fields[3], RemoteAddr: fields[4]}
+	for _, m := range ssProcessRe.FindAllStringSubmatch(strings.Join(fields[5:], " "), -1) {
+		pid, err := strconv.Atoi(m[2])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		if s.PID == 0 || pid < s.PID {
+			s.PID, s.Command = pid, m[1]
+		}
+	}
+	if s.PID == 0 {
+		return SocketBytes{}, false
+	}
+	for _, f := range fields[5:] {
+		if v, ok := strings.CutPrefix(f, "bytes_acked:"); ok {
+			s.BytesOut = parseCounter(v)
+		} else if v, ok := strings.CutPrefix(f, "bytes_received:"); ok {
+			s.BytesIn = parseCounter(v)
+		}
+	}
+	return s, true
+}
+
+func parseCounter(s string) int64 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // splitHostPort splits an "addr:port" token (ss uses the last ':' as the

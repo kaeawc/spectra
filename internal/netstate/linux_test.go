@@ -189,3 +189,58 @@ func TestCollectLinuxUsesSS(t *testing.T) {
 		t.Error("Linux Collect should query ss")
 	}
 }
+
+// ssTCPInfoFixture is `ss -tinpH` output: each socket line is followed by an
+// indented tcp_info line. It covers IPv6, a socket without users: (another
+// user's socket), a socket shared by two processes, and a socket that has not
+// moved data yet (no bytes_* fields).
+const ssTCPInfoFixture = `ESTAB 0      0      192.168.1.10:22      192.168.1.2:51514  users:(("sshd",pid=1234,fd=4),("sshd",pid=1200,fd=4))
+	 cubic wscale:7,7 rto:204 rtt:0.523/0.12 ato:40 mss:1448 pmtu:1500 rcvmss:1072 advmss:1448 cwnd:10 bytes_sent:52341 bytes_acked:52341 bytes_received:8812 segs_out:210 segs_in:300 data_segs_out:200 data_segs_in:100 send 221Mbps lastsnd:4 lastrcv:4 lastack:4 pacing_rate 442Mbps delivery_rate 30.1Mbps delivered:201 app_limited busy:120ms rcv_space:14480 rcv_ssthresh:64088 minrtt:0.2
+ESTAB 0      0      [2001:db8::5]:443    [2001:db8::9]:40112 users:(("Web Content",pid=900,fd=12))
+	 cubic wscale:7,7 rto:212 rtt:10.2/3 mss:1428 cwnd:10 bytes_sent:1000 bytes_acked:999 bytes_received:4096 segs_out:9 segs_in:8 send 11.2Mbps
+ESTAB 0      0      10.0.0.5:5432        10.0.0.9:41000
+	 cubic wscale:7,7 rto:204 bytes_acked:100 bytes_received:200
+SYN-SENT 0   1      10.0.0.5:39000       93.184.216.34:443   users:(("curl",pid=77,fd=5))
+	 cubic rto:1000 mss:524 cwnd:1
+`
+
+func TestParseSSTCPInfo(t *testing.T) {
+	socks := parseSSTCPInfo(ssTCPInfoFixture)
+	if len(socks) != 3 {
+		t.Fatalf("sockets = %d, want 3: %+v", len(socks), socks)
+	}
+	ssh := socks[0]
+	if ssh.PID != 1200 || ssh.Command != "sshd" || ssh.BytesOut != 52341 || ssh.BytesIn != 8812 {
+		t.Errorf("shared socket = %+v, want lowest pid 1200 with acked/received counters", ssh)
+	}
+	if ssh.LocalAddr != "192.168.1.10:22" || ssh.RemoteAddr != "192.168.1.2:51514" || ssh.State != "ESTAB" {
+		t.Errorf("shared socket addrs = %+v", ssh)
+	}
+	v6 := socks[1]
+	if v6.PID != 900 || v6.Command != "Web Content" || v6.RemoteAddr != "[2001:db8::9]:40112" || v6.BytesIn != 4096 || v6.BytesOut != 999 {
+		t.Errorf("ipv6 socket = %+v", v6)
+	}
+	idle := socks[2]
+	if idle.PID != 77 || idle.BytesIn != 0 || idle.BytesOut != 0 {
+		t.Errorf("idle socket = %+v", idle)
+	}
+}
+
+func TestCollectSocketBytes(t *testing.T) {
+	var got []string
+	run := func(name string, args ...string) ([]byte, error) {
+		got = append([]string{name}, args...)
+		return []byte(ssTCPInfoFixture), nil
+	}
+	socks, err := CollectSocketBytes(run)
+	if err != nil || len(socks) != 3 {
+		t.Fatalf("CollectSocketBytes = %d sockets, %v", len(socks), err)
+	}
+	if len(got) != 2 || got[0] != "ss" || got[1] != "-tinpH" {
+		t.Errorf("command = %v", got)
+	}
+	failing := func(string, ...string) ([]byte, error) { return nil, os.ErrNotExist }
+	if _, err := CollectSocketBytes(failing); err == nil {
+		t.Error("expected error when ss fails")
+	}
+}

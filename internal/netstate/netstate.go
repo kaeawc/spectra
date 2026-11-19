@@ -9,6 +9,7 @@ package netstate
 import (
 	"bufio"
 	"encoding/csv"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -153,6 +154,29 @@ func CollectThroughput(run CmdRunner) []Throughput {
 		}
 	}
 	return active
+}
+
+// ProcessBytes is one process's cumulative network byte counters.
+type ProcessBytes struct {
+	PID      int
+	Command  string
+	BytesIn  int64
+	BytesOut int64
+}
+
+// CollectProcessBytes takes one nettop sample without -d, so each row is the
+// process's cumulative external-interface bytes rather than a delta.
+func CollectProcessBytes(run CmdRunner) ([]ProcessBytes, error) {
+	out, err := run("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out", "-t", "external")
+	if err != nil {
+		return nil, fmt.Errorf("nettop: %w", err)
+	}
+	rows := parseNettopThroughput(string(out))
+	res := make([]ProcessBytes, 0, len(rows))
+	for _, r := range rows {
+		res = append(res, ProcessBytes{PID: r.PID, Command: r.Command, BytesIn: r.BytesInPerSec, BytesOut: r.BytesOutPerSec})
+	}
+	return res, nil
 }
 
 func parseNettopThroughput(out string) []Throughput {

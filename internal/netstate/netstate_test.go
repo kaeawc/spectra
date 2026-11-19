@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -361,5 +362,45 @@ func TestCollectConnectionsCountFallsBackToNetstat(t *testing.T) {
 	s := Collect(stub)
 	if s.EstablishedConnectionsCount != 1 {
 		t.Errorf("EstablishedConnectionsCount = %d, want 1", s.EstablishedConnectionsCount)
+	}
+}
+
+// nettopCumulativeFixture is one `nettop -P -L 1 -x -J bytes_in,bytes_out -t
+// external` sample: cumulative bytes per process, names truncated to 15 chars.
+const nettopCumulativeFixture = `,bytes_in,bytes_out,
+apsd.376,5670,23348,
+mDNSResponder.519,52768938,11854128,
+CloudTelemetryS.804,7847,6550,
+Google Chrome H.1559,7468,3495,
+`
+
+func TestCollectProcessBytesCumulative(t *testing.T) {
+	var gotArgs []string
+	run := func(name string, args ...string) ([]byte, error) {
+		if name != "nettop" {
+			t.Fatalf("command = %q", name)
+		}
+		gotArgs = args
+		return []byte(nettopCumulativeFixture), nil
+	}
+	rows, err := CollectProcessBytes(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasArg(gotArgs, "-d") || !hasArg(gotArgs, "external") || !hasArg(gotArgs, "1") {
+		t.Errorf("nettop args = %v, want one cumulative sample", gotArgs)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d: %+v", len(rows), rows)
+	}
+	if r := rows[1]; r.PID != 519 || r.Command != "mDNSResponder" || r.BytesIn != 52768938 || r.BytesOut != 11854128 {
+		t.Errorf("row = %+v", r)
+	}
+	if r := rows[3]; r.PID != 1559 || r.Command != "Google Chrome H" {
+		t.Errorf("row with space = %+v", r)
+	}
+	failing := func(string, ...string) ([]byte, error) { return nil, errors.New("boom") }
+	if _, err := CollectProcessBytes(failing); err == nil || !strings.Contains(err.Error(), "nettop") {
+		t.Errorf("err = %v, want nettop error", err)
 	}
 }
