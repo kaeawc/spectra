@@ -123,12 +123,15 @@ func (d dent) Info() (fs.FileInfo, error) { return nil, os.ErrNotExist }
 
 type fakeInfo struct {
 	os.FileInfo
-	id string
+	id   string
+	mode os.FileMode
 }
+
+func (f fakeInfo) Mode() os.FileMode { return f.mode }
 
 func (f fakeFS) Stat(n string) (os.FileInfo, error) {
 	if id, ok := f.ids[n]; ok {
-		return fakeInfo{id: id}, nil
+		return fakeInfo{id: id, mode: f.modes[n]}, nil
 	}
 	if f.exist[n] {
 		return fakeInfo{id: n}, nil
@@ -156,6 +159,7 @@ type fakeFS struct {
 	links map[string]string
 	files map[string]string
 	deny  map[string]bool
+	modes map[string]os.FileMode // Stat mode for ids entries
 }
 
 func (f fakeFS) ReadDir(n string) ([]os.DirEntry, error) {
@@ -230,7 +234,7 @@ func procTree() fakeFS {
 }
 
 func TestProcPathHolders(t *testing.T) {
-	got, denied := procPathHolders(procTree(), "/proc", []string{"/srv/data/db.sqlite"})
+	got, denied, _ := procPathHolders(procTree(), "/proc", []string{"/srv/data/db.sqlite"})
 	if !denied {
 		t.Error("pid 1 fd dir is permission denied; want denied")
 	}
@@ -242,7 +246,7 @@ func TestProcPathHolders(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v\nwant %+v", got, want)
 	}
-	got, _ = procPathHolders(procTree(), "/proc", []string{"/srv/data"})
+	got, _, _ = procPathHolders(procTree(), "/proc", []string{"/srv/data"})
 	if len(got) != 1 || got[0].Hold != HoldCwd || got[0].PID != 20 {
 		t.Errorf("cwd match = %+v", got)
 	}

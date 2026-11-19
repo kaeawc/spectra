@@ -42,3 +42,5 @@ type Result struct {
 }
 
 const rootHint = "not running as root: only this user's processes are visible, so other owners may exist; re-run with sudo"
+
+const ambiguousHint = "relative-bound sockets matched by working directory; more than one candidate, so the listed holders may include a process that bound elsewhere"

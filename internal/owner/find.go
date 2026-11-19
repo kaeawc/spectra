@@ -39,13 +39,14 @@ func (f Finder) Find(ctx context.Context, t Target) (Result, error) {
 	procs := f.listProcs(ctx, osk)
 	res := Result{Target: t}
 	var err error
+	var ambiguous bool
 	switch t.Kind {
 	case KindPID:
 		res.Holders = pidHolders(procs, t.PID)
 	case KindPort:
 		res.Holders, res.Incomplete, err = f.portHolders(ctx, osk, t)
 	case KindPath:
-		res.Holders, res.Incomplete, err = f.pathHolders(ctx, osk, t)
+		res.Holders, res.Incomplete, ambiguous, err = f.pathHolders(ctx, osk, t)
 	default:
 		err = fmt.Errorf("unknown target kind %q", t.Kind)
 	}
@@ -57,9 +58,7 @@ func (f Finder) Find(ctx context.Context, t Target) (Result, error) {
 	if res.Incomplete && f.isRoot() && (osk != hostos.Linux || t.Kind != KindPath) {
 		res.Incomplete = false
 	}
-	if res.Incomplete {
-		res.Hint = rootHint
-	}
+	res.Incomplete, res.Hint = incompleteHint(res.Incomplete, ambiguous)
 	res.Holders = dedupe(res.Holders)
 	enrich(res.Holders, procs)
 	if osk == hostos.Linux {
@@ -189,10 +188,23 @@ func (f Finder) ssPort(ctx context.Context, proto string, port int) ([]Holder, b
 	return all, hidden, nil
 }
 
-func (f Finder) pathHolders(ctx context.Context, osk hostos.Kind, t Target) ([]Holder, bool, error) {
+// incompleteHint folds the not-root and ambiguous-candidate causes into the
+// Incomplete flag and the hint that explains it.
+func incompleteHint(denied, ambiguous bool) (bool, string) {
+	var hints []string
+	if denied {
+		hints = append(hints, rootHint)
+	}
+	if ambiguous {
+		hints = append(hints, ambiguousHint)
+	}
+	return len(hints) > 0, strings.Join(hints, "; ")
+}
+
+func (f Finder) pathHolders(ctx context.Context, osk hostos.Kind, t Target) ([]Holder, bool, bool, error) {
 	fsys := f.fsys()
 	if _, err := fsys.Stat(t.Path); errors.Is(err, fs.ErrNotExist) {
-		return nil, false, fmt.Errorf("no such file or directory: %s", t.Path)
+		return nil, false, false, fmt.Errorf("no such file or directory: %s", t.Path)
 	}
 	// The kernel and lsof report resolved names (/tmp -> /private/tmp,
 	// /var/run -> /run), so match against both spellings.
@@ -203,12 +215,12 @@ func (f Finder) pathHolders(ctx context.Context, osk hostos.Kind, t Target) ([]H
 	if osk == hostos.Darwin {
 		out, err := f.lsof(ctx, "-nP", "-F", lsofPathFields, "--", t.Path)
 		if err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
-		return lsofPathHolders(parseLsofF(out), paths), true, nil
+		return lsofPathHolders(parseLsofF(out), paths), true, false, nil
 	}
-	hs, denied := procPathHolders(fsys, f.procfs(), paths)
-	return hs, denied, nil
+	hs, denied, ambiguous := procPathHolders(fsys, f.procfs(), paths)
+	return hs, denied, ambiguous, nil
 }
 
 func pidHolders(procs []process.Info, pid int) []Holder {
