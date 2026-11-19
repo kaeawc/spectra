@@ -41,6 +41,7 @@ func subcommandList() []subcommand {
 		{"toolchain", "Show installed language runtimes and package managers", runToolchain},
 		{"network", "Show current network state (routes, DNS, VPN, proxy, listening ports)", runNetwork},
 		{"power", "Show current battery and thermal state", runPower},
+		{"thermal", "Detect thermal throttling and CPU speed limits (exit 0 nominal, 3 warm, 4 throttled)", runThermal},
 		{"impact", "Compute the documented per-pid energy impact score from delta records", runImpact},
 		{"memory", "Show VM compressor, swap, and pressure state", runMemory},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
