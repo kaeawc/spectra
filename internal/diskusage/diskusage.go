@@ -5,12 +5,14 @@ package diskusage
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -87,6 +89,7 @@ type walker struct {
 	rootDev uint64
 	devOK   bool
 	statFn  func(os.FileInfo) fileStat
+	openDir func(string) (dirHandle, error)
 	seen    map[inodeKey]struct{}
 	visited map[inodeKey]struct{}
 	dirs    *topN[DirEntry]
@@ -101,7 +104,19 @@ func Walk(ctx context.Context, root string, opts Options) (*Result, error) {
 	return walkWith(ctx, root, opts, statOf)
 }
 
+// dirHandle is the part of an open directory the walk uses.
+type dirHandle interface {
+	ReadDir(n int) ([]fs.DirEntry, error)
+	Close() error
+}
+
+func osOpenDir(path string) (dirHandle, error) { return os.Open(path) }
+
 func walkWith(ctx context.Context, root string, opts Options, statFn func(os.FileInfo) fileStat) (*Result, error) {
+	return walkOpen(ctx, root, opts, statFn, osOpenDir)
+}
+
+func walkOpen(ctx context.Context, root string, opts Options, statFn func(os.FileInfo) fileStat, openFn func(string) (dirHandle, error)) (*Result, error) {
 	if opts.Top <= 0 {
 		opts.Top = 15
 	}
@@ -122,6 +137,7 @@ func walkWith(ctx context.Context, root string, opts Options, statFn func(os.Fil
 		ctx:     ctx,
 		opts:    opts,
 		statFn:  statFn,
+		openDir: openFn,
 		seen:    map[inodeKey]struct{}{},
 		visited: map[inodeKey]struct{}{},
 		dirs: newTopN(opts.Top, func(a, b DirEntry) bool {
@@ -132,8 +148,14 @@ func walkWith(ctx context.Context, root string, opts Options, statFn func(os.Fil
 		}),
 		res: &Result{Root: root, Unreadable: []Unreadable{}, Skipped: []Skipped{}},
 	}
-	if resolved, rerr := filepath.EvalSymlinks(root); rerr == nil && resolved != filepath.Clean(root) {
-		w.res.ResolvedRoot = resolved
+	// Children are opened under the resolved root: joining onto the typed
+	// root would lexically cancel a ".." that follows a symlink.
+	realRoot := root
+	if resolved, rerr := resolveRoot(root); rerr == nil {
+		realRoot = resolved
+		if resolved != filepath.Clean(root) {
+			w.res.ResolvedRoot = resolved
+		}
 	}
 	st := statFn(fi)
 	w.rootDev, w.devOK = st.dev, st.ok
@@ -142,7 +164,7 @@ func walkWith(ctx context.Context, root string, opts Options, statFn func(os.Fil
 		if st.ok {
 			w.visited[inodeKey{st.dev, st.ino}] = struct{}{}
 		}
-		w.res.TotalBytes = w.walkDir(root, fi, 0)
+		w.res.TotalBytes = w.walkDir(root, realRoot, fi, 0)
 	} else {
 		w.res.TotalBytes = w.addFile(root, fi, st)
 	}
@@ -154,6 +176,34 @@ func walkWith(ctx context.Context, root string, opts Options, statFn func(os.Fil
 	return w.res, nil
 }
 
+// resolveRoot returns the real absolute path of root. EvalSymlinks cleans
+// ".." lexically first, which is wrong after a symlink, so ".." components
+// are applied to the already-resolved prefix instead.
+func resolveRoot(root string) (string, error) {
+	cur, err := filepath.Abs(".")
+	if err == nil {
+		cur, err = filepath.EvalSymlinks(cur)
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve cwd: %w", err)
+	}
+	if filepath.IsAbs(root) {
+		cur = string(filepath.Separator)
+	}
+	for _, c := range strings.Split(root, string(filepath.Separator)) {
+		switch c {
+		case "", ".":
+		case "..":
+			cur = filepath.Dir(cur)
+		default:
+			if cur, err = filepath.EvalSymlinks(filepath.Join(cur, c)); err != nil {
+				return "", fmt.Errorf("resolve %s: %w", root, err)
+			}
+		}
+	}
+	return cur, nil
+}
+
 // less orders ascending by size, then descending by path so that the
 // min-heap evicts a deterministic entry on ties.
 func less(sa, sb uint64, pa, pb string) bool {
@@ -163,10 +213,11 @@ func less(sa, sb uint64, pa, pb string) bool {
 	return pa > pb
 }
 
-func (w *walker) walkDir(path string, fi os.FileInfo, depth int) uint64 {
+// walkDir takes both the display path and the real path used for I/O.
+func (w *walker) walkDir(path, realPath string, fi os.FileInfo, depth int) uint64 {
 	w.res.DirCount++
 	total := w.statFn(fi).alloc
-	total += w.readEntries(path, depth)
+	total += w.readEntries(path, realPath, depth)
 
 	if depth > 0 && (w.opts.Depth <= 0 || depth <= w.opts.Depth) && total >= w.opts.MinSize {
 		w.dirs.push(DirEntry{Path: path, AllocatedBytes: total})
@@ -174,37 +225,49 @@ func (w *walker) walkDir(path string, fi os.FileInfo, depth int) uint64 {
 	return total
 }
 
-// readEntries reads path in batches so a huge directory neither sits in
-// memory whole nor delays cancellation. Output order does not depend on
-// entry order: the top-N comparison breaks ties by path.
-func (w *walker) readEntries(path string, depth int) uint64 {
-	var total uint64
-	f, err := os.Open(path)
-	if err != nil {
-		w.res.Unreadable = append(w.res.Unreadable, Unreadable{Path: path, Error: err.Error()})
+// readEntries reads a directory in batches so cancellation is prompt, and
+// closes the handle before recursing so open descriptors do not grow with
+// tree depth. Output order does not depend on entry order: the top-N
+// comparison breaks ties by path.
+func (w *walker) readEntries(path, realPath string, depth int) uint64 {
+	entries, ok := w.listDir(path, realPath)
+	if !ok {
 		return 0
 	}
+	var total uint64
+	for _, e := range entries {
+		if w.ctx.Err() != nil {
+			break
+		}
+		total += w.walkEntry(path, realPath, e, depth)
+	}
+	return total
+}
+
+func (w *walker) listDir(path, realPath string) ([]fs.DirEntry, bool) {
+	f, err := w.openDir(realPath)
+	if err != nil {
+		w.res.Unreadable = append(w.res.Unreadable, Unreadable{Path: path, Error: err.Error()})
+		return nil, false
+	}
 	defer f.Close()
+	var all []fs.DirEntry
 	for w.ctx.Err() == nil {
 		entries, err := f.ReadDir(readBatch)
-		for _, e := range entries {
-			if w.ctx.Err() != nil {
-				return total
-			}
-			total += w.walkEntry(path, e, depth)
-		}
+		all = append(all, entries...)
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				w.res.Unreadable = append(w.res.Unreadable, Unreadable{Path: path, Error: err.Error()})
 			}
 			break
 		}
 	}
-	return total
+	return all, true
 }
 
-func (w *walker) walkEntry(parent string, e fs.DirEntry, depth int) uint64 {
+func (w *walker) walkEntry(parent, realParent string, e fs.DirEntry, depth int) uint64 {
 	p := filepath.Join(parent, e.Name())
+	rp := filepath.Join(realParent, e.Name())
 	fi, err := e.Info() // lstat semantics: symlinks are not followed
 	if err != nil {
 		w.res.Unreadable = append(w.res.Unreadable, Unreadable{Path: p, Error: err.Error()})
@@ -224,7 +287,7 @@ func (w *walker) walkEntry(parent string, e fs.DirEntry, depth int) uint64 {
 			}
 			w.visited[k] = struct{}{}
 		}
-		return w.walkDir(p, fi, depth+1)
+		return w.walkDir(p, rp, fi, depth+1)
 	}
 	return w.addFile(p, fi, st)
 }

@@ -321,3 +321,55 @@ func TestJSONShape(t *testing.T) {
 		t.Error("unreadable should be [] not null")
 	}
 }
+
+func TestDotDotAfterSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	writeFile(t, filepath.Join(base, "real", "data", "f"), 64*1024)
+	if err := os.MkdirAll(filepath.Join(base, "real", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "real", "sub"), filepath.Join(base, "link")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	r := walk(t, base+"/link/..", Options{}) // Join would clean the ".."
+	if len(r.Unreadable) != 0 || r.FileCount != 1 {
+		t.Errorf("files=%d unreadable=%+v", r.FileCount, r.Unreadable)
+	}
+}
+
+type countingDir struct {
+	dirHandle
+	open *int
+}
+
+func (c countingDir) Close() error { *c.open--; return c.dirHandle.Close() }
+
+func TestDeepTreeBoundedHandles(t *testing.T) {
+	root := t.TempDir()
+	dir := root
+	for i := 0; i < 300; i++ {
+		dir = filepath.Join(dir, "d")
+	}
+	writeFile(t, filepath.Join(dir, "bottom"), 64*1024)
+	var open, max int
+	openFn := func(p string) (dirHandle, error) {
+		h, err := osOpenDir(p)
+		if err != nil {
+			return nil, err
+		}
+		if open++; open > max {
+			max = open
+		}
+		return countingDir{h, &open}, nil
+	}
+	r, err := walkOpen(context.Background(), root, Options{}, statOf, openFn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FileCount != 1 || len(r.Unreadable) != 0 || r.DirCount != 301 {
+		t.Errorf("files=%d dirs=%d unreadable=%+v", r.FileCount, r.DirCount, r.Unreadable)
+	}
+	if max > 2 {
+		t.Errorf("max simultaneously open dirs = %d", max)
+	}
+}
