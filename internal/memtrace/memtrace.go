@@ -15,6 +15,14 @@ import (
 	"github.com/kaeawc/spectra/internal/process"
 )
 
+// Exit reasons.
+const (
+	// ExitGone means the pid disappeared or its start time changed.
+	ExitGone = "gone"
+	// ExitZombie means the target exited but its parent has not reaped it.
+	ExitZombie = "zombie"
+)
+
 // Verdicts.
 const (
 	VerdictSteady       = "steady"
@@ -58,6 +66,7 @@ type Summary struct {
 	Verdict          string  `json:"verdict"`
 	Pattern          string  `json:"pattern,omitempty"`
 	Exited           bool    `json:"exited,omitempty"`
+	ExitReason       string  `json:"exit_reason,omitempty"`
 	SubtreeFirstKiB  int64   `json:"subtree_first_kib,omitempty"`
 	SubtreeLastKiB   int64   `json:"subtree_last_kib,omitempty"`
 	SubtreeGrowthMin float64 `json:"subtree_growth_kib_per_min,omitempty"`
@@ -155,6 +164,7 @@ type tracer struct {
 	res     *Result
 	desc    map[identity]*growth
 	exited  bool
+	reason  string
 	nextSeq int
 }
 
@@ -234,19 +244,56 @@ func (t *tracer) observe(procs []process.Info, at time.Duration) {
 		}
 	}
 	if target == nil || !idOf(*target).same(t.target) {
-		t.exited = true
+		t.exited, t.reason = true, ExitGone
+		return
+	}
+	if lineage.IsZombie(*target) {
+		t.exited, t.reason = true, ExitZombie
 		return
 	}
 	s := Sample{ElapsedMS: at.Milliseconds(), RSSKiB: target.RSSKiB}
 	if t.cfg.Tree {
-		if res, err := lineage.Build(procs, t.cfg.PID); err == nil {
+		if res, err := lineage.Build(liveOnly(procs), t.cfg.PID); err == nil {
 			s.SubtreeRSSKiB, s.Processes = res.Tree.SubtreeRSSKiB, res.Tree.Count
 			t.noteDescendants(res.Tree)
 		}
+		t.forgetZombies(procs)
 	}
 	t.res.Samples = append(t.res.Samples, s)
 	if t.cfg.Emit != nil {
 		t.cfg.Emit(s)
+	}
+}
+
+// liveOnly drops zombies: they hold no memory, so they must not count toward
+// the subtree sum, the process count or the growers.
+func liveOnly(procs []process.Info) []process.Info {
+	out := make([]process.Info, 0, len(procs))
+	for _, p := range procs {
+		if !lineage.IsZombie(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// forgetZombies drops descendants tracked while alive that have since become
+// zombies, so their last live RSS is not reported as growth.
+func (t *tracer) forgetZombies(procs []process.Info) {
+	for _, p := range procs {
+		if !lineage.IsZombie(p) {
+			continue
+		}
+		id := identity{pid: p.PID}
+		if !p.StartTime.IsZero() {
+			id.start = p.StartTime.Unix()
+		}
+		for _, d := range []int64{0, -1, 1} {
+			k := identity{pid: id.pid, start: id.start + d}
+			if _, ok := t.desc[k]; ok && k.same(id) {
+				delete(t.desc, k)
+			}
+		}
 	}
 }
 
@@ -283,6 +330,9 @@ func (t *tracer) finish() {
 	t.res.DurationMS = t.elapsed().Milliseconds()
 	t.res.Summary = Summarize(t.res.Samples)
 	t.res.Summary.Exited = t.exited
+	if t.exited {
+		t.res.Summary.ExitReason = t.reason
+	}
 	if t.cfg.Tree {
 		t.res.Growers = t.growers()
 	}
