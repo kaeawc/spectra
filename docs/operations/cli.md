@@ -67,6 +67,15 @@ need to prompt.
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.
 
+`spectra thermal [--json] [--watch 30s [--interval 2s]]` reports a `nominal`,
+`warm` or `throttled` verdict plus the single reading that decided it: macOS
+parses `pmset -g therm` (CPU speed/scheduler limits and warning levels), Linux
+reads `/sys` thermal zones (placeholder trips and disabled zones ignored),
+Processor/powerclamp cooling devices, a fan at its maximum state, and
+`thermal_throttle` counters. A cpufreq cap is only a note unless a zone is also
+warm; idle fans and firmware cooling offsets are notes too. `--watch` reports the worst verdict seen and any counter increase.
+Exit codes: 0 nominal, 3 warm, 4 throttled, 1 error, 2 usage.
+
 `spectra impact [--interval 1s] [--top N] [--json]` (macOS only) samples per-pid
 rusage and ranks processes by a documented energy impact score with a
 per-component breakdown. `--from-json file|-` scores supplied records instead;
