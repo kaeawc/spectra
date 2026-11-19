@@ -16,6 +16,14 @@ The principal commands are `inspect`, `list`, `snapshot`, `diff`, `jvm`,
 `network`, `power`, `storage`, `process`, `toolchain`, `rules`, `issues`, `alerts`,
 `whatswrong`, and `playbook`. Run `spectra help` for the installed command list.
 
+`spectra du [--top N] [--depth N] [--min-size 100M] [--cross-mounts] [--json] <path>`
+lists the largest directories (cumulative) and files under a path by allocated
+size, flagging sparse files with their apparent size. It stays on one
+filesystem by default, never follows symlinks, counts hard links once, skips
+already-visited directories, lists skipped mounts in `skipped`, and prints a
+partial result (`partial: true`) on interrupt. Paths are reported under the
+path as typed.
+
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
@@ -35,6 +43,15 @@ single-process findings. Each names the family (for iOS simulators, the device
 UDID), its process count, the age of its oldest member, and its heaviest
 members; `--json` adds a `families` array. See
 [Running processes](../inspection/running-processes.md#process-families).
+
+`spectra lineage [--json] <pid>` answers "who started this, and what did it
+start?": the ancestor chain nearest-first up to pid 1 (user, start time,
+command) and the descendant tree with per-node RSS and CPU plus subtree totals.
+Nodes are flagged `zombie` (inferred, since no process state is collected:
+`<defunct>`, or on Linux a bracketed empty-cmdline process with no memory whose
+parent is not a kernel thread) and the target `reparented` (PPID 1 and non-root; a
+heuristic, as per-user launchd agents also match). Exits 2 on bad usage and 1
+for an unknown pid.
 
 `spectra whois [--json] [--sudo] [--duration 3s] <pid>` (macOS only) attributes a
 busy XPC/Mach service to the processes driving it. It samples the service, reads
@@ -69,6 +86,21 @@ On Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from `/proc
 and `spectra pressure [--pid N]` shows pressure-stall and cgroup v2 accounting;
 see [Linux process diagnosis](../inspection/linux-process-diagnosis.md).
 
+`spectra spawns [--interval 250ms] [--duration 10s] [--pid N] [--json]` traces
+process starts and exits live by polling the process table, to catch
+short-lived children that a one-shot `spectra process --tree` misses. Each
+event carries the pid, ppid, parent chain, command and (on exit) lifetime;
+`--pid` scopes the trace to a process and its descendants. It ends with
+per-parent and per-command spawn counts, the shortest-lived processes and
+respawn loops (the same command started 3+ times under one parent); the
+by-parent and by-command lists are cut to the top 10 and say how many distinct
+entries there were. `--interval` must not exceed `--duration`; a final
+collection runs at the deadline. Lifetimes are approximate (`lived ~0.2s`;
+JSON `lifetime_ms` with `lifetime_max_error_ms`). An unknown `--pid` exits 1;
+if the scoped process exits mid-trace its tracked descendants stay in scope.
+Polling misses processes that live for less than the interval, and a pid
+reused within the same second is not distinguished.
+
 Some commands read macOS-only sources. On Linux they exit `1` with an
 "unsupported on host OS (linux)" error instead of returning empty results:
 `spectra logs` (unified log), `spectra updates` (install log and history),
@@ -77,6 +109,15 @@ Some commands read macOS-only sources. On Linux they exit `1` with an
 list|signatures|oom` need `--dir` with copied `.ips` reports there, while
 `crash inspect|resource|state` parse given files on any host.
 `spectra timeline` shows process starts only on Linux.
+
+`spectra load` answers "can this machine take another job?" in one call. It
+exits `0` (admit), `3` (hold: 1-minute load at or above
+`--max-load-per-cpu` x CPUs, available memory below `--min-free-gb` GiB, or
+memory that could not be read: it fails closed) or `4`
+(backoff: memory below `--backoff-free-gb` GiB), and attributes CPU and RSS to
+processes, families and git worktrees (`--root DIR`, repeatable, names a
+worktree directory for the `roots` cause). `--json` emits stable snake_case
+fields including `elapsed_ms`.
 
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
