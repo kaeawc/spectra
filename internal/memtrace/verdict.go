@@ -67,13 +67,36 @@ func classify(pts []point) trend {
 		return tr
 	}
 	tr.verdict = VerdictSawtooth
-	if troughs := minima(turns); len(troughs) >= minTroughs {
-		if v := direction(theilSen(troughs)*span, thr, VerdictSawtooth); v != VerdictSawtooth {
-			tr.verdict, tr.pattern = v, PatternSawtooth
-		}
+	v := sawtoothDirection(turns, slope*span, span, thr)
+	if v != VerdictSawtooth {
+		tr.verdict, tr.pattern = v, PatternSawtooth
 	}
 	return tr
 }
+
+// sawtoothDirection judges an oscillating series. With enough troughs they
+// are fitted; with fewer, the all-sample projection decides, and two troughs
+// must also agree with it in sign (as must the peaks, when there are two).
+func sawtoothDirection(turns []turn, allProj, span, thr float64) string {
+	troughs := minima(turns)
+	if len(troughs) >= minTroughs {
+		return direction(theilSen(troughs)*span, thr, VerdictSawtooth)
+	}
+	v := direction(allProj, thr, VerdictSawtooth)
+	if v == VerdictSawtooth || len(troughs) != 2 {
+		return v
+	}
+	peaks := maxima(turns)
+	if len(peaks) < 2 {
+		return VerdictSawtooth
+	}
+	if sameSign(troughs[1].y-troughs[0].y, allProj) && sameSign(peaks[len(peaks)-1].y-peaks[0].y, allProj) {
+		return v
+	}
+	return VerdictSawtooth
+}
+
+func sameSign(a, b float64) bool { return a*b > 0 }
 
 func direction(projected, thr float64, flat string) string {
 	switch {
@@ -210,6 +233,16 @@ func minima(turns []turn) []point {
 	var out []point
 	for _, t := range turns {
 		if !t.max {
+			out = append(out, t.point)
+		}
+	}
+	return out
+}
+
+func maxima(turns []turn) []point {
+	var out []point
+	for _, t := range turns {
+		if t.max {
 			out = append(out, t.point)
 		}
 	}

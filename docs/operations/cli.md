@@ -120,7 +120,9 @@ a single spike or where the endpoints land does not move it. The trend change
 `growing`, `shrinking` or `steady`. A series with two or more full cycles of
 swings of at least 10% of the median is a `sawtooth`; its troughs are fitted
 the same way, so a leak under garbage collection reports `growing` with
-`pattern: "sawtooth"` ("growing under a sawtooth"). `unreadable` means every
+`pattern: "sawtooth"` ("growing under a sawtooth"). With fewer than 3 troughs
+the all-sample trend decides instead, and the trough-to-trough and
+peak-to-peak changes must agree with its sign. `unreadable` means every
 reading was 0 and `insufficient` means fewer than 5 samples, so `--duration`
 must be at least 4 intervals (a hint is printed when it is not). Polls run at
 fixed deadlines; a collection that overruns one skips it, and JSON reports

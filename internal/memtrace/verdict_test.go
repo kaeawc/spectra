@@ -136,3 +136,27 @@ func TestTheilSenDownsamples(t *testing.T) {
 		t.Fatal("downsample should keep both ends")
 	}
 }
+
+func TestSawtoothFewTroughs(t *testing.T) {
+	tests := []struct {
+		name    string
+		rss     []int64
+		verdict string
+		pattern string
+	}{
+		{"growing, two troughs", mibs(100, 130, 104, 134, 108, 138, 112), VerdictGrowing, PatternSawtooth},
+		{"flat, two troughs", mibs(100, 130, 100, 130, 100, 130, 100), VerdictSawtooth, ""},
+		{"shrinking, two troughs", mibs(112, 138, 108, 134, 104, 130, 100), VerdictShrinking, PatternSawtooth},
+		{"growing, one more cycle", mibs(100, 130, 104, 134, 108, 138, 112, 142, 116), VerdictGrowing, PatternSawtooth},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := Summarize(perMinute(mibs2(tc.rss)...))
+			if s.Verdict != tc.verdict || s.Pattern != tc.pattern {
+				t.Fatalf("got %s/%q, want %s/%q", s.Verdict, s.Pattern, tc.verdict, tc.pattern)
+			}
+		})
+	}
+}
+
+func mibs2(v []int64) []int64 { return v }

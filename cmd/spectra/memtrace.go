@@ -62,7 +62,9 @@ func runMemtraceWithIO(ctx context.Context, args []string, stdout, stderr io.Wri
 			"spike or where the first and last samples land does not move it. The verdict\n"+
 			"compares slope x span with max(5% of median RSS, 1 MiB): growing, shrinking\n"+
 			"or steady. Two or more full cycles with swings of 10% of the median are a\n"+
-			"sawtooth, judged by its troughs (\"growing under a sawtooth\" when they rise).\n"+
+			"sawtooth, judged by its troughs (\"growing under a sawtooth\" when they rise);\n"+
+			"with fewer than 3 troughs the all-sample trend decides, and the trough and\n"+
+			"peak changes must agree with it.\n"+
 			"unreadable means every reading was 0; insufficient means fewer than 5\n"+
 			"samples, so --duration must be at least 4 x --interval.\n\n")
 		fs.PrintDefaults()
