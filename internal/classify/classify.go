@@ -136,12 +136,19 @@ type exeKey struct {
 
 // cacheVersion prefixes every disk key; bump it whenever exeEntry (or
 // anything it contains) changes shape or meaning.
-const cacheVersion = "classify/v2"
+const cacheVersion = "classify/v3"
 
 // exeEntry is the cached per-executable work. A nil field was not needed yet.
 type exeEntry struct {
 	Binary  *binaryVerdict  `json:"binary,omitempty"`
 	Signing *signingVerdict `json:"signing,omitempty"`
+
+	// retryBin and retrySign mark a part that failed for a reason that says
+	// nothing durable about the file (a read race, a cancelled or timed-out
+	// codesign). The part answers the current call as unknown, is never
+	// written to disk, and is redone on the next Classify call.
+	retryBin  bool
+	retrySign bool
 }
 
 // plan is the per-process state gathered before the expensive phase.
@@ -306,13 +313,20 @@ func (c *Classifier) pool(ctx context.Context, n int, do func(int)) error {
 		go func() {
 			defer wg.Done()
 			for i := range work {
-				do(i)
+				// A job handed out just before cancellation must not start.
+				if ctx.Err() == nil {
+					do(i)
+				}
 			}
 		}()
 	}
 	var err error
 feed:
 	for i := range n {
+		// select alone picks randomly when both cases are ready.
+		if err = ctx.Err(); err != nil {
+			break feed
+		}
 		select {
 		case <-ctx.Done():
 			err = ctx.Err()
@@ -363,7 +377,7 @@ func (c *Classifier) pendingJobs(plans []plan) []job {
 	for _, k := range order {
 		j := *byKey[k]
 		e := c.lookup(k)
-		if j.needBin && e.Binary == nil || j.needSign && e.Signing == nil {
+		if j.needBin && (e.Binary == nil || e.retryBin) || j.needSign && (e.Signing == nil || e.retrySign) {
 			jobs = append(jobs, j)
 		}
 	}
@@ -390,24 +404,18 @@ func (c *Classifier) lookup(k exeKey) exeEntry {
 
 func (c *Classifier) run(ctx context.Context, j job) {
 	e := c.lookup(j.key)
-	persist := true
-	if j.needBin && e.Binary == nil {
-		v := inspectBinary(c.files, j.read, c.maxScan)
-		e.Binary = &v
+	if j.needBin && (e.Binary == nil || e.retryBin) {
+		v, err := inspectBinary(c.files, j.read, c.maxScan)
+		e.Binary, e.retryBin = &v, err != nil
 	}
-	if j.needSign && e.Signing == nil && ctx.Err() == nil {
+	if j.needSign && (e.Signing == nil || e.retrySign) && ctx.Err() == nil {
 		v, err := readSigning(ctx, c.os, c.runner, j.read)
-		if err != nil {
-			// A runner failure (cancel, missing codesign) says nothing durable
-			// about the file: keep it for this run only.
-			persist = false
-		}
-		e.Signing = &v
+		e.Signing, e.retrySign = &v, err != nil
 	}
 	c.mu.Lock()
 	c.exes[j.key] = e
 	c.mu.Unlock()
-	if persist && c.store != nil {
+	if !e.retryBin && !e.retrySign && c.store != nil {
 		if data, err := json.Marshal(e); err == nil {
 			_ = c.store.Put(c.diskKey(j.key), data)
 		}

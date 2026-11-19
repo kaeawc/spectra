@@ -210,8 +210,8 @@ func TestBundleReadsStopOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	files := &cancellingFS{fakeFS: base, cancel: cancel}
 	_, err := classifyWithin(t, New(Options{OS: hostos.Darwin, FS: files, Runner: codesignFake(adhocCodesign), Workers: 1}), ctx, in)
-	if !errors.Is(err, context.Canceled) || files.reads > 2 {
-		t.Fatalf("err=%v after %d bundle reads, want cancel to stop the bundle phase", err, files.reads)
+	if !errors.Is(err, context.Canceled) || files.reads != 1 {
+		t.Fatalf("err=%v after %d bundle reads, want exactly the first read before cancel stops the phase", err, files.reads)
 	}
 }
 
@@ -285,8 +285,8 @@ func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 // struct with fields silently zeroed. Bump cacheVersion, then update both pins.
 func TestCacheVersionPinsEntryShape(t *testing.T) {
 	const (
-		pinnedVersion = "classify/v2"
-		pinnedShape   = "afcf79dbea7a0683"
+		pinnedVersion = "classify/v3"
+		pinnedShape   = "e590c1d66c2237ef"
 	)
 	var b strings.Builder
 	describeType(&b, reflect.TypeOf(exeEntry{}), map[reflect.Type]bool{})
@@ -338,7 +338,7 @@ func TestAgentNeedsMoreThanAName(t *testing.T) {
 		{"bare goose (pressly migrations)", Input{Command: "goose", ExecutablePath: "/opt/homebrew/bin/goose"}, RoleCLI},
 		{"bare crush", Input{Command: "crush", ExecutablePath: "/opt/homebrew/bin/crush"}, RoleCLI},
 		{"bare gemini binary", Input{Command: "gemini", ExecutablePath: "/opt/homebrew/bin/gemini"}, RoleCLI},
-		{"goose at installer path", Input{Command: "goose", ExecutablePath: "/Users/a/.local/bin/goose"}, RoleAIAgent},
+		{"goose at pressly install path", Input{Command: "goose", ExecutablePath: "/Users/a/.local/bin/goose"}, RoleCLI},
 		{"amp at installer path", Input{Command: "amp", ExecutablePath: "/Users/a/.amp/bin/amp"}, RoleAIAgent},
 		{"goose by bundle id", Input{Command: "goose", ExecutablePath: "/Applications/Goose.app/Contents/MacOS/goose"}, RoleAIAgent},
 		{"gemini script through npm bin link", Input{Command: "node", ExecutablePath: "/opt/homebrew/bin/node", CommandLine: "node /opt/homebrew/bin/gemini"}, RoleAIAgent},
@@ -380,6 +380,12 @@ func TestInterpreterScriptSkipsFlagValues(t *testing.T) {
 		{"bun --cwd /srv run dev", RuntimeBun, "dev"},
 		{"bun -r ./preload.ts index.ts", RuntimeBun, "index.ts"},
 		{"deno run -c deno.json -A main.ts", RuntimeDeno, "main.ts"},
+		{"deno run --inspect /tmp/claude.js", RuntimeDeno, "/tmp/claude.js"},
+		{"deno run --inspect-brk /tmp/claude.js", RuntimeDeno, "/tmp/claude.js"},
+		{"deno run --inspect-wait=127.0.0.1:9229 /tmp/claude.js", RuntimeDeno, "/tmp/claude.js"},
+		{"deno run --config deno.json /tmp/claude.js", RuntimeDeno, "/tmp/claude.js"},
+		{"node --inspect /tmp/claude.js", RuntimeNode, "/tmp/claude.js"},
+		{"bun --inspect /tmp/claude.js", RuntimeBun, "/tmp/claude.js"},
 		{"python3 -W ignore -X dev -m aider", RuntimePython, "aider"},
 		{"python3 -X utf8 tool.py", RuntimePython, "tool.py"},
 		{"python3 -c print(1)", RuntimePython, ""},

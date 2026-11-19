@@ -172,13 +172,15 @@ status 2): filters would remove ancestors needed for attribution.
 `spectra process --classify` gives every listed process (after `--top`)
 a role, a runtime, its owning app and, on macOS, a code-signing summary,
 so a desktop client can group processes the way Activity Monitor does.
-Without the flag none of this runs and the output is unchanged.
+Without the flag none of this runs and the macOS output is unchanged. On
+Linux, `executable_path` and `executable_deleted` are now always present,
+with or without `--classify`.
 
 | JSON field | Values |
 |---|---|
 | `role` | `app`, `app_helper`, `system`, `shell`, `terminal`, `ai_agent`, `cli` |
 | `runtime` | `electron`, `native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`, `shell`, `unknown` |
-| `app` | `{name, bundle_path, bundle_id}` for the outermost owning `.app` (macOS) |
+| `app` | `{name, bundle_path, bundle_id}` for the outermost owning `.app` (macOS); present only when an owning app is found |
 | `signing` | macOS only: `{status, team_id, hardened_runtime}`, status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown` |
 | `evidence` | `["role: …", "runtime: …", "signing: …"]`, why each was chosen (the `signing` line on macOS only) |
 

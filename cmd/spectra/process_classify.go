@@ -25,6 +25,9 @@ func classifyProcesses(procs []process.Info) {
 	}
 }
 
+// classAppWidth bounds the APP column; longer app names are truncated.
+const classAppWidth = 16
+
 // processClassColumns renders the extra table columns --classify adds before
 // COMMAND; it is empty when classification is off. SIGN is macOS only.
 type processClassColumns struct {
@@ -37,7 +40,7 @@ func newProcessClassColumns(on bool) processClassColumns {
 }
 
 func (c processClassColumns) header() string {
-	return c.cells("ROLE", "RUNTIME", "SIGN")
+	return c.cells("ROLE", "RUNTIME", "SIGN", "APP")
 }
 
 func (c processClassColumns) row(p process.Info) string {
@@ -45,10 +48,14 @@ func (c processClassColumns) row(p process.Info) string {
 	if p.Signing != nil {
 		sign = string(p.Signing.Status)
 	}
-	return c.cells(dashIfEmpty(string(p.Role)), dashIfEmpty(string(p.Runtime)), sign)
+	app := "-"
+	if p.App != nil {
+		app = dashIfEmpty(truncate(p.App.Name, classAppWidth))
+	}
+	return c.cells(dashIfEmpty(string(p.Role)), dashIfEmpty(string(p.Runtime)), sign, app)
 }
 
-func (c processClassColumns) cells(role, runtime, sign string) string {
+func (c processClassColumns) cells(role, runtime, sign, app string) string {
 	if !c.on {
 		return ""
 	}
@@ -56,15 +63,15 @@ func (c processClassColumns) cells(role, runtime, sign string) string {
 	if c.sign {
 		out += fmt.Sprintf("%-12s  ", sign)
 	}
-	return out
+	return out + fmt.Sprintf("%-*s  ", classAppWidth, app)
 }
 
 func (c processClassColumns) width() int {
 	switch {
 	case c.sign:
-		return 10 + 2 + 8 + 2 + 12 + 2
+		return 10 + 2 + 8 + 2 + 12 + 2 + classAppWidth + 2
 	case c.on:
-		return 10 + 2 + 8 + 2
+		return 10 + 2 + 8 + 2 + classAppWidth + 2
 	}
 	return 0
 }

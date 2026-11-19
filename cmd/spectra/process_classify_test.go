@@ -59,11 +59,29 @@ func TestProcessClassColumnsOffAddNothing(t *testing.T) {
 		t.Fatalf("classification columns leak into the default table: %+v", off)
 	}
 	on := processClassColumns{on: true}
-	if got := on.row(process.Info{Role: classify.RoleCLI, Runtime: classify.RuntimeGo}); got != "cli         go        " {
+	if got := on.row(process.Info{Role: classify.RoleCLI, Runtime: classify.RuntimeGo}); got != "cli         go        -"+strings.Repeat(" ", classAppWidth+1) {
 		t.Fatalf("row = %q", got)
 	}
 	if got := (processClassColumns{on: true, sign: true}).row(process.Info{}); !strings.HasPrefix(got, "-           -         -") {
 		t.Fatalf("empty row = %q", got)
+	}
+}
+
+func TestProcessClassColumnsShowBoundedApp(t *testing.T) {
+	cols := processClassColumns{on: true, sign: true}
+	if !strings.Contains(cols.header(), "APP") {
+		t.Fatalf("header = %q", cols.header())
+	}
+	long := process.Info{App: &classify.App{Name: "Visual Studio Code - Insiders Edition"}}
+	row := cols.row(long)
+	if !strings.Contains(row, "Visual Studio C…") || strings.Contains(row, "Insiders") {
+		t.Fatalf("long name not truncated to %d runes: %q", classAppWidth, row)
+	}
+	if len([]rune(row)) != cols.width() || len([]rune(cols.header())) != cols.width() {
+		t.Fatalf("row/header width %d/%d, want %d", len([]rune(row)), len([]rune(cols.header())), cols.width())
+	}
+	if got := cols.row(process.Info{App: &classify.App{Name: "Slack"}}); !strings.Contains(got, "Slack ") {
+		t.Fatalf("row = %q", got)
 	}
 }
 

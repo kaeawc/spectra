@@ -88,42 +88,181 @@ var rustNeedles = [][]byte{[]byte("/rustc/"), []byte("RUST_BACKTRACE")}
 // mangling; the length prefix keeps lang_start_internal (19...) out.
 const rustEntrySymbol = "3std2rt10lang_start"
 
-func inspectBinary(files FileSystem, path string, maxScan int64) binaryVerdict {
+// inspectBinary reports what the executable is. A non-nil error means the
+// file could not be read (a race with exit or replacement, a permission
+// error): the verdict is then unknown and not worth caching.
+func inspectBinary(files FileSystem, path string, maxScan int64) (binaryVerdict, error) {
 	f, err := files.Open(path)
 	if err != nil {
-		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("executable unreadable: %v", err)}
+		return unreadable(err), err
 	}
 	defer f.Close()
 
 	var magic [4]byte
 	if _, err := f.ReadAt(magic[:], 0); err != nil {
-		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("executable unreadable: %v", err)}
+		return unreadable(err), err
 	}
 	if binary.BigEndian.Uint32(magic[:]) == macho.MagicFat {
-		fat, err := macho.NewFatFile(f)
-		if err != nil {
-			return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("malformed universal binary: %v", err)}
-		}
-		slice := pickFatSlice(fat)
-		v := machoVerdict(slice.File, maxScan)
-		if v.Runtime == RuntimeGo {
-			v.GoModule = goModule(io.NewSectionReader(f, int64(slice.Offset), int64(slice.Size)))
-		}
-		v.Evidence += fmt.Sprintf(" (universal binary, %s slice)", slice.Cpu)
-		return v
+		return inspectFat(f, maxScan)
 	}
 	var v binaryVerdict
-	if mf, err := macho.NewFile(f); err == nil {
-		v = machoVerdict(mf, maxScan)
+	if mr, skipped := boundSymtab(f, maxScan); mr != nil {
+		mf, err := macho.NewFile(mr)
+		if err != nil {
+			return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("malformed Mach-O: %v", err)}, nil
+		}
+		v = machoVerdict(mf, maxScan, skipped)
 	} else if ef, err := elf.NewFile(f); err == nil {
 		v = elfVerdict(ef, maxScan)
 	} else {
-		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: "executable is neither Mach-O nor ELF"}
+		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: "executable is neither Mach-O nor ELF"}, nil
 	}
 	if v.Runtime == RuntimeGo {
 		v.GoModule = goModule(f)
 	}
-	return v
+	return v, nil
+}
+
+// inspectFat inspects only the slice the host would run, so the other
+// slices' symbol tables are never loaded.
+func inspectFat(f io.ReaderAt, maxScan int64) (binaryVerdict, error) {
+	arches, err := readFatArches(f)
+	if err != nil {
+		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("malformed universal binary: %v", err)}, nil
+	}
+	slice := pickFatSlice(arches)
+	sr := io.NewSectionReader(f, slice.offset, slice.size)
+	mr, skipped := boundSymtab(sr, maxScan)
+	if mr == nil {
+		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("malformed universal binary: %s slice is not Mach-O", slice.cpu)}, nil
+	}
+	mf, err := macho.NewFile(mr)
+	if err != nil {
+		return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("malformed universal binary: %v", err)}, nil
+	}
+	v := machoVerdict(mf, maxScan, skipped)
+	if v.Runtime == RuntimeGo {
+		v.GoModule = goModule(sr)
+	}
+	v.Evidence += fmt.Sprintf(" (universal binary, %s slice)", slice.cpu)
+	return v, nil
+}
+
+type fatArch struct {
+	cpu          macho.Cpu
+	offset, size int64
+}
+
+func readFatArches(r io.ReaderAt) ([]fatArch, error) {
+	var hdr [8]byte
+	if _, err := r.ReadAt(hdr[:], 0); err != nil {
+		return nil, fmt.Errorf("read fat header: %w", err)
+	}
+	n := binary.BigEndian.Uint32(hdr[4:])
+	if n == 0 || n > 64 {
+		return nil, fmt.Errorf("implausible architecture count %d", n)
+	}
+	buf := make([]byte, 20*n)
+	if _, err := r.ReadAt(buf, 8); err != nil {
+		return nil, fmt.Errorf("read fat architectures: %w", err)
+	}
+	arches := make([]fatArch, n)
+	for i := range arches {
+		e := buf[20*i:]
+		arches[i] = fatArch{
+			cpu:    macho.Cpu(binary.BigEndian.Uint32(e)),
+			offset: int64(binary.BigEndian.Uint32(e[8:])),
+			size:   int64(binary.BigEndian.Uint32(e[12:])),
+		}
+	}
+	return arches, nil
+}
+
+// Mach-O load command layout used to bound the symbol table before
+// debug/macho loads it eagerly.
+const (
+	lcSymtab        = 0x2
+	maxLoadCmdBytes = 1 << 20
+	nlistSize       = 16
+)
+
+// boundSymtab returns a reader for the Mach-O at r, or nil when r is not
+// Mach-O. When the LC_SYMTAB symbol and string tables together exceed limit,
+// the returned reader presents that command with zero symbols so
+// debug/macho does not load them, and skipped is true.
+func boundSymtab(r io.ReaderAt, limit int64) (mr io.ReaderAt, skipped bool) {
+	var hdr [32]byte
+	if _, err := r.ReadAt(hdr[:], 0); err != nil {
+		return nil, false
+	}
+	bo, hdrSize := machoByteOrder(hdr[:4])
+	if bo == nil {
+		return nil, false
+	}
+	ncmds, size := bo.Uint32(hdr[16:]), int64(bo.Uint32(hdr[20:]))
+	if size <= 0 || size > maxLoadCmdBytes {
+		return r, false
+	}
+	cmds := make([]byte, size)
+	if _, err := r.ReadAt(cmds, hdrSize); err != nil {
+		return r, false
+	}
+	off, nsyms, strsize := findSymtab(cmds, bo, ncmds)
+	if off < 0 || nsyms*nlistSize+strsize <= limit {
+		return r, false
+	}
+	return zeroedFields{r: r, at: hdrSize + off + 12, at2: hdrSize + off + 20}, true
+}
+
+// machoByteOrder returns the byte order and header size for a Mach-O magic,
+// or a nil order when magic is not one.
+func machoByteOrder(magic []byte) (binary.ByteOrder, int64) {
+	for _, bo := range []binary.ByteOrder{binary.LittleEndian, binary.BigEndian} {
+		switch bo.Uint32(magic) {
+		case macho.Magic64:
+			return bo, 32
+		case macho.Magic32:
+			return bo, 28
+		}
+	}
+	return nil, 0
+}
+
+// findSymtab returns the offset within cmds of LC_SYMTAB and its table
+// sizes, or a negative offset when there is none.
+func findSymtab(cmds []byte, bo binary.ByteOrder, ncmds uint32) (off, nsyms, strsize int64) {
+	size := int64(len(cmds))
+	for off = 0; ncmds > 0 && off+8 <= size; ncmds-- {
+		cmd, clen := bo.Uint32(cmds[off:]), int64(bo.Uint32(cmds[off+4:]))
+		if clen < 8 || off+clen > size {
+			break
+		}
+		if cmd == lcSymtab && clen >= 24 {
+			return off, int64(bo.Uint32(cmds[off+12:])), int64(bo.Uint32(cmds[off+20:]))
+		}
+		off += clen
+	}
+	return -1, 0, 0
+}
+
+// zeroedFields reads as r with the 4-byte fields at at and at2 zeroed.
+type zeroedFields struct {
+	r       io.ReaderAt
+	at, at2 int64
+}
+
+func (z zeroedFields) ReadAt(p []byte, off int64) (int, error) {
+	n, err := z.r.ReadAt(p, off)
+	for _, f := range []int64{z.at, z.at2} {
+		for i := max(f, off); i < min(f+4, off+int64(n)); i++ {
+			p[i-off] = 0
+		}
+	}
+	return n, err
+}
+
+func unreadable(err error) binaryVerdict {
+	return binaryVerdict{Runtime: RuntimeUnknown, Evidence: fmt.Sprintf("executable unreadable: %v", err)}
 }
 
 func goModule(r io.ReaderAt) string {
@@ -139,20 +278,20 @@ func goModule(r io.ReaderAt) string {
 
 // pickFatSlice prefers the host architecture's slice: that is the code the
 // process actually runs.
-func pickFatSlice(fat *macho.FatFile) macho.FatArch {
+func pickFatSlice(arches []fatArch) fatArch {
 	want := macho.CpuArm64
 	if goruntime.GOARCH == "amd64" {
 		want = macho.CpuAmd64
 	}
-	for _, a := range fat.Arches {
-		if a.Cpu == want {
+	for _, a := range arches {
+		if a.cpu == want {
 			return a
 		}
 	}
-	return fat.Arches[0]
+	return arches[0]
 }
 
-func machoVerdict(f *macho.File, maxScan int64) binaryVerdict {
+func machoVerdict(f *macho.File, maxScan int64, symsSkipped bool) binaryVerdict {
 	if f.Segment("__BUN") != nil {
 		return binaryVerdict{Runtime: RuntimeBun, Evidence: "Mach-O has a __BUN segment (bun compiled executable)"}
 	}
@@ -170,7 +309,15 @@ func machoVerdict(f *macho.File, maxScan int64) binaryVerdict {
 		hits += countMarkers(s.Open(), &budget)
 	}
 	libs, _ := f.ImportedLibraries()
-	return rustVerdict("Mach-O", hits, machoSymbols(f), libs)
+	var syms symbolFacts
+	switch {
+	case hits == 0:
+	case symsSkipped:
+		syms.skipped = true
+	default:
+		syms = machoSymbols(f)
+	}
+	return rustVerdict("Mach-O", hits, syms, libs)
 }
 
 // symbolFacts is what the Rust decision needs from a symbol table.
@@ -178,6 +325,8 @@ type symbolFacts struct {
 	rustEntry bool // std::rt::lang_start is defined
 	locals    bool // local function symbols survive (not stripped)
 	cxx       bool // C++ runtime symbols (libc++/libstdc++, operator new, EH)
+	// skipped means the table was too large to read; it counts as stripped.
+	skipped bool
 }
 
 func (s *symbolFacts) add(name string) {
@@ -213,6 +362,22 @@ func machoSymbols(f *macho.File) symbolFacts {
 	return s
 }
 
+// elfSymbolBytes is the size of the symbol and string tables Symbols and
+// DynamicSymbols would read into memory.
+func elfSymbolBytes(f *elf.File) uint64 {
+	var total uint64
+	for _, sec := range f.Sections {
+		if sec.Type != elf.SHT_SYMTAB && sec.Type != elf.SHT_DYNSYM {
+			continue
+		}
+		total += min(sec.Size, 1<<40)
+		if int(sec.Link) < len(f.Sections) {
+			total += min(f.Sections[sec.Link].Size, 1<<40)
+		}
+	}
+	return total
+}
+
 func elfSymbols(f *elf.File) symbolFacts {
 	var s symbolFacts
 	if syms, err := f.Symbols(); err == nil {
@@ -237,6 +402,14 @@ func elfSymbols(f *elf.File) symbolFacts {
 // symbol; there a C++ runtime (always present when C++ owns main) marks the
 // program as C++ that links Rust, and its absence leaves Rust as the owner.
 func rustVerdict(format string, hits int, syms symbolFacts, libs []string) binaryVerdict {
+	v := rustVerdictOf(format, hits, syms, libs)
+	if syms.skipped {
+		v.Evidence += "; symbol table too large to read, treated as stripped"
+	}
+	return v
+}
+
+func rustVerdictOf(format string, hits int, syms symbolFacts, libs []string) binaryVerdict {
 	cxx := syms.cxx || linksCxx(libs)
 	switch {
 	case syms.rustEntry:
@@ -283,7 +456,15 @@ func elfVerdict(f *elf.File, maxScan int64) binaryVerdict {
 		hits = countMarkers(s.Open(), &budget)
 	}
 	libs, _ := f.ImportedLibraries()
-	return rustVerdict("ELF", hits, elfSymbols(f), libs)
+	var syms symbolFacts
+	switch {
+	case hits == 0:
+	case maxScan >= 0 && elfSymbolBytes(f) > uint64(maxScan):
+		syms.skipped = true
+	default:
+		syms = elfSymbols(f)
+	}
+	return rustVerdict("ELF", hits, syms, libs)
 }
 
 // countMarkers counts rustNeedles in r, reading at most *budget bytes and

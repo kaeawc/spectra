@@ -128,7 +128,7 @@ func TestFatPicksHostSliceAndSaysSo(t *testing.T) {
 	}, macho.CpuAmd64, macho.CpuArm64)
 	files := newFakeFS()
 	files.add("/usr/local/bin/fd", fat)
-	v := inspectBinary(files, "/usr/local/bin/fd", DefaultMaxScanBytes)
+	v, _ := inspectBinary(files, "/usr/local/bin/fd", DefaultMaxScanBytes)
 	if v.Runtime != RuntimeRust || !strings.Contains(v.Evidence, "universal binary") {
 		t.Fatalf("fat verdict = %+v", v)
 	}
@@ -138,10 +138,10 @@ func TestRustScanIsBounded(t *testing.T) {
 	data := append(make([]byte, 4096), rustData()...)
 	files := newFakeFS()
 	files.add("/bin/big", buildMachO(macho.CpuArm64, sect{"__TEXT", "__const", data}))
-	if v := inspectBinary(files, "/bin/big", 1024); v.Runtime != RuntimeNative {
+	if v, _ := inspectBinary(files, "/bin/big", 1024); v.Runtime != RuntimeNative {
 		t.Fatalf("marker past the byte cap was found: %+v", v)
 	}
-	if v := inspectBinary(files, "/bin/big", 1<<20); v.Runtime != RuntimeRust {
+	if v, _ := inspectBinary(files, "/bin/big", 1<<20); v.Runtime != RuntimeRust {
 		t.Fatalf("marker inside the cap missed: %+v", v)
 	}
 }

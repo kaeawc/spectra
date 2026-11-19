@@ -83,9 +83,9 @@ var agentRules = map[string]agentRule{
 	"qwen":         {ambiguous: true, packages: []string{"@qwen-code/qwen-code"}},
 	"amp":          {ambiguous: true, packages: []string{"@sourcegraph/amp"}, paths: []string{"/.amp/bin/"}},
 	"crush":        {ambiguous: true, packages: []string{"@charmland/crush"}, modules: []string{"github.com/charmbracelet/crush"}},
-	// Block's installer puts the goose CLI in ~/.local/bin; the desktop app
-	// is com.block.goose.
-	"goose": {ambiguous: true, bundleIDs: []string{"com.block.goose"}, paths: []string{"/.local/bin/goose"}},
+	// ~/.local/bin/goose is also where pressly/goose, the database migration
+	// tool, installs, so only the desktop app's bundle id confirms Block's.
+	"goose": {ambiguous: true, bundleIDs: []string{"com.block.goose"}},
 }
 
 // agentPackages maps each listed npm package to its agent name.
@@ -268,7 +268,7 @@ var interpreterValueFlags = map[Runtime]map[string]bool{
 	RuntimeBun: setOf("-r", "--preload", "-c", "--config", "--cwd", "--env-file", "-d", "--define",
 		"-l", "--loader", "--tsconfig-override", "--port", "--main-fields", "--conditions", "--extension-order"),
 	RuntimeDeno: setOf("-c", "--config", "--import-map", "--lock", "--cert", "--location", "--seed",
-		"--env-file", "--ext", "--inspect", "--inspect-brk", "--inspect-wait"),
+		"--env-file", "--ext"), // --inspect[-brk|-wait] take a value only as --flag=value
 	RuntimePython: setOf("-W", "-X", "--check-hash-based-pycs"),
 }
 

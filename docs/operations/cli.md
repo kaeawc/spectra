@@ -95,10 +95,10 @@ the local per-user daemon. `spectra daemon run` runs it in the foreground.
 `system`, `shell`, `terminal`, `ai_agent`, `cli`), `runtime` (`electron`,
 `native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`,
 `shell`, `unknown`), `app` (`{name, bundle_path, bundle_id}` of the outermost
-owning `.app`), `signing` (macOS only: `{status, team_id, hardened_runtime}`,
+owning `.app`; present only when an owning app is found), `signing` (macOS only: `{status, team_id, hardened_runtime}`,
 status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown`)
-and `evidence` to every listed process; the table gains `ROLE`, `RUNTIME`
-and, on macOS, `SIGN` columns. Every rule reads the kernel-reported
+and `evidence` to every listed process; the table gains `ROLE`, `RUNTIME`,
+`SIGN` (macOS only) and `APP` (truncated) columns. Every rule reads the kernel-reported
 executable, never argv[0] as a path. Runtime comes from the executable name,
 the owning bundle (Electron Framework, a bundled JBR) and then the binary
 itself (Go build info, Bun's segment, a Rust `std::rt::lang_start` entry
