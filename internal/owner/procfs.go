@@ -38,10 +38,15 @@ type pathMatcher struct {
 	paths []string
 	ref   os.FileInfo     // identity of the queried path, nil if unknown
 	socks map[string]bool // "socket:[inode]" links of unix sockets bound to paths
+	// rel holds "socket:[inode]" links of sockets bound to a relative name
+	// whose base name equals the queried one, mapped to that name.
+	rel map[string]string
+	dir string // /proc/<pid> of the process being scanned
 }
 
 func newPathMatcher(fsys FS, procfs string, paths []string) pathMatcher {
-	m := pathMatcher{fsys: fsys, paths: paths, socks: unixSocketLinks(fsys, procfs, paths)}
+	m := pathMatcher{fsys: fsys, paths: paths}
+	m.socks, m.rel = unixSocketLinks(fsys, procfs, paths)
 	if len(paths) > 0 {
 		if fi, err := fsys.Stat(paths[0]); err == nil {
 			m.ref = fi
@@ -52,24 +57,42 @@ func newPathMatcher(fsys FS, procfs string, paths []string) pathMatcher {
 
 // unixSocketLinks resolves bound socket paths through /proc/net/unix
 // (Num RefCount Protocol Flags Type St Inode Path) because an fd on a socket
-// links to socket:[inode], never to its pathname.
-func unixSocketLinks(fsys FS, procfs string, paths []string) map[string]bool {
+// links to socket:[inode], never to its pathname. A bind("name") socket is
+// listed with its relative name, so those with a matching base name are
+// returned separately as candidates for a per-process working-directory check.
+func unixSocketLinks(fsys FS, procfs string, paths []string) (abs map[string]bool, rel map[string]string) {
 	b, err := fsys.ReadFile(filepath.Join(procfs, "net", "unix"))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	var out map[string]bool
 	for _, line := range strings.Split(string(b), "\n") {
 		inode, path, ok := parseUnixLine(line)
-		if !ok || !slices.Contains(paths, path) {
+		if !ok {
 			continue
 		}
-		if out == nil {
-			out = map[string]bool{}
+		link := "socket:[" + inode + "]"
+		switch {
+		case slices.Contains(paths, path):
+			if abs == nil {
+				abs = map[string]bool{}
+			}
+			abs[link] = true
+		case isRelativeSocketName(path) && baseMatches(paths, path):
+			if rel == nil {
+				rel = map[string]string{}
+			}
+			rel[link] = path
 		}
-		out["socket:["+inode+"]"] = true
 	}
-	return out
+	return abs, rel
+}
+
+func isRelativeSocketName(p string) bool {
+	return !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "@")
+}
+
+func baseMatches(paths []string, name string) bool {
+	return slices.ContainsFunc(paths, func(p string) bool { return filepath.Base(p) == filepath.Base(name) })
 }
 
 // parseUnixLine splits a /proc/net/unix row into its inode and bound path.
@@ -107,7 +130,33 @@ func (m pathMatcher) matchesLink(link string) (matched, denied bool) {
 	if err != nil {
 		return false, errors.Is(err, fs.ErrPermission)
 	}
+	if name, ok := m.rel[t]; ok {
+		return m.relativeSocketMatches(name)
+	}
 	return m.matchesTarget(link, t), false
+}
+
+// relativeSocketMatches resolves a relative bound name against the holder's
+// current directory. A process that changed directory after bind cannot be
+// confirmed this way and is not reported.
+func (m pathMatcher) relativeSocketMatches(name string) (matched, denied bool) {
+	cwd, err := m.fsys.Readlink(filepath.Join(m.dir, "cwd"))
+	if err != nil {
+		return false, errors.Is(err, fs.ErrPermission)
+	}
+	if strings.HasSuffix(cwd, " (deleted)") {
+		return false, false
+	}
+	abs := filepath.Join(cwd, name)
+	if slices.Contains(m.paths, abs) {
+		return true, false
+	}
+	if m.ref != nil {
+		if fi, err := m.fsys.Stat(abs); err == nil && m.fsys.SameFile(m.ref, fi) {
+			return true, false
+		}
+	}
+	return false, false
 }
 
 func (m pathMatcher) matchesTarget(link, t string) bool {
@@ -147,6 +196,7 @@ func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, d
 }
 
 func procPidHolders(m pathMatcher, dir string, pid int) (holders []Holder, denied bool) {
+	m.dir = dir
 	if m.matches(filepath.Join(dir, "cwd")) {
 		holders = append(holders, Holder{PID: pid, Hold: HoldCwd})
 	}
