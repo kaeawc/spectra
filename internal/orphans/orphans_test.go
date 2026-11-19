@@ -1,12 +1,14 @@
 package orphans
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"testing"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostload"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -216,6 +218,52 @@ func TestCwdMissingVersusUnreadable(t *testing.T) {
 		if got[pid] != w {
 			t.Errorf("pid %d: %+v, want %+v (all %v)", pid, got[pid], w, got)
 		}
+	}
+}
+
+func TestRemovedWorktreeOutsideRepo(t *testing.T) {
+	procs := []process.Info{proc(10, 1, 100, time.Hour), proc(11, 1, 100, time.Hour), proc(12, 1, 100, time.Hour)}
+	cwds := map[int]string{
+		10: "/r/worktrees/feature/a",
+		11: "/r/worktrees/feature/b/c",
+		12: "/r/other/x", // parent is not named worktrees
+	}
+	o := opts("/r")
+	o.Stat = statOf("/r/worktrees/feature/a", "/r/worktrees/feature/b/c", "/r/other/x")
+	res := Find(procs, cwds, o)
+	got := map[string]bool{}
+	for _, g := range res.Groups {
+		got[g.Worktree] = g.WorktreeRemoved
+	}
+	want := map[string]bool{"/r/worktrees/feature": true, "/r/other/x": false}
+	if len(got) != len(want) {
+		t.Fatalf("groups = %v", got)
+	}
+	for k, v := range want {
+		if rv, ok := got[k]; !ok || rv != v {
+			t.Fatalf("groups = %v, want %v", got, want)
+		}
+	}
+}
+
+// Goes through the real Linux cwd reader: the deleted marker must survive it
+// even when a directory was recreated at the same path.
+func TestLinuxDeletedCwdThroughHost(t *testing.T) {
+	h := hostload.Host{OS: hostos.Linux, Readlink: func(p string) (string, error) {
+		if p == "/proc/10/cwd" {
+			return "/r/job (deleted)", nil
+		}
+		return "", errors.New("denied")
+	}}
+	o := opts("/r")
+	o.Stat = func(string) error { return nil } // path exists again
+	res := Find([]process.Info{proc(10, 1, 100, time.Hour)}, h.CwdsRaw(context.Background(), []int{10}), o)
+	if len(res.Groups) != 1 || len(res.Groups[0].Processes) != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	p := res.Groups[0].Processes[0]
+	if !p.CwdMissing || p.Cwd != "/r/job" {
+		t.Fatalf("process = %+v", p)
 	}
 }
 

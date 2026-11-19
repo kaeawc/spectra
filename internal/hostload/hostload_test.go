@@ -162,6 +162,13 @@ func TestHostLinuxCollect(t *testing.T) {
 	if c := h.Cwds(ctx, []int{5, 6}); c[5] != "/srv/app" || len(c) != 1 {
 		t.Fatalf("cwds = %v", c)
 	}
+	h.Readlink = func(string) (string, error) { return "/srv/app (deleted)", nil }
+	if c := h.Cwds(ctx, []int{5}); c[5] != "/srv/app" {
+		t.Fatalf("cwds = %v", c)
+	}
+	if c := h.CwdsRaw(ctx, []int{5}); c[5] != "/srv/app (deleted)" {
+		t.Fatalf("raw cwds = %v", c)
+	}
 	delete(files, "/proc/meminfo")
 	if _, err := h.Available(ctx); err == nil {
 		t.Fatal("expected error")

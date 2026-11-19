@@ -124,8 +124,7 @@ func Find(procs []process.Info, cwds map[int]string, opts Options) Result {
 	return res
 }
 
-// deletedSuffix is what Linux appends to the cwd link of a removed directory.
-const deletedSuffix = " (deleted)"
+const deletedSuffix = hostload.DeletedSuffix
 
 type cwdStatus struct{ missing, unreadable bool }
 
@@ -158,6 +157,9 @@ func worktreeOf(cwd string, exists func(string) bool) (string, bool) {
 		}
 		parent := path.Dir(p)
 		if parent == p {
+			if removed != "" {
+				return removed, true
+			}
 			return cwd, false
 		}
 		if removed == "" && path.Base(parent) == "worktrees" {

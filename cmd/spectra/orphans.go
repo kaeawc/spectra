@@ -18,7 +18,8 @@ import (
 
 // orphansDeps are the seams runOrphansWithIO uses so tests need no real host.
 type orphansDeps struct {
-	Procs        func(ctx context.Context) []process.Info
+	Procs func(ctx context.Context) []process.Info
+	// Cwds must keep the Linux " (deleted)" suffix so orphans can see removed directories.
 	Cwds         func(ctx context.Context, pids []int) map[int]string
 	Stat         func(string) error
 	Now          func() time.Time
@@ -36,7 +37,7 @@ func lstat(p string) error {
 func defaultOrphansDeps() orphansDeps {
 	d := defaultLoadDeps()
 	return orphansDeps{
-		Procs: d.Procs, Cwds: d.Host.Cwds, Stat: lstat, Now: d.Now,
+		Procs: d.Procs, Cwds: d.Host.CwdsRaw, Stat: lstat, Now: d.Now,
 		Getwd: os.Getwd, Pid: os.Getpid, Abs: filepath.Abs, EvalSymlinks: filepath.EvalSymlinks,
 	}
 }
