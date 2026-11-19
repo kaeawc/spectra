@@ -162,6 +162,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		return nil
 	}
 	procs := parsePS(string(out))
+	applyCommListing(procs, run)
 	applyDerivedFields(procs, collectNow(opts), collectMemoryBytes(opts))
 	applyProcessDetails(procs, opts.DetailCollector)
 	threadCounter := opts.ThreadCounter
@@ -332,6 +333,58 @@ func shortName(cmd string) string {
 		return exe[idx+1:]
 	}
 	return exe
+}
+
+// applyCommListing fixes Command for executables whose path contains a space.
+// command= is argv joined by spaces, so such a path cannot be split from its
+// arguments; comm= is argv[0] alone and is only untruncated as the last
+// column, hence a second listing. On failure the whitespace-split name stays.
+func applyCommListing(procs []Info, run func(string, ...string) ([]byte, error)) {
+	if len(procs) == 0 {
+		return
+	}
+	if out, err := run("ps", "-axwwo", "pid=,comm="); err == nil {
+		applyExecNames(procs, parsePSComm(string(out)))
+	}
+}
+
+// parsePSComm maps pid to argv[0] from `ps -o pid=,comm=` output.
+func parsePSComm(raw string) map[int]string {
+	out := map[int]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		pidStr, comm, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		pid, err := strconv.Atoi(pidStr)
+		comm = strings.TrimLeft(comm, " ")
+		if err != nil || pid <= 0 || comm == "" {
+			continue
+		}
+		out[pid] = comm
+	}
+	return out
+}
+
+// applyExecNames replaces the whitespace-split Command with argv[0]'s base
+// name. argv[0] is trusted only when it is a prefix of the same pid's command
+// line, which also rejects pids recycled between the two ps listings.
+func applyExecNames(procs []Info, comms map[int]string) {
+	for i := range procs {
+		if name := execName(procs[i].FullCommandLine, comms[procs[i].PID]); name != "" {
+			procs[i].Command = name
+		}
+	}
+}
+
+func execName(full, argv0 string) string {
+	// parseRow collapses runs of whitespace in the command line, so compare
+	// against argv0 collapsed the same way; the name keeps its own spacing.
+	norm := strings.Join(strings.Fields(argv0), " ")
+	if norm == "" || (full != norm && !strings.HasPrefix(full, norm+" ")) {
+		return ""
+	}
+	return argv0[strings.LastIndex(argv0, "/")+1:]
 }
 
 // attributeBundles sets AppPath for each process whose full command line
