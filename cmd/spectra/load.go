@@ -23,6 +23,8 @@ type loadDeps struct {
 	Procs func(ctx context.Context) []process.Info
 	FS    hostload.FS
 	Now   func() time.Time
+	// Sleep waits between the two CPU readings; nil disables sampling.
+	Sleep func(ctx context.Context, d time.Duration)
 	// Abs makes --root absolute (cwds are absolute); nil leaves it as typed.
 	Abs func(string) (string, error)
 	// EvalSymlinks resolves --root paths; nil means no resolution.
@@ -53,24 +55,26 @@ func resolveRoots(roots []string, abs, eval func(string) (string, error)) []host
 }
 
 type loadReport struct {
-	Verdict    string               `json:"verdict"`
-	Reason     string               `json:"reason"`
-	ExitCode   int                  `json:"exit_code"`
-	Load1      float64              `json:"load1"`
-	LoadLimit  float64              `json:"load_limit"`
-	CPUs       int                  `json:"cpus"`
-	AvailGB    *float64             `json:"available_gb"`    // GiB; null when unreadable
-	MinFreeGB  float64              `json:"min_free_gb"`     // GiB
-	BackoffGB  float64              `json:"backoff_free_gb"` // GiB
-	Cause      hostload.Cause       `json:"cause"`
-	TopCPU     []hostload.ProcRow   `json:"top_cpu"`
-	TopRSS     []hostload.ProcRow   `json:"top_rss"`
-	Families   []hostload.FamilyRow `json:"families"`
-	Dirs       []hostload.DirUsage  `json:"dirs"`
-	Unknown    hostload.DirUsage    `json:"unknown"`
-	Notes      []string             `json:"notes,omitempty"`
-	ElapsedMS  int64                `json:"elapsed_ms"`
-	ProcessCnt int                  `json:"process_count"`
+	Verdict     string               `json:"verdict"`
+	Reason      string               `json:"reason"`
+	ExitCode    int                  `json:"exit_code"`
+	Load1       float64              `json:"load1"`
+	LoadLimit   float64              `json:"load_limit"`
+	CPUs        int                  `json:"cpus"`
+	AvailGB     *float64             `json:"available_gb"`    // GiB; null when unreadable
+	MinFreeGB   float64              `json:"min_free_gb"`     // GiB
+	BackoffGB   float64              `json:"backoff_free_gb"` // GiB
+	Cause       hostload.Cause       `json:"cause"`
+	TopCPU      []hostload.ProcRow   `json:"top_cpu"`
+	TopRSS      []hostload.ProcRow   `json:"top_rss"`
+	Families    []hostload.FamilyRow `json:"families"`
+	Dirs        []hostload.DirUsage  `json:"dirs"`
+	Unknown     hostload.DirUsage    `json:"unknown"`
+	Notes       []string             `json:"notes,omitempty"`
+	CPUWindowMS int64                `json:"cpu_window_ms"` // >0 only for basis "window"
+	CPUBasis    string               `json:"cpu_basis"`     // window, recent or lifetime
+	ElapsedMS   int64                `json:"elapsed_ms"`
+	ProcessCnt  int                  `json:"process_count"`
 }
 
 type stringList []string
@@ -97,6 +101,14 @@ func defaultLoadDeps() loadDeps {
 		},
 		FS:  hostload.FS{Exists: func(p string) bool { _, err := os.Lstat(p); return err == nil }},
 		Now: time.Now,
+		Sleep: func(ctx context.Context, d time.Duration) {
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+			}
+		},
 
 		Abs:          filepath.Abs,
 		EvalSymlinks: filepath.EvalSymlinks,
@@ -130,11 +142,12 @@ Exit codes:
 	fs.Var(&roots, "root", "Directory holding worktrees; cause is \"roots\" when load leads there (repeatable)")
 	maxLoad := fs.Float64("max-load-per-cpu", 1.5, "Hold when 1-minute load is at or above this times the CPU count")
 	minFree := fs.Float64("min-free-gb", 8, "Hold when available memory is below this many GiB (also held when memory cannot be read)")
+	sample := fs.Duration("sample", 500*time.Millisecond, "Linux: measure CPU over this window between two /proc readings; 0 uses lifetime averages")
 	backoff := fs.Float64("backoff-free-gb", 4, "Back off when available memory is below this many GiB")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() > 0 || *top < 1 || *maxLoad <= 0 || *minFree < 0 || *backoff < 0 {
+	if fs.NArg() > 0 || *top < 1 || *maxLoad <= 0 || *minFree < 0 || *backoff < 0 || *sample < 0 {
 		fmt.Fprintln(stderr, "spectra load: invalid arguments (see --help)")
 		return 2
 	}
@@ -155,7 +168,8 @@ Exit codes:
 	}
 	dec := hostload.Decide(reading, hostload.Thresholds{MaxLoadPerCPU: *maxLoad, MinFreeGB: *minFree, BackoffFreeGB: *backoff})
 
-	procs := deps.Procs(ctx)
+	sampler := hostload.Sampler{Host: deps.Host, Collect: deps.Procs, Now: deps.Now, Sleep: deps.Sleep}
+	procs, window, basis := sampler.Sample(ctx, *sample)
 	pids := make([]int, len(procs))
 	for i, p := range procs {
 		pids[i] = p.PID
@@ -168,6 +182,7 @@ Exit codes:
 		MinFreeGB: *minFree, BackoffGB: *backoff,
 		Cause: an.Cause, TopCPU: an.TopCPU, TopRSS: an.TopRSS, Families: an.Families,
 		Dirs: an.Dirs, Unknown: an.Unknown, Notes: notes,
+		CPUWindowMS: window.Milliseconds(), CPUBasis: string(basis),
 		ElapsedMS: deps.Now().Sub(start).Milliseconds(), ProcessCnt: len(procs),
 	}
 	if reading.MemKnown {
@@ -194,6 +209,14 @@ func writeLoadText(w io.Writer, r loadReport) {
 		fmt.Fprintf(w, "memory   %.1f GiB available  min %.1f, backoff %.1f\n", *r.AvailGB, r.MinFreeGB, r.BackoffGB)
 	} else {
 		fmt.Fprintf(w, "memory   unknown  min %.1f, backoff %.1f\n", r.MinFreeGB, r.BackoffGB)
+	}
+	switch hostload.CPUBasis(r.CPUBasis) {
+	case hostload.BasisWindow:
+		fmt.Fprintf(w, "cpu      measured over a %d ms window\n", r.CPUWindowMS)
+	case hostload.BasisRecent:
+		fmt.Fprintln(w, "cpu      recent average (ps decaying average)")
+	default:
+		fmt.Fprintln(w, "cpu      lifetime average (no recent window)")
 	}
 	fmt.Fprintf(w, "cause    %s  %s\n", r.Cause.Kind, r.Cause.Detail)
 	for _, n := range r.Notes {
