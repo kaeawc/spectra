@@ -168,8 +168,9 @@ func TestLifetimeClampedToPreviousPoll(t *testing.T) {
 	if len(ev) != 1 || ev[0].Lifetime != 750*time.Millisecond {
 		t.Fatalf("events = %+v, want 750ms lifetime clamped to the previous poll", ev)
 	}
-	if ev[0].LifetimeErr != 250*time.Millisecond {
-		t.Fatalf("error bound = %v, want the interval", ev[0].LifetimeErr)
+	// start window 600ms..1100ms plus exit window 1100ms..1350ms
+	if ev[0].LifetimeErr != 750*time.Millisecond {
+		t.Fatalf("error bound = %v, want 750ms", ev[0].LifetimeErr)
 	}
 }
 
@@ -364,5 +365,50 @@ func TestRunSlowCollectorSkipsTicks(t *testing.T) {
 	}
 	if !strings.Contains(sum.Note, "shorter than") {
 		t.Fatalf("note = %q", sum.Note)
+	}
+}
+
+func TestLifetimeErrorCoversBothObservationWindows(t *testing.T) {
+	tr := NewTracker(0)
+	tr.interval = 250 * time.Millisecond
+	tr.Observe(base(), t0.Add(100*time.Millisecond))
+	blip := p(200, 100, "blip", t0)
+	tr.Observe(append(base(), blip), t0.Add(350*time.Millisecond))
+	ev := tr.Observe(base(), t0.Add(600*time.Millisecond))
+	if len(ev) != 1 || ev[0].Lifetime != 500*time.Millisecond || ev[0].LifetimeErr != 500*time.Millisecond {
+		t.Fatalf("events = %+v, want 500ms lifetime with 500ms error", ev)
+	}
+}
+
+func TestLifetimeErrorWidensOnSkippedPolls(t *testing.T) {
+	tr := NewTracker(0)
+	tr.interval = 250 * time.Millisecond
+	tr.Observe(base(), t0)
+	tr.Observe(append(base(), p(200, 100, "x", t0.Add(time.Second))), t0.Add(1200*time.Millisecond))
+	ev := tr.Observe(base(), t0.Add(4200*time.Millisecond))
+	if len(ev) != 1 || ev[0].LifetimeErr < 3*time.Second {
+		t.Fatalf("events = %+v, want error to include the 3s exit window", ev)
+	}
+}
+
+func TestScopedRootPIDReuseNotTraced(t *testing.T) {
+	tr := NewTracker(300)
+	root := p(300, 100, "root", t0.Add(-time.Minute))
+	with := append(base(), root, p(301, 300, "child", t0.Add(-time.Minute)))
+	tr.Observe(with, t0)
+	tr.Observe(base(), t0.Add(time.Second)) // root and child gone
+	reused := append(base(), p(300, 100, "stranger", t0.Add(2*time.Second)), p(302, 300, "grandkid", t0.Add(2*time.Second)))
+	for _, e := range tr.Observe(reused, t0.Add(3*time.Second)) {
+		t.Fatalf("unrelated process entered the trace: %+v", e)
+	}
+}
+
+func TestRunSummaryDurationIsElapsedOnEarlyStop(t *testing.T) {
+	h := &harness{clk: clock.NewFake(t0), ticks: make(chan time.Time, 1), step: 2 * time.Second, tables: [][]process.Info{base()}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sum := Run(ctx, h.cfg(time.Second, time.Hour, func(Event) {}))
+	if sum.Duration != 2*time.Second {
+		t.Fatalf("duration = %v, want elapsed 2s", sum.Duration)
 	}
 }

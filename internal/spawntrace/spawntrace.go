@@ -36,9 +36,10 @@ type Event struct {
 	Command  string        `json:"command"`
 	Chain    []string      `json:"parent_chain"`
 	Lifetime time.Duration `json:"-"`
-	// LifetimeErr bounds how far Lifetime can be off: start times have
-	// one-second resolution and first sightings are only as precise as the
-	// polling interval.
+	// LifetimeErr bounds how far Lifetime can be off: the start is known only
+	// to one-second resolution or to the poll window it appeared in, and the
+	// exit only to the window between the last poll that saw the process and
+	// the one that did not.
 	LifetimeErr time.Duration `json:"-"`
 }
 
@@ -75,14 +76,16 @@ type identity struct {
 }
 
 type tracked struct {
-	ev    Event // the start-shaped record: pid, ppid, command, chain
-	since time.Time
-	err   time.Duration
+	ev       Event // the start-shaped record: pid, ppid, command, chain
+	since    time.Time
+	startErr time.Duration // uncertainty of since; the exit side is added on exit
 }
 
 // Tracker diffs successive process tables into start and exit events.
 type Tracker struct {
 	root     int
+	rootID   identity // the root's pid+start time from the baseline
+	rootSeen bool
 	baseline bool
 	prev     time.Time
 
@@ -107,13 +110,13 @@ func (t *Tracker) tracking(pid int) bool {
 	return false
 }
 
-// slack is the lifetime error bound: the polling interval, but never finer
-// than the one-second resolution of ps start times.
-func (t *Tracker) slack(fromStartTime bool) time.Duration {
-	if fromStartTime && t.interval < time.Second {
-		return time.Second
+// isRoot reports whether p is the scoped root. Once the baseline has captured
+// the root's identity, a later process that reuses its pid does not match.
+func (t *Tracker) isRoot(p process.Info) bool {
+	if t.baseline {
+		return t.rootSeen && idOf(p) == t.rootID
 	}
-	return t.interval
+	return p.PID == t.root
 }
 
 func idOf(p process.Info) identity {
@@ -134,6 +137,11 @@ func (t *Tracker) Observe(procs []process.Info, now time.Time) []Event {
 	byPID := make(map[int]process.Info, len(procs))
 	for _, p := range procs {
 		byPID[p.PID] = p
+	}
+	if !t.baseline && t.root > 0 {
+		if rp, ok := byPID[t.root]; ok {
+			t.rootID, t.rootSeen = idOf(rp), true
+		}
 	}
 	current := t.currentSet(procs, byPID)
 
@@ -176,7 +184,9 @@ func (t *Tracker) exits(current map[identity]process.Info, now time.Time) []Even
 		}
 		ev := k.ev
 		ev.Kind, ev.Time = KindExit, now
-		ev.Lifetime, ev.LifetimeErr = now.Sub(k.since), k.err
+		// The exit happened somewhere between the last poll that saw the
+		// process (t.prev) and this one.
+		ev.Lifetime, ev.LifetimeErr = now.Sub(k.since), k.startErr+now.Sub(t.prev)
 		if ev.Lifetime < 0 {
 			ev.Lifetime = 0
 		}
@@ -194,25 +204,38 @@ func (t *Tracker) starts(current map[identity]process.Info, byPID map[int]proces
 		if _, ok := t.known[id]; ok {
 			continue
 		}
-		since, fromStart := p.StartTime, true
-		switch {
-		case since.IsZero():
-			since, fromStart = now, false
-		case t.baseline && since.Before(t.prev):
-			// lstart is truncated to the second; the process cannot have
-			// been seen before the previous poll missed it.
-			since, fromStart = t.prev, false
-		}
+		since, startErr := t.startEstimate(p, now)
 		ev := Event{
 			Kind: KindStart, Time: now, PID: p.PID, PPID: p.PPID,
 			Command: name(p), Chain: t.chain(p, byPID),
 		}
-		t.known[id] = tracked{ev: ev, since: since, err: t.slack(fromStart)}
+		t.known[id] = tracked{ev: ev, since: since, startErr: startErr}
 		if t.baseline {
 			events = append(events, ev)
 		}
 	}
 	return events
+}
+
+// startEstimate returns the inferred start and how far it can be off. The
+// process started after the previous poll missed it (when there was one) and
+// no later than now.
+func (t *Tracker) startEstimate(p process.Info, now time.Time) (time.Time, time.Duration) {
+	since := p.StartTime
+	switch {
+	case since.IsZero():
+		if t.baseline {
+			return now, now.Sub(t.prev)
+		}
+		return now, t.interval
+	case t.baseline && since.Before(t.prev):
+		// lstart is truncated to the second; the process cannot have been
+		// seen before the previous poll missed it.
+		return t.prev, now.Sub(t.prev)
+	}
+	// Start times carry one-second resolution, and the process cannot have
+	// started after it was first seen.
+	return since, min(time.Second, max(now.Sub(since), 0))
 }
 
 func (t *Tracker) inScope(p process.Info, byPID map[int]process.Info) bool {
@@ -223,7 +246,7 @@ func (t *Tracker) inScope(p process.Info, byPID map[int]process.Info) bool {
 	for i := 0; i < maxChain; i++ {
 		// A tracked ancestor keeps its subtree in scope after the root has
 		// exited and its children were reparented to pid 1.
-		if _, ok := t.known[idOf(cur)]; ok || cur.PID == t.root {
+		if _, ok := t.known[idOf(cur)]; ok || t.isRoot(cur) {
 			return true
 		}
 		parent, ok := byPID[cur.PPID]
@@ -311,8 +334,9 @@ func Run(ctx context.Context, cfg Config) Summary {
 		deadline, stopDeadline = cfg.Deadline(cfg.Duration)
 		defer stopDeadline()
 	}
-	end := cfg.Clock.Now().Add(cfg.Duration)
-	r := &runner{cfg: cfg, tracker: tracker, sum: sum, ticks: ticks}
+	began := cfg.Clock.Now()
+	end := began.Add(cfg.Duration)
+	r := &runner{cfg: cfg, tracker: tracker, sum: sum, ticks: ticks, began: began}
 
 	r.poll(ctx)
 	for !sum.RootNotFound && cfg.Clock.Now().Before(end) {
@@ -337,6 +361,7 @@ type runner struct {
 	ticks       <-chan time.Time
 	first, last time.Time
 	rootChecked bool
+	began       time.Time
 }
 
 func (r *runner) poll(ctx context.Context) {
@@ -388,6 +413,7 @@ func (r *runner) dropOverrunTicks(elapsed time.Duration) {
 
 func (r *runner) finish() Summary {
 	sum, first, last, cfg := r.sum, r.first, r.last, r.cfg
+	sum.Duration = cfg.Clock.Now().Sub(r.began).Round(time.Millisecond)
 	sum.EffectiveInterval = cfg.Interval
 	if sum.Polls > 1 {
 		sum.EffectiveInterval = last.Sub(first) / time.Duration(sum.Polls-1)
