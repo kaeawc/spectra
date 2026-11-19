@@ -71,7 +71,8 @@ type loadReport struct {
 	Dirs        []hostload.DirUsage  `json:"dirs"`
 	Unknown     hostload.DirUsage    `json:"unknown"`
 	Notes       []string             `json:"notes,omitempty"`
-	CPUWindowMS int64                `json:"cpu_window_ms"` // 0 when lifetime averages were used
+	CPUWindowMS int64                `json:"cpu_window_ms"` // >0 only for basis "window"
+	CPUBasis    string               `json:"cpu_basis"`     // window, recent or lifetime
 	ElapsedMS   int64                `json:"elapsed_ms"`
 	ProcessCnt  int                  `json:"process_count"`
 }
@@ -168,7 +169,7 @@ Exit codes:
 	dec := hostload.Decide(reading, hostload.Thresholds{MaxLoadPerCPU: *maxLoad, MinFreeGB: *minFree, BackoffFreeGB: *backoff})
 
 	sampler := hostload.Sampler{Host: deps.Host, Collect: deps.Procs, Now: deps.Now, Sleep: deps.Sleep}
-	procs, window := sampler.Sample(ctx, *sample)
+	procs, window, basis := sampler.Sample(ctx, *sample)
 	pids := make([]int, len(procs))
 	for i, p := range procs {
 		pids[i] = p.PID
@@ -181,8 +182,8 @@ Exit codes:
 		MinFreeGB: *minFree, BackoffGB: *backoff,
 		Cause: an.Cause, TopCPU: an.TopCPU, TopRSS: an.TopRSS, Families: an.Families,
 		Dirs: an.Dirs, Unknown: an.Unknown, Notes: notes,
-		CPUWindowMS: window.Milliseconds(),
-		ElapsedMS:   deps.Now().Sub(start).Milliseconds(), ProcessCnt: len(procs),
+		CPUWindowMS: window.Milliseconds(), CPUBasis: string(basis),
+		ElapsedMS: deps.Now().Sub(start).Milliseconds(), ProcessCnt: len(procs),
 	}
 	if reading.MemKnown {
 		gb := float64(reading.AvailBytes) / (1 << 30)
@@ -209,12 +210,15 @@ func writeLoadText(w io.Writer, r loadReport) {
 	} else {
 		fmt.Fprintf(w, "memory   unknown  min %.1f, backoff %.1f\n", r.MinFreeGB, r.BackoffGB)
 	}
-	if r.CPUWindowMS > 0 {
-		fmt.Fprintf(w, "cpu      recent, over %d ms\n", r.CPUWindowMS)
-	} else {
+	switch hostload.CPUBasis(r.CPUBasis) {
+	case hostload.BasisWindow:
+		fmt.Fprintf(w, "cpu      measured over a %d ms window\n", r.CPUWindowMS)
+	case hostload.BasisRecent:
+		fmt.Fprintln(w, "cpu      recent average (ps decaying average)")
+	default:
 		fmt.Fprintln(w, "cpu      lifetime average (no recent window)")
 	}
-	fmt.Fprintf(w, "cause   %s  %s\n", r.Cause.Kind, r.Cause.Detail)
+	fmt.Fprintf(w, "cause    %s  %s\n", r.Cause.Kind, r.Cause.Detail)
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "note     %s\n", n)
 	}

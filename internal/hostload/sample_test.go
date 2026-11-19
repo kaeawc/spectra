@@ -69,7 +69,7 @@ func TestSampleRecentOutranksFormerlyBusy(t *testing.T) {
 		rounds: [][]process.Info{{{PID: 1, CPUPct: 0.07}, {PID: 2, CPUPct: 90}}},
 	}
 	f.onSleep = func() { f.files["/proc/1/stat"] = statLine(1, 1050, 5) }
-	procs, window := f.sampler(hostos.Linux).Sample(context.Background(), 500*time.Millisecond)
+	procs, window, _ := f.sampler(hostos.Linux).Sample(context.Background(), 500*time.Millisecond)
 	if window != 500*time.Millisecond {
 		t.Fatalf("window = %v", window)
 	}
@@ -94,7 +94,7 @@ func TestSampleSkipsReusedPID(t *testing.T) {
 	}
 	// Same pid, different start time and a lower counter: a new process.
 	f.onSleep = func() { f.files["/proc/1/stat"] = statLine(1, 10, 99) }
-	procs, window := f.sampler(hostos.Linux).Sample(context.Background(), time.Second)
+	procs, window, _ := f.sampler(hostos.Linux).Sample(context.Background(), time.Second)
 	if window != 0 || procs[0].CPUPct != 42 {
 		t.Fatalf("window=%v cpu=%v, want collector value kept", window, procs[0].CPUPct)
 	}
@@ -117,7 +117,7 @@ func TestSampleGoneDroppedNewKept(t *testing.T) {
 		delete(f.files, "/proc/2/stat")
 		f.files["/proc/3/stat"] = statLine(3, 500, 8)
 	}
-	procs, window := f.sampler(hostos.Linux).Sample(context.Background(), time.Second)
+	procs, window, _ := f.sampler(hostos.Linux).Sample(context.Background(), time.Second)
 	m := byPID(procs)
 	if _, ok := m[2]; ok || len(procs) != 2 {
 		t.Fatalf("exited pid 2 should be dropped: %+v", procs)
@@ -142,10 +142,74 @@ func TestSampleDisabledAndMacOS(t *testing.T) {
 				rounds: [][]process.Info{{{PID: 1, CPUPct: 33}}},
 			}
 			f.onSleep = func() { f.files["/proc/1/stat"] = statLine(1, 900, 5) }
-			procs, window := f.sampler(tc.os).Sample(context.Background(), tc.interval)
+			procs, window, _ := f.sampler(tc.os).Sample(context.Background(), tc.interval)
 			if window != 0 || procs[0].CPUPct != 33 || f.calls != 1 {
 				t.Fatalf("window=%v cpu=%v calls=%d", window, procs[0].CPUPct, f.calls)
 			}
 		})
+	}
+}
+
+func TestSampleBasis(t *testing.T) {
+	mk := func() *fakeProc {
+		return &fakeProc{
+			now:    time.Unix(1000, 0),
+			files:  map[string]string{"/proc/1/stat": statLine(1, 100, 5)},
+			rounds: [][]process.Info{{{PID: 1, CPUPct: 33}}},
+		}
+	}
+	ctx := context.Background()
+	if _, _, b := mk().sampler(hostos.Darwin).Sample(ctx, time.Second); b != BasisRecent {
+		t.Fatalf("darwin basis = %s", b)
+	}
+	if _, _, b := mk().sampler(hostos.Linux).Sample(ctx, 0); b != BasisLifetime {
+		t.Fatalf("linux --sample 0 basis = %s", b)
+	}
+	f := mk()
+	f.onSleep = func() { f.files["/proc/1/stat"] = statLine(1, 150, 5) }
+	if _, w, b := f.sampler(hostos.Linux).Sample(ctx, time.Second); b != BasisWindow || w != time.Second {
+		t.Fatalf("linux basis = %s window=%v", b, w)
+	}
+	// Nothing diffable: falls back to lifetime.
+	u := mk()
+	u.onSleep = func() { delete(u.files, "/proc/1/stat") }
+	if _, w, b := u.sampler(hostos.Linux).Sample(ctx, time.Second); b != BasisLifetime || w != 0 {
+		t.Fatalf("undiffable basis = %s window=%v", b, w)
+	}
+}
+
+func TestSampleStartedInsideWindow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	f := &fakeProc{
+		now: t0,
+		files: map[string]string{
+			"/proc/1/stat": statLine(1, 1000, 5),
+			"/proc/2/stat": statLine(2, 1, 6), // unreadable in first reading, old
+		},
+		rounds: [][]process.Info{
+			{{PID: 1, CPUPct: 1}},
+			{
+				{PID: 1, CPUPct: 1},
+				// Lifetime of ~0.02s: collector says 150%.
+				{PID: 3, CPUPct: 150, StartTime: t0.Add(-500 * time.Millisecond)},
+				{PID: 2, CPUPct: 12, StartTime: t0.Add(-time.Hour)},
+			},
+		},
+	}
+	f.onSleep = func() {
+		f.files["/proc/1/stat"] = statLine(1, 1090, 5) // 90 ticks / 1s = 90%
+		f.files["/proc/3/stat"] = statLine(3, 2, 8)    // 2 ticks over 1s = 2%
+	}
+	procs, _, _ := f.sampler(hostos.Linux).Sample(context.Background(), time.Second)
+	m := byPID(procs)
+	if m[3].CPUPct != 2 {
+		t.Fatalf("new pid cpu = %v, want 2", m[3].CPUPct)
+	}
+	if m[2].CPUPct != 12 {
+		t.Fatalf("old unreadable pid should keep collector value, got %v", m[2].CPUPct)
+	}
+	an := Analyze(procs, map[int]string{}, Options{TopN: 1})
+	if an.TopCPU[0].PID != 1 {
+		t.Fatalf("steady 90%% process should outrank: %+v", an.TopCPU)
 	}
 }

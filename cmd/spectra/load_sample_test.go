@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/hostload"
 )
 
 func sampledLoadDeps(now *time.Time) loadDeps {
@@ -38,7 +40,8 @@ func TestRunLoadSampleWindow(t *testing.T) {
 		t.Fatalf("exit = %d; %s", code, errb.String())
 	}
 	var m struct {
-		Window int64 `json:"cpu_window_ms"`
+		Window int64  `json:"cpu_window_ms"`
+		Basis  string `json:"cpu_basis"`
 		TopCPU []struct {
 			PID    int     `json:"pid"`
 			CPUPct float64 `json:"cpu_pct"`
@@ -47,13 +50,13 @@ func TestRunLoadSampleWindow(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Window != 500 || m.TopCPU[0].PID != 10 || m.TopCPU[0].CPUPct != 50 {
+	if m.Window != 500 || m.Basis != "window" || m.TopCPU[0].PID != 10 || m.TopCPU[0].CPUPct != 50 {
 		t.Fatalf("window=%d top=%+v", m.Window, m.TopCPU)
 	}
 
 	now = time.Unix(1000, 0)
 	out.Reset()
-	if code := runLoadWithIO(nil, &out, &errb, sampledLoadDeps(&now)); code != 0 || !strings.Contains(out.String(), "recent, over 500 ms") {
+	if code := runLoadWithIO(nil, &out, &errb, sampledLoadDeps(&now)); code != 0 || !strings.Contains(out.String(), "measured over a 500 ms window") {
 		t.Fatalf("text lacks window (exit %d):\n%s", code, out.String())
 	}
 
@@ -75,5 +78,37 @@ func TestRunLoadSampleWindow(t *testing.T) {
 	}
 	if code := runLoadWithIO([]string{"--sample", "-1s"}, &out, &errb, fakeLoadDeps("1 1 1 1/1 1", "")); code != 2 {
 		t.Fatalf("negative sample exit = %d", code)
+	}
+}
+
+func TestRunLoadBasisAndAlignment(t *testing.T) {
+	var out, errb bytes.Buffer
+	deps := fakeLoadDeps("1 1 1 1/1 1", "MemAvailable: 16777216 kB\n")
+	if code := runLoadWithIO([]string{"--json"}, &out, &errb, deps); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var m struct {
+		Basis string `json:"cpu_basis"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &m); err != nil || m.Basis == "" {
+		t.Fatalf("cpu_basis missing: %v %s", err, out.String())
+	}
+	var w bytes.Buffer
+	for _, basis := range []string{"window", "recent", "lifetime"} {
+		w.Reset()
+		writeLoadText(&w, loadReport{Verdict: "admit", CPUBasis: basis, CPUWindowMS: 500, Cause: hostload.Cause{Kind: hostload.CauseNone, Detail: "x"}})
+		for _, line := range strings.Split(strings.TrimSpace(w.String()), "\n") {
+			for _, label := range []string{"verdict", "load", "memory", "cpu", "cause"} {
+				if strings.HasPrefix(line, label+" ") && !strings.HasPrefix(line, label+strings.Repeat(" ", 9-len(label))) {
+					t.Fatalf("label %q not padded to 9 columns: %q", label, line)
+				}
+				if strings.HasPrefix(line, label+" ") && line[9] == ' ' {
+					t.Fatalf("value not at column 10: %q", line)
+				}
+			}
+		}
+		if basis == "recent" && !strings.Contains(w.String(), "recent average") {
+			t.Fatalf("recent text wrong: %s", w.String())
+		}
 	}
 }
