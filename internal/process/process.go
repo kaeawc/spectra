@@ -378,7 +378,10 @@ func applyExecNames(procs []Info, comms map[int]string) {
 }
 
 func execName(full, argv0 string) string {
-	if argv0 == "" || (full != argv0 && !strings.HasPrefix(full, argv0+" ")) {
+	// parseRow collapses runs of whitespace in the command line, so compare
+	// against argv0 collapsed the same way; the name keeps its own spacing.
+	norm := strings.Join(strings.Fields(argv0), " ")
+	if norm == "" || (full != norm && !strings.HasPrefix(full, norm+" ")) {
 		return ""
 	}
 	return argv0[strings.LastIndex(argv0, "/")+1:]

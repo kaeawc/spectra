@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -174,6 +175,7 @@ const psCommFixture = `  370 /usr/sbin/syslogd
 
 func TestCollectAllNamesExecutablesWithSpaces(t *testing.T) {
 	procs := CollectAll(context.Background(), CollectOptions{
+		OS: hostos.Darwin,
 		CmdRunner: func(_ string, args ...string) ([]byte, error) {
 			if args[len(args)-1] == "pid=,comm=" {
 				return []byte(psCommFixture), nil
@@ -229,6 +231,7 @@ func TestExecNameRejectsMismatchedArgv0(t *testing.T) {
 
 func TestCollectAllCommListingFailureKeepsFallback(t *testing.T) {
 	procs := CollectAll(context.Background(), CollectOptions{
+		OS: hostos.Darwin,
 		CmdRunner: func(_ string, args ...string) ([]byte, error) {
 			if args[len(args)-1] == "pid=,comm=" {
 				return nil, errors.New("ps failed")
@@ -237,10 +240,26 @@ func TestCollectAllCommListingFailureKeepsFallback(t *testing.T) {
 		},
 		DetailCollector: func([]Info) map[int]Details { return nil },
 	})
+	found := false
 	for _, p := range procs {
-		if p.PID == 1345 && p.Command != "Application" {
+		if p.PID != 1345 {
+			continue
+		}
+		found = true
+		if p.Command != "Application" {
 			t.Errorf("Command = %q, want whitespace-split fallback", p.Command)
 		}
+	}
+	if !found {
+		t.Fatal("pid 1345 missing from the collected processes")
+	}
+}
+
+func TestExecNameIgnoresCollapsedWhitespace(t *testing.T) {
+	argv0 := "/Applications/My  App.app/Contents/MacOS/My  App"
+	full := "/Applications/My App.app/Contents/MacOS/My App --flag"
+	if got := execName(full, argv0); got != "My  App" {
+		t.Errorf("execName = %q, want %q", got, "My  App")
 	}
 }
 
