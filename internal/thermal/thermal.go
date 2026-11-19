@@ -209,8 +209,13 @@ func (c *Collector) Watch(ctx context.Context, duration, interval time.Duration)
 	worst, last := first, first
 	samples := 1
 	start := c.clk().Now()
-	for c.clk().Now().Sub(start) < duration {
-		if err := c.sleep(ctx, interval); err != nil {
+	for {
+		remaining := duration - c.clk().Now().Sub(start)
+		if remaining <= 0 {
+			break
+		}
+		// Cap the sleep so the final sample lands inside the requested window.
+		if err := c.sleep(ctx, min(interval, remaining)); err != nil {
 			if ctx.Err() != nil {
 				break
 			}

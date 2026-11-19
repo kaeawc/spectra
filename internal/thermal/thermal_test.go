@@ -267,6 +267,36 @@ func TestWatchReportsWorstVerdictAndSteadyCounter(t *testing.T) {
 	}
 }
 
+func TestWatchCapsSleepToRemainingDuration(t *testing.T) {
+	cases := []struct {
+		name               string
+		duration, interval time.Duration
+		samples            int
+	}{
+		{"interval larger than duration", time.Second, time.Hour, 2},
+		{"interval does not divide duration", 5 * time.Second, 2 * time.Second, 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := clock.NewFake(time.Unix(0, 0))
+			var slept time.Duration
+			c := &Collector{OS: hostos.Linux, FS: counterFS(3), Clock: clk}
+			c.Sleep = func(_ context.Context, d time.Duration) error {
+				slept += d
+				clk.Advance(d)
+				return nil
+			}
+			w, err := c.Watch(context.Background(), tc.duration, tc.interval)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slept > tc.duration || w.Samples != tc.samples {
+				t.Fatalf("slept=%s samples=%d", slept, w.Samples)
+			}
+		})
+	}
+}
+
 func TestWatchRejectsBadInterval(t *testing.T) {
 	c := &Collector{OS: hostos.Linux, FS: fstest.MapFS{}}
 	if _, err := c.Watch(context.Background(), time.Second, 0); err == nil {
