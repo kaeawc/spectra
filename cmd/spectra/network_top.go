@@ -18,6 +18,7 @@ import (
 	"github.com/kaeawc/spectra/internal/lineage"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/nettop"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -25,18 +26,21 @@ const networkTopUsage = "usage: spectra network top [--duration 10s] [--interval
 
 // networkTopDeps are the seams runNetworkTopWithIO needs; tests replace them.
 type networkTopDeps struct {
-	os    hostos.Kind
-	run   netstate.CmdRunner
-	procs func(ctx context.Context) []process.Info
-	conns func() []netstate.Connection
-	cwds  func(ctx context.Context, pids []int) map[int]string
-	sleep func(ctx context.Context, d time.Duration) error
-	clock clock.Clock
+	os  hostos.Kind
+	run netstate.CmdRunner
+	// runner runs the macOS measuring tool, which must die on Ctrl-C.
+	runner proc.Runner
+	procs  func(ctx context.Context) []process.Info
+	conns  func() []netstate.Connection
+	cwds   func(ctx context.Context, pids []int) map[int]string
+	sleep  func(ctx context.Context, d time.Duration) error
+	clock  clock.Clock
 }
 
 func defaultNetworkTopDeps() networkTopDeps {
 	return networkTopDeps{
-		run: netstate.DefaultRunner,
+		run:    netstate.DefaultRunner,
+		runner: proc.Default,
 		procs: func(ctx context.Context) []process.Info {
 			return process.CollectAll(ctx, process.CollectOptions{
 				DetailCollector: func([]process.Info) map[int]process.Details { return nil },
@@ -77,15 +81,18 @@ func parseNetworkTopFlags(args []string, stderr io.Writer) (networkTopOpts, bool
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, networkTopUsage+"\n\n"+
-			"Show which processes are using the network right now: sample per-process\n"+
-			"byte counters each interval (macOS nettop, Linux ss TCP sockets) and rank\n"+
-			"processes by bytes moved over the window. Ctrl-C ends early.\n\n")
+			"Show which processes are using the network right now: measure the bytes each\n"+
+			"process moves every interval and rank processes by bytes moved over the\n"+
+			"window. Ctrl-C ends early and still prints the summary.\n\n"+
+			"macOS runs one `nettop -d -L 2` per interval, so --interval and --duration\n"+
+			"are rounded up to whole seconds and an interval cut short by Ctrl-C is\n"+
+			"dropped. Linux diffs per-socket TCP counters from `ss -tinpH`.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.DurationVar(&o.duration, "duration", 10*time.Second, "How long to sample (Ctrl-C stops early)")
 	fs.DurationVar(&o.interval, "interval", time.Second, "Sampling interval")
 	fs.IntVar(&o.top, "top", 10, "Number of processes to list")
-	fs.IntVar(&o.pid, "pid", 0, "Only this pid and its descendants")
+	fs.IntVar(&o.pid, "pid", 0, "Only this pid and its descendants (per-interval lines: descendants alive at the start; summary: also those alive at the end)")
 	fs.BoolVar(&o.json, "json", false, "Emit one JSON object")
 	if err := fs.Parse(args); err != nil {
 		return o, false
@@ -110,7 +117,7 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 	if !ok {
 		return 2
 	}
-	sample, basis, tool, err := nettop.SamplerFor(deps.os, deps.run)
+	src, err := nettop.SourceFor(deps.os, deps.run, deps.runner)
 	if err != nil {
 		fmt.Fprintf(stderr, "network top: %v\n", err)
 		return 1
@@ -122,14 +129,16 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 		return 1
 	}
 
+	asked := opts.interval
+	opts.interval, opts.duration = src.Round(opts.interval), src.Round(opts.duration)
 	ew := &errWriter{w: stdout}
 	cfg := nettop.Config{
-		Sample: sample, Tool: tool, Sleep: deps.sleep, Clock: deps.clock,
-		Interval: opts.interval, Duration: opts.duration,
-		Preexisting: pidSet(before), EmitInclude: scope.include(),
+		Sleep: deps.sleep, Clock: deps.clock, Interval: opts.interval, Duration: opts.duration,
+		EmitInclude: scope.startInclude(),
 	}
+	src.Configure(&cfg)
 	if !opts.json {
-		fmt.Fprintf(ew, "Sampling %s every %s for %s (Ctrl-C to stop early)\n", tool, opts.interval, opts.duration)
+		printNetworkTopHeader(ew, src.Tool, opts, asked)
 		cfg.Emit = func(t nettop.Tick) { printNetworkTopTick(ew, t) }
 	}
 	tr, err := nettop.Run(ctx, cfg)
@@ -143,10 +152,10 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 	after := deps.procs(post)
 	scope.extend(after)
 	rep := nettop.Summarize(tr, scope.include(), opts.top)
-	rep.Basis, rep.PID = basis, opts.pid
-	rep.Limitations = append(rep.Limitations, nettop.Limitations(basis)...)
+	rep.Basis, rep.PID = src.Basis, opts.pid
+	rep.Limitations = append(rep.Limitations, nettop.Limitations(src.Basis)...)
 	if opts.pid > 0 {
-		rep.Limitations = append(rep.Limitations, "--pid: descendants are taken from process tables read before and after the window, so a child that started and exited inside it is not included")
+		rep.Limitations = append(rep.Limitations, pidScopeNote)
 	}
 	enrichNetworkTop(post, &rep, deps, before, after)
 
@@ -164,11 +173,16 @@ func runNetworkTopWithIO(ctx context.Context, args []string, stdout, stderr io.W
 	return 0
 }
 
+// pidScopeNote says which processes --pid counts where; text, JSON and help
+// all describe the same rule.
+const pidScopeNote = "--pid: per-interval lines count the target and the descendants alive at the start; the summary also counts descendants alive at the end, so a child that started and exited inside the window is not included"
+
 // topScope is the --pid subtree: the target plus every descendant seen in
-// any process table read.
+// any process table read. start freezes the subtree of the first read.
 type topScope struct {
-	pid  int
-	pids map[int]bool
+	pid   int
+	pids  map[int]bool
+	start map[int]bool
 }
 
 func newTopScope(pid int) *topScope { return &topScope{pid: pid, pids: map[int]bool{}} }
@@ -201,15 +215,26 @@ func (s *topScope) include() func(int) bool {
 	return func(pid int) bool { return s.pids[pid] }
 }
 
-func pidSet(procs []process.Info) map[int]bool {
-	if len(procs) == 0 {
+// startInclude accepts the subtree as of now, unaffected by later extends.
+func (s *topScope) startInclude() func(int) bool {
+	if s.pid <= 0 {
 		return nil
 	}
-	set := make(map[int]bool, len(procs))
-	for _, p := range procs {
-		set[p.PID] = true
+	s.start = make(map[int]bool, len(s.pids))
+	for pid := range s.pids {
+		s.start[pid] = true
 	}
-	return set
+	return func(pid int) bool { return s.start[pid] }
+}
+
+func printNetworkTopHeader(w io.Writer, tool string, opts networkTopOpts, asked time.Duration) {
+	fmt.Fprintf(w, "Sampling %s every %s for %s (Ctrl-C to stop early)\n", tool, opts.interval, opts.duration)
+	if opts.interval != asked {
+		fmt.Fprintf(w, "  interval rounded up from %s: %s takes whole seconds\n", asked, tool)
+	}
+	if opts.pid > 0 {
+		fmt.Fprintf(w, "  %s\n", pidScopeNote)
+	}
 }
 
 // enrichNetworkTop fills user, full command name, cwd and remote endpoints,

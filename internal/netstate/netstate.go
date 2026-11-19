@@ -8,12 +8,14 @@ package netstate
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
@@ -156,7 +158,8 @@ func CollectThroughput(run CmdRunner) []Throughput {
 	return active
 }
 
-// ProcessBytes is one process's cumulative network byte counters.
+// ProcessBytes is the external-interface bytes one process moved during one
+// interval.
 type ProcessBytes struct {
 	PID      int
 	Command  string
@@ -164,19 +167,59 @@ type ProcessBytes struct {
 	BytesOut int64
 }
 
-// CollectProcessBytes takes one nettop sample without -d, so each row is the
-// process's cumulative external-interface bytes rather than a delta.
-func CollectProcessBytes(run CmdRunner) ([]ProcessBytes, error) {
-	out, err := run("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out", "-t", "external")
+// ProcessBytesArgs is the nettop invocation CollectProcessBytes runs for an
+// interval of secs whole seconds. nettop's per-process row without -d is a
+// sum over the flows open right now, so it drops when a connection closes
+// and is useless for diffing; in delta mode (-d) the second block is what
+// every flow moved during the delay, including flows that closed in it.
+func ProcessBytesArgs(secs int64) []string {
+	return []string{"-P", "-x", "-d", "-L", "2", "-s", strconv.FormatInt(secs, 10), "-J", "bytes_in,bytes_out", "-t", "external"}
+}
+
+// CollectProcessBytes runs nettop for one interval (rounded up to whole
+// seconds, at least one, since nettop's -s takes whole seconds) and returns
+// the bytes each process moved in it. Cancelling ctx kills nettop.
+func CollectProcessBytes(ctx context.Context, r proc.Runner, interval time.Duration) ([]ProcessBytes, error) {
+	secs := max(int64((interval+time.Second-1)/time.Second), 1)
+	out, err := proc.Output(ctx, r, "nettop", ProcessBytesArgs(secs)...)
 	if err != nil {
 		return nil, fmt.Errorf("nettop: %w", err)
 	}
-	rows := parseNettopThroughput(string(out))
+	blocks := parseNettopBlocks(string(out))
+	if len(blocks) < 2 {
+		return nil, fmt.Errorf("nettop: want 2 sample blocks, got %d", len(blocks))
+	}
+	rows := blocks[1]
 	res := make([]ProcessBytes, 0, len(rows))
 	for _, r := range rows {
 		res = append(res, ProcessBytes{PID: r.PID, Command: r.Command, BytesIn: r.BytesInPerSec, BytesOut: r.BytesOutPerSec})
 	}
 	return res, nil
+}
+
+// parseNettopBlocks splits nettop CSV logging output into its sample blocks,
+// one per header line; unlike parseNettopThroughput an empty block is kept.
+func parseNettopBlocks(out string) [][]Throughput {
+	r := csv.NewReader(strings.NewReader(out))
+	r.FieldsPerRecord = -1
+	var blocks [][]Throughput
+	for {
+		record, err := r.Read()
+		if err != nil {
+			break
+		}
+		if len(record) < 3 {
+			continue
+		}
+		if record[0] == "" && record[1] == "bytes_in" && record[2] == "bytes_out" {
+			blocks = append(blocks, []Throughput{})
+			continue
+		}
+		if row, ok := parseNettopThroughputRow(record); ok && len(blocks) > 0 {
+			blocks[len(blocks)-1] = append(blocks[len(blocks)-1], row)
+		}
+	}
+	return blocks
 }
 
 func parseNettopThroughput(out string) []Throughput {

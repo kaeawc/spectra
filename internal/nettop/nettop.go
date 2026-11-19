@@ -1,7 +1,12 @@
-// Package nettop answers "who is using the network right now": it samples
-// per-process cumulative byte counters on fixed deadlines, turns consecutive
-// samples into per-interval deltas and rates, and ranks processes by the
-// bytes they moved over the window.
+// Package nettop answers "who is using the network right now": it measures
+// per-process bytes over consecutive intervals, turns them into per-interval
+// deltas and rates, and ranks processes by the bytes they moved over the
+// window.
+//
+// Two kinds of source feed it. A polled source (Linux ss) returns counters
+// that grow from the moment a socket opens, sampled on fixed deadlines and
+// diffed. A measuring source (macOS nettop in delta mode) runs for one
+// interval itself and returns what each process moved in it.
 package nettop
 
 import (
@@ -18,6 +23,7 @@ import (
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/netstate"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Bases name where the counters came from.
@@ -29,18 +35,24 @@ const (
 // MaxRemotes bounds the remote endpoints reported per process.
 const MaxRemotes = 3
 
+// measureSlack bounds how long one measuring run may overrun its interval
+// before it is killed and counted as failed.
+const measureSlack = 30 * time.Second
+
 var (
-	// ErrBadConfig reports a non-positive interval or duration.
-	ErrBadConfig = errors.New("interval and duration must be positive")
-	// ErrNoData reports that no sample produced any counters.
+	// ErrBadConfig reports a non-positive interval or duration, or a config
+	// with neither or both of Sample and Measure.
+	ErrBadConfig = errors.New("interval and duration must be positive and exactly one source set")
+	// ErrNoData reports that no sample or measurement succeeded.
 	ErrNoData = errors.New("no usable sample")
 	// ErrToolMissing reports that the sampling tool is not installed.
 	ErrToolMissing = errors.New("sampling tool not found")
 )
 
-// Counter is one cumulative counter pair from a sample. Socket is empty when
-// the source counts per process (nettop) and names the connection when it
-// counts per socket (ss), so a closed socket and a new one are never diffed.
+// Counter is one counter pair. From a Sampler it is cumulative; from a
+// Measurer it is the bytes moved during the interval. Socket is empty when
+// the source counts per process and names the connection when it counts per
+// socket (ss), so a closed socket and a new one are never diffed.
 type Counter struct {
 	PID int
 	// Start is the process start time (unix seconds) when the source knows
@@ -56,6 +68,10 @@ type Counter struct {
 // Sampler returns the current cumulative counters.
 type Sampler func(ctx context.Context) ([]Counter, error)
 
+// Measurer runs for interval and returns the bytes each process moved in it.
+// It must return promptly when ctx ends.
+type Measurer func(ctx context.Context, interval time.Duration) ([]Counter, error)
+
 // Tick is the host-wide rate over one interval, emitted as it is measured.
 type Tick struct {
 	ElapsedMS int64   `json:"elapsed_ms"`
@@ -65,9 +81,10 @@ type Tick struct {
 	Active    int     `json:"active_processes"`
 }
 
-// Config drives Run.
+// Config drives Run. Exactly one of Sample and Measure is set.
 type Config struct {
-	Sample Sampler
+	Sample  Sampler
+	Measure Measurer
 	// Tool names the sampling tool in errors.
 	Tool string
 	// Sleep waits d or until ctx ends, returning the context error then.
@@ -75,10 +92,6 @@ type Config struct {
 	Clock    clock.Clock
 	Interval time.Duration
 	Duration time.Duration
-	// Preexisting holds the pids alive before the baseline sample. A process
-	// absent from it started inside the window, so its whole counter counts
-	// on first appearance. Nil means unknown: first appearances count 0.
-	Preexisting map[int]bool
 	// Emit, if set, receives each interval's rate; EmitInclude, if set,
 	// limits which pids it sums.
 	Emit        func(Tick)
@@ -113,43 +126,53 @@ type Trace struct {
 	stamps   []time.Duration
 	procs    map[procKey]*procAcc
 	interval time.Duration
-	// Failed counts samples that errored or returned nothing.
+	// Failed counts samples or measurements that errored.
 	Failed int
 	// Skipped counts deadlines missed because a sample overran them.
 	Skipped int
 }
 
 type run struct {
-	cfg     Config
-	began   time.Time
-	tr      *Trace
+	cfg   Config
+	began time.Time
+	tr    *Trace
+	// last holds the previous sample's counters by diffKey.
 	last    map[sockKey]Counter
+	ok      int
 	lastErr error
 }
 
-// Run samples until Duration elapses on cfg.Clock or ctx ends. A cancelled
-// context ends the window early and still returns what was measured. It
-// fails when the tool is missing or no sample produced counters.
+// Run measures until Duration elapses on cfg.Clock or ctx ends. A cancelled
+// context ends the window early and still returns what was measured. A
+// sample that succeeds with no counters is a valid observation of an idle
+// host. Run fails when the tool is missing, or when no sample or
+// measurement succeeded.
 func Run(ctx context.Context, cfg Config) (*Trace, error) {
-	if cfg.Interval <= 0 || cfg.Duration <= 0 {
+	if cfg.Interval <= 0 || cfg.Duration <= 0 || (cfg.Sample == nil) == (cfg.Measure == nil) {
 		return nil, fmt.Errorf("nettop: %w", ErrBadConfig)
 	}
 	r := &run{
 		cfg: cfg, began: cfg.Clock.Now(), last: map[sockKey]Counter{},
 		tr: &Trace{procs: map[procKey]*procAcc{}, interval: cfg.Interval},
 	}
-	r.take(ctx)
-	if errors.Is(r.lastErr, ErrToolMissing) {
-		return nil, fmt.Errorf("%s: %w", cfg.Tool, r.lastErr)
+	if cfg.Measure != nil {
+		r.measureLoop(ctx)
+	} else if r.take(ctx); !errors.Is(r.lastErr, ErrToolMissing) {
+		r.loop(ctx)
 	}
-	r.loop(ctx)
-	if len(r.tr.stamps) == 0 {
-		if r.lastErr != nil {
-			return nil, fmt.Errorf("%w from %s in %d attempts: %w", ErrNoData, cfg.Tool, r.tr.Failed, r.lastErr)
-		}
-		return nil, fmt.Errorf("%w from %s in %d attempts (every sample was empty)", ErrNoData, cfg.Tool, r.tr.Failed)
+	return r.result()
+}
+
+func (r *run) result() (*Trace, error) {
+	switch {
+	case r.ok > 0:
+		return r.tr, nil
+	case errors.Is(r.lastErr, ErrToolMissing):
+		return nil, fmt.Errorf("%s: %w", r.cfg.Tool, r.lastErr)
+	case r.lastErr != nil:
+		return nil, fmt.Errorf("%w from %s in %d attempts: %w", ErrNoData, r.cfg.Tool, r.tr.Failed, r.lastErr)
 	}
-	return r.tr, nil
+	return nil, fmt.Errorf("%w from %s: stopped before the first interval completed", ErrNoData, r.cfg.Tool)
 }
 
 // loop samples at fixed deadlines (start + k×interval, the last clamped to
@@ -172,19 +195,49 @@ func (r *run) loop(ctx context.Context) {
 	}
 }
 
+// measureLoop runs the measurer back to back, each run covering one
+// interval (the last clamped to what remains of Duration), so the spans
+// tile the window. A run interrupted by ctx is dropped. A failed run still
+// takes its interval, so the cadence holds and its span counts no bytes.
+func (r *run) measureLoop(ctx context.Context) {
+	r.tr.stamps = append(r.tr.stamps, r.elapsed())
+	for planned := time.Duration(0); planned < r.cfg.Duration && ctx.Err() == nil; {
+		d := min(r.cfg.Interval, r.cfg.Duration-planned)
+		planned += d
+		start := r.elapsed()
+		cs, err := r.cfg.Measure(ctx, d)
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			r.ok++
+			r.recordSpan(cs, r.elapsed())
+			continue
+		}
+		r.tr.Failed++
+		r.lastErr = err
+		if errors.Is(err, ErrToolMissing) {
+			return
+		}
+		if wait := start + d - r.elapsed(); wait > 0 && r.cfg.Sleep(ctx, wait) != nil {
+			return
+		}
+		r.tr.stamps = append(r.tr.stamps, r.elapsed())
+	}
+}
+
 func (r *run) elapsed() time.Duration { return r.cfg.Clock.Now().Sub(r.began) }
 
 // take stamps the sample with the time its collection finished.
 func (r *run) take(ctx context.Context) {
 	cs, err := r.cfg.Sample(ctx)
 	at := r.elapsed()
-	if err != nil || len(cs) == 0 {
+	if err != nil {
 		r.tr.Failed++
-		if err != nil {
-			r.lastErr = err
-		}
+		r.lastErr = err
 		return
 	}
+	r.ok++
 	r.record(cs, at)
 }
 
@@ -199,53 +252,89 @@ func aggregate(cs []Counter) map[sockKey]Counter {
 	return cur
 }
 
+// diffKey is what a cumulative counter is diffed by: the socket alone when
+// the source names one (so a socket whose attribution moves to another pid
+// is not counted twice), else the process.
+func diffKey(k sockKey) sockKey {
+	if k.socket != "" {
+		return sockKey{socket: k.socket}
+	}
+	return k
+}
+
+// observe notes that the process was seen at stamp idx and returns its
+// accumulator.
+func (r *run) observe(k procKey, c Counter, idx int) *procAcc {
+	acc := r.tr.procs[k]
+	if acc == nil {
+		acc = &procAcc{first: idx, remoteIdx: -1}
+		r.tr.procs[k] = acc
+	}
+	acc.last = idx
+	if c.Command != "" {
+		acc.command = c.Command
+	}
+	acc.noteRemote(idx, c)
+	return acc
+}
+
+func (a *procAcc) add(span int, in, out int64) {
+	if in > 0 || out > 0 {
+		a.deltas = append(a.deltas, delta{span: span, in: in, out: out})
+	}
+}
+
+// record diffs a cumulative sample against the previous one.
 func (r *run) record(cs []Counter, at time.Duration) {
 	idx := len(r.tr.stamps)
 	r.tr.stamps = append(r.tr.stamps, at)
 	cur := aggregate(cs)
+	next := make(map[sockKey]Counter, len(cur))
 	for k, c := range cur {
-		acc := r.tr.procs[k.proc]
-		if acc == nil {
-			acc = &procAcc{first: idx, remoteIdx: -1}
-			r.tr.procs[k.proc] = acc
-		}
-		acc.last = idx
-		if c.Command != "" {
-			acc.command = c.Command
-		}
-		acc.noteRemote(idx, c)
-		if idx == 0 {
-			continue
-		}
-		din, dout := r.deltaFor(k, c)
-		if din > 0 || dout > 0 {
-			acc.deltas = append(acc.deltas, delta{span: idx - 1, in: din, out: dout})
+		acc := r.observe(k.proc, c, idx)
+		dk := diffKey(k)
+		next[dk] = c
+		if idx > 0 {
+			din, dout := r.deltaFor(dk, c)
+			acc.add(idx-1, din, dout)
 		}
 	}
-	r.last = cur
+	r.last = next
 	if idx > 0 && r.cfg.Emit != nil {
 		r.cfg.Emit(r.tick(idx - 1))
 	}
 }
 
-// deltaFor diffs c against the previous sample. A key not in the previous
-// sample counts in full only when its process started inside the window;
-// otherwise its bytes before now are unknowable and it contributes 0. A
-// counter that went backwards (reset, restart) contributes 0 for the interval.
+// recordSpan adds one measured interval ending at at. A process seen in it
+// counts as present at both of the span's stamps.
+func (r *run) recordSpan(cs []Counter, at time.Duration) {
+	idx := len(r.tr.stamps)
+	r.tr.stamps = append(r.tr.stamps, at)
+	for k, c := range aggregate(cs) {
+		acc := r.observe(k.proc, c, idx-1)
+		acc.last = idx
+		acc.add(idx-1, c.In, c.Out)
+	}
+	if r.cfg.Emit != nil {
+		r.cfg.Emit(r.tick(idx - 1))
+	}
+}
+
+// deltaFor diffs c against the previous sample. A counter first seen after
+// the baseline started at 0 when its socket (or process) was created, so its
+// whole value moved since then and counts in full. A counter that went
+// backwards belongs to a new socket reusing the key and counts in full too.
 func (r *run) deltaFor(k sockKey, c Counter) (int64, int64) {
 	prev, ok := r.last[k]
 	if !ok {
-		if r.cfg.Preexisting != nil && !r.cfg.Preexisting[k.proc.pid] {
-			return c.In, c.Out
-		}
-		return 0, 0
+		return c.In, c.Out
 	}
 	return grow(prev.In, c.In), grow(prev.Out, c.Out)
 }
 
 func grow(prev, cur int64) int64 {
 	if cur < prev {
-		return 0
+		return cur
 	}
 	return cur - prev
 }
@@ -483,35 +572,60 @@ func (t *Trace) PIDs() []int {
 
 // Limitations describes what a basis cannot see.
 func Limitations(basis string) []string {
-	common := "a process or socket first seen after the baseline sample counts 0 bytes for that first appearance unless its process started inside the window, and traffic of one that opens and closes between samples is missed"
 	switch basis {
 	case BasisNettop:
 		return []string{
 			"nettop -t external: loopback traffic is not counted",
-			common,
-			"nettop reports no start time, so a pid reused within the window is not distinguished; a counter that goes backwards counts 0 for that interval",
+			"each interval is one `nettop -d -L 2` run, which counts flows that open and close inside it, but bytes moved in the few milliseconds between runs are missed (about 3% of a steady transfer at a 1s interval)",
+			"nettop's delay is whole seconds, so --interval and --duration are rounded up to whole seconds",
+			"nettop reports no start time, so a pid reused within the window is merged with its predecessor",
 		}
 	case BasisSSTCP:
 		return []string{
 			"TCP only: UDP and QUIC traffic are not counted",
 			"sockets of other users are invisible without root",
 			"loopback sockets are not counted",
-			common,
+			"a socket first seen after the baseline sample counts its whole counter (ss counters start at 0 when the socket opens); a socket that opens and closes between samples is missed",
 			"bytes out is bytes_acked, so unacknowledged in-flight data is not counted; a socket shared by several processes is attributed to the lowest pid",
 		}
 	}
 	return nil
 }
 
-// SamplerFor returns the sampler, basis and tool name for kind.
-func SamplerFor(kind hostos.Kind, run netstate.CmdRunner) (Sampler, string, string, error) {
+// Source is where a basis's counters come from: exactly one of Sample and
+// Measure is set.
+type Source struct {
+	Basis   string
+	Tool    string
+	Sample  Sampler
+	Measure Measurer
+	// Step, if set, is the interval granularity the tool supports.
+	Step time.Duration
+}
+
+// Round rounds d up to a multiple of the source's Step.
+func (s Source) Round(d time.Duration) time.Duration {
+	if s.Step <= 0 || d <= 0 || d%s.Step == 0 {
+		return d
+	}
+	return (d/s.Step + 1) * s.Step
+}
+
+// Configure fills cfg's source fields from s.
+func (s Source) Configure(cfg *Config) {
+	cfg.Sample, cfg.Measure, cfg.Tool = s.Sample, s.Measure, s.Tool
+}
+
+// SourceFor returns the source for kind. run serves polled tools; r runs
+// the measuring tool, which must die with its context.
+func SourceFor(kind hostos.Kind, run netstate.CmdRunner, r proc.Runner) (Source, error) {
 	switch hostos.Resolve(kind) {
 	case hostos.Darwin:
-		return nettopSampler(run), BasisNettop, "nettop", nil
+		return Source{Basis: BasisNettop, Tool: "nettop", Measure: nettopMeasurer(r), Step: time.Second}, nil
 	case hostos.Linux:
-		return ssSampler(run), BasisSSTCP, "ss", nil
+		return Source{Basis: BasisSSTCP, Tool: "ss", Sample: ssSampler(run)}, nil
 	}
-	return nil, "", "", hostos.Unsupported("network top")
+	return Source{}, hostos.Unsupported("network top")
 }
 
 func toolErr(err error) error {
@@ -521,15 +635,17 @@ func toolErr(err error) error {
 	return err
 }
 
-func nettopSampler(run netstate.CmdRunner) Sampler {
-	return func(context.Context) ([]Counter, error) {
-		rows, err := netstate.CollectProcessBytes(run)
+func nettopMeasurer(r proc.Runner) Measurer {
+	return func(ctx context.Context, interval time.Duration) ([]Counter, error) {
+		ctx, cancel := context.WithTimeout(ctx, interval+measureSlack)
+		defer cancel()
+		rows, err := netstate.CollectProcessBytes(ctx, r, interval)
 		if err != nil {
 			return nil, toolErr(err)
 		}
 		cs := make([]Counter, 0, len(rows))
-		for _, r := range rows {
-			cs = append(cs, Counter{PID: r.PID, Command: r.Command, In: r.BytesIn, Out: r.BytesOut})
+		for _, row := range rows {
+			cs = append(cs, Counter{PID: row.PID, Command: row.Command, In: row.BytesIn, Out: row.BytesOut})
 		}
 		return cs, nil
 	}

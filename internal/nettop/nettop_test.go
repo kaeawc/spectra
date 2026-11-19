@@ -93,22 +93,49 @@ func TestSteadySender(t *testing.T) {
 
 func TestAppearsMidWindow(t *testing.T) {
 	steps := []step{at(c(10, 0, 0)), at(c(10, 0, 10), c(20, 500, 500)), at(c(10, 0, 20), c(20, 600, 600))}
-
 	rep := Summarize(runScript(t, newScript(steps...).config(time.Second, 2*time.Second)), nil, 0)
 	p := findProc(rep, 20)
-	if p == nil || p.BytesIn != 100 || p.BytesOut != 100 || !p.Appeared {
-		t.Fatalf("unknown-start newcomer = %+v, want only its second interval counted", p)
+	if p == nil || p.BytesIn != 600 || p.BytesOut != 600 || p.PeakInRate != 500 || !p.Appeared {
+		t.Fatalf("newcomer = %+v, want its whole counter (it started at 0)", p)
 	}
 	if len(rep.Appeared) != 1 || rep.Appeared[0].PID != 20 {
 		t.Errorf("appeared = %+v", rep.Appeared)
 	}
+}
 
-	s := newScript(steps...)
-	cfg := s.config(time.Second, 2*time.Second)
-	cfg.Preexisting = map[int]bool{10: true}
-	rep = Summarize(runScript(t, cfg), nil, 0)
-	if p := findProc(rep, 20); p == nil || p.BytesIn != 600 || p.PeakInRate != 500 {
-		t.Fatalf("process born in window = %+v, want its whole counter", p)
+// ss counters start at 0 when a socket opens: a socket first seen after the
+// baseline counts in full, one present in the baseline only by its growth.
+func TestLinuxFirstSeenSocketCountsFully(t *testing.T) {
+	sock := func(name string, in, out int64) Counter {
+		return Counter{PID: 7, Command: "git", Socket: name, Remote: name, In: in, Out: out}
+	}
+	s := newScript(
+		at(sock("old", 10_000, 1_000)),
+		at(sock("old", 10_500, 1_100), sock("new", 4_000, 40)),
+		at(sock("old", 10_700, 1_100), sock("new", 4_500, 50)),
+	)
+	rep := Summarize(runScript(t, s.config(time.Second, 2*time.Second)), nil, 0)
+	p := findProc(rep, 7)
+	if p == nil || p.BytesIn != 700+4_500 || p.BytesOut != 100+50 {
+		t.Fatalf("process = %+v, want baseline socket's growth (700/100) plus the new socket's whole counter (4500/50)", p)
+	}
+	if p.Appeared {
+		t.Errorf("a new socket of a known process is not a new process: %+v", p)
+	}
+}
+
+func TestSharedSocketReattributedIsNotDoubleCounted(t *testing.T) {
+	s := newScript(
+		at(Counter{PID: 5, Socket: "s", In: 1000}),
+		at(Counter{PID: 5, Socket: "s", In: 1200}),
+		at(Counter{PID: 9, Socket: "s", In: 1500}), // pid 5 exited; ss now names 9
+	)
+	rep := Summarize(runScript(t, s.config(time.Second, 2*time.Second)), nil, 0)
+	if rep.Totals.BytesIn != 500 {
+		t.Fatalf("totals = %+v, want 200 + 300", rep.Totals)
+	}
+	if p := findProc(rep, 9); p == nil || p.BytesIn != 300 {
+		t.Errorf("new owner = %+v, want only the growth", p)
 	}
 }
 
@@ -130,8 +157,8 @@ func TestDisappearsMidWindow(t *testing.T) {
 func TestCounterReset(t *testing.T) {
 	s := newScript(at(c(10, 1000, 0)), at(c(10, 2000, 0)), at(c(10, 100, 0)), at(c(10, 300, 0)))
 	rep := Summarize(runScript(t, s.config(time.Second, 3*time.Second)), nil, 0)
-	if p := findProc(rep, 10); p == nil || p.BytesIn != 1200 {
-		t.Fatalf("reset process = %+v, want 1000 + 0 + 200", p)
+	if p := findProc(rep, 10); p == nil || p.BytesIn != 1300 {
+		t.Fatalf("reset process = %+v, want 1000 + 100 (counted from 0) + 200", p)
 	}
 }
 
@@ -212,16 +239,16 @@ func TestSocketKeysNotDiffedAcrossSockets(t *testing.T) {
 	sock := func(name string, in int64) Counter { return Counter{PID: 5, Command: "curl", Socket: name, In: in} }
 	s := newScript(at(sock("a", 100)), at(sock("a", 150)), at(sock("b", 9000)), at(sock("b", 9100)))
 	rep := Summarize(runScript(t, s.config(time.Second, 3*time.Second)), nil, 0)
-	if p := findProc(rep, 5); p == nil || p.BytesIn != 150 {
-		t.Fatalf("process = %+v, want 50 (a) + 0 (b first seen) + 100 (b)", p)
+	if p := findProc(rep, 5); p == nil || p.BytesIn != 9150 {
+		t.Fatalf("process = %+v, want 50 (a) + 9000 (b first seen) + 100 (b)", p)
 	}
 }
 
 func TestStartTimeDistinguishesReusedPID(t *testing.T) {
 	s := newScript(at(Counter{PID: 7, Start: 100, In: 500}), at(Counter{PID: 7, Start: 200, In: 900}))
 	rep := Summarize(runScript(t, s.config(time.Second, time.Second)), nil, 0)
-	if rep.Totals.BytesIn != 0 {
-		t.Fatalf("reused pid diffed against its predecessor: %+v", rep.Totals)
+	if rep.Totals.BytesIn != 900 {
+		t.Fatalf("totals = %+v, want the new process's own 900, not 400 diffed against its predecessor", rep.Totals)
 	}
 }
 
@@ -262,15 +289,22 @@ func TestToolMissingFailsFast(t *testing.T) {
 	}
 }
 
-func TestEverySampleEmpty(t *testing.T) {
+func TestIdleHostIsNotAnError(t *testing.T) {
 	s := newScript(step{})
-	_, err := Run(context.Background(), s.config(time.Second, 3*time.Second))
-	if !errors.Is(err, ErrNoData) || !strings.Contains(err.Error(), "nettop") || !strings.Contains(err.Error(), "empty") {
-		t.Fatalf("err = %v", err)
+	tr, err := Run(context.Background(), s.config(time.Second, 3*time.Second))
+	if err != nil {
+		t.Fatalf("empty samples are a valid idle observation: %v", err)
 	}
-	s = newScript(step{err: errors.New("boom")})
-	_, err = Run(context.Background(), s.config(time.Second, 2*time.Second))
-	if !errors.Is(err, ErrNoData) || !strings.Contains(err.Error(), "boom") {
+	rep := Summarize(tr, nil, 0)
+	if rep.Samples != 4 || rep.SamplesFailed != 0 || len(rep.Processes) != 0 || rep.DurationMS != 3000 {
+		t.Fatalf("report = %+v", rep)
+	}
+}
+
+func TestEverySampleFailed(t *testing.T) {
+	s := newScript(step{err: errors.New("boom")})
+	_, err := Run(context.Background(), s.config(time.Second, 2*time.Second))
+	if !errors.Is(err, ErrNoData) || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "3 attempts") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -290,6 +324,15 @@ func TestBadConfig(t *testing.T) {
 	s := newScript(at(c(1, 0, 0)))
 	if _, err := Run(context.Background(), s.config(0, time.Second)); !errors.Is(err, ErrBadConfig) {
 		t.Fatalf("err = %v", err)
+	}
+	both := s.config(time.Second, time.Second)
+	both.Measure = func(context.Context, time.Duration) ([]Counter, error) { return nil, nil }
+	if _, err := Run(context.Background(), both); !errors.Is(err, ErrBadConfig) {
+		t.Fatalf("both sources: err = %v", err)
+	}
+	both.Sample, both.Measure = nil, nil
+	if _, err := Run(context.Background(), both); !errors.Is(err, ErrBadConfig) {
+		t.Fatalf("no source: err = %v", err)
 	}
 }
 
@@ -312,28 +355,6 @@ func TestRemotesKeptFromLatestSample(t *testing.T) {
 	}
 }
 
-const nettopSample = `,bytes_in,bytes_out,
-apsd.376,5670,23348,
-mDNSResponder.519,52768938,11854128,
-`
-
-func TestSamplerForDarwin(t *testing.T) {
-	run := func(name string, _ ...string) ([]byte, error) {
-		if name != "nettop" {
-			return nil, errors.New("unexpected " + name)
-		}
-		return []byte(nettopSample), nil
-	}
-	sample, basis, tool, err := SamplerFor(hostos.Darwin, run)
-	if err != nil || basis != BasisNettop || tool != "nettop" {
-		t.Fatalf("basis=%q tool=%q err=%v", basis, tool, err)
-	}
-	cs, err := sample(context.Background())
-	if err != nil || len(cs) != 2 || cs[1].PID != 519 || cs[1].In != 52768938 || cs[1].Socket != "" {
-		t.Fatalf("counters = %+v err = %v", cs, err)
-	}
-}
-
 const ssSample = `ESTAB 0 0 192.168.1.10:51000 140.82.112.3:443 users:(("git-remote-http",pid=4242,fd=5))
 	 cubic bytes_acked:1200 bytes_received:98000
 ESTAB 0 0 127.0.0.1:5432 127.0.0.1:41000 users:(("psql",pid=50,fd=3))
@@ -351,11 +372,11 @@ func TestSamplerForLinux(t *testing.T) {
 		}
 		return []byte(ssSample), nil
 	}
-	sample, basis, tool, err := SamplerFor(hostos.Linux, run)
-	if err != nil || basis != BasisSSTCP || tool != "ss" {
-		t.Fatalf("basis=%q tool=%q err=%v", basis, tool, err)
+	src, err := SourceFor(hostos.Linux, run, nil)
+	if err != nil || src.Basis != BasisSSTCP || src.Tool != "ss" || src.Sample == nil || src.Measure != nil || src.Step != 0 {
+		t.Fatalf("source = %+v err = %v", src, err)
 	}
-	cs, err := sample(context.Background())
+	cs, err := src.Sample(context.Background())
 	if err != nil || len(cs) != 2 {
 		t.Fatalf("counters = %+v err = %v, want loopback sockets dropped", cs, err)
 	}
@@ -371,8 +392,8 @@ func TestSamplerMissingTool(t *testing.T) {
 	run := func(name string, _ ...string) ([]byte, error) {
 		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
 	}
-	sample, _, _, _ := SamplerFor(hostos.Linux, run)
-	if _, err := sample(context.Background()); !errors.Is(err, ErrToolMissing) || !strings.Contains(err.Error(), "ss") {
+	src, _ := SourceFor(hostos.Linux, run, nil)
+	if _, err := src.Sample(context.Background()); !errors.Is(err, ErrToolMissing) || !strings.Contains(err.Error(), "ss") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -392,7 +413,10 @@ func TestLimitations(t *testing.T) {
 	if l := Limitations(BasisSSTCP); len(l) == 0 || !strings.Contains(strings.Join(l, " "), "TCP only") || !strings.Contains(strings.Join(l, " "), "root") {
 		t.Errorf("ss limitations = %v", l)
 	}
-	if l := Limitations(BasisNettop); len(l) == 0 {
-		t.Error("nettop limitations empty")
+	if l := strings.Join(Limitations(BasisNettop), " "); !strings.Contains(l, "whole seconds") || !strings.Contains(l, "between runs") {
+		t.Errorf("nettop limitations = %v", l)
+	}
+	if l := strings.Join(Limitations(BasisSSTCP), " "); !strings.Contains(l, "first seen after the baseline sample counts its whole counter") {
+		t.Errorf("ss limitations = %v", l)
 	}
 }
