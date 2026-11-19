@@ -15,6 +15,19 @@ import (
 // pure helpers below for testability.
 const linuxClkTck int64 = 100
 
+// LinuxClkTck is linuxClkTck for callers that diff cumulative CPU ticks.
+const LinuxClkTck = linuxClkTck
+
+// ParseLinuxCPUTimes returns utime+stime and the start time of a
+// /proc/<pid>/stat line, both in clock ticks.
+func ParseLinuxCPUTimes(data []byte) (cpuTicks, startTicks int64, ok bool) {
+	st, ok := parseLinuxStat(data)
+	if !ok {
+		return 0, 0, false
+	}
+	return st.utimeTicks + st.stimeTicks, st.starttimeTicks, true
+}
+
 // collectLinuxProcs reads running processes from a procfs rooted at root
 // (normally "/proc"). It is pure Go and root-injectable so the parsing is
 // testable on any host against a fixture tree. Individual unreadable
