@@ -242,6 +242,42 @@ func TestWatchCounterIncreaseIsThrottled(t *testing.T) {
 	}
 }
 
+func TestWatchKeepsIncreaseWhenCounterBecomesUnreadable(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	sleeps := 0
+	c := &Collector{OS: hostos.Linux, FS: counterFS(3), Clock: clk}
+	c.Sleep = func(_ context.Context, d time.Duration) error {
+		sleeps++
+		clk.Advance(d)
+		switch sleeps {
+		case 1:
+			c.FS = counterFS(5)
+		case 2:
+			c.FS = fstest.MapFS{"sys/class/thermal/thermal_zone0/temp": {Data: []byte("40000")}}
+		}
+		return nil
+	}
+	w, err := c.Watch(context.Background(), 4*time.Second, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Verdict != Throttled || len(w.CounterIncreases) != 1 || w.CounterIncreases[0].From != 3 || w.CounterIncreases[0].To != 5 {
+		t.Fatalf("got %s %+v", w.Verdict, w.CounterIncreases)
+	}
+}
+
+func TestCoolCappedCPUEvidenceDoesNotDenyCap(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sys/class/thermal/thermal_zone0/temp":                 {Data: []byte("40000")},
+		"sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq": {Data: []byte("1200000")},
+		"sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq": {Data: []byte("3600000")},
+	}
+	r, _ := (&Collector{OS: hostos.Linux, FS: fsys}).Collect(context.Background())
+	if r.Verdict != Nominal || len(r.FreqCaps) != 1 || strings.Contains(r.Evidence, "no CPU frequency cap") {
+		t.Fatalf("got %s %q %+v", r.Verdict, r.Evidence, r.FreqCaps)
+	}
+}
+
 func TestWatchReportsWorstVerdictAndSteadyCounter(t *testing.T) {
 	clk := clock.NewFake(time.Unix(0, 0))
 	c := &Collector{OS: hostos.Linux, FS: counterFS(3), Clock: clk}

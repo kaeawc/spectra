@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -113,5 +114,17 @@ func TestThermalUsageAndErrorExits(t *testing.T) {
 	c := &thermal.Collector{OS: hostos.Darwin, Runner: proc.NewFake()}
 	if code := runThermalWithIO(context.Background(), nil, &out, &errb, c); code != 1 {
 		t.Errorf("runner error: exit = %d, want 1", code)
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestThermalTextWriteErrorExitsOne(t *testing.T) {
+	var stderr bytes.Buffer
+	code := runThermalWithIO(context.Background(), nil, failWriter{}, &stderr, linuxZone("40000"))
+	if code != 1 || !strings.Contains(stderr.String(), "thermal: write output: disk full") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 }

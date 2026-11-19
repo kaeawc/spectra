@@ -77,7 +77,7 @@ func (c *Collector) collectLinux() Report {
 		}
 	}
 	sort.Strings(r.Notes)
-	r.decide("no thermal zone near a trip point and no CPU frequency cap")
+	r.decide("no deciding thermal-throttling signal found (no thermal zone near a trip point, no throttle counter)")
 	return r
 }
 
@@ -207,12 +207,36 @@ func readThrottleCounts(fsys fs.FS) map[string]int64 {
 	return out
 }
 
-func counterIncreases(first, last map[string]int64) []CounterIncrease {
-	var out []CounterIncrease
-	for p, to := range last {
-		if from, ok := first[p]; ok && to > from {
-			out = append(out, CounterIncrease{Path: p, From: from, To: to})
+// counterTracker accumulates throttle-counter increases between consecutive
+// readable observations, so a counter that later becomes unreadable keeps the
+// increase already seen.
+type counterTracker struct {
+	prev map[string]int64
+	inc  map[string]*CounterIncrease
+}
+
+func newCounterTracker(first map[string]int64) *counterTracker {
+	t := &counterTracker{prev: map[string]int64{}, inc: map[string]*CounterIncrease{}}
+	t.observe(first)
+	return t
+}
+
+func (t *counterTracker) observe(cur map[string]int64) {
+	for p, n := range cur {
+		if from, ok := t.prev[p]; ok && n > from {
+			if t.inc[p] == nil {
+				t.inc[p] = &CounterIncrease{Path: p, From: from}
+			}
+			t.inc[p].To = n
 		}
+		t.prev[p] = n
+	}
+}
+
+func (t *counterTracker) increases() []CounterIncrease {
+	var out []CounterIncrease
+	for _, v := range t.inc {
+		out = append(out, *v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out

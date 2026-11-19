@@ -206,7 +206,8 @@ func (c *Collector) Watch(ctx context.Context, duration, interval time.Duration)
 	if err != nil {
 		return WatchReport{}, err
 	}
-	worst, last := first, first
+	worst := first
+	tracker := newCounterTracker(first.Counters)
 	samples := 1
 	start := c.clk().Now()
 	for {
@@ -226,13 +227,13 @@ func (c *Collector) Watch(ctx context.Context, duration, interval time.Duration)
 			return WatchReport{}, err
 		}
 		samples++
-		last = cur
+		tracker.observe(cur.Counters)
 		if severity(cur.Verdict) > severity(worst.Verdict) {
 			worst = cur
 		}
 	}
 	out := WatchReport{Report: worst, Samples: samples}
-	out.CounterIncreases = counterIncreases(first.Counters, last.Counters)
+	out.CounterIncreases = tracker.increases()
 	if len(out.CounterIncreases) > 0 {
 		inc := out.CounterIncreases[0]
 		ev := fmt.Sprintf("%s rose %d -> %d during watch", inc.Path, inc.From, inc.To)
