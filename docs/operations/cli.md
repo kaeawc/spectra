@@ -24,6 +24,16 @@ already-visited directories, lists skipped mounts in `skipped`, and prints a
 partial result (`partial: true`) on interrupt. Paths are reported under the
 path as typed.
 
+`spectra fswatch <path> [--duration 30s] [--interval 1s] [--top 10] [--max-entries N] [--json]`
+answers "what keeps writing here?" by snapshotting the tree under a path each
+interval and streaming created, modified and removed events, then summarizing
+counts by kind and the busiest files and directories, naming the processes
+that hold each busiest surviving file open when the watch ends. It is a
+polling watcher: files that appear and vanish between polls are missed and
+several writes within one interval count once. It never follows symlinks,
+reports truncation past `--max-entries` (default 200000), and on Ctrl-C prints
+the summary with the actual elapsed time. `--json` emits one object at the end.
+
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
