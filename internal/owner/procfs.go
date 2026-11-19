@@ -41,14 +41,17 @@ type pathMatcher struct {
 	// rel holds "socket:[inode]" links of sockets bound to a relative name
 	// whose base name equals the queried one, mapped to that name.
 	rel map[string]string
-	// relHits collects the distinct relative-bound sockets accepted so far;
-	// the map is shared across the per-process copies of the matcher.
-	relHits map[string]bool
+	// relHits collects the distinct processes accepted through a relative-bound
+	// socket; one process holding several such sockets (a listener plus its
+	// accepted connections) is a single candidate. The map is shared across
+	// the per-process copies of the matcher.
+	relHits map[int]bool
 	dir     string // /proc/<pid> of the process being scanned
+	pid     int
 }
 
 func newPathMatcher(fsys FS, procfs string, paths []string) pathMatcher {
-	m := pathMatcher{fsys: fsys, paths: paths, relHits: map[string]bool{}}
+	m := pathMatcher{fsys: fsys, paths: paths, relHits: map[int]bool{}}
 	m.socks, m.rel = unixSocketLinks(fsys, procfs, paths)
 	if len(paths) > 0 {
 		if fi, err := fsys.Stat(paths[0]); err == nil {
@@ -136,7 +139,7 @@ func (m pathMatcher) matchesLink(link string) (matched, denied bool) {
 	if name, ok := m.rel[t]; ok {
 		ok, denied := m.relativeSocketMatches(name)
 		if ok {
-			m.relHits[t] = true
+			m.relHits[m.pid] = true
 		}
 		return ok, denied
 	}
@@ -194,8 +197,8 @@ func (m pathMatcher) matchesTarget(link, t string) bool {
 
 // procPathHolders scans procfs for processes holding path as an fd, cwd or
 // executable. denied is true when some process could not be inspected;
-// ambiguous is true when more than one distinct relative-bound socket was
-// accepted by working directory, so at most one of them is the real holder.
+// ambiguous is true when more than one process was accepted through a
+// relative-bound socket by working directory, so at most one of them is the real holder.
 func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, denied, ambiguous bool) {
 	entries, err := fsys.ReadDir(procfs)
 	if err != nil {
@@ -215,7 +218,7 @@ func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, d
 }
 
 func procPidHolders(m pathMatcher, dir string, pid int) (holders []Holder, denied bool) {
-	m.dir = dir
+	m.dir, m.pid = dir, pid
 	if m.matches(filepath.Join(dir, "cwd")) {
 		holders = append(holders, Holder{PID: pid, Hold: HoldCwd})
 	}
