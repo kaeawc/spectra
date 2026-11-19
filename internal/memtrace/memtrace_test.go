@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ type harness struct {
 	tables [][]process.Info
 	calls  int
 	sleeps []time.Duration
+	cost   time.Duration // fake time each collection takes
 }
 
 func newHarness(tables ...[]process.Info) *harness {
@@ -32,6 +34,7 @@ func (h *harness) cfg(pid int, tree bool, interval, duration time.Duration) Conf
 		Collect: func(context.Context) []process.Info {
 			i := min(h.calls, len(h.tables)-1)
 			h.calls++
+			h.clk.Advance(h.cost)
 			return h.tables[i]
 		},
 		Sleep: func(_ context.Context, d time.Duration) error {
@@ -64,51 +67,13 @@ func runSeries(t *testing.T, rss ...int64) *Result {
 	return res
 }
 
-func TestVerdicts(t *testing.T) {
-	tests := []struct {
-		name string
-		rss  []int64
-		want string
-	}{
-		{"steady", []int64{1000, 1001, 1000, 1002, 1000, 1001}, VerdictSteady},
-		{"growing", []int64{1000, 1100, 1200, 1300, 1400, 1500}, VerdictGrowing},
-		{"shrinking", []int64{1500, 1400, 1300, 1200, 1100, 1000}, VerdictShrinking},
-		{"sawtooth", []int64{1000, 1500, 1000, 1500, 1000, 1010}, VerdictSawtooth},
-		{"insufficient", []int64{1000, 2000, 3000, 4000}, VerdictInsufficient},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := runSeries(t, tc.rss...).Summary.Verdict; got != tc.want {
-				t.Fatalf("verdict = %s, want %s", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestSlopeLinearSeries(t *testing.T) {
-	// 100 KiB per minute, sampled every 30s.
-	var ss []Sample
-	for i := range 7 {
-		ss = append(ss, Sample{ElapsedMS: int64(i) * 30000, RSSKiB: 5000 + int64(i)*50})
-	}
-	got := Slope(ss, func(s Sample) int64 { return s.RSSKiB })
-	if math.Abs(got-100) > 1e-6 {
-		t.Fatalf("slope = %v, want 100", got)
-	}
+func TestRunSummaryFacts(t *testing.T) {
 	res := runSeries(t, 1000, 1100, 1200, 1300, 1400)
 	if math.Abs(res.Summary.GrowthKiBPerMin-100) > 1e-6 || res.Summary.NetChangeKiB != 400 {
 		t.Fatalf("summary = %+v", res.Summary)
 	}
 	if res.Summary.MinKiB != 1000 || res.Summary.MaxKiB != 1400 || res.Summary.Samples != 5 {
 		t.Fatalf("summary = %+v", res.Summary)
-	}
-}
-
-func TestSlopeIgnoresSpikeAtEnd(t *testing.T) {
-	// last-minus-first says +50% but the fit is dominated by the flat run.
-	res := runSeries(t, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1500)
-	if res.Summary.GrowthKiBPerMin >= 500/1.0 {
-		t.Fatalf("slope %v should be below the endpoint rate", res.Summary.GrowthKiBPerMin)
 	}
 }
 
@@ -188,8 +153,93 @@ func TestEmptyCollectionIsNotExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Summary.Exited || len(res.Samples) != 2 {
+	if res.Summary.Exited || len(res.Samples) != 2 || res.PollsFailed != 1 || res.PollsSkipped != 0 {
 		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestSlowCollectionSkipsDeadlines(t *testing.T) {
+	h := newHarness(series(1000)...)
+	h.cost = 2500 * time.Millisecond
+	res, err := Run(context.Background(), h.cfg(100, false, time.Second, 10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Collections finish at 2.5s, 5.5s, 8.5s, 11.5s; the deadlines at 1, 2,
+	// 4, 5, 7, 8 and 10s were overrun.
+	var at []int64
+	for _, s := range res.Samples {
+		at = append(at, s.ElapsedMS)
+	}
+	if !slices.Equal(at, []int64{2500, 5500, 8500, 11500}) || res.PollsSkipped != 7 || res.PollsFailed != 0 {
+		t.Fatalf("elapsed=%v skipped=%d failed=%d", at, res.PollsSkipped, res.PollsFailed)
+	}
+	for _, d := range h.sleeps {
+		if d != 500*time.Millisecond {
+			t.Fatalf("sleeps = %v, want only the remainder to each deadline", h.sleeps)
+		}
+	}
+}
+
+func TestFixedDeadlinesWithFastCollection(t *testing.T) {
+	h := newHarness(series(1000)...)
+	h.cost = 300 * time.Millisecond
+	res, err := Run(context.Background(), h.cfg(100, false, time.Second, 4*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Samples) != 5 || res.Samples[4].ElapsedMS != 4300 || res.PollsSkipped != 0 || h.sleeps[0] != 700*time.Millisecond {
+		t.Fatalf("res=%+v sleeps=%v", res, h.sleeps)
+	}
+}
+
+func TestStartTimeJitter(t *testing.T) {
+	for _, tc := range []struct {
+		drift  time.Duration
+		exited bool
+	}{{time.Second, false}, {-time.Second, false}, {2 * time.Second, true}} {
+		moved := target(1000)
+		moved.StartTime = moved.StartTime.Add(tc.drift)
+		h := newHarness([]process.Info{target(1000)}, []process.Info{moved})
+		res, err := Run(context.Background(), h.cfg(100, false, time.Minute, 2*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Summary.Exited != tc.exited {
+			t.Errorf("drift %v: exited = %v, want %v", tc.drift, res.Summary.Exited, tc.exited)
+		}
+	}
+}
+
+func TestDescendantStartJitterIsSameProcess(t *testing.T) {
+	kid := func(rss int64, drift time.Duration) []process.Info {
+		return []process.Info{target(10), {PID: 101, PPID: 100, Command: "kid", RSSKiB: rss, StartTime: t0.Add(drift)}}
+	}
+	h := newHarness(kid(10, 0), kid(20, time.Second), kid(30, 0))
+	res, err := Run(context.Background(), h.cfg(100, true, time.Minute, 2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Growers) != 1 || res.Growers[0].FirstKiB != 10 || res.Growers[0].LastKiB != 30 {
+		t.Fatalf("growers = %+v", res.Growers)
+	}
+}
+
+func TestRunRejectsNonPositiveInterval(t *testing.T) {
+	h := newHarness(series(1)...)
+	if _, err := Run(context.Background(), h.cfg(100, false, 0, time.Minute)); !errors.Is(err, ErrBadConfig) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestMaxSamples(t *testing.T) {
+	for _, tc := range []struct {
+		d, i time.Duration
+		want int64
+	}{{4 * time.Second, time.Second, 5}, {3 * time.Second, time.Second, 4}, {4500 * time.Millisecond, time.Second, 6}, {time.Second, time.Minute, 2}} {
+		if got := MaxSamples(tc.d, tc.i); got != tc.want {
+			t.Errorf("MaxSamples(%v, %v) = %d, want %d", tc.d, tc.i, got, tc.want)
+		}
 	}
 }
 

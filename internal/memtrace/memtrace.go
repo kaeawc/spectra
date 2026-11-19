@@ -22,6 +22,7 @@ const (
 	VerdictShrinking    = "shrinking"
 	VerdictSawtooth     = "sawtooth"
 	VerdictInsufficient = "insufficient"
+	VerdictUnreadable   = "unreadable"
 )
 
 const (
@@ -29,13 +30,13 @@ const (
 	MinSamples = 5
 	// MaxGrowers bounds the descendant growth list.
 	MaxGrowers = 5
-
-	changeFrac = 0.05 // net change that counts as growth or shrinkage
-	rangeFrac  = 0.20 // min-to-max range, relative to the mean, that counts as sawtooth
 )
 
 // ErrNotFound reports that the target pid was not in the first process table.
 var ErrNotFound = errors.New("no such process")
+
+// ErrBadConfig reports a non-positive interval or duration.
+var ErrBadConfig = errors.New("interval and duration must be positive")
 
 // Sample is one poll of the target.
 type Sample struct {
@@ -55,10 +56,13 @@ type Summary struct {
 	NetChangeKiB     int64   `json:"net_change_kib"`
 	GrowthKiBPerMin  float64 `json:"growth_kib_per_min"`
 	Verdict          string  `json:"verdict"`
+	Pattern          string  `json:"pattern,omitempty"`
 	Exited           bool    `json:"exited,omitempty"`
 	SubtreeFirstKiB  int64   `json:"subtree_first_kib,omitempty"`
 	SubtreeLastKiB   int64   `json:"subtree_last_kib,omitempty"`
 	SubtreeGrowthMin float64 `json:"subtree_growth_kib_per_min,omitempty"`
+	SubtreeVerdict   string  `json:"subtree_verdict,omitempty"`
+	SubtreePattern   string  `json:"subtree_pattern,omitempty"`
 }
 
 // Grower is a descendant whose RSS grew over the trace.
@@ -78,8 +82,12 @@ type Result struct {
 	DurationMS int64    `json:"duration_ms"`
 	IntervalMS int64    `json:"interval_ms"`
 	Samples    []Sample `json:"samples"`
-	Summary    Summary  `json:"summary"`
-	Growers    []Grower `json:"growers"`
+	// PollsFailed counts collections that returned no process table.
+	PollsFailed int `json:"polls_failed"`
+	// PollsSkipped counts deadlines missed because a collection overran them.
+	PollsSkipped int      `json:"polls_skipped"`
+	Summary      Summary  `json:"summary"`
+	Growers      []Grower `json:"growers"`
 }
 
 // Config drives Run.
@@ -111,6 +119,29 @@ func idOf(p process.Info) identity {
 	return id
 }
 
+// same tolerates 1s of start-time drift: Linux derives start time from
+// /proc/stat btime, which shifts by a second after a clock step.
+func (a identity) same(b identity) bool {
+	if a.pid != b.pid || (a.start == 0) != (b.start == 0) {
+		return false
+	}
+	d := a.start - b.start
+	return d >= -1 && d <= 1
+}
+
+// MaxSamples is the most samples a trace of duration at interval can take:
+// the first poll plus one per deadline, the last clamped to duration.
+func MaxSamples(duration, interval time.Duration) int64 {
+	if duration <= 0 || interval <= 0 {
+		return 1
+	}
+	n := int64(duration / interval)
+	if duration%interval != 0 {
+		n++
+	}
+	return n + 1
+}
+
 type growth struct {
 	command     string
 	first, last int64
@@ -131,6 +162,9 @@ type tracer struct {
 // exits, or ctx ends. It returns ErrNotFound if the target is absent from the
 // first process table.
 func Run(ctx context.Context, cfg Config) (*Result, error) {
+	if cfg.Interval <= 0 || cfg.Duration <= 0 {
+		return nil, fmt.Errorf("memtrace: %w", ErrBadConfig)
+	}
 	t := &tracer{
 		cfg: cfg, desc: map[identity]*growth{}, began: cfg.Clock.Now(),
 		res: &Result{PID: cfg.PID, Tree: cfg.Tree, IntervalMS: cfg.Interval.Milliseconds(), Samples: []Sample{}, Growers: []Grower{}},
@@ -143,15 +177,25 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	return t.res, nil
 }
 
-// loop polls until the deadline, the target's exit, or cancellation; a
-// cancelled sleep ends the trace normally so the summary still prints.
+// loop polls at fixed deadlines (start + k×interval, the last clamped to
+// Duration) until the end, the target's exit, or cancellation, sleeping only
+// the remainder so a slow collection does not stretch the cadence. Deadlines a
+// collection overran are skipped and counted. A cancelled sleep ends the trace
+// normally so the summary still prints.
 func (t *tracer) loop(ctx context.Context) {
-	for !t.exited && t.elapsed() < t.cfg.Duration {
-		remaining := t.cfg.Duration - t.elapsed()
-		if t.cfg.Sleep(ctx, min(t.cfg.Interval, remaining)) != nil || ctx.Err() != nil {
+	for k := time.Duration(1); !t.exited; k++ {
+		due := min(k*t.cfg.Interval, t.cfg.Duration)
+		if wait := due - t.elapsed(); wait < 0 {
+			t.res.PollsSkipped++
+		} else {
+			if wait > 0 && (t.cfg.Sleep(ctx, wait) != nil || ctx.Err() != nil) {
+				return
+			}
+			t.poll(ctx)
+		}
+		if due >= t.cfg.Duration {
 			return
 		}
-		t.poll(ctx)
 	}
 }
 
@@ -168,17 +212,18 @@ func (t *tracer) start(ctx context.Context) error {
 	if !found {
 		return fmt.Errorf("pid %d: %w", t.cfg.PID, ErrNotFound)
 	}
-	t.observe(procs, 0)
+	t.observe(procs, t.elapsed())
 	return nil
 }
 
+// poll stamps the sample with the time the collection finished.
 func (t *tracer) poll(ctx context.Context) {
-	at := t.elapsed()
 	procs := t.cfg.Collect(ctx)
 	if len(procs) == 0 {
-		return // failed collection, not an exit
+		t.res.PollsFailed++ // failed collection, not an exit
+		return
 	}
-	t.observe(procs, at)
+	t.observe(procs, t.elapsed())
 }
 
 func (t *tracer) observe(procs []process.Info, at time.Duration) {
@@ -188,7 +233,7 @@ func (t *tracer) observe(procs []process.Info, at time.Duration) {
 			target = &procs[i]
 		}
 	}
-	if target == nil || idOf(*target) != t.target {
+	if target == nil || !idOf(*target).same(t.target) {
 		t.exited = true
 		return
 	}
@@ -211,7 +256,7 @@ func (t *tracer) noteDescendants(n *lineage.Node) {
 		if !c.StartTime.IsZero() {
 			id.start = c.StartTime.Unix()
 		}
-		g, ok := t.desc[id]
+		g, ok := t.lookup(id)
 		if !ok {
 			g = &growth{command: c.Command, first: c.RSSKiB, seq: t.nextSeq}
 			t.nextSeq++
@@ -220,6 +265,18 @@ func (t *tracer) noteDescendants(n *lineage.Node) {
 		g.last = c.RSSKiB
 		t.noteDescendants(c)
 	}
+}
+
+// lookup finds a tracked descendant whose start time is within the same
+// 1s drift tolerance as the target.
+func (t *tracer) lookup(id identity) (*growth, bool) {
+	for _, d := range []int64{0, -1, 1} {
+		k := identity{pid: id.pid, start: id.start + d}
+		if g, ok := t.desc[k]; ok && k.same(id) {
+			return g, true
+		}
+	}
+	return nil, false
 }
 
 func (t *tracer) finish() {
@@ -256,66 +313,27 @@ func (t *tracer) growers() []Grower {
 	return out
 }
 
-// Summarize computes the trend statistics and verdict for samples.
+// Summarize computes the facts and verdict for samples. First, last and net
+// change are reported as facts only; the verdict comes from classify, which
+// does not depend on where the two endpoints land.
 func Summarize(samples []Sample) Summary {
-	s := Summary{Samples: len(samples), Verdict: VerdictInsufficient}
+	s := Summary{Samples: len(samples)}
+	rss := classify(pointsOf(samples, func(x Sample) int64 { return x.RSSKiB }))
+	s.Verdict, s.Pattern, s.GrowthKiBPerMin = rss.verdict, rss.pattern, rss.slope
 	if len(samples) == 0 {
 		return s
 	}
 	last := samples[len(samples)-1]
 	s.FirstKiB, s.LastKiB = samples[0].RSSKiB, last.RSSKiB
 	s.MinKiB, s.MaxKiB = s.FirstKiB, s.FirstKiB
-	var sum float64
 	for _, x := range samples {
 		s.MinKiB, s.MaxKiB = min(s.MinKiB, x.RSSKiB), max(s.MaxKiB, x.RSSKiB)
-		sum += float64(x.RSSKiB)
 	}
 	s.NetChangeKiB = s.LastKiB - s.FirstKiB
-	s.GrowthKiBPerMin = Slope(samples, func(x Sample) int64 { return x.RSSKiB })
 	if samples[0].Processes > 0 {
 		s.SubtreeFirstKiB, s.SubtreeLastKiB = samples[0].SubtreeRSSKiB, last.SubtreeRSSKiB
-		s.SubtreeGrowthMin = Slope(samples, func(x Sample) int64 { return x.SubtreeRSSKiB })
-	}
-	if len(samples) >= MinSamples {
-		span := float64(last.ElapsedMS-samples[0].ElapsedMS) / 60000
-		s.Verdict = verdict(s, sum/float64(len(samples)), s.GrowthKiBPerMin*span)
+		sub := classify(pointsOf(samples, func(x Sample) int64 { return x.SubtreeRSSKiB }))
+		s.SubtreeVerdict, s.SubtreePattern, s.SubtreeGrowthMin = sub.verdict, sub.pattern, sub.slope
 	}
 	return s
-}
-
-// verdict also checks the slope-projected change over the trace, so "steady"
-// requires the fitted trend to be flat and not only the two endpoints.
-func verdict(s Summary, mean, projected float64) string {
-	net, limit := float64(s.NetChangeKiB), changeFrac*float64(s.FirstKiB)
-	small := net > -limit && net < limit
-	switch {
-	case small && float64(s.MaxKiB-s.MinKiB) >= rangeFrac*mean:
-		return VerdictSawtooth
-	case small && projected > -limit && projected < limit:
-		return VerdictSteady
-	case net >= limit && s.GrowthKiBPerMin > 0:
-		return VerdictGrowing
-	case net <= -limit && s.GrowthKiBPerMin < 0:
-		return VerdictShrinking
-	}
-	// Endpoints and fitted trend disagree: the series is not monotonic.
-	return VerdictSawtooth
-}
-
-// Slope is the least-squares slope of val over elapsed time, in KiB/minute.
-func Slope(samples []Sample, val func(Sample) int64) float64 {
-	if len(samples) < 2 {
-		return 0
-	}
-	n := float64(len(samples))
-	var sx, sy, sxx, sxy float64
-	for _, p := range samples {
-		x, y := float64(p.ElapsedMS)/60000, float64(val(p))
-		sx, sy, sxx, sxy = sx+x, sy+y, sxx+x*x, sxy+x*y
-	}
-	den := n*sxx - sx*sx
-	if den == 0 {
-		return 0
-	}
-	return (n*sxy - sx*sy) / den
 }

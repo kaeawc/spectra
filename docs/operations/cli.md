@@ -113,12 +113,21 @@ reused within the same second is not distinguished.
 `spectra memtrace <pid> [--tree] [--duration 60s] [--interval 2s] [--json]`
 samples one process's resident memory over time and says whether it is
 growing. It prints one line per sample, then the sample count, min, max,
-first, last, net change, a least-squares growth rate in KiB/minute and a
-verdict: `steady`, `growing` (net rise of 5% or more with a positive slope),
-`shrinking`, `sawtooth` (range of 20% or more of the mean with little net
-change) or `insufficient` (fewer than 5 samples). `--tree` also sums the whole
-descendant subtree (and its process count) per sample and lists the top 5
-descendants by RSS growth. An unknown pid exits 1; if the process exits
+first, last and net change (as facts only), a growth rate in KiB/minute and a
+verdict. The growth rate is the Theil–Sen slope (median of pairwise slopes), so
+a single spike or where the endpoints land does not move it. The trend change
+(slope × observed span) is compared with max(5% of the median RSS, 1 MiB):
+`growing`, `shrinking` or `steady`. A series with two or more full cycles of
+swings of at least 10% of the median is a `sawtooth`; its troughs are fitted
+the same way, so a leak under garbage collection reports `growing` with
+`pattern: "sawtooth"` ("growing under a sawtooth"). `unreadable` means every
+reading was 0 and `insufficient` means fewer than 5 samples, so `--duration`
+must be at least 4 intervals (a hint is printed when it is not). Polls run at
+fixed deadlines; a collection that overruns one skips it, and JSON reports
+`polls_failed` and `polls_skipped` (text shows them when non-zero). A start
+time that drifts by up to 1 second is the same process. `--tree` also sums the
+whole descendant subtree (and its process count) per sample, gives it its own
+verdict, and lists the top 5 descendants by RSS growth. An unknown pid exits 1; if the process exits
 mid-trace, or its pid is reused by another process, the trace stops and
 reports what was collected with exit 0. Ctrl-C ends early and still prints the
 summary. `--json` emits one object with `samples`, `summary` and `growers`.
