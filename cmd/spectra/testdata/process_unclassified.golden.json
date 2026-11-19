@@ -1,0 +1,60 @@
+[
+  {
+    "pid": 4242,
+    "ppid": 1,
+    "uid": 501,
+    "user": "alice",
+    "command": "Slack Helper",
+    "bsd_name": "Slack Helper",
+    "executable_path": "/Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper",
+    "full_command_line": "/Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper --type=renderer",
+    "rss_kib": 2048,
+    "vsize_kib": 4096,
+    "vsz_bytes": 4194304,
+    "thread_count": 12,
+    "cpu_pct": 1.5,
+    "cpu_percent": 1.5,
+    "mem_percent": 0.25,
+    "start_time": "2026-11-19T08:30:00Z",
+    "started_at": "2026-11-19T08:30:00Z",
+    "elapsed": 90000000000,
+    "open_fds": 7,
+    "fd_breakdown": {
+      "total": 7,
+      "pty": 1,
+      "socket": 2,
+      "regular": 3,
+      "dir": 0,
+      "pipe": 1,
+      "char": 0,
+      "kqueue": 0,
+      "other": 0
+    },
+    "listening_ports": [
+      8080
+    ],
+    "outbound_connections": [
+      "1.2.3.4:443"
+    ],
+    "log_files": [
+      "/tmp/x.log"
+    ],
+    "cwd": "/",
+    "app_path": "/Applications/Slack.app"
+  },
+  {
+    "pid": 7,
+    "ppid": 0,
+    "uid": 0,
+    "command": "launchd",
+    "full_command_line": "/sbin/launchd",
+    "rss_kib": 0,
+    "vsize_kib": 0,
+    "thread_count": 0,
+    "cpu_pct": 0,
+    "cpu_percent": 0,
+    "mem_percent": 0,
+    "start_time": "0001-01-01T00:00:00Z",
+    "started_at": "0001-01-01T00:00:00Z"
+  }
+]

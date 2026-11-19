@@ -91,6 +91,22 @@ one object at the end.
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
+`spectra process --classify [--json]` adds `role` (`app`, `app_helper`,
+`system`, `shell`, `terminal`, `ai_agent`, `cli`), `runtime` (`electron`,
+`native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`,
+`shell`, `unknown`), `app` (`{name, bundle_path, bundle_id}` of the outermost
+owning `.app`), `signing` (macOS only: `{status, team_id, hardened_runtime}`,
+status `apple`, `developer_id`, `adhoc`, `unsigned` or `unknown`) and
+`evidence` to every listed process; the table gains `ROLE`, `RUNTIME` and, on
+macOS, `SIGN` columns. Runtime comes from the executable name, the owning
+bundle (Electron Framework, a bundled JBR) and then the binary itself (Go
+build info, Bun's segment, rustc markers); signing is one `codesign -dv` per
+unique executable. Results are cached per executable by (path, size, mtime)
+in the `classify` cache kind, so only the first run is slow. Without
+`--classify` the output and cost of `spectra process` are unchanged. The rules
+and precedence are in
+[Running processes](../inspection/running-processes.md#process-classification).
+
 `spectra alerts [--state firing|resolved|all] [--limit N] [--json]` lists alerts.
 `spectra alerts ack <id> [--json]` acknowledges one. `spectra alerts health
 [--json]` summarizes load, memory, disk, processes, and active alerts.

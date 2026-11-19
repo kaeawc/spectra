@@ -213,6 +213,10 @@ func (v Value) Any() any {
 	}
 }
 
+// Decode parses plist bytes (XML, binary, or OpenStep) for callers that
+// read the file through their own filesystem seam.
+func Decode(data []byte) (Value, error) { return decode(data) }
+
 func decode(data []byte) (Value, error) {
 	var raw any
 	if _, err := plist.Unmarshal(data, &raw); err != nil {

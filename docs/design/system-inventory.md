@@ -75,6 +75,10 @@ ProcessInfo {
   open_fds                 # via lsof, only when --deep
   listening_ports          # via lsof, only when --deep
   outbound_connections     # via lsof / nettop, only when --deep
+  role, runtime            # only with --classify (internal/classify)
+  app                      # {name, bundle_path, bundle_id}, only with --classify
+  signing                  # {status, team_id, hardened_runtime}, macOS, only with --classify
+  evidence                 # why role and runtime were chosen, only with --classify
 }
 ```
 

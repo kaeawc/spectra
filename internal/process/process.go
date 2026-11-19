@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/classify"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
@@ -51,6 +52,14 @@ type Info struct {
 	// .app bundle path. Populated only when CollectAll is called with a set
 	// of app paths (BundlePaths option).
 	AppPath string `json:"app_path,omitempty"`
+
+	// Classification fields — populated only by `spectra process --classify`
+	// (see internal/classify); all omitted otherwise.
+	Role     classify.Role     `json:"role,omitempty"`
+	Runtime  classify.Runtime  `json:"runtime,omitempty"`
+	App      *classify.App     `json:"app,omitempty"`
+	Signing  *classify.Signing `json:"signing,omitempty"`
+	Evidence []string          `json:"evidence,omitempty"`
 }
 
 // FDBreakdown groups open descriptors by lsof TYPE and path.

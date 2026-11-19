@@ -11,6 +11,7 @@ const (
 	KindNetcap    = "netcap"
 	KindToolchain = "toolchain"
 	KindStorage   = "storage"
+	KindClassify  = "classify"
 )
 
 // Stores holds the concrete ShardedStore instances for every kind.
@@ -25,6 +26,7 @@ type Stores struct {
 	Netcap    *ShardedStore
 	Toolchain *ShardedStore
 	Storage   *ShardedStore
+	Classify  *ShardedStore
 }
 
 // NewStores creates all ShardedStores under versionedRoot and registers
@@ -44,5 +46,6 @@ func NewStores(versionedRoot string, reg *Registry) *Stores {
 		Netcap:    mk(KindNetcap),
 		Toolchain: mk(KindToolchain),
 		Storage:   mk(KindStorage),
+		Classify:  mk(KindClassify),
 	}
 }

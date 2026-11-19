@@ -164,8 +164,75 @@ unchanged.
 | `heaviest` | Top members: `pid`, `command`, `cpu_pct`, `age_seconds` |
 
 `--group-by family` cannot be combined with `--sort`, `--tree`, `--ppid`,
-`--user`, `--min-rss`, `--min-vsz` or `--min-elapsed` (exit status 2): filters
-would remove ancestors needed for attribution.
+`--user`, `--min-rss`, `--min-vsz`, `--min-elapsed` or `--classify` (exit
+status 2): filters would remove ancestors needed for attribution.
+
+## Process classification
+
+`spectra process --classify` gives every listed process (after `--top`)
+a role, a runtime, its owning app and, on macOS, a code-signing summary,
+so a desktop client can group processes the way Activity Monitor does.
+Without the flag none of this runs and the output is unchanged.
+
+| JSON field | Values |
+|---|---|
+| `role` | `app`, `app_helper`, `system`, `shell`, `terminal`, `ai_agent`, `cli` |
+| `runtime` | `electron`, `native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`, `shell`, `unknown` |
+| `app` | `{name, bundle_path, bundle_id}` for the outermost owning `.app` (macOS) |
+| `signing` | macOS only: `{status, team_id, hardened_runtime}`, status `apple`, `developer_id`, `adhoc`, `unsigned` or `unknown` |
+| `evidence` | `["role: …", "runtime: …"]`, why each was chosen |
+
+**Runtime**, first match wins:
+
+1. Interpreter or managed runtime by executable base name (argv[0] when the
+   path is not visible): `java`, `node`, `bun`, `deno`, `python*`, `ruby*`,
+   and shells (`sh`, `bash`, `zsh`, `fish`, …) as `shell`.
+2. `electron` for any executable inside an `.app` whose outermost bundle has
+   `Contents/Frameworks/Electron Framework.framework`, helpers included.
+3. `jvm` for the main executable of an app that bundles a Java runtime
+   (`Contents/jbr` or `Contents/runtime`, as JetBrains IDEs and jpackage apps do).
+4. The binary itself, read with `debug/macho` (host slice of a universal
+   binary) or `debug/elf`: a `__BUN` segment / `.bun` section is `bun`
+   (a `bun build --compile` executable), a `__go_buildinfo` /
+   `.go.buildinfo` section is `go`, and `/rustc/` or `RUST_BACKTRACE` in
+   read-only data (at most 32 MiB scanned per file) is `rust`; otherwise
+   `native`. An unreadable or unknown file is `unknown`.
+
+**Role** precedence (documented in `internal/classify/role.go`):
+
+1. `system` for Linux kernel threads.
+2. `ai_agent` when the executable base name, argv[0], or the script/module a
+   node/bun/deno/python interpreter runs exactly matches `claude`, `codex`,
+   `ollama`, `aider`, `cursor-agent`, `gemini`, `opencode`, `goose`, `amp`,
+   `crush`, `copilot` or `qwen`, or the script is in one of their npm
+   packages (for example `@anthropic-ai/claude-code`). Arguments are never
+   substring-matched. An agent CLI running on node is `ai_agent` with
+   runtime `node`.
+3. `terminal` for Terminal, iTerm2, Ghostty, kitty, Alacritty, WezTerm, Warp,
+   Hyper, tmux, screen, zellij and similar.
+4. `shell` by executable.
+5. `app` for an app's `CFBundleExecutable`, `app_helper` for anything else in
+   it. Bundles under `/System/Library/` or `/Library/Apple/` are `system`;
+   a `.app` inside a `.framework` (Homebrew's `Python.app`) and tools under
+   `<app>/Contents/Developer/` (Xcode's toolchain) are not app processes.
+6. `system` on macOS under `/System`, `/usr/libexec`, `/usr/sbin`, `/sbin`,
+   or an Apple platform binary (a non-root `/bin` or `/usr/bin` tool stays
+   `cli`); on Linux a uid 0 process under `/usr/lib/systemd`, `/usr/sbin`
+   or `/sbin`.
+7. `cli` otherwise.
+
+**Signing** runs `codesign -dv --verbose=2 <exe>` once per unique executable:
+a `Platform identifier` or a "Software Signing" leaf is `apple`; a Developer
+ID, Mac App Store or Apple Development leaf is `developer_id` (with
+`team_id`); `Signature=adhoc` is `adhoc`; "not signed at all" is `unsigned`.
+Linux never runs codesign and omits `signing`.
+
+The per-executable work is cached by (path, size, mtime) in memory and in
+the `classify` cache kind, so a second run skips codesign and binary reads
+entirely; cold classification runs on a CPU-count worker pool. On a Mac
+with about 1,300 processes the first run takes a few seconds and later
+runs add well under 100 ms. The table adds `ROLE` and `RUNTIME` columns,
+plus `SIGN` on macOS.
 
 ## Implementation reference
 

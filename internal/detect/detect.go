@@ -813,6 +813,12 @@ func (d detector) readSigning(appPath string) (teamID string, hardened bool) {
 	return parseSigningOutput(d.stderrOf("codesign", "-dv", appPath))
 }
 
+// ParseSigningOutput extracts the team identifier and hardened-runtime flag
+// from `codesign -dv` stderr, for callers that run codesign themselves.
+func ParseSigningOutput(out string) (teamID string, hardened bool) {
+	return parseSigningOutput(out)
+}
+
 func parseSigningOutput(out string) (teamID string, hardened bool) {
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "TeamIdentifier=") {

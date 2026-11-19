@@ -29,6 +29,7 @@ func runProcess(args []string) int {
 	ppid := fs.Int("ppid", -1, "Only direct children of PID")
 	user := fs.String("user", "", "Only processes owned by user name")
 	groupBy := fs.String("group-by", "", "Group processes: family (sums CPU per simulator device, Xcode, build tools, browsers)")
+	classifyFlag := fs.Bool("classify", false, "Add role, runtime, owning app and (macOS) code signing per process")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -65,6 +66,9 @@ func runProcess(args []string) int {
 	if *topN > 0 && *topN < len(procs) {
 		procs = procs[:*topN]
 	}
+	if *classifyFlag {
+		classifyProcesses(procs)
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -77,11 +81,12 @@ func runProcess(args []string) int {
 		return 0
 	}
 
+	cols := newProcessClassColumns(*classifyFlag)
 	if *tree {
-		printProcessTree(process.BuildTree(procs))
+		printProcessTree(process.BuildTree(procs), cols)
 		return 0
 	}
-	printProcessRows(procs, *deep, *fdBreakdown)
+	printProcessRows(procs, *deep, *fdBreakdown, cols)
 	return 0
 }
 
@@ -212,16 +217,16 @@ func processVSZBytes(p process.Info) uint64 {
 	return uint64(p.VSizeKiB) * 1024
 }
 
-func printProcessRows(procs []process.Info, deep, fdBreakdown bool) {
+func printProcessRows(procs []process.Info, deep, fdBreakdown bool, cols processClassColumns) {
 	if fdBreakdown {
-		fmt.Printf("%-7s  %-6s  %-8s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %s\n", "PID", "THR", "RSS", "FDS", "PTY", "SOCK", "REG", "PIPE", "CHR", "KQ", "OTH", "COMMAND")
-		fmt.Println(strings.Repeat("-", 105))
+		fmt.Printf("%-7s  %-6s  %-8s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %-5s  %s%s\n", "PID", "THR", "RSS", "FDS", "PTY", "SOCK", "REG", "PIPE", "CHR", "KQ", "OTH", cols.header(), "COMMAND")
+		fmt.Println(strings.Repeat("-", 105+cols.width()))
 	} else if deep {
-		fmt.Printf("%-7s  %-6s  %-10s  %-10s  %-5s  %s\n", "PID", "THR", "RSS", "CPU%", "FDS", "COMMAND")
-		fmt.Println(strings.Repeat("-", 82))
+		fmt.Printf("%-7s  %-6s  %-10s  %-10s  %-5s  %s%s\n", "PID", "THR", "RSS", "CPU%", "FDS", cols.header(), "COMMAND")
+		fmt.Println(strings.Repeat("-", 82+cols.width()))
 	} else {
-		fmt.Printf("%-7s  %-7s  %-10s  %-10s  %-7s  %-7s  %-20s  %s\n", "PID", "PPID", "RSS", "VSZ", "CPU%", "MEM%", "STARTED", "COMMAND")
-		fmt.Println(strings.Repeat("-", 112))
+		fmt.Printf("%-7s  %-7s  %-10s  %-10s  %-7s  %-7s  %-20s  %s%s\n", "PID", "PPID", "RSS", "VSZ", "CPU%", "MEM%", "STARTED", cols.header(), "COMMAND")
+		fmt.Println(strings.Repeat("-", 112+cols.width()))
 	}
 	for _, p := range procs {
 		thr := "-"
@@ -234,51 +239,51 @@ func printProcessRows(procs []process.Info, deep, fdBreakdown bool) {
 		}
 		switch {
 		case fdBreakdown:
-			printProcessFDBreakdownRow(p, thr)
+			printProcessFDBreakdownRow(p, thr, cols)
 		case deep:
-			printProcessDeepRow(p, thr, cpu)
+			printProcessDeepRow(p, thr, cpu, cols)
 		default:
-			fmt.Printf("%-7d  %-7d  %-10s  %-10s  %-7s  %-7s  %-20s  %s\n",
+			fmt.Printf("%-7d  %-7d  %-10s  %-10s  %-7s  %-7s  %-20s  %s%s\n",
 				p.PID, p.PPID, humanSizeKiB(p.RSSKiB), humanSizeBytes(processVSZBytes(p)), cpu,
-				percentString(p.MemPercent), startedString(p.StartedAt), truncate(p.Command, 40))
+				percentString(p.MemPercent), startedString(p.StartedAt), cols.row(p), truncate(p.Command, 40))
 		}
 	}
 }
 
-func printProcessTree(roots []*process.TreeNode) {
-	fmt.Printf("%-7s  %-7s  %-20s  %s\n", "PID", "PPID", "STARTED", "COMMAND")
-	fmt.Println(strings.Repeat("-", 76))
+func printProcessTree(roots []*process.TreeNode, cols processClassColumns) {
+	fmt.Printf("%-7s  %-7s  %-20s  %s%s\n", "PID", "PPID", "STARTED", cols.header(), "COMMAND")
+	fmt.Println(strings.Repeat("-", 76+cols.width()))
 	for _, root := range roots {
-		printProcessTreeNode(root, 0)
+		printProcessTreeNode(root, 0, cols)
 	}
 }
 
-func printProcessTreeNode(node *process.TreeNode, depth int) {
+func printProcessTreeNode(node *process.TreeNode, depth int, cols processClassColumns) {
 	p := node.Info
 	prefix := strings.Repeat("  ", depth)
 	width := 50 - depth*2
 	if width < 20 {
 		width = 20
 	}
-	fmt.Printf("%-7d  %-7d  %-20s  %s%s\n", p.PID, p.PPID, startedString(p.StartedAt), prefix, truncate(p.Command, width))
+	fmt.Printf("%-7d  %-7d  %-20s  %s%s%s\n", p.PID, p.PPID, startedString(p.StartedAt), cols.row(p), prefix, truncate(p.Command, width))
 	for _, child := range node.Children {
-		printProcessTreeNode(child, depth+1)
+		printProcessTreeNode(child, depth+1, cols)
 	}
 }
 
-func printProcessFDBreakdownRow(p process.Info, thr string) {
+func printProcessFDBreakdownRow(p process.Info, thr string, cols processClassColumns) {
 	b := p.FDBreakdown
 	if b == nil {
 		b = &process.FDBreakdown{}
 	}
 	fds := processFDString(p)
-	fmt.Printf("%-7d  %-6s  %-8s  %-5s  %-5d  %-5d  %-5d  %-5d  %-5d  %-5d  %-5d  %s\n",
-		p.PID, thr, humanSizeKiB(p.RSSKiB), fds, b.PTY, b.Socket, b.Regular, b.Pipe, b.Char, b.Kqueue, b.Other, truncate(p.Command, 40))
+	fmt.Printf("%-7d  %-6s  %-8s  %-5s  %-5d  %-5d  %-5d  %-5d  %-5d  %-5d  %-5d  %s%s\n",
+		p.PID, thr, humanSizeKiB(p.RSSKiB), fds, b.PTY, b.Socket, b.Regular, b.Pipe, b.Char, b.Kqueue, b.Other, cols.row(p), truncate(p.Command, 40))
 }
 
-func printProcessDeepRow(p process.Info, thr, cpu string) {
-	fmt.Printf("%-7d  %-6s  %-10s  %-10s  %-5s  %s\n",
-		p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, processFDString(p), truncate(p.Command, 45))
+func printProcessDeepRow(p process.Info, thr, cpu string, cols processClassColumns) {
+	fmt.Printf("%-7d  %-6s  %-10s  %-10s  %-5s  %s%s\n",
+		p.PID, thr, humanSizeKiB(p.RSSKiB), cpu, processFDString(p), cols.row(p), truncate(p.Command, 45))
 }
 
 func processFDString(p process.Info) string {
