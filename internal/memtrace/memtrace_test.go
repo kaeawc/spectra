@@ -146,6 +146,79 @@ func TestPIDReuseIsExit(t *testing.T) {
 	}
 }
 
+func zombieTarget() process.Info {
+	return process.Info{PID: 100, PPID: 1, Command: "app <defunct>", StartTime: t0.Add(-time.Hour)}
+}
+
+func TestZombieTargetIsExit(t *testing.T) {
+	tables := append(series(100000, 150000, 200000, 250000, 300000), []process.Info{zombieTarget()})
+	h := newHarness(tables...)
+	res, err := Run(context.Background(), h.cfg(100, false, time.Minute, 10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := res.Summary
+	if !s.Exited || s.ExitReason != ExitZombie || len(res.Samples) != 5 || s.LastKiB != 300000 || s.Verdict != VerdictGrowing {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestGoneTargetExitReason(t *testing.T) {
+	tables := append(series(1000, 1100), []process.Info{{PID: 1, Command: "launchd"}})
+	h := newHarness(tables...)
+	res, err := Run(context.Background(), h.cfg(100, false, time.Minute, 10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Summary.ExitReason != ExitGone || !res.Summary.Exited {
+		t.Fatalf("res = %+v", res.Summary)
+	}
+	live := runSeries(t, 1, 2, 3)
+	if live.Summary.ExitReason != "" {
+		t.Fatalf("exit_reason = %q", live.Summary.ExitReason)
+	}
+}
+
+func TestZeroRSSLiveProcessStillSampled(t *testing.T) {
+	res := runSeries(t, 0, 0, 0, 0, 0)
+	if res.Summary.Exited || len(res.Samples) != 5 || res.Summary.Verdict != VerdictUnreadable {
+		t.Fatalf("res = %+v", res.Summary)
+	}
+}
+
+func TestDescendantThatBecomesZombieIsNotAGrower(t *testing.T) {
+	last := treeTable(100, 0, 10)
+	last[2] = process.Info{PID: 101, PPID: 100, Command: "child-a <defunct>", StartTime: t0}
+	h := newHarness(treeTable(100, 50, 10), treeTable(100, 200, 10), last)
+	res, err := Run(context.Background(), h.cfg(100, true, time.Minute, 2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range res.Growers {
+		if g.PID == 101 {
+			t.Fatalf("zombie still a grower: %+v", res.Growers)
+		}
+	}
+}
+
+func TestZombieDescendantExcludedFromTree(t *testing.T) {
+	table := treeTable(1000, 200, 50)
+	table = append(table, process.Info{PID: 104, PPID: 100, Command: "dead <defunct>", StartTime: t0})
+	h := newHarness(table)
+	res, err := Run(context.Background(), h.cfg(100, true, time.Minute, time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Samples[0]; got.Processes != 3 || got.SubtreeRSSKiB != 1250 {
+		t.Fatalf("sample = %+v", got)
+	}
+	for _, g := range res.Growers {
+		if g.PID == 104 {
+			t.Fatalf("zombie in growers: %+v", res.Growers)
+		}
+	}
+}
+
 func TestEmptyCollectionIsNotExit(t *testing.T) {
 	tables := [][]process.Info{{target(10)}, nil, {target(20)}}
 	h := newHarness(tables...)

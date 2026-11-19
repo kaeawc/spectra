@@ -181,7 +181,10 @@ time that drifts by up to 1 second is the same process. `--tree` also sums the
 whole descendant subtree (and its process count) per sample, gives it its own
 verdict, and lists the top 5 descendants by RSS growth. An unknown pid exits 1; if the process exits
 mid-trace, or its pid is reused by another process, the trace stops and
-reports what was collected with exit 0. Ctrl-C ends early and still prints the
+reports what was collected with exit 0. A target that has exited but is not yet reaped (a
+zombie) counts as exited and its zero reading is not recorded; with `--tree`, zombie descendants
+are excluded from the subtree sum, count and growers. JSON `summary.exit_reason` is `gone` or
+`zombie` when exited. Ctrl-C ends early and still prints the
 summary. `--json` emits one object with `samples`, `summary` and `growers`.
 
 Some commands read macOS-only sources. On Linux they exit `1` with an
