@@ -121,13 +121,24 @@ func (d dent) IsDir() bool                { return true }
 func (d dent) Type() fs.FileMode          { return fs.ModeDir }
 func (d dent) Info() (fs.FileInfo, error) { return nil, os.ErrNotExist }
 
-type fakeInfo struct{ os.FileInfo }
+type fakeInfo struct {
+	os.FileInfo
+	id string
+}
 
 func (f fakeFS) Stat(n string) (os.FileInfo, error) {
+	if id, ok := f.ids[n]; ok {
+		return fakeInfo{id: id}, nil
+	}
 	if f.exist[n] {
-		return fakeInfo{}, nil
+		return fakeInfo{id: n}, nil
 	}
 	return nil, fs.ErrNotExist
+}
+
+func (f fakeFS) SameFile(a, b os.FileInfo) bool {
+	x, y := a.(fakeInfo), b.(fakeInfo)
+	return x.id != "" && x.id == y.id
 }
 
 func (f fakeFS) EvalSymlinks(n string) (string, error) {
@@ -139,6 +150,7 @@ func (f fakeFS) EvalSymlinks(n string) (string, error) {
 
 type fakeFS struct {
 	exist map[string]bool
+	ids   map[string]string // inode identity for Stat, overrides exist
 	eval  map[string]string
 	dirs  map[string][]string
 	links map[string]string
@@ -179,13 +191,21 @@ func procTree() fakeFS {
 	return fakeFS{
 		exist: map[string]bool{"/nothing": true, "/srv/data/db.sqlite": true, "/var/run/app.sock": true},
 		eval:  map[string]string{"/var/run/app.sock": "/run/app.sock"},
+		// The path was recreated: fd 3 (deleted) is an older inode, and
+		// pid 40 holds the live file through another hard link.
+		ids: map[string]string{
+			"/srv/data/db.sqlite": "ino-live", "/proc/20/fd/5": "ino-live",
+			"/proc/30/fd/3": "ino-old", "/srv/data/hardlink.sqlite": "ino-live", "/proc/40/fd/7": "ino-live",
+		},
 		dirs: map[string][]string{
-			"/proc":       {"1", "20", "30", "self", "cpuinfo"},
+			"/proc":       {"1", "20", "30", "40", "self", "cpuinfo"},
 			"/proc/20/fd": {"0", "5"},
 			"/proc/30/fd": {"3", "4"},
+			"/proc/40/fd": {"7"},
 		},
 		links: map[string]string{
-			"/proc/30/fd/4": "/run/app.sock",
+			"/proc/30/fd/4": "socket:[777]",
+			"/proc/40/fd/7": "/srv/data/hardlink.sqlite",
 			"/proc/20/cwd":  "/srv/data",
 			"/proc/20/exe":  "/usr/bin/app",
 			"/proc/20/fd/5": "/srv/data/db.sqlite",
@@ -195,6 +215,11 @@ func procTree() fakeFS {
 		files: map[string]string{
 			"/proc/20/fdinfo/5": "pos:\t0\nflags:\t0100002\nmnt_id:\t1\n",
 			"/proc/30/fdinfo/3": "flags:\t02000000\n",
+			"/proc/40/fdinfo/7": "flags:\t0100001\n",
+			"/proc/net/unix": "Num       RefCount Protocol Flags    Type St Inode Path\n" +
+				"0000: 00000002 00000000 00010000 0001 01 777 /run/app.sock\n" +
+				"0001: 00000003 00000000 00000000 0001 03 778 /run/other.sock\n" +
+				"0002: 00000002 00000000 00010000 0001 01 779\n",
 		},
 		deny: map[string]bool{"/proc/1/fd": true},
 	}
@@ -208,7 +233,7 @@ func TestProcPathHolders(t *testing.T) {
 	want := []Holder{
 		{PID: 20, Hold: HoldFD, Detail: "fd 5", Mode: "rw"},
 		{PID: 30, Hold: HoldTxt, Detail: "exe"},
-		{PID: 30, Hold: HoldFD, Detail: "fd 3", Mode: "r"},
+		{PID: 40, Hold: HoldFD, Detail: "fd 7", Mode: "w"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v\nwant %+v", got, want)
@@ -243,6 +268,9 @@ func TestParentChainAndEnrich(t *testing.T) {
 	wantChain := []Link{{20, "app"}, {10, "sshd"}, {1, "systemd"}}
 	if h.User != "jason" || h.Command != "worker" || !reflect.DeepEqual(h.Chain, wantChain) {
 		t.Errorf("holder = %+v", h)
+	}
+	if h.Executable != "/srv/data/db.sqlite" {
+		t.Errorf("exe should come from /proc/30/exe: %q", h.Executable)
 	}
 	res, _ = f.Find(context.Background(), Target{Kind: KindPID, Raw: "20", PID: 20})
 	if res.Holders[0].Executable != "/usr/bin/app" || !res.Holders[0].Started.Equal(t0) {

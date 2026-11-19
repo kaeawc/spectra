@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -58,7 +60,23 @@ func (f Finder) Find(ctx context.Context, t Target) (Result, error) {
 	}
 	res.Holders = dedupe(res.Holders)
 	enrich(res.Holders, procs)
+	if osk == hostos.Linux {
+		f.fillLinuxExe(res.Holders)
+	}
 	return res, nil
+}
+
+// fillLinuxExe covers the Linux process collector, which leaves
+// ExecutablePath empty. An unreadable link leaves the field empty.
+func (f Finder) fillLinuxExe(hs []Holder) {
+	for i := range hs {
+		if hs[i].Executable != "" {
+			continue
+		}
+		if t, err := f.fsys().Readlink(filepath.Join(f.procfs(), strconv.Itoa(hs[i].PID), "exe")); err == nil {
+			hs[i].Executable = strings.TrimSuffix(t, " (deleted)")
+		}
+	}
 }
 
 func (f Finder) isRoot() bool {

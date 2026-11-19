@@ -17,6 +17,8 @@ type FS interface {
 	ReadFile(name string) ([]byte, error)
 	Stat(name string) (os.FileInfo, error)
 	EvalSymlinks(name string) (string, error)
+	// SameFile reports whether a and b (from Stat) are the same device+inode.
+	SameFile(a, b os.FileInfo) bool
 }
 
 // OSFS is the real filesystem.
@@ -25,9 +27,73 @@ type OSFS struct{}
 func (OSFS) Stat(name string) (os.FileInfo, error)    { return os.Stat(name) }
 func (OSFS) EvalSymlinks(name string) (string, error) { return filepath.EvalSymlinks(name) }
 
+func (OSFS) SameFile(a, b os.FileInfo) bool             { return os.SameFile(a, b) }
 func (OSFS) ReadDir(name string) ([]os.DirEntry, error) { return os.ReadDir(name) }
 func (OSFS) Readlink(name string) (string, error)       { return os.Readlink(name) }
 func (OSFS) ReadFile(name string) ([]byte, error)       { return os.ReadFile(name) }
+
+// pathMatcher decides whether a /proc link refers to the queried path.
+type pathMatcher struct {
+	fsys  FS
+	paths []string
+	ref   os.FileInfo     // identity of the queried path, nil if unknown
+	socks map[string]bool // "socket:[inode]" links of unix sockets bound to paths
+}
+
+func newPathMatcher(fsys FS, procfs string, paths []string) pathMatcher {
+	m := pathMatcher{fsys: fsys, paths: paths, socks: unixSocketLinks(fsys, procfs, paths)}
+	if len(paths) > 0 {
+		if fi, err := fsys.Stat(paths[0]); err == nil {
+			m.ref = fi
+		}
+	}
+	return m
+}
+
+// unixSocketLinks resolves bound socket paths through /proc/net/unix
+// (Num RefCount Protocol Flags Type St Inode Path) because an fd on a socket
+// links to socket:[inode], never to its pathname.
+func unixSocketLinks(fsys FS, procfs string, paths []string) map[string]bool {
+	b, err := fsys.ReadFile(filepath.Join(procfs, "net", "unix"))
+	if err != nil {
+		return nil
+	}
+	var out map[string]bool
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 8 || !slices.Contains(paths, f[7]) {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out["socket:["+f[6]+"]"] = true
+	}
+	return out
+}
+
+// matches compares by device+inode when the link target is a file path, so a
+// descriptor on an unlinked file is not mistaken for a new file created at
+// the same path and descriptors opened via another hard link still match.
+func (m pathMatcher) matches(link string) bool {
+	t, err := m.fsys.Readlink(link)
+	if err != nil {
+		return false
+	}
+	if m.socks[t] {
+		return true
+	}
+	name, deleted := strings.CutSuffix(t, " (deleted)")
+	if !strings.HasPrefix(name, "/") {
+		return false
+	}
+	if m.ref != nil {
+		if fi, err := m.fsys.Stat(link); err == nil && m.fsys.SameFile(m.ref, fi) {
+			return true
+		}
+	}
+	return !deleted && slices.Contains(m.paths, name)
+}
 
 // procPathHolders scans procfs for processes holding path as an fd, cwd or
 // executable. denied is true when some process could not be inspected.
@@ -36,41 +102,37 @@ func procPathHolders(fsys FS, procfs string, path []string) (holders []Holder, d
 	if err != nil {
 		return nil, errors.Is(err, fs.ErrPermission)
 	}
+	m := newPathMatcher(fsys, procfs, path)
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
 			continue
 		}
-		hs, d := procPidHolders(fsys, filepath.Join(procfs, e.Name()), pid, path)
+		hs, d := procPidHolders(m, filepath.Join(procfs, e.Name()), pid)
 		holders = append(holders, hs...)
 		denied = denied || d
 	}
 	return holders, denied
 }
 
-func procPidHolders(fsys FS, dir string, pid int, path []string) (holders []Holder, denied bool) {
-	if linkIs(fsys, filepath.Join(dir, "cwd"), path) {
+func procPidHolders(m pathMatcher, dir string, pid int) (holders []Holder, denied bool) {
+	if m.matches(filepath.Join(dir, "cwd")) {
 		holders = append(holders, Holder{PID: pid, Hold: HoldCwd})
 	}
-	if linkIs(fsys, filepath.Join(dir, "exe"), path) {
+	if m.matches(filepath.Join(dir, "exe")) {
 		holders = append(holders, Holder{PID: pid, Hold: HoldTxt, Detail: "exe"})
 	}
 	fdDir := filepath.Join(dir, "fd")
-	fds, err := fsys.ReadDir(fdDir)
+	fds, err := m.fsys.ReadDir(fdDir)
 	if err != nil {
 		return holders, errors.Is(err, fs.ErrPermission)
 	}
 	for _, fd := range fds {
-		if linkIs(fsys, filepath.Join(fdDir, fd.Name()), path) {
-			holders = append(holders, Holder{PID: pid, Hold: HoldFD, Detail: "fd " + fd.Name(), Mode: fdMode(fsys, dir, fd.Name())})
+		if m.matches(filepath.Join(fdDir, fd.Name())) {
+			holders = append(holders, Holder{PID: pid, Hold: HoldFD, Detail: "fd " + fd.Name(), Mode: fdMode(m.fsys, dir, fd.Name())})
 		}
 	}
 	return holders, false
-}
-
-func linkIs(fsys FS, link string, paths []string) bool {
-	t, err := fsys.Readlink(link)
-	return err == nil && slices.Contains(paths, strings.TrimSuffix(t, " (deleted)"))
 }
 
 // fdMode reads the open flags from fdinfo; the low two bits are the access mode.
