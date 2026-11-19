@@ -16,6 +16,45 @@ The principal commands are `inspect`, `list`, `snapshot`, `diff`, `jvm`,
 `network`, `power`, `storage`, `process`, `toolchain`, `rules`, `issues`, `alerts`,
 `whatswrong`, and `playbook`. Run `spectra help` for the installed command list.
 
+`spectra network top [--duration 10s] [--interval 1s] [--top 10] [--pid N] [--json]`
+answers "who is using the network right now?". On macOS each interval is one
+`nettop -P -x -d -L 2 -s <secs> -t external` run, whose delta block counts
+what every flow moved in it, including flows that opened and closed inside it;
+nettop's delay is whole seconds, so `--interval` and `--duration` are rounded
+up to whole seconds, and an interval cut short by Ctrl-C is dropped. On Linux
+it diffs per-socket TCP counters from `ss -tinpeH` (`bytes_received` in,
+`bytes_acked` out, keyed by the socket's `sk:` cookie, or by local/remote
+address when ss prints none) sampled on fixed deadlines; a socket first seen
+after the baseline sample counts its whole counter, since ss counters start at
+0 when the socket opens. Each ss poll is bounded by 10s and ends at once on
+Ctrl-C, and `--interval` must be at least 100ms on Linux (exit 2 otherwise). It
+prints one line per interval with
+the total in/out rate, and ends with a table ranking processes by bytes moved:
+bytes in/out, average and peak rates, user, working directory, and up to 3
+remote endpoints (on Linux the remotes whose sockets moved the most bytes
+inside the window, including sockets that closed before it ended,
+`remotes_basis` `window-bytes`;
+on macOS one connection listing taken at the end of the window, `remotes_basis`
+`end-snapshot`, shown under a "REMOTES (open at end of window)" header, since a
+connection that closed earlier is not listed). Rates use the actual time each interval took, not the nominal
+interval. The summary also lists processes that started using the network
+(their first interval with traffic came after the first measured interval) and
+processes that stopped (their last came before the last measured interval); a
+failed interval is not evidence either way. Loopback traffic is not counted; on Linux only TCP is counted and
+other users' sockets need root. `--pid` limits the output to that process and
+its descendants: the per-interval lines count the descendants alive at the
+start, the summary also those alive at the end. Ctrl-C ends early and still
+prints the summary with the actual duration; if Ctrl-C comes before the first
+interval completes, it prints an empty zero-duration summary marked interrupted
+and exits 0. A host where nothing moved (or,
+unprivileged, nothing is visible) reports "no process moved any bytes" and
+exits 0. `--json` emits one object with `duration_ms`, `interval_ms`,
+`samples`, `basis` (`nettop` or `ss-tcp`), `remotes_basis`, `totals`, `processes`
+(each with `started`/`stopped` flags), `started`,
+`stopped` and `limitations`. Exit codes: 0 ok, 1 runtime or output error
+(a missing sampling tool, or no interval measured because the tool failed on
+every sample or, on Linux, on every sample after the baseline), 2 usage error.
+
 `spectra du [--top N] [--depth N] [--min-size 100M] [--cross-mounts] [--json] <path>`
 lists the largest directories (cumulative) and files under a path by allocated
 size, flagging sparse files with their apparent size. It stays on one

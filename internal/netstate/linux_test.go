@@ -1,11 +1,13 @@
 package netstate
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 func TestParseProcNetRoute(t *testing.T) {
@@ -187,5 +189,89 @@ func TestCollectLinuxUsesSS(t *testing.T) {
 	_ = Collect(stub)
 	if !sawSS {
 		t.Error("Linux Collect should query ss")
+	}
+}
+
+// ssTCPInfoFixture is `ss -tinpH` output: each socket line is followed by an
+// indented tcp_info line. It covers IPv6, a socket without users: (another
+// user's socket), a socket shared by two processes, and a socket that has not
+// moved data yet (no bytes_* fields).
+const ssTCPInfoFixture = `ESTAB 0      0      192.168.1.10:22      192.168.1.2:51514  users:(("sshd",pid=1234,fd=4),("sshd",pid=1200,fd=4))
+	 cubic wscale:7,7 rto:204 rtt:0.523/0.12 ato:40 mss:1448 pmtu:1500 rcvmss:1072 advmss:1448 cwnd:10 bytes_sent:52341 bytes_acked:52341 bytes_received:8812 segs_out:210 segs_in:300 data_segs_out:200 data_segs_in:100 send 221Mbps lastsnd:4 lastrcv:4 lastack:4 pacing_rate 442Mbps delivery_rate 30.1Mbps delivered:201 app_limited busy:120ms rcv_space:14480 rcv_ssthresh:64088 minrtt:0.2
+ESTAB 0      0      [2001:db8::5]:443    [2001:db8::9]:40112 users:(("Web Content",pid=900,fd=12))
+	 cubic wscale:7,7 rto:212 rtt:10.2/3 mss:1428 cwnd:10 bytes_sent:1000 bytes_acked:999 bytes_received:4096 segs_out:9 segs_in:8 send 11.2Mbps
+ESTAB 0      0      10.0.0.5:5432        10.0.0.9:41000
+	 cubic wscale:7,7 rto:204 bytes_acked:100 bytes_received:200
+SYN-SENT 0   1      10.0.0.5:39000       93.184.216.34:443   users:(("curl",pid=77,fd=5))
+	 cubic rto:1000 mss:524 cwnd:1
+`
+
+func TestParseSSTCPInfo(t *testing.T) {
+	socks := parseSSTCPInfo(ssTCPInfoFixture)
+	if len(socks) != 3 {
+		t.Fatalf("sockets = %d, want 3: %+v", len(socks), socks)
+	}
+	ssh := socks[0]
+	if ssh.PID != 1200 || ssh.Command != "sshd" || ssh.BytesOut != 52341 || ssh.BytesIn != 8812 {
+		t.Errorf("shared socket = %+v, want lowest pid 1200 with acked/received counters", ssh)
+	}
+	if ssh.LocalAddr != "192.168.1.10:22" || ssh.RemoteAddr != "192.168.1.2:51514" || ssh.State != "ESTAB" {
+		t.Errorf("shared socket addrs = %+v", ssh)
+	}
+	v6 := socks[1]
+	if v6.PID != 900 || v6.Command != "Web Content" || v6.RemoteAddr != "[2001:db8::9]:40112" || v6.BytesIn != 4096 || v6.BytesOut != 999 {
+		t.Errorf("ipv6 socket = %+v", v6)
+	}
+	idle := socks[2]
+	if idle.PID != 77 || idle.BytesIn != 0 || idle.BytesOut != 0 {
+		t.Errorf("idle socket = %+v", idle)
+	}
+}
+
+// ssTCPInfoExtFixture is `ss -tinpeH` output, constructed from iproute2's
+// documented field order (not captured on a Linux host): after users:, -e
+// adds uid:, ino:, sk:<cookie hex>, cgroup: when known, and the shutdown
+// marker <->. It covers a cgroup path, an IPv6 socket, a command name
+// containing " sk:" and a socket that ss printed without sk:.
+const ssTCPInfoExtFixture = `ESTAB 0      0      192.168.1.10:51000   140.82.112.3:443    users:(("git-remote-http",pid=4242,fd=5)) uid:1000 ino:58925 sk:3c cgroup:/user.slice/user-1000.slice/session-2.scope <->
+	 cubic wscale:7,7 rto:232 rtt:30.5/4.2 ato:40 mss:1448 pmtu:1500 rcvmss:1448 advmss:1448 cwnd:10 bytes_sent:1200 bytes_acked:1200 bytes_received:98000 segs_out:40 segs_in:80 data_segs_out:5 data_segs_in:75 send 3.8Mbps lastsnd:1200 lastrcv:1100 lastack:1100 pacing_rate 7.6Mbps delivery_rate 2.1Mbps delivered:6 app_limited busy:60ms rcv_space:14480 rcv_ssthresh:64088 minrtt:28.1
+ESTAB 0      0      [2001:db8::5]:40112  [2606:4700::1]:443  users:(("curl",pid=70,fd=3)) uid:1000 ino:61002 sk:ffff9a3c41e2b2c0 <->
+	 cubic wscale:7,7 rto:212 rtt:10.2/3 mss:1428 cwnd:10 bytes_sent:5 bytes_acked:5 bytes_received:7 segs_out:9 segs_in:8 send 11.2Mbps
+ESTAB 0      0      10.0.0.5:52000       10.0.0.9:443        users:(("my sk:abc tool",pid=80,fd=7)) uid:1000 ino:61100 sk:1a2b cgroup:/system.slice/my.service <->
+	 cubic rto:204 bytes_acked:10 bytes_received:20
+ESTAB 0      0      10.0.0.5:52001       10.0.0.9:443        users:(("old",pid=81,fd=7))
+	 cubic rto:204 bytes_acked:1 bytes_received:2
+`
+
+func TestParseSSTCPInfoExtended(t *testing.T) {
+	socks := parseSSTCPInfo(ssTCPInfoExtFixture)
+	if len(socks) != 4 {
+		t.Fatalf("sockets = %d, want 4: %+v", len(socks), socks)
+	}
+	git := socks[0]
+	if git.PID != 4242 || git.Command != "git-remote-http" || git.Cookie != "3c" || git.BytesIn != 98000 || git.BytesOut != 1200 ||
+		git.LocalAddr != "192.168.1.10:51000" || git.RemoteAddr != "140.82.112.3:443" {
+		t.Errorf("git socket = %+v", git)
+	}
+	if v6 := socks[1]; v6.PID != 70 || v6.Cookie != "ffff9a3c41e2b2c0" || v6.RemoteAddr != "[2606:4700::1]:443" || v6.BytesIn != 7 {
+		t.Errorf("ipv6 socket = %+v", v6)
+	}
+	if odd := socks[2]; odd.Command != "my sk:abc tool" || odd.Cookie != "1a2b" || odd.BytesOut != 10 {
+		t.Errorf("command with sk: = %+v, want the real cookie", odd)
+	}
+	if none := socks[3]; none.Cookie != "" || none.PID != 81 || none.BytesIn != 2 {
+		t.Errorf("socket without sk: = %+v", none)
+	}
+}
+
+func TestCollectSocketBytes(t *testing.T) {
+	f := proc.NewFake().OnExact("ss", []string{"-tinpeH"}, proc.Response{Result: proc.Result{Stdout: []byte(ssTCPInfoFixture)}})
+	socks, err := CollectSocketBytes(context.Background(), f)
+	if err != nil || len(socks) != 3 {
+		t.Fatalf("CollectSocketBytes = %d sockets, %v", len(socks), err)
+	}
+	failing := proc.NewFake().On(proc.MatchPrefix("ss"), proc.Response{Err: os.ErrNotExist})
+	if _, err := CollectSocketBytes(context.Background(), failing); err == nil {
+		t.Error("expected error when ss fails")
 	}
 }

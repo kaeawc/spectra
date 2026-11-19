@@ -1,12 +1,16 @@
 package netstate
 
 import (
+	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // collectLinux gathers network state on Linux from /proc, /sys, and the
@@ -163,6 +167,123 @@ func parseSSListen(out, proto string) []ListeningPort {
 		ports = append(ports, lp)
 	}
 	return ports
+}
+
+// SocketBytes is one TCP socket's cumulative byte counters from `ss -tinpeH`.
+type SocketBytes struct {
+	PID     int
+	Command string
+	State   string
+	// Cookie is the kernel socket identity from ss's `sk:` field, empty when
+	// ss does not print one. Unlike the endpoints, it differs between a
+	// closed socket and a new one that reuses the same addresses.
+	Cookie     string
+	LocalAddr  string
+	RemoteAddr string
+	// BytesIn is bytes_received; BytesOut is bytes_acked (data the peer
+	// acknowledged, so unacknowledged in-flight data is not counted).
+	BytesIn  int64
+	BytesOut int64
+}
+
+// SocketBytesArgs are the ss arguments CollectSocketBytes runs: TCP, tcp_info
+// (-i), numeric, processes, extended socket info (-e, for the sk: cookie),
+// no header.
+var SocketBytesArgs = []string{"-tinpeH"}
+
+// CollectSocketBytes reads per-socket TCP counters with `ss -tinpeH` through
+// r, so the run ends when ctx does.
+func CollectSocketBytes(ctx context.Context, r proc.Runner) ([]SocketBytes, error) {
+	out, err := proc.Output(ctx, r, "ss", SocketBytesArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("ss: %w", err)
+	}
+	return parseSSTCPInfo(string(out)), nil
+}
+
+// parseSSTCPInfo parses `ss -tinpeH` (or `-tinpH`). Each socket is a line
+// starting in column 0 (State Recv-Q Send-Q Local Peer [users:(...)] and,
+// with -e, uid: ino: sk: [cgroup:] <->) followed by an indented tcp_info
+// line. Sockets without a users: field (other users'
+// sockets, or orphans) cannot be attributed and are skipped. A socket shared
+// by several processes is attributed to the lowest pid so it counts once.
+func parseSSTCPInfo(out string) []SocketBytes {
+	var records [][]string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if (line[0] != ' ' && line[0] != '\t') || len(records) == 0 {
+			records = append(records, fields)
+			continue
+		}
+		records[len(records)-1] = append(records[len(records)-1], fields...)
+	}
+	var socks []SocketBytes
+	for _, rec := range records {
+		if s, ok := parseSSTCPRecord(rec); ok {
+			socks = append(socks, s)
+		}
+	}
+	return socks
+}
+
+func parseSSTCPRecord(fields []string) (SocketBytes, bool) {
+	if len(fields) < 5 {
+		return SocketBytes{}, false
+	}
+	s := SocketBytes{State: fields[0], LocalAddr: fields[3], RemoteAddr: fields[4]}
+	for _, m := range ssProcessRe.FindAllStringSubmatch(strings.Join(fields[5:], " "), -1) {
+		pid, err := strconv.Atoi(m[2])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		if s.PID == 0 || pid < s.PID {
+			s.PID, s.Command = pid, m[1]
+		}
+	}
+	if s.PID == 0 {
+		return SocketBytes{}, false
+	}
+	for _, f := range fields[5:] {
+		s.noteField(f)
+	}
+	return s, true
+}
+
+// noteField takes what a socket record carries past its endpoints: the
+// counters from tcp_info and the cookie from -e. Everything else (users:,
+// uid:, ino:, cgroup:, <->, rtt:, ...) is ignored. ss prints sk: after
+// users:, so the last hex sk: wins over one inside a command name.
+func (s *SocketBytes) noteField(f string) {
+	if v, ok := strings.CutPrefix(f, "bytes_acked:"); ok {
+		s.BytesOut = parseCounter(v)
+	} else if v, ok := strings.CutPrefix(f, "bytes_received:"); ok {
+		s.BytesIn = parseCounter(v)
+	} else if v, ok := strings.CutPrefix(f, "sk:"); ok && isHex(v) {
+		s.Cookie = v
+	}
+}
+
+func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func parseCounter(s string) int64 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // splitHostPort splits an "addr:port" token (ss uses the last ':' as the
