@@ -186,6 +186,21 @@ func TestZeroRSSLiveProcessStillSampled(t *testing.T) {
 	}
 }
 
+func TestDescendantThatBecomesZombieIsNotAGrower(t *testing.T) {
+	last := treeTable(100, 0, 10)
+	last[2] = process.Info{PID: 101, PPID: 100, Command: "child-a <defunct>", StartTime: t0}
+	h := newHarness(treeTable(100, 50, 10), treeTable(100, 200, 10), last)
+	res, err := Run(context.Background(), h.cfg(100, true, time.Minute, 2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range res.Growers {
+		if g.PID == 101 {
+			t.Fatalf("zombie still a grower: %+v", res.Growers)
+		}
+	}
+}
+
 func TestZombieDescendantExcludedFromTree(t *testing.T) {
 	table := treeTable(1000, 200, 50)
 	table = append(table, process.Info{PID: 104, PPID: 100, Command: "dead <defunct>", StartTime: t0})

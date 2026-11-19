@@ -257,6 +257,7 @@ func (t *tracer) observe(procs []process.Info, at time.Duration) {
 			s.SubtreeRSSKiB, s.Processes = res.Tree.SubtreeRSSKiB, res.Tree.Count
 			t.noteDescendants(res.Tree)
 		}
+		t.forgetZombies(procs)
 	}
 	t.res.Samples = append(t.res.Samples, s)
 	if t.cfg.Emit != nil {
@@ -274,6 +275,26 @@ func liveOnly(procs []process.Info) []process.Info {
 		}
 	}
 	return out
+}
+
+// forgetZombies drops descendants tracked while alive that have since become
+// zombies, so their last live RSS is not reported as growth.
+func (t *tracer) forgetZombies(procs []process.Info) {
+	for _, p := range procs {
+		if !lineage.IsZombie(p) {
+			continue
+		}
+		id := identity{pid: p.PID}
+		if !p.StartTime.IsZero() {
+			id.start = p.StartTime.Unix()
+		}
+		for _, d := range []int64{0, -1, 1} {
+			k := identity{pid: id.pid, start: id.start + d}
+			if _, ok := t.desc[k]; ok && k.same(id) {
+				delete(t.desc, k)
+			}
+		}
+	}
 }
 
 func (t *tracer) noteDescendants(n *lineage.Node) {
