@@ -50,6 +50,7 @@ func subcommandList() []subcommand {
 		{"logs", "Run bounded unified log queries", runLogs},
 		{"updates", "Show macOS install/update log entries", runUpdates},
 		{"system", "Show system resource limits and saturation", runSystem},
+		{"load", "Admit, hold or back off a new job from load and memory, with per-worktree attribution", runLoad},
 		{"process", "List running processes sorted by memory (RSS)", runProcess},
 		{"playbook", "Show diagnostic playbooks and command plans", runPlaybook},
 		{"diff", "Diff two stored snapshots (alias for snapshot diff)", runSnapshotDiff},
