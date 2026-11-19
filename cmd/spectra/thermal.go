@@ -82,21 +82,6 @@ Exit codes: 0 nominal, 3 warm, 4 throttled, 1 error, 2 usage.
 	return thermalExit(rep.Verdict)
 }
 
-// errWriter latches the first write error so printThermal stays linear.
-type errWriter struct {
-	w   io.Writer
-	err error
-}
-
-func (e *errWriter) Write(p []byte) (int, error) {
-	if e.err != nil {
-		return 0, e.err
-	}
-	n, err := e.w.Write(p)
-	e.err = err
-	return n, err
-}
-
 func printThermal(out io.Writer, r thermal.WatchReport, watched bool) error {
 	w := &errWriter{w: out}
 	fmt.Fprintf(w, "thermal: %s — %s\n", r.Verdict, r.Evidence)
