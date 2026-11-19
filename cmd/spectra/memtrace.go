@@ -157,7 +157,11 @@ func printMemtraceSummary(out io.Writer, r *memtrace.Result) error {
 	s := r.Summary
 	fmt.Fprintf(w, "\nSummary for %s (pid %d) over %.1fs\n", r.Command, r.PID, float64(r.DurationMS)/1000)
 	if s.Exited {
-		fmt.Fprintln(w, "Process exited during the trace; showing what was collected.")
+		if s.ExitReason == memtrace.ExitZombie {
+			fmt.Fprintln(w, "process exited (zombie, not yet reaped); showing what was collected.")
+		} else {
+			fmt.Fprintln(w, "Process exited during the trace; showing what was collected.")
+		}
 	}
 	fmt.Fprintf(w, "  samples: %d\n  min: %d KiB  max: %d KiB\n  first: %d KiB  last: %d KiB\n",
 		s.Samples, s.MinKiB, s.MaxKiB, s.FirstKiB, s.LastKiB)

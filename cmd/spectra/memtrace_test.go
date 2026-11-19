@@ -140,6 +140,18 @@ func TestRunMemtraceTextFlatAndUnreadable(t *testing.T) {
 	}
 }
 
+func TestMemtraceSummaryZombieExit(t *testing.T) {
+	var out bytes.Buffer
+	r := &memtrace.Result{PID: 1, Command: "app",
+		Summary: memtrace.Summary{Exited: true, ExitReason: memtrace.ExitZombie, Verdict: memtrace.VerdictInsufficient}}
+	if err := printMemtraceSummary(&out, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "process exited (zombie, not yet reaped)") {
+		t.Errorf("missing zombie line:\n%s", out.String())
+	}
+}
+
 func TestMemtraceSummaryLines(t *testing.T) {
 	var out bytes.Buffer
 	r := &memtrace.Result{PID: 1, Command: "app", PollsFailed: 2, PollsSkipped: 3,
