@@ -152,9 +152,12 @@ func buildELF(sects ...sect) []byte {
 type fakeFS struct {
 	files fstest.MapFS
 	deny  map[string]bool
+	links map[string]string // EvalSymlinks results
 }
 
-func newFakeFS() *fakeFS { return &fakeFS{files: fstest.MapFS{}, deny: map[string]bool{}} }
+func newFakeFS() *fakeFS {
+	return &fakeFS{files: fstest.MapFS{}, deny: map[string]bool{}, links: map[string]string{}}
+}
 
 var fixtureTime = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
@@ -182,11 +185,22 @@ func (f *fakeFS) Open(path string) (ReadAtCloser, error) {
 	return rac, nil
 }
 
-func (f *fakeFS) ReadFile(path string) ([]byte, error) {
+func (f *fakeFS) ReadFile(path string, limit int64) ([]byte, error) {
 	if f.deny[path] {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission}
 	}
-	return fs.ReadFile(f.files, strings.TrimPrefix(path, "/"))
+	data, err := fs.ReadFile(f.files, strings.TrimPrefix(path, "/"))
+	if err == nil && int64(len(data)) > limit {
+		return nil, ErrTooLarge
+	}
+	return data, err
+}
+
+func (f *fakeFS) EvalSymlinks(path string) (string, error) {
+	if to, ok := f.links[path]; ok {
+		return to, nil
+	}
+	return path, nil
 }
 
 // memStore is an in-memory Store that counts traffic.

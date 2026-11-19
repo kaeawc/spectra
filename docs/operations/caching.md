@@ -47,7 +47,7 @@ The cache layout follows the patterns proven out in
 | `threads` | hash of `(pid, timestamp)` | Thread dump text |
 | `samples` | hash of `(pid, timestamp)` | `sample <pid>` output |
 | `netcap` | hash of capture metadata | pcap recordings and summaries |
-| `classify` | hash of `(os, executable path, size, mtime)` | `spectra process --classify` per-executable runtime and code-signing result; a rebuilt binary misses |
+| `classify` | hash of `(os, executable path, size, mtime, device, inode, ctime)` | `spectra process --classify` per-executable runtime and code-signing result; a rebuilt or replaced binary misses, even with size and mtime preserved |
 
 ## Eviction
 

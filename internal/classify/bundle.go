@@ -53,10 +53,13 @@ type bundleInfo struct {
 	jvm string
 }
 
+// maxPlistBytes caps one Info.plist read; real ones are a few KiB.
+const maxPlistBytes = 1 << 20
+
 func readBundle(files FileSystem, root string) bundleInfo {
 	info := bundleInfo{name: strings.TrimSuffix(filepath.Base(root), ".app")}
 	contents := filepath.Join(root, "Contents")
-	if data, err := files.ReadFile(filepath.Join(contents, "Info.plist")); err == nil {
+	if data, err := files.ReadFile(filepath.Join(contents, "Info.plist"), maxPlistBytes); err == nil {
 		if v, err := plistread.Decode(data); err == nil {
 			info.bundleID = plistString(v, "CFBundleIdentifier")
 			if exe := plistString(v, "CFBundleExecutable"); exe != "" && !strings.Contains(exe, "/") {

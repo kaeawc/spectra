@@ -13,12 +13,13 @@ func Classify(ctx context.Context, procs []Info, c *classify.Classifier) error {
 	inputs := make([]classify.Input, len(procs))
 	for i, p := range procs {
 		inputs[i] = classify.Input{
-			PID:            p.PID,
-			PPID:           p.PPID,
-			UID:            p.UID,
-			Command:        p.Command,
-			ExecutablePath: p.ExecutablePath,
-			CommandLine:    p.FullCommandLine,
+			PID:               p.PID,
+			PPID:              p.PPID,
+			UID:               p.UID,
+			Command:           p.Command,
+			ExecutablePath:    p.ExecutablePath,
+			ExecutableDeleted: p.ExecutableDeleted,
+			CommandLine:       p.FullCommandLine,
 		}
 	}
 	results, err := c.Classify(ctx, inputs)

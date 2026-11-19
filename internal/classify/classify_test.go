@@ -45,23 +45,24 @@ TeamIdentifier=not set
 
 func TestParseCodesign(t *testing.T) {
 	cases := []struct {
-		name     string
-		out      string
-		want     Signing
-		platform bool
+		name  string
+		out   string
+		want  Signing
+		claim string
 	}{
-		{"apple", appleCodesign, Signing{Status: SigningApple}, true},
-		{"developer_id", devIDCodesign, Signing{Status: SigningDeveloperID, TeamID: "ABCDE12345", HardenedRuntime: true}, false},
-		{"mac app store", masCodesign, Signing{Status: SigningDeveloperID, TeamID: "BQR82RBBHL", HardenedRuntime: true}, false},
-		{"adhoc", adhocCodesign, Signing{Status: SigningAdhoc}, false},
-		{"unsigned", unsignedCodesign, Signing{Status: SigningUnsigned}, false},
-		{"garbage", "codesign: No such file or directory\n", Signing{Status: SigningUnknown}, false},
+		// An Apple claim is only a claim until codesign --verify settles it.
+		{"apple", appleCodesign, Signing{Status: SigningUnknown}, "platform binary"},
+		{"developer_id", devIDCodesign, Signing{Status: SigningDeveloperID, TeamID: "ABCDE12345", HardenedRuntime: true}, ""},
+		{"mac app store", masCodesign, Signing{Status: SigningDeveloperID, TeamID: "BQR82RBBHL", HardenedRuntime: true}, ""},
+		{"adhoc", adhocCodesign, Signing{Status: SigningAdhoc}, ""},
+		{"unsigned", unsignedCodesign, Signing{Status: SigningUnsigned}, ""},
+		{"garbage", "codesign: No such file or directory\n", Signing{Status: SigningUnknown}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := parseCodesign(tc.out)
-			if got.Signing != tc.want || got.Platform != tc.platform {
-				t.Fatalf("parseCodesign = %+v, want %+v platform=%v", got, tc.want, tc.platform)
+			if got.Signing != tc.want || got.Claim != tc.claim || got.Platform || got.Validated {
+				t.Fatalf("parseCodesign = %+v, want %+v claim=%q and nothing granted", got, tc.want, tc.claim)
 			}
 		})
 	}
@@ -107,8 +108,10 @@ func TestBinaryRuntime(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Only /proc/10/exe holds the code: the classifier must read the
+			// running image, not the (possibly replaced) path on disk.
 			files := newFakeFS()
-			files.add("/opt/tool/bin/tool", tc.data)
+			files.add("/proc/10/exe", tc.data)
 			c := New(Options{OS: tc.os, FS: files, Runner: proc.NewFake()})
 			r := classifyOne(t, c, Input{PID: 10, PPID: 1, UID: 501, Command: "tool", ExecutablePath: "/opt/tool/bin/tool", CommandLine: "/opt/tool/bin/tool"})
 			if r.Runtime != tc.want {
@@ -155,8 +158,8 @@ func TestCountMarkersAcrossChunkBoundary(t *testing.T) {
 
 func TestUnreadableBinaryIsUnknown(t *testing.T) {
 	files := newFakeFS()
-	files.add("/usr/local/bin/secret", []byte("x"))
-	files.deny["/usr/local/bin/secret"] = true
+	files.add("/proc/5/exe", []byte("x"))
+	files.deny["/proc/5/exe"] = true
 	c := New(Options{OS: hostos.Linux, FS: files})
 	res, err := c.Classify(context.Background(), []Input{
 		{PID: 5, Command: "secret", ExecutablePath: "/usr/local/bin/secret", CommandLine: "secret"},
@@ -249,7 +252,7 @@ func TestRolePrecedence(t *testing.T) {
 		role    Role
 		runtime Runtime
 	}{
-		{"agent by argv0", Input{Command: "claude", ExecutablePath: "/Users/a/.local/share/claude/versions/2.1.220", CommandLine: "claude --resume"}, RoleAIAgent, RuntimeNative},
+		{"native claude by path shape", Input{Command: "claude", ExecutablePath: "/Users/a/.local/share/claude/versions/2.1.220", CommandLine: "claude --resume"}, RoleAIAgent, RuntimeNative},
 		{"agent npm package on node", Input{Command: "node", ExecutablePath: "/opt/homebrew/bin/node", CommandLine: "node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js"}, RoleAIAgent, RuntimeNode},
 		{"agent script on node", Input{Command: "node", ExecutablePath: "/opt/homebrew/bin/node", CommandLine: "node --no-warnings /opt/homebrew/bin/codex exec"}, RoleAIAgent, RuntimeNode},
 		{"agent python module", Input{Command: "python3", ExecutablePath: "/opt/homebrew/bin/python3", CommandLine: "python3 -m aider --model x"}, RoleAIAgent, RuntimePython},
@@ -299,28 +302,40 @@ func TestRolePrecedence(t *testing.T) {
 func TestLinuxRoles(t *testing.T) {
 	files := newFakeFS()
 	elfBin := buildELF(sect{name: ".rodata", data: []byte("x")})
-	for _, p := range []string{"/usr/lib/systemd/systemd-journald", "/usr/sbin/sshd", "/usr/bin/htop"} {
-		files.add(p, elfBin)
+	for _, pid := range []string{"300", "302", "303", "305"} {
+		files.add("/proc/"+pid+"/exe", elfBin)
 	}
+	// A real file at the argv[0] path: it must still not be trusted.
+	files.add("/usr/sbin/sshd", elfBin)
 	fake := proc.NewFake()
 	c := New(Options{OS: hostos.Linux, FS: files, Runner: fake})
 	cases := []struct {
-		in   Input
-		role Role
+		in      Input
+		role    Role
+		runtime Runtime
 	}{
-		{Input{PID: 40, PPID: 2, Command: "kworker/0:1", CommandLine: "[kworker/0:1]"}, RoleSystem},
-		{Input{PID: 300, PPID: 1, UID: 0, Command: "systemd-journal", ExecutablePath: "/usr/lib/systemd/systemd-journald"}, RoleSystem},
-		{Input{PID: 301, PPID: 1, UID: 0, Command: "sshd", CommandLine: "/usr/sbin/sshd -D"}, RoleSystem},
-		{Input{PID: 302, PPID: 1, UID: 1000, Command: "sshd", ExecutablePath: "/usr/sbin/sshd"}, RoleCLI},
-		{Input{PID: 303, PPID: 1, UID: 1000, Command: "htop", ExecutablePath: "/usr/bin/htop"}, RoleCLI},
+		{Input{PID: 40, PPID: 2, Command: "kworker/0:1", CommandLine: "[kworker/0:1]"}, RoleSystem, RuntimeNative},
+		{Input{PID: 300, PPID: 1, UID: 0, Command: "systemd-journal", ExecutablePath: "/usr/lib/systemd/systemd-journald", CommandLine: "/usr/lib/systemd/systemd-journald"}, RoleSystem, RuntimeNative},
+		// exec -a /usr/sbin/sshd ./evil as root: no visible executable, so
+		// argv[0] decides nothing about system.
+		{Input{PID: 301, PPID: 1, UID: 0, Command: "sshd", CommandLine: "/usr/sbin/sshd -D"}, RoleCLI, RuntimeUnknown},
+		{Input{PID: 302, PPID: 1, UID: 1000, Command: "sshd", ExecutablePath: "/usr/sbin/sshd", CommandLine: "sshd"}, RoleCLI, RuntimeNative},
+		{Input{PID: 303, PPID: 1, UID: 1000, Command: "htop", ExecutablePath: "/usr/bin/htop", CommandLine: "htop"}, RoleCLI, RuntimeNative},
+		// Interpreter guessed from the comm name only, and marked unverified.
+		{Input{PID: 304, PPID: 1, UID: 1000, Command: "python3", CommandLine: "python3 x.py"}, RoleCLI, RuntimePython},
+		// Root daemon whose argv[0] claims a system path; exe says otherwise.
+		{Input{PID: 305, PPID: 1, UID: 0, Command: "sshd", ExecutablePath: "/tmp/evil", CommandLine: "/usr/sbin/sshd -D"}, RoleCLI, RuntimeNative},
 	}
 	for _, tc := range cases {
 		r := classifyOne(t, c, tc.in)
-		if r.Role != tc.role {
-			t.Errorf("%s: role = %s, want %s (evidence %v)", tc.in.Command, r.Role, tc.role, r.Evidence)
+		if r.Role != tc.role || r.Runtime != tc.runtime {
+			t.Errorf("pid %d: role=%s runtime=%s, want %s/%s (evidence %v)", tc.in.PID, r.Role, r.Runtime, tc.role, tc.runtime, r.Evidence)
 		}
 		if r.Signing != nil || r.App != nil {
 			t.Errorf("%s: Linux result carries signing/app: %+v", tc.in.Command, r)
+		}
+		if tc.in.PID == 304 && !strings.Contains(strings.Join(r.Evidence, " "), "from argv[0], unverified") {
+			t.Errorf("argv[0] runtime guess not marked unverified: %v", r.Evidence)
 		}
 	}
 	if fake.CallCount() != 0 {

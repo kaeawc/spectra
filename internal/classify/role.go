@@ -3,6 +3,7 @@ package classify
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -24,12 +25,7 @@ const (
 // Role precedence: the first rule that matches wins.
 //
 //  1. system    Linux kernel thread (bracketed comm, pid or ppid 2).
-//  2. ai_agent  executable base name, argv[0] name, or the script/module a
-//     node/bun/deno/python interpreter runs is in agentNames, or the script
-//     lives in an agentPackages npm package. Matching is exact and
-//     case-sensitive, so it also wins inside a bundle (Claude Code ships as
-//     claude.app/Contents/MacOS/claude, Ollama.app runs Resources/ollama)
-//     while desktop apps named "Claude" or "Ollama" stay apps.
+//  2. ai_agent  see agentRules below.
 //  3. terminal  executable base name is in terminalNames, or the process is
 //     the main executable of an app whose bundle name is.
 //  4. shell     executable base name is in shellNames.
@@ -40,25 +36,70 @@ const (
 //     .framework (Python.framework/.../Python.app) or a tool under
 //     <app>/Contents/Developer/ (Xcode's toolchain) does not count.
 //  6. system    macOS: under /System/, /usr/libexec/, /usr/sbin/ or /sbin/,
-//     or an Apple platform binary (except a non-root process from /bin/ or
-//     /usr/bin/, which is a user-invoked tool). Linux: a uid 0 process under
-//     /usr/lib/systemd/, /lib/systemd/, /usr/sbin/ or /sbin/.
+//     or a validated Apple platform binary (except a non-root process from
+//     /bin/ or /usr/bin/, which is a user-invoked tool). Linux: a uid 0
+//     process under /usr/lib/systemd/, /lib/systemd/, /usr/sbin/ or /sbin/.
 //  7. cli       everything else.
+//
+// Every path rule uses the kernel-reported executable, never argv[0], which
+// any process can set (exec -a). When the executable is not visible, rules
+// 2-4 may match on the argv[0] name with evidence marked unverified, and
+// rules 5-6 cannot match.
 
-// agentNames are AI coding agents and local model servers, matched exactly on
-// a base name (never as a substring of arguments).
-var agentNames = map[string]bool{
-	"claude": true, "codex": true, "ollama": true, "aider": true, "cursor-agent": true,
-	"gemini": true, "opencode": true, "goose": true, "amp": true, "crush": true,
-	"copilot": true, "qwen": true,
+// agentRule describes one AI coding agent or local model server, keyed by
+// executable (or entry-script) base name, matched exactly and
+// case-sensitively so desktop apps named "Claude" or "Ollama" stay apps.
+//
+// The name alone decides only for distinctive names. An ambiguous name, one
+// that unrelated tools also use (pressly/goose migrations, other "amp" or
+// "gemini" binaries), needs one confirming signal:
+//   - modules:   the binary's Go main module path (from build info)
+//   - packages:  the npm package of the script an interpreter runs
+//   - bundleIDs: the CFBundleIdentifier of the owning .app
+//   - paths:     a substring of the executable path at a known install location
+//
+// Without confirmation an ambiguous name falls through to the other roles
+// (normally cli). An interpreter running a script from any listed package is
+// an agent for every rule. Claude Code's native installer runs a file named
+// after its version inside a claude directory
+// (~/.local/share/claude/versions/2.1.220); that is matched by path shape.
+type agentRule struct {
+	ambiguous bool
+	modules   []string
+	packages  []string
+	bundleIDs []string
+	paths     []string
 }
 
-// agentPackages are npm packages whose entry script an interpreter runs.
-var agentPackages = map[string]bool{
-	"@anthropic-ai/claude-code": true, "@openai/codex": true, "@google/gemini-cli": true,
-	"opencode-ai": true, "@sourcegraph/amp": true, "@github/copilot": true,
-	"@qwen-code/qwen-code": true, "@charmland/crush": true,
+var agentRules = map[string]agentRule{
+	"claude":       {packages: []string{"@anthropic-ai/claude-code"}},
+	"codex":        {packages: []string{"@openai/codex"}},
+	"ollama":       {},
+	"aider":        {},
+	"cursor-agent": {},
+	"opencode":     {packages: []string{"opencode-ai"}},
+	"gemini":       {ambiguous: true, packages: []string{"@google/gemini-cli"}},
+	"copilot":      {ambiguous: true, packages: []string{"@github/copilot"}},
+	"qwen":         {ambiguous: true, packages: []string{"@qwen-code/qwen-code"}},
+	"amp":          {ambiguous: true, packages: []string{"@sourcegraph/amp"}, paths: []string{"/.amp/bin/"}},
+	"crush":        {ambiguous: true, packages: []string{"@charmland/crush"}, modules: []string{"github.com/charmbracelet/crush"}},
+	// Block's installer puts the goose CLI in ~/.local/bin; the desktop app
+	// is com.block.goose.
+	"goose": {ambiguous: true, bundleIDs: []string{"com.block.goose"}, paths: []string{"/.local/bin/goose"}},
 }
+
+// agentPackages maps each listed npm package to its agent name.
+var agentPackages = func() map[string]string {
+	m := map[string]string{}
+	for name, r := range agentRules {
+		for _, p := range r.packages {
+			m[p] = name
+		}
+	}
+	return m
+}()
+
+var versionName = regexp.MustCompile(`^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.-]+)?$`)
 
 // terminalNames are terminal emulators and multiplexers (lowercased).
 var terminalNames = map[string]bool{
@@ -73,20 +114,27 @@ type roleInput struct {
 	os        hostos.Kind
 	pid, ppid int
 	uid       int
-	exe       string // best-known executable path; may be empty
+	exe       string // kernel-reported executable path; may be empty
 	argv0     string // argv[0] base name (process.Info.Command)
 	cmdline   string
 	runtime   Runtime
 	loc       bundleLoc
 	bundle    bundleInfo
-	platform  bool // Apple platform binary per codesign
+	platform  bool   // validated Apple platform binary
+	goModule  string // Go main module of the executable, when known
+	// script is the interpreter's script with symlinks resolved; empty when
+	// the runtime is not an interpreter or none was found.
+	script string
 }
 
-func (in roleInput) exeBase() string {
+// unverified marks evidence drawn from argv[0] instead of the executable.
+const unverified = " (from argv[0], unverified)"
+
+func (in roleInput) exeBase() (string, string) {
 	if in.exe != "" {
-		return filepath.Base(in.exe)
+		return filepath.Base(in.exe), ""
 	}
-	return strings.TrimPrefix(in.argv0, "-")
+	return strings.TrimPrefix(in.argv0, "-"), unverified
 }
 
 func decideRole(in roleInput) (Role, string) {
@@ -96,15 +144,15 @@ func decideRole(in roleInput) (Role, string) {
 	if ev := agentMatch(in); ev != "" {
 		return RoleAIAgent, ev
 	}
-	base := in.exeBase()
+	base, note := in.exeBase()
 	if terminalNames[strings.ToLower(base)] {
-		return RoleTerminal, fmt.Sprintf("executable %s is a terminal", base)
+		return RoleTerminal, fmt.Sprintf("executable %s is a terminal%s", base, note)
 	}
 	if in.loc.appOwned() && in.bundle.isMainExecutable(in.loc.root, in.exe) && terminalNames[strings.ToLower(in.bundle.name)] {
 		return RoleTerminal, fmt.Sprintf("main executable of terminal app %s", in.bundle.name)
 	}
 	if shellNames[strings.ToLower(base)] {
-		return RoleShell, fmt.Sprintf("executable %s is a shell", base)
+		return RoleShell, fmt.Sprintf("executable %s is a shell%s", base, note)
 	}
 	if in.loc.appOwned() {
 		return appRole(in)
@@ -132,58 +180,146 @@ func isKernelThread(in roleInput) bool {
 }
 
 func agentMatch(in roleInput) string {
-	if in.exe != "" && agentNames[filepath.Base(in.exe)] {
-		return fmt.Sprintf("executable %s is an AI agent", filepath.Base(in.exe))
+	if in.exe != "" {
+		if ev := exeAgent(in); ev != "" {
+			return ev
+		}
+	} else if name := strings.TrimPrefix(in.argv0, "-"); distinctAgent(name) {
+		return fmt.Sprintf("argv[0] %s is an AI agent%s", name, unverified)
 	}
-	if name := strings.TrimPrefix(in.argv0, "-"); agentNames[name] {
-		return fmt.Sprintf("argv[0] %s is an AI agent", name)
+	return scriptAgent(in)
+}
+
+// distinctAgent reports a known agent whose name decides on its own.
+func distinctAgent(name string) bool {
+	r, ok := agentRules[name]
+	return ok && !r.ambiguous
+}
+
+func exeAgent(in roleInput) string {
+	if claudeNative(in.exe) {
+		return "executable is a Claude Code version file under claude/versions"
 	}
-	switch in.runtime {
-	case RuntimeNode, RuntimeBun, RuntimeDeno, RuntimePython:
-	default:
+	name := filepath.Base(in.exe)
+	r, ok := agentRules[name]
+	if !ok {
 		return ""
 	}
-	script := interpreterScript(in.cmdline, in.runtime)
-	if script == "" {
+	if !r.ambiguous {
+		return fmt.Sprintf("executable %s is an AI agent", name)
+	}
+	if why := r.confirm(in); why != "" {
+		return fmt.Sprintf("executable %s is an AI agent (%s)", name, why)
+	}
+	return ""
+}
+
+// claudeNative matches .../claude/versions/<version>, the native installer
+// layout whose executable has no "claude" base name.
+func claudeNative(exe string) bool {
+	dir := filepath.Dir(exe)
+	return versionName.MatchString(filepath.Base(exe)) && filepath.Base(dir) == "versions" &&
+		filepath.Base(filepath.Dir(dir)) == "claude"
+}
+
+func (r agentRule) confirm(in roleInput) string {
+	for _, m := range r.modules {
+		if in.goModule == m {
+			return "Go module " + m
+		}
+	}
+	for _, id := range r.bundleIDs {
+		if in.bundle.bundleID == id {
+			return "bundle " + id
+		}
+	}
+	for _, p := range r.paths {
+		if strings.Contains(in.exe, p) {
+			return "installed under " + p
+		}
+	}
+	return ""
+}
+
+func scriptAgent(in roleInput) string {
+	if in.script == "" {
 		return ""
 	}
-	if pkg := npmPackage(script); agentPackages[pkg] {
+	if pkg := npmPackage(in.script); agentPackages[pkg] != "" {
 		return fmt.Sprintf("%s runs AI agent package %s", in.runtime, pkg)
 	}
-	name := filepath.Base(script)
+	name := filepath.Base(in.script)
 	for _, ext := range []string{".js", ".mjs", ".cjs", ".ts", ".py"} {
 		name = strings.TrimSuffix(name, ext)
 	}
-	if agentNames[name] {
+	if distinctAgent(name) {
 		return fmt.Sprintf("%s runs AI agent script %s", in.runtime, name)
 	}
 	return ""
 }
 
+// interpreterValueFlags are the options of each interpreter that consume the
+// next argument, so that argument is not taken for the script.
+var interpreterValueFlags = map[Runtime]map[string]bool{
+	RuntimeNode: setOf("-r", "--require", "--import", "--loader", "--experimental-loader",
+		"-C", "--conditions", "--input-type", "--title", "--inspect-port", "--env-file",
+		"--watch-path", "--redirect-warnings", "--icu-data-dir", "--openssl-config",
+		"--diagnostic-dir", "--report-dir", "--cpu-prof-dir", "--heap-prof-dir", "--stack-trace-limit"),
+	RuntimeBun: setOf("-r", "--preload", "-c", "--config", "--cwd", "--env-file", "-d", "--define",
+		"-l", "--loader", "--tsconfig-override", "--port", "--main-fields", "--conditions", "--extension-order"),
+	RuntimeDeno: setOf("-c", "--config", "--import-map", "--lock", "--cert", "--location", "--seed",
+		"--env-file", "--ext", "--inspect", "--inspect-brk", "--inspect-wait"),
+	RuntimePython: setOf("-W", "-X", "--check-hash-based-pycs"),
+}
+
+// interpreterNoScript are options after which no script file runs.
+var interpreterNoScript = map[Runtime]map[string]bool{
+	RuntimeNode:   setOf("-e", "--eval", "-p", "--print"),
+	RuntimeBun:    setOf("-e", "--eval", "-p", "--print"),
+	RuntimePython: setOf("-c"),
+}
+
+func setOf(s ...string) map[string]bool {
+	m := make(map[string]bool, len(s))
+	for _, v := range s {
+		m[v] = true
+	}
+	return m
+}
+
 // interpreterScript returns the script path (or python -m module) an
-// interpreter command line runs: the first non-flag argument after argv[0],
-// skipping bun/deno subcommands.
+// interpreter command line runs: the first argument after argv[0] that is
+// not an option or an option's value, skipping bun/deno subcommands.
 func interpreterScript(cmdline string, rt Runtime) string {
 	args := strings.Fields(cmdline)
 	if len(args) < 2 {
 		return ""
 	}
 	args = args[1:]
+	values := interpreterValueFlags[rt]
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case rt == RuntimePython && a == "-m" && i+1 < len(args):
-			return args[i+1]
-		case rt == RuntimePython && a == "-c":
+		case a == "--" || rt == RuntimePython && a == "-m":
+			// The next argument is the script (or module), whatever it looks like.
+			if i+1 < len(args) {
+				return args[i+1]
+			}
 			return ""
-		case strings.HasPrefix(a, "-"):
-			continue
-		case (rt == RuntimeBun || rt == RuntimeDeno) && (a == "run" || a == "x" || a == "exec"):
-			continue
+		case interpreterNoScript[rt][a]:
+			return ""
+		case values[a]:
+			i++
+		case strings.HasPrefix(a, "-") || runnerSubcommand(rt, a):
+		default:
+			return a
 		}
-		return a
 	}
 	return ""
+}
+
+func runnerSubcommand(rt Runtime, a string) bool {
+	return (rt == RuntimeBun || rt == RuntimeDeno) && (a == "run" || a == "x" || a == "exec")
 }
 
 // npmPackage returns the package a script path belongs to
@@ -215,7 +351,7 @@ func systemMatch(in roleInput) string {
 		return "executable under a system directory"
 	}
 	if in.platform && (in.uid == 0 || !hasAnyPrefix(exe, "/bin/", "/usr/bin/")) {
-		return "Apple platform binary"
+		return "validated Apple platform binary"
 	}
 	return ""
 }
