@@ -126,6 +126,8 @@ func TestCollectAll(t *testing.T) {
 func TestCollectAllWithProcRunner(t *testing.T) {
 	runner := proc.NewFake().OnExact("ps", []string{"-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="}, proc.Response{
 		Result: proc.Result{Stdout: []byte(psFixture)},
+	}).OnExact("ps", []string{"-axwwo", "pid=,comm="}, proc.Response{
+		Result: proc.Result{Stdout: []byte("415 /Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper\n")},
 	})
 	procs := CollectAll(context.Background(), CollectOptions{
 		Runner:          runner,
@@ -134,8 +136,111 @@ func TestCollectAllWithProcRunner(t *testing.T) {
 	if len(procs) != 4 {
 		t.Fatalf("CollectAll: got %d procs, want 4", len(procs))
 	}
-	if got := runner.CallCount(); got != 1 {
-		t.Fatalf("CallCount = %d, want 1", got)
+	if got := runner.CallCount(); got != 2 {
+		t.Fatalf("CallCount = %d, want 2 (command listing + comm listing)", got)
+	}
+	if got := procs[2].Command; got != "Slack Helper" {
+		t.Errorf("Command = %q, want Slack Helper", got)
+	}
+}
+
+// Captured on macOS 26 with `ps -axwwo pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=`
+// (long argument tails trimmed). 62337 is a process caught mid-exec; 41214
+// a zombie; 49282 is missing from the comm listing; 99999 only appears there.
+const psSpacesFixture = `  370     1   0.0   2464 435371600     0 root  Thu Nov 12 16:16:29 2026     /usr/sbin/syslogd
+ 1345     1   0.0  45344 469038976   501 jason Thu Nov 12 16:18:20 2026     /Users/jason/Library/Application Support/JetBrains/Daemon/bundles/current/jetbrainsd.app/Contents/MacOS/jetbrainsd run
+ 2515 69551   0.0 160736 1951527712   501 jason Wed Nov 18 19:31:51 2026     /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.79/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer) --type=renderer --origin-trial-disabled-features=CanvasTextNg
+ 5589 73802   0.0     32 435299504   501 jason Wed Nov 18 19:54:41 2026     /Applications/Claude.app/Contents/Helpers/disclaimer --pgroup -- /Users/jason/Library/Application Support/Claude/claude-code/2.1.321/ddbdf2b334e1/claude.app/Contents/MacOS/claude --output-format stream-json
+ 5591  5589   0.0 252528 441158720   501 jason Wed Nov 18 19:54:41 2026     /Users/jason/Library/Application Support/Claude/claude-code/2.1.321/ddbdf2b334e1/claude.app/Contents/MacOS/claude --output-format stream-json --verbose
+62337 62105   0.3   2704 435433888   501 jason            Thu Nov 19 12:55:51 2026     (bash)
+49282 49279   2.6 556816 410565376   501 jason            Thu Nov 19 11:52:05 2026     /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/CoreServices/SpringBoard.app/SpringBoard
+41214 41209   0.0      0        0   501 jason Thu Nov 19 12:52:42 2026     <defunct>
+49281 49279   0.6  52016 410134592   501 jason Thu Nov 19 11:52:05 2026     /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/UserEventAgent (System)
+76290 76289   0.0     32 435308240     0 root  Fri Nov 13 12:21:52 2026     /usr/bin/login -fpl jason /Applications/iTerm.app/Contents/MacOS/ShellLauncher --launch_shell
+`
+
+// Captured with `ps -axwwo pid=,comm=` on the same host.
+const psCommFixture = `  370 /usr/sbin/syslogd
+ 1345 /Users/jason/Library/Application Support/JetBrains/Daemon/bundles/current/jetbrainsd.app/Contents/MacOS/jetbrainsd
+ 2515 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.79/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 5589 /Applications/Claude.app/Contents/Helpers/disclaimer
+ 5591 /Users/jason/Library/Application Support/Claude/claude-code/2.1.321/ddbdf2b334e1/claude.app/Contents/MacOS/claude
+62337 (bash)
+41214 <defunct>
+49281 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/UserEventAgent
+76290 /usr/bin/login
+99999 /usr/bin/true
+`
+
+func TestCollectAllNamesExecutablesWithSpaces(t *testing.T) {
+	procs := CollectAll(context.Background(), CollectOptions{
+		CmdRunner: func(_ string, args ...string) ([]byte, error) {
+			if args[len(args)-1] == "pid=,comm=" {
+				return []byte(psCommFixture), nil
+			}
+			return []byte(psSpacesFixture), nil
+		},
+		DetailCollector: func([]Info) map[int]Details { return nil },
+	})
+	want := map[int]struct{ cmd, full string }{
+		370:   {"syslogd", "/usr/sbin/syslogd"},
+		1345:  {"jetbrainsd", "/Users/jason/Library/Application Support/JetBrains/Daemon/bundles/current/jetbrainsd.app/Contents/MacOS/jetbrainsd run"},
+		2515:  {"Google Chrome Helper (Aperitif Renderer)", ""},
+		5589:  {"disclaimer", ""},
+		5591:  {"claude", "/Users/jason/Library/Application Support/Claude/claude-code/2.1.321/ddbdf2b334e1/claude.app/Contents/MacOS/claude --output-format stream-json --verbose"},
+		62337: {"(bash)", "(bash)"},
+		49282: {"iOS", ""}, // absent from the comm listing: whitespace-split fallback
+		41214: {"<defunct>", "<defunct>"},
+		49281: {"UserEventAgent", ""},
+		76290: {"login", "/usr/bin/login -fpl jason /Applications/iTerm.app/Contents/MacOS/ShellLauncher --launch_shell"},
+	}
+	if len(procs) != len(want) {
+		t.Fatalf("got %d procs, want %d", len(procs), len(want))
+	}
+	for _, p := range procs {
+		w, ok := want[p.PID]
+		if !ok {
+			t.Errorf("unexpected pid %d", p.PID)
+			continue
+		}
+		if p.Command != w.cmd {
+			t.Errorf("pid %d Command = %q, want %q", p.PID, p.Command, w.cmd)
+		}
+		if w.full != "" && p.FullCommandLine != w.full {
+			t.Errorf("pid %d FullCommandLine = %q, want %q", p.PID, p.FullCommandLine, w.full)
+		}
+	}
+}
+
+func TestExecNameRejectsMismatchedArgv0(t *testing.T) {
+	tests := []struct{ full, argv0, want string }{
+		{"/usr/bin/foo a b", "/usr/bin/foo", "foo"},
+		{"/usr/bin/foo", "/usr/bin/foo", "foo"},
+		{"/usr/bin/foobar x", "/usr/bin/foo", ""}, // prefix but not a whole argv[0]
+		{"/bin/sh -c x", "/usr/bin/foo", ""},      // pid recycled between listings
+		{"/bin/sh", "", ""},
+	}
+	for _, tt := range tests {
+		if got := execName(tt.full, tt.argv0); got != tt.want {
+			t.Errorf("execName(%q, %q) = %q, want %q", tt.full, tt.argv0, got, tt.want)
+		}
+	}
+}
+
+func TestCollectAllCommListingFailureKeepsFallback(t *testing.T) {
+	procs := CollectAll(context.Background(), CollectOptions{
+		CmdRunner: func(_ string, args ...string) ([]byte, error) {
+			if args[len(args)-1] == "pid=,comm=" {
+				return nil, errors.New("ps failed")
+			}
+			return []byte(psSpacesFixture), nil
+		},
+		DetailCollector: func([]Info) map[int]Details { return nil },
+	})
+	for _, p := range procs {
+		if p.PID == 1345 && p.Command != "Application" {
+			t.Errorf("Command = %q, want whitespace-split fallback", p.Command)
+		}
 	}
 }
 
