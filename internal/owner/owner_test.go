@@ -174,6 +174,9 @@ func (f fakeFS) ReadDir(n string) ([]os.DirEntry, error) {
 }
 
 func (f fakeFS) Readlink(n string) (string, error) {
+	if f.deny[n] {
+		return "", fs.ErrPermission
+	}
 	if l, ok := f.links[n]; ok {
 		return l, nil
 	}
@@ -219,6 +222,7 @@ func procTree() fakeFS {
 			"/proc/net/unix": "Num       RefCount Protocol Flags    Type St Inode Path\n" +
 				"0000: 00000002 00000000 00010000 0001 01 777 /run/app.sock\n" +
 				"0001: 00000003 00000000 00000000 0001 03 778 /run/other.sock\n" +
+				"0003: 00000002 00000000 00010000 0001 01 780 /tmp/my app/service.sock\n" +
 				"0002: 00000002 00000000 00010000 0001 01 779\n",
 		},
 		deny: map[string]bool{"/proc/1/fd": true},

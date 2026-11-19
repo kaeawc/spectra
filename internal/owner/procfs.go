@@ -60,26 +60,57 @@ func unixSocketLinks(fsys FS, procfs string, paths []string) map[string]bool {
 	}
 	var out map[string]bool
 	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 8 || !slices.Contains(paths, f[7]) {
+		inode, path, ok := parseUnixLine(line)
+		if !ok || !slices.Contains(paths, path) {
 			continue
 		}
 		if out == nil {
 			out = map[string]bool{}
 		}
-		out["socket:["+f[6]+"]"] = true
+		out["socket:["+inode+"]"] = true
 	}
 	return out
 }
 
-// matches compares by device+inode when the link target is a file path, so a
-// descriptor on an unlinked file is not mistaken for a new file created at
-// the same path and descriptors opened via another hard link still match.
+// parseUnixLine splits a /proc/net/unix row into its inode and bound path.
+// The first seven columns never contain spaces; everything after the single
+// separator is the path verbatim, which may itself contain spaces.
+func parseUnixLine(line string) (inode, path string, ok bool) {
+	rest := strings.TrimRight(line, "\r\n")
+	var cols [7]string
+	for i := range cols {
+		rest = strings.TrimLeft(rest, " ")
+		end := strings.IndexByte(rest, ' ')
+		if end < 0 {
+			return "", "", false
+		}
+		cols[i], rest = rest[:end], rest[end+1:]
+	}
+	if rest == "" {
+		return "", "", false
+	}
+	return cols[6], rest, true
+}
+
 func (m pathMatcher) matches(link string) bool {
+	ok, _ := m.matchesLink(link)
+	return ok
+}
+
+// matchesLink compares by device+inode when the link target is a file path,
+// so a descriptor on an unlinked file is not mistaken for a new file created
+// at the same path and descriptors opened via another hard link still match.
+// denied reports a permission failure reading the link; a vanished link (the
+// fd closed mid-scan) is not a denial.
+func (m pathMatcher) matchesLink(link string) (matched, denied bool) {
 	t, err := m.fsys.Readlink(link)
 	if err != nil {
-		return false
+		return false, errors.Is(err, fs.ErrPermission)
 	}
+	return m.matchesTarget(link, t), false
+}
+
+func (m pathMatcher) matchesTarget(link, t string) bool {
 	if m.socks[t] {
 		return true
 	}
@@ -128,11 +159,13 @@ func procPidHolders(m pathMatcher, dir string, pid int) (holders []Holder, denie
 		return holders, errors.Is(err, fs.ErrPermission)
 	}
 	for _, fd := range fds {
-		if m.matches(filepath.Join(fdDir, fd.Name())) {
+		ok, d := m.matchesLink(filepath.Join(fdDir, fd.Name()))
+		denied = denied || d
+		if ok {
 			holders = append(holders, Holder{PID: pid, Hold: HoldFD, Detail: "fd " + fd.Name(), Mode: fdMode(m.fsys, dir, fd.Name())})
 		}
 	}
-	return holders, false
+	return holders, denied
 }
 
 // fdMode reads the open flags from fdinfo; the low two bits are the access mode.

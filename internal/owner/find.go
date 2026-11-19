@@ -52,7 +52,9 @@ func (f Finder) Find(ctx context.Context, t Target) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if res.Incomplete && f.isRoot() {
+	// A Linux path scan reads /proc directly, so a denial under uid 0 (no
+	// CAP_SYS_PTRACE in a container) is real and must stay visible.
+	if res.Incomplete && f.isRoot() && (osk != hostos.Linux || t.Kind != KindPath) {
 		res.Incomplete = false
 	}
 	if res.Incomplete {
