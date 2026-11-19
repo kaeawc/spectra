@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -140,5 +141,33 @@ func TestMachoVerdictMarksSkippedSymbols(t *testing.T) {
 	v := machoVerdict(mf, DefaultMaxScanBytes, true)
 	if v.Runtime != RuntimeRust || !strings.Contains(v.Evidence, "symbol table too large") {
 		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+// A skipped symbol table must still parse: debug/macho rejects a dysymtab
+// that indexes past an empty symtab (seen live on iTerm2).
+func TestBoundSymtabKeepsDysymtabConsistent(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	f, err := os.Open(exe)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer f.Close()
+	mr, skipped := boundSymtab(f, 0)
+	if mr == nil {
+		t.Skip("test binary is not a thin Mach-O")
+	}
+	if !skipped {
+		t.Fatal("limit 0 did not skip the symbol table")
+	}
+	mf, err := macho.NewFile(mr)
+	if err != nil {
+		t.Fatalf("Mach-O with a skipped symbol table does not parse: %v", err)
+	}
+	if mf.Symtab != nil && len(mf.Symtab.Syms) != 0 {
+		t.Fatalf("symbols were loaded: %d", len(mf.Symtab.Syms))
 	}
 }

@@ -182,6 +182,7 @@ func readFatArches(r io.ReaderAt) ([]fatArch, error) {
 // debug/macho loads it eagerly.
 const (
 	lcSymtab        = 0x2
+	lcDysymtab      = 0xb
 	maxLoadCmdBytes = 1 << 20
 	nlistSize       = 16
 )
@@ -211,7 +212,13 @@ func boundSymtab(r io.ReaderAt, limit int64) (mr io.ReaderAt, skipped bool) {
 	if off < 0 || nsyms*nlistSize+strsize <= limit {
 		return r, false
 	}
-	return zeroedFields{r: r, at: hdrSize + off + 12, at2: hdrSize + off + 20}, true
+	zero := []span{{hdrSize + off + 12, 4}, {hdrSize + off + 20, 4}}
+	// debug/macho rejects a dysymtab whose symbol indexes point past the
+	// (now empty) symbol table, so its six index/count fields go too.
+	if dys := findLoadCmd(cmds, bo, ncmds, lcDysymtab, 32); dys >= 0 {
+		zero = append(zero, span{hdrSize + dys + 8, 24})
+	}
+	return zeroedFields{r: r, zero: zero}, true
 }
 
 // machoByteOrder returns the byte order and header size for a Mach-O magic,
@@ -231,30 +238,42 @@ func machoByteOrder(magic []byte) (binary.ByteOrder, int64) {
 // findSymtab returns the offset within cmds of LC_SYMTAB and its table
 // sizes, or a negative offset when there is none.
 func findSymtab(cmds []byte, bo binary.ByteOrder, ncmds uint32) (off, nsyms, strsize int64) {
+	off = findLoadCmd(cmds, bo, ncmds, lcSymtab, 24)
+	if off < 0 {
+		return -1, 0, 0
+	}
+	return off, int64(bo.Uint32(cmds[off+12:])), int64(bo.Uint32(cmds[off+20:]))
+}
+
+// findLoadCmd returns the offset in cmds of the first load command want that
+// is at least minLen bytes, or -1.
+func findLoadCmd(cmds []byte, bo binary.ByteOrder, ncmds, want uint32, minLen int64) int64 {
 	size := int64(len(cmds))
-	for off = 0; ncmds > 0 && off+8 <= size; ncmds-- {
+	for off := int64(0); ncmds > 0 && off+8 <= size; ncmds-- {
 		cmd, clen := bo.Uint32(cmds[off:]), int64(bo.Uint32(cmds[off+4:]))
 		if clen < 8 || off+clen > size {
 			break
 		}
-		if cmd == lcSymtab && clen >= 24 {
-			return off, int64(bo.Uint32(cmds[off+12:])), int64(bo.Uint32(cmds[off+20:]))
+		if cmd == want && clen >= minLen {
+			return off
 		}
 		off += clen
 	}
-	return -1, 0, 0
+	return -1
 }
 
-// zeroedFields reads as r with the 4-byte fields at at and at2 zeroed.
+type span struct{ at, n int64 }
+
+// zeroedFields reads as r with the byte ranges in zero cleared.
 type zeroedFields struct {
-	r       io.ReaderAt
-	at, at2 int64
+	r    io.ReaderAt
+	zero []span
 }
 
 func (z zeroedFields) ReadAt(p []byte, off int64) (int, error) {
 	n, err := z.r.ReadAt(p, off)
-	for _, f := range []int64{z.at, z.at2} {
-		for i := max(f, off); i < min(f+4, off+int64(n)); i++ {
+	for _, f := range z.zero {
+		for i := max(f.at, off); i < min(f.at+f.n, off+int64(n)); i++ {
 			p[i-off] = 0
 		}
 	}
