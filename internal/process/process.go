@@ -89,7 +89,9 @@ type CollectOptions struct {
 	// per collection.
 	Deep bool
 
-	// CmdRunner overrides exec.Command for testing.
+	// CmdRunner overrides exec.Command for testing. A production CmdRunner
+	// must run ps with TZ=UTC0 and LC_ALL=C (see proc.StableTimeEnv): lstart
+	// is parsed as UTC.
 	// Deprecated: prefer Runner for new code.
 	CmdRunner func(name string, args ...string) ([]byte, error)
 

@@ -74,8 +74,15 @@ type Throughput struct {
 // CmdRunner abstracts shell-out for testability.
 type CmdRunner func(name string, args ...string) ([]byte, error)
 
-// DefaultRunner runs the real command.
+// DefaultRunner runs the real command. ps runs with TZ=UTC0 and LC_ALL=C
+// because process.CollectAll, which this runner also feeds, parses lstart as
+// UTC.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
+	if name == "ps" {
+		ctx, cancel := context.WithTimeout(context.Background(), proc.DefaultTimeout)
+		defer cancel()
+		return proc.OutputEnv(ctx, nil, proc.StableTimeEnv(), name, args...)
+	}
 	return proc.BoundedOutput(name, args...)
 }
 

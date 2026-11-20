@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -13,6 +14,7 @@ func TestCollectAllRunsPSWithUTCAndCLocale(t *testing.T) {
 		Result: proc.Result{Stdout: []byte(psFixture)},
 	}).OnExact("ps", []string{"-axwwo", "pid=,comm="}, proc.Response{})
 	CollectAll(context.Background(), CollectOptions{
+		OS:              hostos.Darwin,
 		Runner:          runner,
 		DetailCollector: func([]Info) map[int]Details { return nil },
 	})
