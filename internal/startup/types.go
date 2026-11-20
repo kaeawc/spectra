@@ -44,7 +44,9 @@ const (
 	SourcePrintDisabled = "launchctl_print_disabled"
 	SourceLaunchctl     = "launchctl_print"
 	SourceBTM           = "btm"
-	SourceOwner         = "owner"
+	// SourceBTMStore is BTM read from the store file, without root.
+	SourceBTMStore = "btm_store"
+	SourceOwner    = "owner"
 )
 
 // Item is one thing that launches at login or boot.
@@ -136,6 +138,11 @@ const (
 type PlistError struct {
 	Path  string `json:"path"`
 	Error string `json:"error"`
+	// Label is what a streaming scan read from a plist too large to parse.
+	Label string `json:"label,omitempty"`
+
+	gui   bool // in a LaunchAgents directory: its jobs load into gui/<uid>
+	inert bool // empty, or a dict with no Label: launchd loads no job from it
 }
 
 // Report is the result of List.

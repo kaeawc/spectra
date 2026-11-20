@@ -22,6 +22,9 @@ const (
 	RefuseUnknown   = "unknown_label"
 	RefuseSystem    = "system_scope"
 	RefuseBTMOnly   = "btm_only"
+	// RefuseUnreadable is a plist in a LaunchAgents directory that could not
+	// be read and might define the same label.
+	RefuseUnreadable = "unreadable_plist"
 )
 
 // Command is one launchctl invocation a change ran.
@@ -49,6 +52,10 @@ type ChangeResult struct {
 	Pending bool  `json:"pending,omitempty"`
 	Before  *Item `json:"before,omitempty"`
 	After   *Item `json:"after,omitempty"`
+	// Unreadable are the plists the duplicate-label check could not parse.
+	// Empty ones and dicts without a Label define no job and do not block a
+	// change; the rest are named so the user can judge them.
+	Unreadable []PlistError `json:"unreadable_plists,omitempty"`
 	// Mismatch says how the re-read state differs from what was asked, or
 	// is empty when the change took effect.
 	Mismatch string `json:"mismatch,omitempty"`
@@ -82,10 +89,12 @@ func change(ctx context.Context, opts Options, action, label, scope string) (Cha
 	e.opts.IncludeApple = true
 	e.ownersFor = label
 	btm := e.readBTM(ctx)
+	e.btmListed = btm.listed()
 	rep, err := e.list(ctx, btm)
 	if err != nil {
 		return res, err
 	}
+	res.Unreadable = rep.Errors
 	// Without launchd's own view every job reads as not loaded and enabled, so
 	// a change would skip steps and then report success it can't see.
 	if err := launchdReadable(rep); err != nil {
@@ -96,10 +105,11 @@ func change(ctx context.Context, opts Options, action, label, scope string) (Cha
 		res.Domain = item.Domain
 		res.Before = item
 	}
-	if e.refuse(&res, item, plistRows(rep.Items, label), scope) {
+	if e.refuse(&res, item, plistRows(rep.Items, label), rep.Errors, scope) {
 		return res, nil
 	}
 	mutErr := e.mutate(ctx, &res, *item)
+	res.noteUnreadable()
 	after, err := e.list(ctx, btm)
 	if err != nil {
 		return res, errors.Join(mutErr, fmt.Errorf("re-read after %s: %w", action, err))
@@ -166,7 +176,7 @@ func (r ChangeResult) verify() string {
 }
 
 // refuse fills res and returns true when the change must not run.
-func (e env) refuse(res *ChangeResult, item *Item, copies []Item, scope string) bool {
+func (e env) refuse(res *ChangeResult, item *Item, copies []Item, unreadable []PlistError, scope string) bool {
 	switch {
 	case scope != "" && scope != string(ScopeUser):
 		return res.refuse(RefuseScope, fmt.Sprintf("only --scope user can be changed by spectra; %s-scope items need root", scope))
@@ -174,7 +184,7 @@ func (e env) refuse(res *ChangeResult, item *Item, copies []Item, scope string) 
 		return res.refuse(RefuseApple, fmt.Sprintf("refusing to %s Apple item %s: macOS components can break when disabled; run the command yourself if you are sure", res.Action, res.Label),
 			manualCommands(res.Action, item, e.root)...)
 	}
-	if refuseCopies(res, copies) {
+	if refuseCopies(res, copies) || refuseUnreadable(res, unreadable) {
 		return true
 	}
 	switch {
@@ -215,8 +225,47 @@ func refuseCopies(res *ChangeResult, copies []Item) bool {
 	return false
 }
 
+// refuseUnreadable refuses when a plist whose jobs would load into
+// gui/<uid> could not be parsed and may define the same label: one whose
+// label a scan read as this one, or a non-empty one whose label is unknown.
+func refuseUnreadable(res *ChangeResult, errs []PlistError) bool {
+	var unknown []string
+	for _, pe := range errs {
+		switch {
+		case !pe.gui || pe.inert || (pe.Label != "" && pe.Label != res.Label):
+		case pe.Label == res.Label:
+			return res.refuse(RefuseDuplicate, fmt.Sprintf("refusing to %s %s: %s also defines this label (read by scan; it is too large to parse) and launchd loads only one; remove or rename the extra plist first",
+				res.Action, res.Label, pe.Path))
+		default:
+			unknown = append(unknown, pe.Path)
+		}
+	}
+	if len(unknown) == 0 {
+		return false
+	}
+	return res.refuse(RefuseUnreadable, fmt.Sprintf("refusing to %s %s: spectra could not read the label of %s, so it cannot rule out a second job with this label; fix or remove the unreadable plist first",
+		res.Action, res.Label, strings.Join(unknown, ", ")))
+}
+
+// noteUnreadable names the plists that were not parsed, after any note a
+// launchctl step left.
+func (r *ChangeResult) noteUnreadable() {
+	if len(r.Unreadable) == 0 {
+		return
+	}
+	paths := make([]string, 0, len(r.Unreadable))
+	for _, pe := range r.Unreadable {
+		paths = append(paths, pe.Path)
+	}
+	note := fmt.Sprintf("plists not parsed and not counted as a second %s (empty, no Label, another label, or not in a LaunchAgents directory): %s", r.Label, strings.Join(paths, ", "))
+	if r.Message != "" {
+		note = r.Message + "; " + note
+	}
+	r.Message = note
+}
+
 func (e env) refuseUnknown(res *ChangeResult) bool {
-	if e.root {
+	if e.root || e.btmListed {
 		return res.refuse(RefuseUnknown, fmt.Sprintf("no startup item labelled %q; run `spectra startup list` to see labels", res.Label))
 	}
 	return res.refuse(RefuseUnknown, fmt.Sprintf("no launchd plist labelled %q. It may be a Login Items entry: those are read only as root (`sudo spectra startup list`) and changed in System Settings > General > Login Items", res.Label),

@@ -353,8 +353,9 @@ label, program, trigger (`login`, `boot`, `interval`, `calendar`,
 `on_demand`, `keep_alive`), scope, plist owner, enabled/disabled from
 `launchctl print-disabled`, loaded/running and pid from `launchctl print
 <domain>`, and the owning app with its team id. Login Items from
-Background Task Management (`sfltool dumpbtm`) are merged in only when run as
-root, since `sfltool` otherwise asks for administrator authorization; the
+Background Task Management are merged in without root from the BTM store
+(`btm_store` source, store version 16 only); when the store cannot be used the
+`btm` source is `needs_root` unless run as root (`sfltool dumpbtm`), and the
 `sources` field says so. `spectra startup disable <label>` and
 `spectra startup enable <label>` change user-scope launchd items only
 (`launchctl disable` + `bootout`, `launchctl enable` + `bootstrap`); Apple,

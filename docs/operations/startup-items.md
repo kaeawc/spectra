@@ -7,7 +7,6 @@ exits with an unsupported-OS error.
 ```bash
 spectra startup                      # same as: spectra startup list
 spectra startup list --json --scope user
-sudo spectra startup list            # also reads Login Items (BTM)
 spectra startup disable com.example.agent
 spectra startup enable com.example.agent --json
 ```
@@ -22,7 +21,8 @@ Each row lists the sources that contributed to it, and the report's
 | `launchd_plist` | label, program (`Program` or `ProgramArguments[0]`), trigger, plist owner | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`; `/System/Library/LaunchAgents` and `LaunchDaemons` only with `--include-apple` |
 | `launchctl_print_disabled` | enabled/disabled overrides (`disabled`/`enabled`, or `true`/`false` on older macOS) | `launchctl print-disabled gui/<uid>` and `launchctl print-disabled system` |
 | `launchctl_print` | loaded, running, pid, last exit | `launchctl print gui/<uid>` and `launchctl print system` |
-| `btm` | Background Task Management items: what System Settings > General > Login Items shows | `sfltool dumpbtm`, as root only |
+| `btm_store` | Background Task Management items: what System Settings > General > Login Items shows, read without root | the world-readable `/private/var/db/com.apple.backgroundtaskmanagement/BackgroundItems-v16.btm`; only store version 16 is decoded |
+| `btm` | the same items, as the fallback when the store cannot be used and Spectra runs as root; otherwise reported as `needs_root` | `sfltool dumpbtm`, as root only |
 | `owner` | owning app and team id | the `.app` containing the program, the plist's `AssociatedBundleIdentifiers`, an app whose bundle id equals or is a dotted prefix of the label, or BTM's parent app; team id from `codesign -dv` |
 
 Loaded state comes from one `launchctl print <domain>` per domain: its
@@ -77,7 +77,8 @@ reason:
 | `duplicate_label` | more than one plist defines the label; launchd loads one job per label, so Spectra cannot tell which one a change would act on | the paths are printed; remove or rename the extra plist |
 | `system_scope` | the item is in `/Library/LaunchAgents` or `/Library/LaunchDaemons` | the exact `launchctl ...` commands are printed (with `sudo` for `/Library/LaunchDaemons` when not already root; an override in your GUI domain needs no root); the [privileged helper](../design/privileged-helper.md) is observe-only by design |
 | `btm_only` | a BTM login item with no launchd plist (an app opened at login, or an SMAppService job inside an app bundle) | change it in System Settings > General > Login Items: `open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"` |
-| `unknown_label` | no item has that label; without root it may be a Login Items entry, since BTM is read only as root | `spectra startup list` (or `sudo spectra startup list`) shows the labels; the Login Items pane is suggested |
+| `unknown_label` | no item has that label; it may be a Login Items entry when the `btm`/`btm_store` source could not be read | `spectra startup list` shows the labels; the Login Items pane is suggested |
+| `unreadable_plist` | a plist that could not be parsed might define the label, so Spectra cannot rule out a duplicate | the unreadable paths are listed in the result's `unreadable_plists` field; fix or remove them |
 | `unsupported_scope` | `--scope` is not `user` | |
 
 Exit codes: `0` ok, `1` error (a failed `launchctl` command, or a re-read
@@ -85,11 +86,19 @@ state that does not match the change), `2` usage, `3` refused.
 
 ## Background Task Management limits
 
+- Login Items are read without root from the BTM store file, decoded as an
+  NSKeyedArchiver binary plist (`btm_store` source). Only store version 16
+  is decoded; the newest `BackgroundItems-v<N>.btm` is used. The input is
+  vetted before decoding (binary plist header, bounded object count) and the
+  decode is time-bounded. If the store is missing, of another version,
+  malformed, or too slow to decode, Spectra falls back to `needs_root`
+  for the `btm` source and lists launchd plists only.
 - `sfltool dumpbtm` asks for administrator authorization in a dialog when it
   is not run as root, and blocks until the dialog is answered. Spectra
-  therefore runs it only as root, and otherwise reports `btm` as
-  `needs_root`. Run `sudo spectra startup list` to include Login Items;
-  under `sudo`, Spectra reports the invoking user's (`SUDO_UID`) session.
+  therefore runs it only as root, and only when the store cannot be used.
+  Under `sudo`, Spectra reports the invoking user's (`SUDO_UID`) session.
+- The store lists only users whose generated UUID Spectra can resolve (the
+  caller's own, root, nobody); other users' records are skipped.
 - Without BTM, apps that open at login through `SMAppService` and helper jobs
   whose plists live inside an app bundle are not listed; launchd plists in
   the three directories above are always listed.
