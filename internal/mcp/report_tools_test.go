@@ -216,6 +216,7 @@ func TestReportToolArgumentValidation(t *testing.T) {
 		{"load", `{"min_free_gb":-1}`, "invalid load options"},
 		{"load", `{"max_load_per_cpu":0}`, "invalid load options"},
 		{"load", `{"roots":["rel"]}`, "absolute"},
+		{"load", `{"roots":["/r0","/r1","/r2","/r3","/r4","/r5","/r6","/r7","/r8","/r9","/r10","/r11","/r12","/r13","/r14","/r15","/r16","/r17","/r18","/r19","/r20","/r21","/r22","/r23","/r24","/r25","/r26","/r27","/r28","/r29","/r30","/r31","/r32"]}`, "at most 32"},
 		{"load", `{"top":"x"}`, "invalid params"},
 		{"orphans", `{}`, "roots is required"},
 		{"orphans", `{"roots":["rel"]}`, "absolute"},
@@ -345,5 +346,13 @@ func TestSpawnsToolReturnsEventsAndSummary(t *testing.T) {
 
 	if res := callReportTool(t, s, "spawns", `{"pid":4242,"duration_seconds":3,"interval_millis":1000}`); !res.IsError || !strings.Contains(res.Content[0].Text, "4242") {
 		t.Fatalf("unknown pid: %+v", res)
+	}
+}
+
+func TestOwnerToolTrimsPathTarget(t *testing.T) {
+	s := reportTestServer(t, new(int))
+	res := callReportTool(t, s, "owner", `{"target":" /tmp"}`)
+	if res.IsError && len(res.Content) > 0 && strings.Contains(res.Content[0].Text, "must be absolute") {
+		t.Fatalf("a padded absolute path was rejected: %+v", res)
 	}
 }

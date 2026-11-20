@@ -153,7 +153,14 @@ func (s *Server) reportToolHandlers() map[string]func(json.RawMessage) ToolResul
 	}
 }
 
+// maxRoots bounds how many directories one call may name: each root can cost
+// a bounded walk and Spotlight reads, and the server answers one call at a time.
+const maxRoots = 32
+
 func absRoots(name string, roots []string) error {
+	if len(roots) > maxRoots {
+		return fmt.Errorf("%s: at most %d directories", name, maxRoots)
+	}
 	for _, r := range roots {
 		if !filepath.IsAbs(r) {
 			return fmt.Errorf("%s must be absolute paths: %q", name, r)
@@ -293,7 +300,7 @@ func (s *Server) toolOwner(raw json.RawMessage) ToolResult {
 	if err != nil {
 		return toolError("owner: " + err.Error())
 	}
-	if t.Kind == owner.KindPath && !filepath.IsAbs(p.Target) {
+	if t.Kind == owner.KindPath && !filepath.IsAbs(t.Path) {
 		return toolError("owner: a path target must be absolute")
 	}
 	res, err := owner.BuildReport(ctx, t, s.collect.Reports.Find)
