@@ -1,0 +1,1717 @@
+{
+  "tools": [
+    {
+      "name": "alerts",
+      "description": "List or acknowledge daemon alerts.",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "default": "list",
+            "enum": [
+              "list",
+              "ack"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Alert ID for ack.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum alerts (1..2000).",
+            "type": "integer"
+          },
+          "state": {
+            "default": "firing",
+            "enum": [
+              "firing",
+              "resolved",
+              "all"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "cache",
+      "description": "Local blob cache. Ops: stats, clear. Ask: \"How big is the cache?\"",
+      "inputSchema": {
+        "properties": {
+          "kind": {
+            "description": "Cache kind to clear; empty clears all.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "stats",
+            "enum": [
+              "stats",
+              "clear"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "core",
+      "description": "Inspect a crashed-process core file and suggest offline analyzers. Ask: \"What crashed in this core dump?\"",
+      "inputSchema": {
+        "properties": {
+          "executable": {
+            "description": "Optional path to the crashed executable.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the core file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "db",
+      "description": "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "discover",
+            "enum": [
+              "discover",
+              "overview",
+              "schema",
+              "relations",
+              "stats",
+              "sample"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "diagnose",
+      "description": "Run rules. Finds risky app, JVM, network, storage, and toolchain state. Ask: \"What needs attention?\"",
+      "inputSchema": {
+        "properties": {
+          "include_raw": {
+            "description": "Return raw findings.",
+            "type": "boolean"
+          },
+          "persist": {
+            "description": "Save as issues.",
+            "type": "boolean"
+          },
+          "rules_config": {
+            "description": "spectra.yml path.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "thread_dump_pids": {
+            "description": "JVM PIDs to thread-dump for jvm-deadlock (live only).",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "host_health",
+      "description": "Current daemon host health and optional recent samples.",
+      "inputSchema": {
+        "properties": {
+          "samples": {
+            "description": "Recent samples to include (0..240).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "idle",
+      "description": "Long-idle holders: processes under roots (or named by pids) alive longer than min_age whose tree used under max_cpu percent of one CPU over a window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
+      "inputSchema": {
+        "properties": {
+          "max_cpu": {
+            "description": "Idle means process plus descendants used under this percent of one CPU (default 1).",
+            "type": "number"
+          },
+          "min_age": {
+            "description": "Only processes alive at least this Go duration (default \"10m\").",
+            "type": "string"
+          },
+          "pids": {
+            "description": "PIDs to check (with or instead of roots; one of them is required).",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "roots": {
+            "description": "Absolute directories whose processes are checked.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "window": {
+            "description": "CPU sample Go duration (100ms..30s, default \"5s\"); the call blocks this long.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "inspect_app",
+      "description": "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
+      "inputSchema": {
+        "properties": {
+          "deep": {
+            "description": "Join live process, open-FD/listening-port, and connection state for each app.",
+            "type": "boolean"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "network": {
+            "description": "Scan app URLs.",
+            "type": "boolean"
+          },
+          "paths": {
+            "description": ".app paths. Optional when scan_all=true.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scan_all": {
+            "description": "Inspect every .app under /Applications instead of listing paths.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "issues",
+      "description": "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "check",
+            "enum": [
+              "check",
+              "list",
+              "acknowledge",
+              "dismiss",
+              "record_fix",
+              "fix_history"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "jvm",
+      "description": "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "list",
+            "enum": [
+              "list",
+              "inspect",
+              "explain",
+              "thread_dump",
+              "gc_stats",
+              "vm_memory",
+              "heap_histogram",
+              "heap_dump",
+              "heap_leak_suspects",
+              "flamegraph",
+              "attach",
+              "mbeans",
+              "mbean_read",
+              "mbean_invoke",
+              "probe"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "lineage",
+      "description": "Ancestors and descendant tree of one pid, with subtree RSS and CPU. Same JSON as `spectra lineage --json`. Ask: \"What started PID 123 and what is under it?\"",
+      "inputSchema": {
+        "properties": {
+          "pid": {
+            "description": "Process ID (required).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "load",
+      "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. Ask: \"Should I start another lane?\"",
+      "inputSchema": {
+        "properties": {
+          "backoff_free_gb": {
+            "description": "Back off when available memory is below this many GiB (default 4).",
+            "type": "number"
+          },
+          "max_load_per_cpu": {
+            "description": "Hold when 1-minute load is at or above this times the CPU count (default 1.5).",
+            "type": "number"
+          },
+          "min_free_gb": {
+            "description": "Hold when available memory is below this many GiB (default 8).",
+            "type": "number"
+          },
+          "roots": {
+            "description": "Absolute directories holding worktrees; cause is \"roots\" when load leads there.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "top": {
+            "description": "Rows per top table (1..50, default 5).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "logs",
+      "description": "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
+      "inputSchema": {
+        "properties": {
+          "allow_long_window": {
+            "description": "Permit a longer-than-default time window.",
+            "type": "boolean"
+          },
+          "allow_unsafe_predicate": {
+            "description": "Permit an unsanitized predicate.",
+            "type": "boolean"
+          },
+          "last_seconds": {
+            "description": "Look back this many seconds.",
+            "type": "integer"
+          },
+          "max_rows": {
+            "description": "Max rows to return.",
+            "type": "integer"
+          },
+          "min_level": {
+            "description": "Minimum level (default, info, debug).",
+            "type": "string"
+          },
+          "predicate": {
+            "description": "Raw log predicate.",
+            "type": "string"
+          },
+          "process": {
+            "description": "Process name filter.",
+            "type": "string"
+          },
+          "subsystem": {
+            "description": "Subsystem filter.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "memory",
+      "description": "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "metrics",
+      "description": "Locally stored process metrics and app churn. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
+      "inputSchema": {
+        "properties": {
+          "app_path": {
+            "description": "App path filter (churn).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max rows (default 60).",
+            "type": "integer"
+          },
+          "operation": {
+            "default": "process",
+            "enum": [
+              "process",
+              "churn"
+            ],
+            "type": "string"
+          },
+          "pid": {
+            "description": "PID filter (process).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "network",
+      "description": "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "state",
+            "enum": [
+              "state",
+              "connections",
+              "by_app",
+              "firewall",
+              "diagnose",
+              "capture_start",
+              "capture_stop"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "orphans",
+      "description": "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`: groups (candidates plus daemon_by_design processes), totals, limitations. Ask: \"What did finished lanes leave running?\"",
+      "inputSchema": {
+        "properties": {
+          "min_age": {
+            "description": "Ignore processes younger than this Go duration (default \"1m\").",
+            "type": "string"
+          },
+          "no_daemon": {
+            "description": "Do not ask the running daemon for recorded spawn origins.",
+            "type": "boolean"
+          },
+          "roots": {
+            "description": "Absolute directories holding worktrees (required).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "roots"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "owner",
+      "description": "Who has this? Pass target (:PORT, tcp:PORT, udp:PORT, an absolute path, or a pid) for `spectra owner --json`, or under (absolute directories) for `spectra owner --under --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
+      "inputSchema": {
+        "properties": {
+          "target": {
+            "description": "Port, absolute path, or pid. Exactly one of target or under.",
+            "type": "string"
+          },
+          "under": {
+            "description": "Absolute directories: list processes whose cwd is inside them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "playbook",
+      "description": "Built-in diagnostic playbooks and command plans. Ops: list, get. Ask: \"How do I triage an fseventsd leak?\"",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Playbook id (get).",
+            "type": "string"
+          },
+          "operation": {
+            "default": "list",
+            "enum": [
+              "list",
+              "get"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "power",
+      "description": "Battery, thermal, and energy impact. Ops: state, impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
+      "inputSchema": {
+        "properties": {
+          "duration_seconds": {
+            "description": "Energy sampling window for impact (default 1).",
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Max ranked rows for impact.",
+            "type": "integer"
+          },
+          "operation": {
+            "default": "state",
+            "enum": [
+              "state",
+              "impact"
+            ],
+            "type": "string"
+          },
+          "pids": {
+            "description": "PIDs to score (impact). Defaults to all processes.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "process",
+      "description": "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "list",
+            "enum": [
+              "list",
+              "tree",
+              "history",
+              "sample",
+              "by_app"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "services",
+      "description": "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "snapshot",
+      "description": "Capture or compare host state. Ops: create, list, get, diff, baseline. Ask: \"What changed since baseline?\"",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "id_a": {
+            "description": "Diff left ID.",
+            "type": "string"
+          },
+          "id_b": {
+            "description": "Diff right ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "live or baseline.",
+            "type": "string"
+          },
+          "limit_summary": {
+            "description": "Summary row limit.",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Baseline name.",
+            "type": "string"
+          },
+          "network": {
+            "description": "Scan app URLs.",
+            "type": "boolean"
+          },
+          "operation": {
+            "default": "create",
+            "enum": [
+              "create",
+              "list",
+              "get",
+              "diff",
+              "baseline"
+            ],
+            "type": "string"
+          },
+          "skip_apps": {
+            "description": "Skip apps.",
+            "type": "boolean"
+          },
+          "store": {
+            "description": "Save snapshot.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "spawns",
+      "description": "Bounded live trace of process starts and exits by polling (blocks for the duration, at most 30s). Returns {events: [...], summary: {...}}: events are the objects `spectra spawns --json` streams one per line, summary is its final line. Ask: \"What keeps spawning under PID 123?\"",
+      "inputSchema": {
+        "properties": {
+          "duration_seconds": {
+            "description": "How long to trace (1..30, default 10).",
+            "type": "integer"
+          },
+          "interval_millis": {
+            "description": "Polling interval in ms (50..duration, default 250).",
+            "type": "integer"
+          },
+          "pid": {
+            "description": "Only trace this process and its descendants (0 or omitted: all).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "storage",
+      "description": "Disk volumes and ~/Library storage footprint. Ask: \"What is using all my disk?\"",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "description": "How many top apps to report (default 10).",
+            "type": "integer"
+          },
+          "paths": {
+            "description": ".app paths to size for the largest-apps list.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "system",
+      "description": "Kernel resource limits and saturation. Ops: limits, top. Ask: \"Are we running out of file descriptors or PTYs?\"",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "description": "Top-holder rows per saturated resource (default 10).",
+            "type": "integer"
+          },
+          "operation": {
+            "default": "limits",
+            "enum": [
+              "limits",
+              "top"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "timemachine",
+      "description": "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "toolchain",
+      "description": "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"",
+      "inputSchema": {
+        "properties": {
+          "agent": {
+            "description": "Path to spectra-agent.jar override.",
+            "type": "string"
+          },
+          "applied_by": {
+            "description": "Actor.",
+            "type": "string"
+          },
+          "asprof_path": {
+            "description": "async-profiler asprof path override.",
+            "type": "string"
+          },
+          "attribute": {
+            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
+            "type": "string"
+          },
+          "auto_attach": {
+            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "type": "boolean"
+          },
+          "bundles": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Fix command.",
+            "type": "string"
+          },
+          "confirm_sensitive": {
+            "description": "Allow sensitive artifact.",
+            "type": "boolean"
+          },
+          "deep": {
+            "description": "More process detail.",
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "Output path.",
+            "type": "string"
+          },
+          "dsn": {
+            "description": "Database DSN or URL.",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration.",
+            "type": "integer"
+          },
+          "event": {
+            "description": "Profiler event.",
+            "type": "string"
+          },
+          "exit_code": {
+            "description": "Exit code.",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "Capture handle.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host filter.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "interface": {
+            "description": "Network interface.",
+            "type": "string"
+          },
+          "interval_millis": {
+            "description": "Interval.",
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "Issue ID.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit.",
+            "type": "integer"
+          },
+          "machine_uuid": {
+            "description": "Machine UUID.",
+            "type": "string"
+          },
+          "mbean_name": {
+            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
+            "type": "string"
+          },
+          "mbean_operation": {
+            "description": "MBean operation name. Required for mbean_invoke.",
+            "type": "string"
+          },
+          "operation": {
+            "default": "scan",
+            "enum": [
+              "scan",
+              "jdk",
+              "runtimes",
+              "build_tools",
+              "brew",
+              "drift"
+            ],
+            "type": "string"
+          },
+          "output": {
+            "description": "Fix output.",
+            "type": "string"
+          },
+          "paths": {
+            "description": "App paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "port": {
+            "description": "Port filter.",
+            "type": "integer"
+          },
+          "proto": {
+            "description": "Protocol.",
+            "type": "string"
+          },
+          "samples": {
+            "description": "Number of samples.",
+            "type": "integer"
+          },
+          "schema": {
+            "description": "Database schema filter.",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "description": "Snapshot ID.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Issue status.",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "triage",
+      "description": "Best first tool. Give app_path, pid, bundle_id, or symptom. Returns summary, evidence, next steps. Ask: \"What looks wrong with Slack?\"",
+      "inputSchema": {
+        "properties": {
+          "app_path": {
+            "description": ".app path.",
+            "type": "string"
+          },
+          "bundle_id": {
+            "description": "Bundle ID.",
+            "type": "string"
+          },
+          "include_raw": {
+            "description": "Return raw data.",
+            "type": "boolean"
+          },
+          "network": {
+            "description": "Scan app URLs.",
+            "type": "boolean"
+          },
+          "pid": {
+            "description": "PID.",
+            "type": "integer"
+          },
+          "scope": {
+            "default": "target",
+            "enum": [
+              "target",
+              "global"
+            ],
+            "type": "string"
+          },
+          "symptom": {
+            "description": "Problem to investigate.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "updates",
+      "description": "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+      "inputSchema": {
+        "properties": {
+          "grep": {
+            "description": "Substring filter (log).",
+            "type": "string"
+          },
+          "max_lines": {
+            "description": "Max install.log lines (log).",
+            "type": "integer"
+          },
+          "operation": {
+            "default": "history",
+            "enum": [
+              "history",
+              "log"
+            ],
+            "type": "string"
+          },
+          "process": {
+            "description": "Process filter (log).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "spectra://alerts/firing",
+      "name": "Firing Alerts",
+      "description": "Current daemon alerts in JSON.",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "spectra://capabilities",
+      "name": "Capabilities",
+      "description": "Tool list and when to use each one.",
+      "mimeType": "text/markdown"
+    },
+    {
+      "uri": "spectra://workflows/debugging",
+      "name": "Debug Workflows",
+      "description": "Short app, JVM, network, and baseline workflows.",
+      "mimeType": "text/markdown"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "baseline-diff-review",
+      "description": "Review changes between two snapshots.",
+      "arguments": [
+        {
+          "name": "id_a",
+          "description": "Baseline snapshot ID.",
+          "required": true
+        },
+        {
+          "name": "id_b",
+          "description": "New snapshot ID.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "incident-triage",
+      "description": "Triage an app, PID, host, or symptom.",
+      "arguments": [
+        {
+          "name": "target",
+          "description": "App path, PID, bundle ID, host, or symptom.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "jvm-memory-debug",
+      "description": "Debug JVM heap, GC, and native memory.",
+      "arguments": [
+        {
+          "name": "pid",
+          "description": "JVM PID.",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

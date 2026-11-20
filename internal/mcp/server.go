@@ -1,27 +1,30 @@
-// Package mcp implements a Spectra MCP server over stdio.
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/kaeawc/spectra/internal/jsonrpc"
 	"github.com/kaeawc/spectra/internal/logger"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const protocolVersion = "2024-11-05"
-
-// Server routes MCP JSON-RPC calls.
+// Server serves Spectra's tools, resources and prompts over stdio through
+// the MCP Go SDK, which negotiates every protocol revision it supports
+// (2024-11-05 through 2026-07-28).
 type Server struct {
-	reader        *bufio.Reader
-	writer        io.Writer
-	mu            sync.Mutex
+	reader io.Reader
+	writer io.Writer
+	// callMu serializes tool calls and resource reads. The SDK dispatches
+	// requests concurrently; the handlers and the lazily connected daemon
+	// client were written for one call at a time.
+	callMu        sync.Mutex
 	Version       string
 	Verbose       bool
 	log           logger.Logger
@@ -34,7 +37,7 @@ type Server struct {
 // NewServer returns a configured MCP server from stdin/stdout handles.
 func NewServer(reader io.Reader, writer io.Writer) *Server {
 	return &Server{
-		reader:  bufio.NewReader(reader),
+		reader:  reader,
 		writer:  writer,
 		Version: "dev",
 		log:     logger.New(logger.Config{Format: logger.FormatText, Level: slog.LevelInfo}),
@@ -121,144 +124,88 @@ func mergeHostStateCollectors(c, defaults Collectors) Collectors {
 	return c
 }
 
-// Run reads framed messages and processes them until EOF.
-func (s *Server) Run() {
-	for {
-		msg, err := jsonrpc.ReadMessage(s.reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			s.log.Error("jsonrpc read failed", "err", err)
-			return
-		}
-		req, rpcErr := decodeRequest(msg)
-		if rpcErr != nil {
-			// Errors for messages whose id could not be read are still
-			// answered, with a null id, per JSON-RPC 2.0 section 5.
-			jsonrpc.SendResponse(s.writer, &s.mu, req.ID, nil, rpcErr)
-			continue
-		}
-		s.route(req)
-	}
-}
-
-// nullID is a request id the client sent as an explicit JSON null. It is
-// non-nil so sendResponse answers it, unlike a notification (id absent).
-var nullID = json.RawMessage("null")
-
-// decodeRequest parses one message. Invalid JSON is a parse error (-32700);
-// valid JSON that is not a request object (an array/batch, wrong field
-// types, wrong jsonrpc version) is an invalid request (-32600).
-func decodeRequest(msg []byte) (Request, *RPCError) {
-	var req Request
-	if err := json.Unmarshal(msg, &req); err != nil {
-		if !json.Valid(msg) {
-			return Request{}, &RPCError{Code: -32700, Message: "parse error: " + err.Error()}
-		}
-		return Request{}, &RPCError{Code: -32600, Message: "invalid request: expected a single JSON-RPC request object"}
-	}
-	if req.ID == nil {
-		var probe struct {
-			ID json.RawMessage `json:"id"`
-		}
-		if json.Unmarshal(msg, &probe) == nil && len(probe.ID) > 0 {
-			req.ID = nullID
-		}
-	}
-	if req.JSONRPC != "2.0" || req.Method == "" {
-		id := req.ID
-		return Request{ID: id}, &RPCError{Code: -32600, Message: "invalid request"}
-	}
-	return req, nil
-}
-
-func (s *Server) sendResponse(id interface{}, rpcErr *RPCError, result ...any) {
-	var payload any
-	if len(result) == 1 {
-		payload = result[0]
-	}
-	if id == nil {
-		return
-	}
-	jsonrpc.SendResponse(s.writer, &s.mu, id, payload, rpcErr)
-}
-
-func (s *Server) route(req Request) {
-	switch req.Method {
-	case "initialize":
-		s.handleInitialize(req)
-	case "ping":
-		s.sendResponse(req.ID, nil, struct{}{})
-	case "tools/list":
-		s.handleToolsList(req)
-	case "tools/call":
-		s.handleToolsCall(req)
-	case "resources/list":
-		s.handleResourcesList(req)
-	case "resources/read":
-		s.handleResourcesRead(req)
-	case "prompts/list":
-		s.handlePromptsList(req)
-	case "prompts/get":
-		s.handlePromptsGet(req)
-	case "shutdown":
-		s.sendResponse(req.ID, nil, map[string]bool{"ok": true})
-	case "exit":
-		s.sendResponse(req.ID, nil, map[string]bool{"ok": true})
-	default:
-		s.sendResponse(req.ID, &RPCError{Code: -32601, Message: "method not found: " + req.Method})
-	}
-}
-
-func (s *Server) handleInitialize(req Request) {
-	var params InitializeParams
-	if len(req.Params) > 0 {
-		if err := json.Unmarshal(req.Params, &params); err != nil {
-			s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
-			return
-		}
-		if params.ProtocolVersion != "" && params.ProtocolVersion != protocolVersion {
-			s.log.Info("initialize with unsupported protocol", "protocol", params.ProtocolVersion)
-		}
-		_ = params
-	}
-	_ = req
-	s.sendResponse(req.ID, nil, InitializeResult{
-		ProtocolVersion: protocolVersion,
-		ServerInfo: ServerInfo{
-			Name:    "spectra-mcp",
-			Version: s.Version,
-		},
-		Capabilities: ServerCaps{
-			Tools:     &ToolsCap{},
-			Resources: &ResourcesCap{},
-			Prompts:   &PromptsCap{},
-		},
+// Run serves one MCP session over the reader and writer until the client
+// closes its end or ctx is cancelled.
+func (s *Server) Run(ctx context.Context) error {
+	err := s.sdkServer().Run(ctx, &sdk.IOTransport{
+		Reader: io.NopCloser(s.reader),
+		Writer: nopWriteCloser{s.writer},
 	})
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return fmt.Errorf("mcp session: %w", err)
 }
 
-func (s *Server) handleToolsList(req Request) {
-	s.sendResponse(req.ID, nil, ToolsListResult{
-		Tools: toolDefinitions(),
-	})
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+// sdkServer builds the SDK server with every Spectra tool, resource and prompt.
+func (s *Server) sdkServer() *sdk.Server {
+	opts := &sdk.ServerOptions{
+		// Advertise tools, resources and prompts without the SDK's default
+		// logging capability; the surface never changes at runtime.
+		Capabilities: &sdk.ServerCapabilities{
+			Tools:     &sdk.ToolCapabilities{},
+			Resources: &sdk.ResourceCapabilities{},
+			Prompts:   &sdk.PromptCapabilities{},
+		},
+	}
+	if s.Verbose {
+		opts.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	}
+	srv := sdk.NewServer(&sdk.Implementation{Name: "spectra-mcp", Version: s.Version}, opts)
+	handlers := s.toolHandlers()
+	for _, def := range toolDefinitions() {
+		srv.AddTool(sdkTool(def), s.sdkToolHandler(handlers[def.Name]))
+	}
+	for _, r := range resourceDefinitions() {
+		h := readStaticResource
+		if r.URI == firingAlertsURI {
+			h = s.readFiringAlerts
+		}
+		srv.AddResource(r, h)
+	}
+	for _, p := range promptDefinitions() {
+		srv.AddPrompt(p, getPrompt)
+	}
+	return srv
 }
 
-func (s *Server) handleToolsCall(req Request) {
-	var params ToolCallParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
-		return
+// stateChangingTools may change host or Spectra state for some operation
+// (snapshot store, issue status, alert ack, cache clear, JVM attach or MBean
+// invoke, packet capture), so they carry no readOnlyHint. Every other tool
+// only reads.
+var stateChangingTools = map[string]bool{
+	"snapshot": true,
+	"diagnose": true,
+	"jvm":      true,
+	"network":  true,
+	"issues":   true,
+	"cache":    true,
+	"alerts":   true,
+}
+
+func sdkTool(def ToolDefinition) *sdk.Tool {
+	t := &sdk.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}
+	if !stateChangingTools[def.Name] {
+		t.Annotations = &sdk.ToolAnnotations{ReadOnlyHint: true}
 	}
-	handler, ok := s.toolHandlers()[params.Name]
-	if !ok {
-		s.sendResponse(req.ID, nil, ToolResult{
-			Content: []ContentBlock{{Type: "text", Text: "unknown tool: " + params.Name}},
-			IsError: true,
-		})
-		return
+	return t
+}
+
+func (s *Server) sdkToolHandler(h func(json.RawMessage) ToolResult) sdk.ToolHandler {
+	return func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		s.callMu.Lock()
+		res := h(req.Params.Arguments)
+		s.callMu.Unlock()
+		out := &sdk.CallToolResult{IsError: res.IsError, Content: make([]sdk.Content, 0, len(res.Content))}
+		for _, c := range res.Content {
+			out.Content = append(out.Content, &sdk.TextContent{Text: c.Text})
+		}
+		return out, nil
 	}
-	s.sendResponse(req.ID, nil, handler(params.Arguments))
 }
 
 // toolHandlers maps each tool name to its handler. The table keeps
@@ -295,54 +242,4 @@ func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
 		handlers[name] = h
 	}
 	return handlers
-}
-
-func (s *Server) handleResourcesList(req Request) {
-	s.sendResponse(req.ID, nil, ResourcesListResult{
-		Resources: resourceDefinitions(),
-	})
-}
-
-func (s *Server) handleResourcesRead(req Request) {
-	var params ResourceReadParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
-		return
-	}
-	if params.URI == "spectra://alerts/firing" {
-		s.readFiringAlerts(req)
-		return
-	}
-	content, mimeType, err := readResource(params.URI)
-	if err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: err.Error()})
-		return
-	}
-	s.sendResponse(req.ID, nil, ResourceReadResult{
-		Contents: []ResourceContent{{
-			URI:      params.URI,
-			MimeType: mimeType,
-			Text:     content,
-		}},
-	})
-}
-
-func (s *Server) handlePromptsList(req Request) {
-	s.sendResponse(req.ID, nil, PromptsListResult{
-		Prompts: promptDefinitions(),
-	})
-}
-
-func (s *Server) handlePromptsGet(req Request) {
-	var params PromptGetParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32602, Message: "invalid params: " + err.Error()})
-		return
-	}
-	result, err := s.getPrompt(params.Name, params.Arguments)
-	if err != nil {
-		s.sendResponse(req.ID, err)
-		return
-	}
-	s.sendResponse(req.ID, nil, result)
 }

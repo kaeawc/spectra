@@ -1,11 +1,13 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kaeawc/spectra/internal/mcp"
 )
@@ -24,8 +26,14 @@ func main() {
 	}
 
 	log.SetOutput(os.Stderr)
-	server := mcp.NewServer(bufio.NewReader(os.Stdin), os.Stdout)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	server := mcp.NewServer(os.Stdin, os.Stdout)
 	server.Version = version
 	server.Verbose = *verboseFlag
-	server.Run()
+	if err := server.Run(ctx); err != nil {
+		log.Printf("spectra-mcp: %v", err)
+		stop()
+		os.Exit(1)
+	}
 }

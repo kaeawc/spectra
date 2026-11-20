@@ -14,6 +14,8 @@ import (
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/watchclient"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var errDaemonUnavailable = errors.New("spectra daemon is not running")
@@ -55,7 +57,8 @@ func (s *Server) SetDaemonConnector(fn func(context.Context) (daemonWatchClient,
 	s.connectDaemon = fn
 }
 
-// The lazily connected daemon client relies on the MCP server's single-threaded request dispatch; concurrent dispatch needs a lock here.
+// The lazily connected daemon client is not safe for concurrent use; callers
+// hold s.callMu, which serializes every tool call and resource read.
 func (s *Server) withDaemon(fn func(context.Context, daemonWatchClient) error) error {
 	parentCtx := context.Background()
 	ctx, cancel := context.WithTimeout(parentCtx, s.daemonCallTimeout())
@@ -203,7 +206,9 @@ func (s *Server) toolProcessHistory(pid, limit int) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("process history for pid %d", pid), Raw: history, Timestamp: s.now()})
 }
 
-func (s *Server) readFiringAlerts(req Request) {
+func (s *Server) readFiringAlerts(_ context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
 	var alerts []hostwatch.Alert
 	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
 		var callErr error
@@ -211,13 +216,14 @@ func (s *Server) readFiringAlerts(req Request) {
 		return callErr
 	})
 	if err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32000, Message: fmt.Sprintf("%v; start it with `spectra daemon start`", err)})
-		return
+		return nil, &jsonrpc.Error{Code: -32000, Message: fmt.Sprintf("%v; start it with `spectra daemon start`", err)}
 	}
 	data, err := json.Marshal(alerts)
 	if err != nil {
-		s.sendResponse(req.ID, &RPCError{Code: -32603, Message: err.Error()})
-		return
+		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: err.Error()}
 	}
-	s.sendResponse(req.ID, nil, ResourceReadResult{Contents: []ResourceContent{{URI: "spectra://alerts/firing", MimeType: "application/json", Text: string(data)}}})
+	res := &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{URI: firingAlertsURI, MIMEType: "application/json", Text: string(data)}}}
+	// Alerts describe this host: stale at once (ttlMs 0) and never shared.
+	res.CacheScope = "private"
+	return res, nil
 }

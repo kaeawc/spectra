@@ -1,7 +1,32 @@
 # MCP tools
 
 `spectra-mcp` serves local diagnostic tools over stdio. It does not start the
-daemon. Start the local service with `spectra daemon start` or install it with
+daemon.
+
+## Protocol
+
+The server is built on the official MCP Go SDK
+(`github.com/modelcontextprotocol/go-sdk`, pinned to v1.8.0) and speaks
+newline-delimited JSON-RPC on stdin and stdout. It negotiates every revision
+the SDK supports: `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26` and
+`2024-11-05`. A client that sends `initialize` gets the version it asked for,
+or `2025-11-25` when it asks for one the server does not know. A `2026-07-28`
+client skips the handshake: it calls `server/discover` and sends the protocol
+version in each request's `_meta`.
+
+The server advertises the `tools`, `resources` and `prompts` capabilities. The
+set never changes while it runs, so it sends no list-changed notifications.
+Tools that only read carry the `readOnlyHint` annotation. `snapshot`,
+`diagnose`, `jvm`, `network`, `issues`, `cache` and `alerts` do not, because
+some of their operations store snapshots or issues, acknowledge alerts, clear
+the cache, attach to a JVM, invoke an MBean or start a packet capture.
+
+Tool calls and resource reads run one at a time. `ping` and the list methods
+are still answered while a long call such as `spawns` runs.
+
+## Daemon-backed tools
+
+Start the local service with `spectra daemon start` or install it with
 `spectra daemon install` to use these daemon-backed tools:
 
 | Tool | Parameters | Result |
@@ -43,7 +68,7 @@ results here; read `exit_code`, `total` or `holders`. A failed lookup (an
 unreadable load average, an unknown pid, a CPU window that could not be
 measured) is a tool error.
 
-`spawns` blocks the server for its whole duration. The CLI streams one JSON
+`spawns` holds up other tool calls for its whole duration. The CLI streams one JSON
 object per event and then a summary line; the tool collects the same values
 into one document: `events` holds the event objects in order (at most 5000;
 `events_dropped` counts the rest, which the summary still counts), `summary`
