@@ -20,6 +20,15 @@ func Classify(ctx context.Context, procs []Info, c *classify.Classifier) error {
 			ExecutablePath:    p.ExecutablePath,
 			ExecutableDeleted: p.ExecutableDeleted,
 			CommandLine:       p.FullCommandLine,
+			Argv:              p.Argv,
+		}
+		if len(p.Argv) == 0 && p.PID > 0 {
+			// Read only when the classifier asks (interpreters), and keep
+			// what was read so --classify output shows the boundaries used.
+			inputs[i].LoadArgv = func() []string {
+				procs[i].Argv = argvFor(p.PID, p.FullCommandLine)
+				return procs[i].Argv
+			}
 		}
 	}
 	results, err := c.Classify(ctx, inputs)

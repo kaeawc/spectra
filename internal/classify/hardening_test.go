@@ -466,6 +466,40 @@ func TestInterpreterScriptSkipsFlagValues(t *testing.T) {
 	}
 }
 
+func TestInterpreterScriptKeepsArgvBoundaries(t *testing.T) {
+	c := New(Options{OS: hostos.Darwin, FS: newFakeFS(), Runner: codesignFake(adhocCodesign)})
+	node := "/opt/homebrew/bin/node"
+	gemini := "/home/Jane Doe/node_modules/@google/gemini-cli/dist/index.js"
+	cases := []struct {
+		name string
+		in   Input
+		want Role
+	}{
+		{"script path with a space", Input{CommandLine: "node " + gemini, Argv: []string{"node", gemini}}, RoleAIAgent},
+		{"script path with a space, argv loaded lazily", Input{CommandLine: "node " + gemini, LoadArgv: func() []string { return []string{"node", gemini} }}, RoleAIAgent},
+		// Without argv the joined string splits at the space: /home/Jane.
+		{"script path with a space, no argv", Input{CommandLine: "node " + gemini}, RoleCLI},
+		{"argv[0] with a space", Input{CommandLine: "node codex server.js", Argv: []string{"node codex", "server.js"}}, RoleCLI},
+		{"argv[0] with a space, no argv", Input{CommandLine: "node codex server.js"}, RoleAIAgent},
+		{"argv unavailable falls back", Input{CommandLine: "node /opt/homebrew/bin/codex", LoadArgv: func() []string { return nil }}, RoleAIAgent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.in.UID, tc.in.Command, tc.in.ExecutablePath = 501, "node", node
+			if r := classifyOne(t, c, tc.in); r.Role != tc.want {
+				t.Fatalf("role = %s, want %s (evidence %v)", r.Role, tc.want, r.Evidence)
+			}
+		})
+	}
+	called := false
+	native := Input{UID: 501, Command: "tool", ExecutablePath: "/opt/tool/bin/tool", CommandLine: "tool",
+		LoadArgv: func() []string { called = true; return nil }}
+	classifyOne(t, c, native)
+	if called {
+		t.Fatal("argv loaded for a process that is not an interpreter")
+	}
+}
+
 func TestRustVerdict(t *testing.T) {
 	cases := []struct {
 		name string
