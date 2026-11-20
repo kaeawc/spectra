@@ -50,12 +50,14 @@ var genericNames = map[string]bool{
 
 // matcher accumulates items keyed by path; the first, strongest match wins.
 type matcher struct {
-	ctx    context.Context
-	o      Options
-	app    App
-	items  map[string]*Item
-	labels []string
-	others *otherApps
+	// refused lists items the structural guard dropped, with the reason.
+	refused []string
+	ctx     context.Context
+	o       Options
+	app     App
+	items   map[string]*Item
+	labels  []string
+	others  *otherApps
 }
 
 func newMatcher(ctx context.Context, o Options, app App) *matcher {
@@ -220,6 +222,10 @@ func idDerived(it *Item) bool {
 
 const appleNote = "a com.apple.* id, and the bundle is not signed by Apple (anchor apple)"
 
+// appleNoSpotlightNote marks com.apple.* items when Spotlight did not
+// answer: a system app outside the scanned folders may use the same id.
+const appleNoSpotlightNote = "a com.apple.* id, and Spotlight did not answer, so another copy of the Apple app cannot be ruled out"
+
 // wholeAppSharedNote explains why none of the app's id-derived items may
 // be acted on, or returns "".
 func (m *matcher) wholeAppSharedNote() string {
@@ -232,6 +238,9 @@ func (m *matcher) wholeAppSharedNote() string {
 	}
 	if isAppleID(id) && !m.app.AppleSigned {
 		return appleNote
+	}
+	if isAppleID(id) && !m.others.spotlightOK {
+		return appleNoSpotlightNote
 	}
 	if idSegments(id) < 3 && m.app.TeamID == "" {
 		return "the bundle id has fewer than three segments and the app has no verified team id"
@@ -258,18 +267,23 @@ func (m *matcher) itemSharedNote(it *Item) string {
 
 // markShared reports id-derived items as shared when the ids they came from
 // are not this app's alone. The bundle itself, jobs that run from it and
-// receipts that list it are judged on their own evidence.
+// receipts that list it are judged on their own evidence, except that any
+// item but the bundle carrying a com.apple.* id is shared when Spotlight did
+// not answer.
 func (m *matcher) markShared() {
 	ids := append(append([]string{}, m.app.HelperIDs...), m.app.DeclaredJobs...)
 	m.others.spotlight(m.ctx, m.app.BundleID, ids)
 	whole := m.wholeAppSharedNote()
 	for _, it := range m.items {
-		if !idDerived(it) {
-			continue
+		note := ""
+		if idDerived(it) {
+			note = whole
+			if note == "" {
+				note = m.itemSharedNote(it)
+			}
 		}
-		note := whole
-		if note == "" {
-			note = m.itemSharedNote(it)
+		if note == "" && it.Kind != KindBundle && !m.others.spotlightOK && isAppleID(it.Detail) {
+			note = appleNoSpotlightNote
 		}
 		if note != "" && !it.Shared {
 			it.Shared, it.Note = true, note
@@ -281,6 +295,8 @@ func (m *matcher) markShared() {
 type collected struct {
 	items  []Item
 	labels []string
+	// refused lists items dropped by the guard, as warnings.
+	refused []string
 	// spotlightOK is false when mdfind failed or timed out, so only the
 	// app folders were searched for other copies.
 	spotlightOK bool
@@ -298,7 +314,8 @@ func collect(ctx context.Context, o Options, app App) collected {
 	m.matchReceipts()
 	m.matchNames()
 	m.markShared()
-	return collected{items: m.finish(), labels: uniqueSorted(m.labels), spotlightOK: m.others.spotlightOK}
+	items := m.finish()
+	return collected{items: items, labels: uniqueSorted(m.labels), refused: m.refused, spotlightOK: m.others.spotlightOK}
 }
 
 // collectLeftovers matches only <location>/<bundle id><suffix> for an app
@@ -315,6 +332,10 @@ func (m *matcher) finish() []Item {
 	items := make([]Item, 0, len(m.items))
 	for _, it := range m.items {
 		if checkItemPath(m.o, m.app.Path, *it) != nil {
+			continue
+		}
+		if err := checkResolvedParent(m.o, *it); err != nil {
+			m.refused = append(m.refused, "not planned: "+err.Error())
 			continue
 		}
 		finishItem(m.o, m.app, it)

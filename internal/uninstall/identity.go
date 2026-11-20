@@ -148,6 +148,12 @@ func inside(path, root string) bool {
 	return path == root || strings.HasPrefix(path, strings.TrimSuffix(root, "/")+"/")
 }
 
+// insideFold is inside ignoring case, as the default APFS volume compares
+// names.
+func insideFold(path, root string) bool {
+	return inside(strings.ToLower(path), strings.ToLower(root))
+}
+
 // readIdentity builds the app identity from the bundle on disk.
 func readIdentity(ctx context.Context, o Options, bundle string) (App, error) {
 	if underAny(bundle, o.SystemRoots) {

@@ -128,3 +128,26 @@ func checkItemPath(o Options, appPath string, it Item) error {
 	}
 	return fmt.Errorf("%s item %s is not directly inside a %s location", it.Kind, p, it.Kind)
 }
+
+// checkResolvedParent refuses an item whose folder is reached through a
+// symbolic link: a location folder (~/Library/Caches and so on) that is
+// itself a link, or any parent whose resolved path differs from its text,
+// so a move never acts outside the folder the plan names. Receipts and the
+// files they list are never moved and are not checked.
+func checkResolvedParent(o Options, it Item) error {
+	if it.Kind == KindReceipt || it.Kind == KindReceiptFile {
+		return nil
+	}
+	parent := filepath.Dir(filepath.Clean(it.Path))
+	if m, err := o.FS.Meta(parent); err == nil && m.IsSymlink() {
+		return fmt.Errorf("%s: the folder %s is a symbolic link", it.Path, parent)
+	}
+	resolved, err := o.FS.EvalSymlinks(parent)
+	if err != nil {
+		return fmt.Errorf("%s: resolve %s: %w", it.Path, parent, err)
+	}
+	if resolved != parent {
+		return fmt.Errorf("%s: the folder %s resolves to %s through a symbolic link", it.Path, parent, resolved)
+	}
+	return nil
+}

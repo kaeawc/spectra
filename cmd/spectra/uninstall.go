@@ -151,7 +151,7 @@ func runUninstallApply(args []string, stdout, stderr io.Writer, opts uninstall.O
 		fmt.Fprintf(stderr, "spectra uninstall apply: %v\n", applyErr)
 		return 1
 	}
-	if len(res.NeedsRoot) > 0 || moveFailures(res) > 0 {
+	if len(res.NeedsRoot) > 0 || moveFailures(res) > 0 || bootoutFailures(res) > 0 {
 		return 3
 	}
 	return 0
@@ -167,6 +167,16 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func bootoutFailures(res uninstall.Result) int {
+	n := 0
+	for _, b := range res.Bootouts {
+		if b.Failed {
+			n++
+		}
+	}
+	return n
 }
 
 func moveFailures(res uninstall.Result) int {

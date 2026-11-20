@@ -54,7 +54,12 @@ declaration is trusted only when it points back at the app itself:
   `<TEAMID>.*` for the app's verified team id. A team id counts only when
   `codesign --verify --strict <bundle>` passes and `codesign -dv` reports a
   non-ad-hoc `TeamIdentifier`; a modified, ad-hoc or unsigned bundle has no
-  team id, so its team groups are shared.
+  team id, so its team groups are shared. `--strict` also rejects a bundle
+  that carries Finder metadata or other extended attributes ("resource fork,
+  Finder information, or similar detritus not allowed"), which is common for
+  apps copied out of a download; such a bundle has no team id either, and its
+  team groups are report-only. This is deliberate: Spectra does not strip
+  attributes or relax the check to recover a team id.
 
 An id can also be Apple's or another app's. So, in every mode:
 
@@ -62,9 +67,13 @@ An id can also be Apple's or another app's. So, in every mode:
   `group.com.apple.*` group) is report-only unless the bundle satisfies
   `codesign --verify --strict -R='anchor apple'`. Apple's own apps under
   `/System` stay refused as system apps; an Apple app in `/Applications`
-  that passes may proceed. (App Store builds of Apple apps such as Keynote
-  are signed through the App Store, not `anchor apple`, so their data is
-  report-only.)
+  that passes may proceed. Apple's App Store apps (Keynote, Pages, Numbers,
+  Xcode and the like) are signed through the App Store, fail `anchor apple`,
+  and so stay report-only; this is a deliberate conservative choice, not a
+  bug.
+- when Spotlight does not answer (see below), every `com.apple.*` item is
+  report-only, even for a bundle that passes `anchor apple`: a copy of a
+  system app elsewhere on disk may be the real owner of that data.
 - a bundle id of fewer than three segments (`com.google`) is a likely vendor
   prefix: its id-derived items are report-only unless the app has a verified
   team id.
@@ -76,9 +85,12 @@ Everything else is reported with `shared: true` and never acted on:
   `com.docker.docker`);
 - a group container another installed app's entitlements also list, judged
   across `/Applications`, `/Applications/Utilities`, `~/Applications`,
-  `/System/Applications` and `/System/Applications/Utilities`, plus one
-  folder below each (`/Applications/<Vendor>/Foo.app`) and a top-level
-  symlinked `.app` such as `/Applications/Safari.app`;
+  `/System/Applications`, `/System/Library/CoreServices` and
+  `/System/Library/CoreServices/Applications` (where Archive Utility and
+  similar system apps live), plus one folder below each
+  (`/Applications/<Vendor>/Foo.app`) and a top-level symlinked `.app` such as
+  `/Applications/Safari.app`; a symlink that resolves to the planned bundle,
+  or a path equal to it ignoring case, is the same app, not a second copy;
 - a `<TEAMID>.*` group container this app's entitlements do not list;
 - every id-derived item when another installed app has the same bundle id,
   ignoring case (a second copy in `~/Downloads`, or `com.Foo.App` next to
@@ -89,10 +101,19 @@ Everything else is reported with `shared: true` and never acted on:
 
 Other installed apps are found in the folders above and, read-only, with
 `mdfind "kMDItemCFBundleIdentifier == '<id>'cd"` (and `'<id>.*'`, plus each
-helper id and label) under a 5-second deadline. Any hit outside the planned
-bundle and the Trash counts as installed. If Spotlight does not answer, the
-plan carries a warning and only the folder scan is used; `--leftovers`
-refuses outright.
+helper id and label) under a 5-second deadline. The same query also asks for
+`com.apple.finder` as a canary: `mdfind` exits 0 with no hits when indexing
+is off, so Spotlight counts as having answered only when Finder is among the
+hits. Any hit outside the planned bundle (ignoring case, after resolving
+symlinks) and the Trash counts as installed. If Spotlight does not answer, the
+plan carries a warning, only the folder scan is used, every `com.apple.*`
+item is report-only, and `--leftovers` refuses outright.
+
+An item is never planned, and a plan that lists one is rejected, when its
+location folder (`~/Library/Caches`, `Application Support`, `Containers` and
+so on) is a symbolic link, or when its parent folder resolves somewhere else
+through a symbolic link higher up (a symlinked `~/Library`, say). The plan
+lists each such item under its warnings.
 
 Files a receipt installed (`receipt_file`) are always report-only, with a
 `pkgutil --file-info` command to check them: another installer may have
@@ -140,7 +161,11 @@ Then, in order:
    the plan whose label is the bundle id or under it, never for a
    `com.apple.*` label. A job that only runs from the bundle under another
    label has its plist moved but is not booted out (the same rule decides
-   whether a `needs_root` command includes a bootout). It then checks the
+   whether a `needs_root` command includes a bootout). A bootout that fails
+   for any reason other than the job not being loaded ("No such process",
+   "Could not find specified service") is reported with `failed: true`, that
+   agent's plist is left in place (skipped as `not moved: launchctl bootout
+   failed`), and apply exits 3. It then checks the
    processes again, from the old path and from the bundle's place in the
    Trash. If the app started again in between (a `KeepAlive` agent, say), it
    reports the new processes under `relaunched` and stops with only the

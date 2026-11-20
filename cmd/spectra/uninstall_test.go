@@ -35,9 +35,18 @@ func uninstallFixture(t *testing.T) (uninstall.Options, string, string) {
 	if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(info), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Spotlight answers with no hits; every other command fails.
+	// Spotlight answers with only the canary Finder; every other command
+	// fails.
+	finder := filepath.Join(root, "System", "Library", "CoreServices", "Finder.app")
+	if err := os.MkdirAll(filepath.Join(finder, "Contents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	finderInfo := `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.apple.finder</string></dict></plist>`
+	if err := os.WriteFile(filepath.Join(finder, "Contents", "Info.plist"), []byte(finderInfo), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fake := proc.NewFake().
-		On(func(c proc.Cmd) bool { return c.Name == "mdfind" }, proc.Response{}).
+		On(func(c proc.Cmd) bool { return c.Name == "mdfind" }, proc.Response{Result: proc.Result{Stdout: []byte(finder + "\n")}}).
 		On(func(proc.Cmd) bool { return true }, proc.Response{Result: proc.Result{ExitCode: 1}})
 	opts := uninstall.Options{
 		Home: home, AppRoots: []string{filepath.Join(root, "Applications")},
@@ -152,4 +161,48 @@ func TestUninstallRegistered(t *testing.T) {
 		}
 	}
 	t.Fatal("uninstall not registered")
+}
+
+// bootoutFails answers launchctl with a failure that is not "not loaded"
+// and passes every other command to next.
+type bootoutFails struct{ next proc.Runner }
+
+func (b bootoutFails) Run(ctx context.Context, c proc.Cmd) (proc.Result, error) {
+	if c.Name == "launchctl" {
+		return proc.Result{ExitCode: 5, Stderr: []byte("Boot-out failed: 5: Input/output error")}, nil
+	}
+	return b.next.Run(ctx, c)
+}
+
+func TestUninstallApplyExits3WhenBootoutFails(t *testing.T) {
+	opts, app, _ := uninstallFixture(t)
+	agent := filepath.Join(opts.Home, "Library", "LaunchAgents", "com.foo.app.plist")
+	if err := os.MkdirAll(filepath.Dir(agent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>com.foo.app</string><key>Program</key><string>` +
+		filepath.Join(app, "Contents", "MacOS", "Foo") + `</string></dict></plist>`
+	if err := os.WriteFile(agent, []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts.Runner = bootoutFails{next: opts.Runner}
+	optsFn := func() uninstall.Options { return opts }
+	var out, errOut bytes.Buffer
+	if code := runUninstallWithIO([]string{"plan", app, "-json"}, &out, &errOut, optsFn); code != 0 {
+		t.Fatalf("plan exit %d: %s", code, errOut.String())
+	}
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planFile, out.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := runUninstallWithIO([]string{"apply", "--plan", planFile}, &out, &errOut, optsFn); code != 3 {
+		t.Fatalf("apply exit %d, want 3: %s%s", code, out.String(), errOut.String())
+	}
+	if _, err := os.Lstat(agent); err != nil {
+		t.Fatal("agent plist moved after a failed bootout")
+	}
+	if !strings.Contains(out.String(), "bootout failed") {
+		t.Fatalf("output does not report the failed bootout:\n%s", out.String())
+	}
 }

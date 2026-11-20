@@ -98,10 +98,14 @@ type fixture struct {
 	apps     string
 	receipts string
 	trash    string
-	runner   *fakeRunner
-	procs    func() []process.Info
-	now      time.Time
-	opts     Options
+	// coreServices is the fixture's /System/Library/CoreServices; finder
+	// is the canary bundle in it.
+	coreServices string
+	finder       string
+	runner       *fakeRunner
+	procs        func() []process.Info
+	now          time.Time
+	opts         Options
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -122,13 +126,18 @@ func newFixture(t *testing.T) *fixture {
 		f.mkdir(d)
 	}
 	f.procs = func() []process.Info { return nil }
-	// Spotlight answers, with no hits, unless a test says otherwise.
-	f.runner.onPrefix(proc.Result{}, "mdfind")
+	f.coreServices = filepath.Join(root, "System", "Library", "CoreServices")
+	f.finder = f.app(f.coreServices, "Finder", "com.apple.finder", "")
+	// Spotlight answers, with only the canary, unless a test says otherwise.
+	f.spotlight()
+	// launchctl bootout succeeds unless a test says otherwise.
+	f.runner.onPrefix(proc.Result{}, "launchctl", "bootout")
 	f.opts = Options{
 		Home: f.home, AppRoots: []string{f.apps}, SystemLibrary: f.sysLib, Receipts: f.receipts,
-		SystemRoots:    []string{filepath.Join(root, "System")},
-		SystemAppRoots: []string{filepath.Join(root, "System", "Applications"), filepath.Join(root, "System", "Applications", "Utilities")},
-		UID:            int64(os.Getuid()), GIDs: []int64{int64(os.Getgid())},
+		SystemRoots: []string{filepath.Join(root, "System")},
+		SystemAppRoots: []string{filepath.Join(root, "System", "Applications"), f.coreServices,
+			filepath.Join(f.coreServices, "Applications")},
+		UID: int64(os.Getuid()), GIDs: []int64{int64(os.Getgid())},
 		Runner: f.runner, FS: ownerFS{rootOwned: []string{f.sysLib, filepath.Join(root, "var"), filepath.Join(root, "System")}},
 		Procs:   func(context.Context) []process.Info { return f.procs() },
 		Now:     func() time.Time { return f.now },
@@ -216,8 +225,15 @@ func (f *fixture) appleSigned(bundle string) {
 	f.runner.on("", "", "codesign", "--verify", "--strict", "-R=anchor apple", bundle)
 }
 
-// spotlight makes mdfind answer with hits for every query.
+// spotlight makes mdfind answer with hits for every query, plus the
+// canary Finder that shows Spotlight is indexing.
 func (f *fixture) spotlight(hits ...string) {
+	f.spotlightRaw(append(hits, f.finder)...)
+}
+
+// spotlightRaw makes mdfind exit 0 with exactly hits, as it does with
+// indexing turned off when hits is empty.
+func (f *fixture) spotlightRaw(hits ...string) {
 	out := strings.Join(hits, "\n")
 	if out != "" {
 		out += "\n"

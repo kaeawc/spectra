@@ -159,7 +159,10 @@ type Options struct {
 	SystemRoots []string
 	// SystemAppRoots are scanned, never planned, when deciding whether an id
 	// or an app group is also used by another installed app. Default
-	// /System/Applications and /System/Applications/Utilities.
+	// /System/Applications, /System/Library/CoreServices and
+	// /System/Library/CoreServices/Applications, each with one folder
+	// below it (Utilities), so a copy of a system app elsewhere is seen
+	// even when Spotlight does not answer.
 	SystemAppRoots []string
 
 	UID  int64
@@ -219,7 +222,7 @@ func (o Options) withDefaults() Options {
 		o.SystemRoots = []string{"/System"}
 	}
 	if o.SystemAppRoots == nil {
-		o.SystemAppRoots = []string{"/System/Applications", "/System/Applications/Utilities"}
+		o.SystemAppRoots = []string{"/System/Applications", "/System/Library/CoreServices", "/System/Library/CoreServices/Applications"}
 	}
 	if o.Runner == nil {
 		o.Runner = proc.OS{}
@@ -258,7 +261,8 @@ var planLimitations = []string{
 	"Only paths tied to the app by bundle id, declared helper ids, app-group entitlements, launchd jobs or pkgutil receipts are planned; nothing is matched by substring.",
 	"A declared launchd label, helper id or app group that is not under the app's own bundle id (or its verified team id, for groups) is reported as shared and never acted on.",
 	"If another installed app (in the app folders, one folder below them, or found by Spotlight) has the same bundle id ignoring case, or an id under this app's id, every id-derived item is reported as shared; so is an item whose helper id or label is another installed app's id.",
-	"A com.apple.* id (main, helper, label or group.com.apple.* group) is report-only unless the bundle satisfies codesign's `anchor apple` requirement.",
+	"A com.apple.* id (main, helper, label or group.com.apple.* group) is report-only unless the bundle satisfies codesign's `anchor apple` requirement and Spotlight answered.",
+	"An item whose location folder is a symbolic link, or whose parent folder resolves elsewhere through one, is never planned or moved.",
 	"A bundle id of fewer than three segments is report-only for id-derived items unless the app has a verified team id; a team id counts only when `codesign --verify --strict` passes.",
 	"A launch agent or daemon is booted out (or a bootout command printed) only for a label under the app's own bundle id, never for com.apple.*.",
 	"Files a pkgutil receipt installed are reported only; another tool may have replaced them.",

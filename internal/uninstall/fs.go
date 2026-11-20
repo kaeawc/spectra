@@ -30,6 +30,8 @@ type FS interface {
 	// Mkdir creates one directory and fails if anything already exists there.
 	Mkdir(path string, perm fs.FileMode) error
 	Readlink(path string) (string, error)
+	// EvalSymlinks resolves every symbolic link on path.
+	EvalSymlinks(path string) (string, error)
 	// Size returns allocated bytes: the link itself for a symlink, the
 	// whole tree (not following symlinks) for a directory.
 	Size(path string) uint64
@@ -65,6 +67,9 @@ func (OSFS) Mkdir(path string, perm fs.FileMode) error { return os.Mkdir(path, p
 
 // Readlink implements FS.
 func (OSFS) Readlink(path string) (string, error) { return os.Readlink(path) }
+
+// EvalSymlinks implements FS.
+func (OSFS) EvalSymlinks(path string) (string, error) { return filepath.EvalSymlinks(path) }
 
 // Size implements FS.
 func (OSFS) Size(path string) uint64 {

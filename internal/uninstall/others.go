@@ -15,6 +15,11 @@ import (
 // spotlightWait bounds the mdfind lookup for other copies of the app.
 const spotlightWait = 5 * time.Second
 
+// spotlightCanary is a bundle id every macOS install has. mdfind with
+// indexing off exits 0 with no hits, so Spotlight counts as having answered
+// only when the canary is among the hits.
+const spotlightCanary = "com.apple.finder"
+
 // otherApps is the lazily loaded view of every other installed app (the app
 // roots and the system app roots, plus Spotlight hits once asked), used to
 // mark names, ids and app groups that this app does not own alone.
@@ -31,12 +36,40 @@ type otherApps struct {
 	spotlightRan, spotlightOK bool
 }
 
+// isSelf reports whether p is the planned bundle: the same path ignoring
+// case, or a symbolic link (anywhere on the path) that resolves to it.
+func (a *otherApps) isSelf(p string) bool {
+	if a.self == "" {
+		return false
+	}
+	if strings.EqualFold(filepath.Clean(p), filepath.Clean(a.self)) {
+		return true
+	}
+	rp, err1 := a.o.FS.EvalSymlinks(p)
+	rs, err2 := a.o.FS.EvalSymlinks(a.self)
+	return err1 == nil && err2 == nil && strings.EqualFold(rp, rs)
+}
+
+// isSelfOrInside reports whether p is the planned bundle or a path inside
+// it, ignoring case and resolving symbolic links.
+func (a *otherApps) isSelfOrInside(p string) bool {
+	if a.self == "" {
+		return false
+	}
+	if insideFold(p, a.self) {
+		return true
+	}
+	rp, err1 := a.o.FS.EvalSymlinks(p)
+	rs, err2 := a.o.FS.EvalSymlinks(a.self)
+	return err1 == nil && err2 == nil && insideFold(rp, rs)
+}
+
 func (a *otherApps) list() []string {
 	if a.apps == nil {
 		a.apps = []string{}
 		roots := append(append([]string{}, a.o.AppRoots...), a.o.SystemAppRoots...)
 		for _, p := range installedApps(a.o.FS, roots) {
-			if !strings.EqualFold(filepath.Clean(p), filepath.Clean(a.self)) {
+			if !a.isSelf(p) {
 				a.apps = append(a.apps, p)
 			}
 		}
@@ -109,8 +142,9 @@ func (a *otherApps) under(mainID string) (string, string) {
 
 // spotlight asks mdfind, once and read-only, for bundles whose id is mainID,
 // is under mainID, or is one of ids, and records every hit outside the
-// planned bundle and the Trash as installed. It reports whether Spotlight
-// answered; on failure nothing is added.
+// planned bundle and the Trash as installed. It also asks for the canary
+// (spotlightCanary): Spotlight counts as having answered only when mdfind
+// exits 0 and the canary is among the hits. On no answer nothing is added.
 func (a *otherApps) spotlight(ctx context.Context, mainID string, ids []string) bool {
 	if a.spotlightRan {
 		return a.spotlightOK
@@ -120,6 +154,7 @@ func (a *otherApps) spotlight(ctx context.Context, mainID string, ids []string) 
 	terms := []string{
 		fmt.Sprintf("kMDItemCFBundleIdentifier == '%s'cd", mainID),
 		fmt.Sprintf("kMDItemCFBundleIdentifier == '%s.*'cd", mainID),
+		fmt.Sprintf("kMDItemCFBundleIdentifier == '%s'cd", spotlightCanary),
 	}
 	for _, id := range ids {
 		if validID(id) && !ownsID(mainID, id) {
@@ -132,22 +167,42 @@ func (a *otherApps) spotlight(ctx context.Context, mainID string, ids []string) 
 	if err != nil || res.ExitCode != 0 || ctx.Err() != nil {
 		return false
 	}
-	a.spotlightOK = true
+	var hits []string
+	canary := false
 	for _, line := range strings.Split(string(res.Stdout), "\n") {
 		p := strings.TrimSpace(line)
-		if !filepath.IsAbs(p) || (a.self != "" && inside(p, a.self)) || inside(p, a.o.Trash) {
+		if !filepath.IsAbs(p) {
 			continue
 		}
 		p = filepath.Clean(p)
-		if !a.addBundle(p) {
-			// A hit whose Info.plist cannot be read matched one of the
-			// ids; count it against the main id.
-			if _, ok := a.ids[strings.ToLower(mainID)]; !ok {
-				a.ids[strings.ToLower(mainID)] = p
-			}
+		if bi, err := readBundleInfo(a.o.FS, p); err == nil && strings.EqualFold(bi.id, spotlightCanary) {
+			canary = true
 		}
+		hits = append(hits, p)
+	}
+	if !canary {
+		return false
+	}
+	a.spotlightOK = true
+	for _, p := range hits {
+		a.addHit(mainID, p)
 	}
 	return true
+}
+
+// addHit records one Spotlight hit, unless it is the planned bundle (or
+// inside it) or in the Trash.
+func (a *otherApps) addHit(mainID, p string) {
+	if a.isSelfOrInside(p) || insideFold(p, a.o.Trash) {
+		return
+	}
+	if !a.addBundle(p) {
+		// A hit whose Info.plist cannot be read matched one of the ids;
+		// count it against the main id.
+		if _, ok := a.ids[strings.ToLower(mainID)]; !ok {
+			a.ids[strings.ToLower(mainID)] = p
+		}
+	}
 }
 
 // listsGroup reports whether another installed app's entitlements list g.

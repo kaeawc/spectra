@@ -29,6 +29,7 @@ func BuildPlan(ctx context.Context, opts Options, target string) (Plan, error) {
 	if !c.spotlightOK {
 		warnings = append(warnings, spotlightWarning)
 	}
+	warnings = append(warnings, c.refused...)
 	return Plan{
 		Schema:        PlanSchema,
 		CreatedAt:     o.Now().UTC(),
@@ -43,7 +44,7 @@ func BuildPlan(ctx context.Context, opts Options, target string) (Plan, error) {
 	}, nil
 }
 
-const spotlightWarning = "Spotlight (mdfind) did not answer, so other copies of the app were looked for only in the app folders; an install elsewhere was not seen. apply --leftovers refuses until Spotlight answers."
+const spotlightWarning = "Spotlight (mdfind) did not answer, so other copies of the app were looked for only in the app folders; an install elsewhere was not seen. Every com.apple.* item is report-only, and apply --leftovers refuses until Spotlight answers."
 
 // appProcesses returns processes whose executable lives inside bundle.
 func appProcesses(procs []process.Info, bundle string) []Process {

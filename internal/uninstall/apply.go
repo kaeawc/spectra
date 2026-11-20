@@ -70,6 +70,9 @@ type NeedsRoot struct {
 type Bootout struct {
 	Target string `json:"target"`
 	Error  string `json:"error,omitempty"`
+	// Failed is set when the bootout failed for a reason other than the
+	// job not being loaded; the agent's plist is then left in place.
+	Failed bool `json:"failed,omitempty"`
 }
 
 // Result is the outcome of Apply.
@@ -169,7 +172,7 @@ func quitAndMove(ctx context.Context, o Options, ident App, todo []Item, ao Appl
 			return nil
 		}
 	}
-	bootoutAgents(ctx, o, ident, rest, ao.DryRun, res)
+	rest = keepLoaded(rest, bootoutAgents(ctx, o, ident, rest, ao.DryRun, res), mv)
 	if !ao.DryRun {
 		if err := checkRelaunch(ctx, o, ident, bundleDest, res); err != nil {
 			mv.skipAll(rest, "not moved: the app started again")
@@ -307,6 +310,9 @@ func checkPlanPaths(o Options, plan Plan) error {
 	seen := make(map[string]bool, len(plan.Items))
 	for _, it := range plan.Items {
 		if err := checkItemPath(o, plan.App.Path, it); err != nil {
+			return fmt.Errorf("%w: %w", ErrPlanRejected, err)
+		}
+		if err := checkResolvedParent(o, it); err != nil && exists(o.FS, it.Path) {
 			return fmt.Errorf("%w: %w", ErrPlanRejected, err)
 		}
 		key := strings.ToLower(it.Path)
@@ -469,8 +475,11 @@ func waitGone(ctx context.Context, o Options, procs []Process) error {
 // bootoutAgents unloads the user's own launch agents that are about to be
 // moved, so launchd does not keep or respawn them. Only labels the app owns
 // are booted out (App.bootsOut); a job that merely runs from the bundle
-// under someone else's label has its plist moved but is not booted out.
-func bootoutAgents(ctx context.Context, o Options, ident App, todo []Item, dry bool, res *Result) {
+// under someone else's label has its plist moved but is not booted out. It
+// returns the plists whose bootout failed for a reason other than the job
+// not being loaded, keyed by path.
+func bootoutAgents(ctx context.Context, o Options, ident App, todo []Item, dry bool, res *Result) map[string]string {
+	failed := map[string]string{}
 	userAgents := filepath.Join(o.UserLibrary, "LaunchAgents")
 	for _, it := range todo {
 		if it.Kind != KindLaunchAgent || filepath.Dir(it.Path) != userAgents || !ident.bootsOut(it.Detail) {
@@ -489,9 +498,40 @@ func bootoutAgents(ctx context.Context, o Options, ident App, todo []Item, dry b
 					b.Error = "exit " + strconv.Itoa(r.ExitCode)
 				}
 			}
+			if b.Error != "" && !notLoaded(b.Error) {
+				b.Failed = true
+				failed[it.Path] = b.Error
+			}
 		}
 		res.Bootouts = append(res.Bootouts, b)
 	}
+	return failed
+}
+
+// notLoaded reports whether a bootout error only says the job was not
+// loaded, which leaves nothing for launchd to keep or respawn.
+func notLoaded(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "not loaded") || strings.Contains(m, "no such process") ||
+		strings.Contains(m, "could not find specified service")
+}
+
+// keepLoaded drops the plists whose bootout failed and records them as
+// skipped: moving the plist of a job launchd still runs would leave it
+// loaded with no file to boot it out by.
+func keepLoaded(items []Item, failed map[string]string, mv *mover) []Item {
+	if len(failed) == 0 {
+		return items
+	}
+	var out []Item
+	for _, it := range items {
+		if why, ok := failed[it.Path]; ok {
+			mv.res.Skipped = append(mv.res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: "not moved: launchctl bootout failed: " + why})
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // mover renames items into one new folder in the Trash. The folder is
