@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/diskusage"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/storagestate"
 )
 
 // loadDeps are the seams runLoadWithIO uses so tests need no real host.
@@ -29,6 +31,9 @@ type loadDeps struct {
 	Abs func(string) (string, error)
 	// EvalSymlinks resolves --root paths; nil means no resolution.
 	EvalSymlinks func(string) (string, error)
+	// Spotlight reads per-root Spotlight state when indexing is the cause;
+	// its OS defaults to Host.OS.
+	Spotlight hostload.SpotlightProbe
 }
 
 func resolveRoots(roots []string, abs, eval func(string) (string, error)) []hostload.Root {
@@ -55,26 +60,29 @@ func resolveRoots(roots []string, abs, eval func(string) (string, error)) []host
 }
 
 type loadReport struct {
-	Verdict     string               `json:"verdict"`
-	Reason      string               `json:"reason"`
-	ExitCode    int                  `json:"exit_code"`
-	Load1       float64              `json:"load1"`
-	LoadLimit   float64              `json:"load_limit"`
-	CPUs        int                  `json:"cpus"`
-	AvailGB     *float64             `json:"available_gb"`    // GiB; null when unreadable
-	MinFreeGB   float64              `json:"min_free_gb"`     // GiB
-	BackoffGB   float64              `json:"backoff_free_gb"` // GiB
-	Cause       hostload.Cause       `json:"cause"`
-	TopCPU      []hostload.ProcRow   `json:"top_cpu"`
-	TopRSS      []hostload.ProcRow   `json:"top_rss"`
-	Families    []hostload.FamilyRow `json:"families"`
-	Dirs        []hostload.DirUsage  `json:"dirs"`
-	Unknown     hostload.DirUsage    `json:"unknown"`
-	Notes       []string             `json:"notes,omitempty"`
-	CPUWindowMS int64                `json:"cpu_window_ms"` // >0 only for basis "window"
-	CPUBasis    string               `json:"cpu_basis"`     // window, recent or lifetime
-	ElapsedMS   int64                `json:"elapsed_ms"`
-	ProcessCnt  int                  `json:"process_count"`
+	Verdict   string               `json:"verdict"`
+	Reason    string               `json:"reason"`
+	ExitCode  int                  `json:"exit_code"`
+	Load1     float64              `json:"load1"`
+	LoadLimit float64              `json:"load_limit"`
+	CPUs      int                  `json:"cpus"`
+	AvailGB   *float64             `json:"available_gb"`    // GiB; null when unreadable
+	MinFreeGB float64              `json:"min_free_gb"`     // GiB
+	BackoffGB float64              `json:"backoff_free_gb"` // GiB
+	Cause     hostload.Cause       `json:"cause"`
+	TopCPU    []hostload.ProcRow   `json:"top_cpu"`
+	TopRSS    []hostload.ProcRow   `json:"top_rss"`
+	Families  []hostload.FamilyRow `json:"families"`
+	Dirs      []hostload.DirUsage  `json:"dirs"`
+	Unknown   hostload.DirUsage    `json:"unknown"`
+	Devices   hostload.Devices     `json:"devices"`
+	// Spotlight is per --root, present only when the cause is indexing.
+	Spotlight   []hostload.RootSpotlight `json:"spotlight,omitempty"`
+	Notes       []string                 `json:"notes,omitempty"`
+	CPUWindowMS int64                    `json:"cpu_window_ms"` // >0 only for basis "window"
+	CPUBasis    string                   `json:"cpu_basis"`     // window, recent or lifetime
+	ElapsedMS   int64                    `json:"elapsed_ms"`
+	ProcessCnt  int                      `json:"process_count"`
 }
 
 type stringList []string
@@ -112,6 +120,35 @@ func defaultLoadDeps() loadDeps {
 
 		Abs:          filepath.Abs,
 		EvalSymlinks: filepath.EvalSymlinks,
+		Spotlight:    defaultSpotlightProbe(host),
+	}
+}
+
+// rootSizeBound caps the walk of each root when sizing it for the indexing
+// report, so a huge worktree cannot stall the load check.
+const rootSizeBound = 3 * time.Second
+
+func defaultSpotlightProbe(host hostload.Host) hostload.SpotlightProbe {
+	return hostload.SpotlightProbe{
+		OS:       host.OS,
+		Exists:   func(p string) bool { _, err := os.Lstat(p); return err == nil },
+		ReadFile: os.ReadFile,
+		Volume: func(ctx context.Context, p string) (storagestate.SpotlightVolume, error) {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return storagestate.SpotlightForPath(func(name string, args ...string) ([]byte, error) {
+				return proc.Output(ctx, host.Runner, name, args...)
+			}, p)
+		},
+		Size: func(ctx context.Context, p string) (hostload.RootSize, error) {
+			ctx, cancel := context.WithTimeout(ctx, rootSizeBound)
+			defer cancel()
+			res, err := diskusage.Walk(ctx, p, diskusage.Options{Top: 1})
+			if err != nil {
+				return hostload.RootSize{}, fmt.Errorf("size %s: %w", p, err)
+			}
+			return hostload.RootSize{Files: res.FileCount, Bytes: res.TotalBytes, Partial: res.Partial}, nil
+		},
 	}
 }
 
@@ -144,10 +181,12 @@ Exit codes:
 	minFree := fs.Float64("min-free-gb", 8, "Hold when available memory is below this many GiB (also held when memory cannot be read)")
 	sample := fs.Duration("sample", 500*time.Millisecond, "Linux: measure CPU over this window between two /proc readings; 0 uses lifetime averages")
 	backoff := fs.Float64("backoff-free-gb", 4, "Back off when available memory is below this many GiB")
+	bootWindow := fs.Duration("boot-window", hostload.DefaultBootWindow, "Count a simulator or emulator as booted recently when it started within this window")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() > 0 || *top < 1 || *maxLoad <= 0 || *minFree < 0 || *backoff < 0 || *sample < 0 {
+	badDurations := *sample < 0 || *bootWindow <= 0
+	if fs.NArg() > 0 || *top < 1 || *maxLoad <= 0 || *minFree < 0 || *backoff < 0 || badDurations {
 		fmt.Fprintln(stderr, "spectra load: invalid arguments (see --help)")
 		return 2
 	}
@@ -174,17 +213,19 @@ Exit codes:
 	for i, p := range procs {
 		pids[i] = p.PID
 	}
-	an := hostload.Analyze(procs, deps.Host.Cwds(ctx, pids), hostload.Options{TopN: *top, Roots: resolveRoots(roots, deps.Abs, deps.EvalSymlinks), FS: deps.FS, Now: deps.Now()})
+	rootList := resolveRoots(roots, deps.Abs, deps.EvalSymlinks)
+	an := hostload.Analyze(procs, deps.Host.Cwds(ctx, pids), hostload.Options{TopN: *top, Roots: rootList, FS: deps.FS, Now: deps.Now(), BootWindow: *bootWindow})
 
 	rep := loadReport{
 		Verdict: string(dec.Verdict), Reason: dec.Reason, ExitCode: dec.Verdict.ExitCode(),
 		Load1: reading.Load1, LoadLimit: dec.LoadLimit, CPUs: reading.CPUs,
 		MinFreeGB: *minFree, BackoffGB: *backoff,
 		Cause: an.Cause, TopCPU: an.TopCPU, TopRSS: an.TopRSS, Families: an.Families,
-		Dirs: an.Dirs, Unknown: an.Unknown, Notes: notes,
+		Dirs: an.Dirs, Unknown: an.Unknown, Devices: an.Devices, Notes: notes,
 		CPUWindowMS: window.Milliseconds(), CPUBasis: string(basis),
 		ElapsedMS: deps.Now().Sub(start).Milliseconds(), ProcessCnt: len(procs),
 	}
+	rep.Spotlight = rootSpotlight(ctx, deps, an.Cause, rootList)
 	if reading.MemKnown {
 		gb := float64(reading.AvailBytes) / (1 << 30)
 		rep.AvailGB = &gb
@@ -200,6 +241,19 @@ Exit codes:
 	}
 	writeLoadText(stdout, rep)
 	return rep.ExitCode
+}
+
+// rootSpotlight reports each root's Spotlight state, only when indexing is
+// the cause and roots were named.
+func rootSpotlight(ctx context.Context, deps loadDeps, cause hostload.Cause, roots []hostload.Root) []hostload.RootSpotlight {
+	if cause.Kind != hostload.CauseIndexing || len(roots) == 0 {
+		return nil
+	}
+	probe := deps.Spotlight
+	if probe.OS == hostos.Unknown {
+		probe.OS = deps.Host.OS
+	}
+	return probe.Inspect(ctx, roots)
 }
 
 func writeLoadText(w io.Writer, r loadReport) {
@@ -233,7 +287,49 @@ func writeLoadText(w io.Writer, r loadReport) {
 	if r.Unknown.Procs > 0 {
 		fmt.Fprintf(w, "dir      %5.1f%% cpu  %7.0f MB  %3d procs  %s (cwd unreadable)\n", r.Unknown.CPUPct, float64(r.Unknown.RSSKiB)/1024, r.Unknown.Procs, r.Unknown.Dir)
 	}
+	writeDevices(w, r.Devices)
+	writeSpotlight(w, r.Spotlight)
 	fmt.Fprintf(w, "elapsed  %d ms\n", r.ElapsedMS)
+}
+
+func writeDevices(w io.Writer, d hostload.Devices) {
+	fmt.Fprintf(w, "devices  %d booted (%d simulators, %d emulators), %d in the last %s\n",
+		d.Booted, d.Simulators, d.Emulators, d.BootedRecently, time.Duration(d.BootWindowSeconds)*time.Second)
+	for _, dev := range d.List {
+		line := fmt.Sprintf("device   %-9s %s  pid %d  %3d procs  %5.1f%% cpu  age %s", dev.Kind, dev.ID, dev.PID, dev.Members, dev.CPUPct, time.Duration(dev.AgeSeconds)*time.Second)
+		if dev.Recent {
+			line += "  recent"
+		}
+		if dev.Root != "" {
+			line += "  root " + dev.Root
+		}
+		fmt.Fprintln(w, line)
+	}
+	for _, rd := range d.ByRoot {
+		fmt.Fprintf(w, "devices  %s: %d booted, %d recently\n", rd.Root, rd.Booted, rd.BootedRecently)
+	}
+}
+
+func writeSpotlight(w io.Writer, roots []hostload.RootSpotlight) {
+	for _, rs := range roots {
+		if rs.Unsupported != "" {
+			fmt.Fprintf(w, "spotlight %s  %s\n", rs.Root, rs.Unsupported)
+			continue
+		}
+		excl := "unknown"
+		if rs.Excluded != nil {
+			excl = "no"
+			if *rs.Excluded {
+				excl = "yes"
+			}
+		}
+		vol := "volume unknown"
+		if rs.Volume != nil {
+			vol = "volume " + rs.Volume.MountPoint + " " + rs.Volume.Status.String()
+		}
+		fmt.Fprintf(w, "spotlight %s  excluded %s  %s\n", rs.Root, excl, vol)
+		fmt.Fprintf(w, "hint     %s\n", rs.Hint)
+	}
 }
 
 func writeRows(w io.Writer, label string, rows []hostload.ProcRow) {

@@ -44,6 +44,9 @@ type Options struct {
 	Roots []Root
 	FS    FS
 	Now   time.Time
+	// BootWindow is how recent a device start counts as a boot; 0 means
+	// DefaultBootWindow.
+	BootWindow time.Duration
 }
 
 // ProcRow is one process in a top table.
@@ -80,6 +83,10 @@ type Cause struct {
 	CPUPct   float64 `json:"cpu_pct"`
 	Root     string  `json:"root,omitempty"`
 	Worktree string  `json:"worktree,omitempty"`
+	// Runner and Repo are set for kind ci-runner: the runner (GitHub
+	// Actions, GitLab, Buildkite) and the job's repository directory.
+	Runner string `json:"runner,omitempty"`
+	Repo   string `json:"repo,omitempty"`
 }
 
 // Analysis is the attribution of host load.
@@ -90,6 +97,7 @@ type Analysis struct {
 	Dirs     []DirUsage  `json:"dirs"`
 	Unknown  DirUsage    `json:"unknown"`
 	Cause    Cause       `json:"cause"`
+	Devices  Devices     `json:"devices"`
 }
 
 // Analyze attributes load across procs. cwds maps pid to working directory;
@@ -142,9 +150,11 @@ func Analyze(procs []process.Info, cwds map[int]string, opts Options) Analysis {
 	byRSS := sortedRows(rows, func(x, y ProcRow) bool { return x.RSSKiB > y.RSSKiB })
 	a.TopCPU = head(byCPU, n)
 	a.TopRSS = head(byRSS, n)
-	a.Families = topFamilies(procs, opts.Now, n)
+	ci := ciOutsideRoots(attributeCI(procs, cwds), cwds, opts.Roots)
+	a.Families = topFamilies(procs, opts.Now, n, ci)
 	a.Dirs = topDirs(dirs, n)
-	a.Cause = classify(rows, opts.Roots)
+	a.Cause = classify(rows, opts.Roots, ci)
+	a.Devices = CollectDevices(procs, cwds, opts.Roots, opts.Now, opts.BootWindow)
 	return a
 }
 
@@ -176,16 +186,56 @@ func head[T any](s []T, n int) []T {
 	return append([]T{}, s...)
 }
 
-func topFamilies(procs []process.Info, now time.Time, n int) []FamilyRow {
-	fams := process.GroupFamilies(procs, now, 1)
-	out := make([]FamilyRow, 0, n)
-	for _, f := range fams {
-		if len(out) == n {
-			break
+// ciOutsideRoots drops CI attribution from processes whose cwd is under a
+// --root, so a lane's own work is never reported as the runner's.
+func ciOutsideRoots(ci map[int]ciWork, cwds map[int]string, roots []Root) map[int]ciWork {
+	for pid := range ci {
+		if MatchRoot(cwds[pid], roots) != "" {
+			delete(ci, pid)
 		}
+	}
+	return ci
+}
+
+// topFamilies groups CI runner work into one ci-runner family per runner
+// and everything else through process.GroupFamilies.
+func topFamilies(procs []process.Info, now time.Time, n int, ci map[int]ciWork) []FamilyRow {
+	rest := make([]process.Info, 0, len(procs))
+	runners := map[string]*FamilyRow{}
+	for _, p := range procs {
+		w, ok := ci[p.PID]
+		if !ok {
+			rest = append(rest, p)
+			continue
+		}
+		f := runners[w.Runner]
+		if f == nil {
+			f = &FamilyRow{Name: ciFamilyName(w.Runner), Kind: FamilyCIRunner}
+			runners[w.Runner] = f
+		}
+		f.Members++
+		f.CPUPct += procCPU(p)
+		f.RSSKiB += p.RSSKiB
+	}
+	out := make([]FamilyRow, 0, len(runners)+n)
+	for _, f := range process.GroupFamilies(rest, now, 1) {
 		out = append(out, FamilyRow{Name: f.Name, Kind: f.Kind, Members: f.Members, CPUPct: f.CPUPct, RSSKiB: f.RSSKiB})
 	}
-	return out
+	labels := make([]string, 0, len(runners))
+	for l := range runners {
+		labels = append(labels, l)
+	}
+	sort.Strings(labels)
+	for _, l := range labels {
+		out = append(out, *runners[l])
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CPUPct != out[j].CPUPct {
+			return out[i].CPUPct > out[j].CPUPct
+		}
+		return out[i].Kind == FamilyCIRunner && out[j].Kind != FamilyCIRunner
+	})
+	return head(out, n)
 }
 
 func topDirs(dirs map[string]*DirUsage, n int) []DirUsage {
@@ -239,60 +289,105 @@ type dirGroup struct {
 	top  *ProcRow
 }
 
+type candidate struct {
+	cpu   float64
+	cause Cause
+}
+
+type groups struct {
+	indexing float64
+	indexers []string
+	dirs     map[string]*dirGroup
+	ci       map[string]*ciGroup
+	singles  []*ProcRow
+}
+
 // classify sums CPU per candidate group over every collected row (all
-// indexers together, each directory, each remaining single process) and
-// names the largest. Ties prefer indexing, then directories, then singles.
-func classify(rows []ProcRow, roots []Root) Cause {
-	var indexing float64
-	var indexers []string
-	dirs := map[string]*dirGroup{}
-	var singles []*ProcRow
+// indexers together, each CI runner, each directory, each remaining
+// single process) and names the largest. Ties prefer indexing, then
+// directories under a --root, then CI runner work, then other directories,
+// then single processes. CI attribution never covers a cwd under a --root,
+// so a leading lane still wins over runner work.
+func classify(rows []ProcRow, roots []Root, ci map[int]ciWork) Cause {
+	g := groups{dirs: map[string]*dirGroup{}, ci: map[string]*ciGroup{}}
 	for i := range rows {
-		r := &rows[i]
-		switch {
-		case isIndexer(r.Command):
-			indexing += r.CPUPct
-			indexers = append(indexers, path.Base(r.Command))
-		case r.Dir == UnknownDir || r.Dir == "/":
-			// A cwd of "/" says nothing about who is running; judge by process.
-			singles = append(singles, r)
-		default:
-			g := dirs[r.Dir]
-			if g == nil {
-				g = &dirGroup{}
-				dirs[r.Dir] = g
-			}
-			g.add(r, roots)
+		g.add(&rows[i], roots, ci)
+	}
+	lead := candidate{}
+	for _, c := range g.candidates() {
+		if c.cpu > lead.cpu {
+			lead = c
 		}
 	}
-
-	lead := 0.0
-	c := Cause{}
-	if indexing > lead {
-		lead = indexing
-		c = Cause{Kind: CauseIndexing, CPUPct: indexing, Detail: "indexing leads the CPU table (" + strings.Join(indexers, ", ") + ")"}
+	if lead.cpu < idleCPUPct {
+		return Cause{Kind: CauseNone, CPUPct: lead.cpu, Detail: fmt.Sprintf("host is idle: leading group uses under %.0f%% CPU", idleCPUPct)}
 	}
-	names := make([]string, 0, len(dirs))
-	for d := range dirs {
+	return lead.cause
+}
+
+func (g *groups) add(r *ProcRow, roots []Root, ci map[int]ciWork) {
+	w, isCI := ci[r.PID]
+	switch {
+	case isIndexer(r.Command):
+		g.indexing += r.CPUPct
+		g.indexers = append(g.indexers, path.Base(r.Command))
+	case isCI:
+		c := g.ci[w.Runner]
+		if c == nil {
+			c = &ciGroup{runner: w.Runner, repos: map[string]float64{}}
+			g.ci[w.Runner] = c
+		}
+		c.add(r, w.Repo)
+	case r.Dir == UnknownDir || r.Dir == "/":
+		// A cwd of "/" says nothing about who is running; judge by process.
+		g.singles = append(g.singles, r)
+	default:
+		d := g.dirs[r.Dir]
+		if d == nil {
+			d = &dirGroup{}
+			g.dirs[r.Dir] = d
+		}
+		d.add(r, roots)
+	}
+}
+
+func (g *groups) candidates() []candidate {
+	out := []candidate{{cpu: g.indexing, cause: Cause{Kind: CauseIndexing, CPUPct: g.indexing,
+		Detail: "indexing leads the CPU table (" + strings.Join(g.indexers, ", ") + ")"}}}
+	names := make([]string, 0, len(g.dirs))
+	for d := range g.dirs {
 		names = append(names, d)
 	}
 	sort.Strings(names)
-	for _, dir := range names {
-		if g := dirs[dir]; g.cpu > lead {
-			lead = g.cpu
-			c = dirCause(dir, g)
+	for _, rooted := range []bool{true, false} {
+		for _, dir := range names {
+			if d := g.dirs[dir]; (d.root != "") == rooted {
+				out = append(out, candidate{cpu: d.cpu, cause: dirCause(dir, d)})
+			}
+		}
+		if rooted {
+			out = append(out, g.ciCandidates()...)
 		}
 	}
-	for _, r := range singles {
-		if r.CPUPct > lead {
-			lead = r.CPUPct
-			c = Cause{Kind: CauseOther, CPUPct: r.CPUPct, Detail: fmt.Sprintf("process %s (pid %d) leads the CPU table", r.Command, r.PID)}
-		}
+	for _, r := range g.singles {
+		out = append(out, candidate{cpu: r.CPUPct, cause: Cause{Kind: CauseOther, CPUPct: r.CPUPct,
+			Detail: fmt.Sprintf("process %s (pid %d) leads the CPU table", r.Command, r.PID)}})
 	}
-	if lead < idleCPUPct {
-		return Cause{Kind: CauseNone, CPUPct: lead, Detail: fmt.Sprintf("host is idle: leading group uses under %.0f%% CPU", idleCPUPct)}
+	return out
+}
+
+func (g *groups) ciCandidates() []candidate {
+	runners := make([]string, 0, len(g.ci))
+	for r := range g.ci {
+		runners = append(runners, r)
 	}
-	return c
+	sort.Strings(runners)
+	out := make([]candidate, 0, len(runners))
+	for _, r := range runners {
+		c := g.ci[r]
+		out = append(out, candidate{cpu: c.cpu, cause: Cause{Kind: CauseCIRunner, CPUPct: c.cpu, Runner: c.runner, Repo: c.heaviestRepo(), Detail: ciCauseDetail(c)}})
+	}
+	return out
 }
 
 func (g *dirGroup) add(r *ProcRow, roots []Root) {

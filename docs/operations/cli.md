@@ -252,6 +252,38 @@ reports a decaying recent average; `cpu_window_ms` is `0`) or `lifetime`
 `0`). A process that started during the window is scored on its CPU over the
 window. The text output has a `cpu` line saying which basis applied.
 
+The `cause` kind is `indexing`, `roots`, `ci-runner`, `other` or `none`.
+`ci-runner` names work from a self-hosted CI runner on the host: a process
+with a GitHub Actions `Runner.Worker` / `Runner.Listener`, `gitlab-runner` or
+`buildkite-agent` ancestor, or a cwd under an `actions-runner*/_work/`
+directory. Its `runner` field names the runner and `repo` the job's
+repository directory (`_work/<repo>/<repo>`) when a cwd shows it; the same
+processes form one `ci-runner` family per runner. A process whose cwd is
+under a `--root` stays with that root, and on equal CPU a root group wins, so
+a leading lane is still reported as `roots`.
+
+`devices` counts booted iOS simulators (one per CoreSimulator device UDID) and
+running emulator instances (one per `qemu-system-*` process, or an `emulator`
+launcher with none below it; `avd` from `-avd NAME` or `@NAME`). `booted_recently`
+counts those whose earliest process started within `--boot-window` (default
+`5m`, also `boot_window_seconds`); `by_root` counts devices whose process cwd
+or parent chain lies under a `--root`. Simulators are started by
+CoreSimulator, not by the shell that ran `simctl boot`, so they rarely carry a
+root. Each `list` entry has `kind`, `id`, `pid`, `members`, `cpu_pct`,
+`rss_kib`, `started_at`, `age_seconds`, `booted_recently` and `root`.
+
+When the cause is `indexing` and `--root` is given, `spotlight` reports each
+root: `excluded` (`true` for a `.metadata_never_index` marker at the root or
+above, or a matching entry in the volume's Spotlight privacy list; `false`
+when that list was read and does not name it; `null` when there is no marker
+and the list, which is root-only on current macOS, cannot be read),
+`privacy_list` (`listed`, `not_listed` or `unreadable`), `volume` (the
+volume's `mdutil` state as `spectra storage --spotlight` reads it), `size`
+(file count and allocated bytes from a walk bounded to 3 seconds; `partial`
+when it hit the bound) and a `hint` naming the action: exclude the root, or
+shrink it. Nothing is written or changed. On Linux each entry carries only
+`unsupported`.
+
 `spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--json]` finds
 leftover processes from worktrees and finished jobs: parent pid 1, a readable
 working directory under a root (default: the current directory), and older than
