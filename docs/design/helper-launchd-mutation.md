@@ -4,6 +4,9 @@
     This is the design for step 1 of the helper mutation plan in issue #600.
     Nothing here is implemented. No helper code lands until the owner
     approves this design and an independent security review signs off.
+    The owner answered four open questions on 2026-11-20 (admin gate,
+    `enable` bootstrap, no stop-only method, denylist); those are now part
+    of the proposal below. Everything stays proposed.
 
 The privileged helper gains one narrow ability: disable (and stop) or
 re-enable a **system-domain launchd daemon** whose plist sits in
@@ -25,12 +28,12 @@ Three methods. Each does one thing.
 |---|---|---|
 | `helper.launchd.system.prepare` | no | Re-derive and verify the target, return what would run and a single-use token |
 | `helper.launchd.system.disable` | yes | `launchctl disable system/<label>`, then `launchctl bootout system/<label>` when loaded |
-| `helper.launchd.system.enable` | yes | `launchctl enable system/<label>` |
+| `helper.launchd.system.enable` | yes | `launchctl enable system/<label>`, then `launchctl bootstrap system <plist>` when the job is not loaded |
 
 `disable` and `enable` match the user-scope `spectra startup disable/enable`
-verbs, except that `enable` does **not** bootstrap the job. A re-enabled
-daemon loads at next boot, or when the user runs `sudo launchctl bootstrap`
-themselves (see [open questions](#open-questions-for-the-owner)).
+verbs: `enable` also loads the daemon when it is not loaded, so it runs
+without a reboot. The bootstrap rules are under
+[Enable and bootstrap](#enable-and-bootstrap).
 
 ### Request and response
 
@@ -82,9 +85,12 @@ another.
 
 ## What the helper re-derives
 
-Every check runs in `prepare` and again, from scratch, in `disable`/`enable`.
+Every numbered check below runs in `prepare` and again, from scratch, in `disable`/`enable`.
 Any check failing means refusal and no `launchctl` call.
 
+0. **Denylist.** Before anything else, the root-owned
+   [denylist](#denylist) is loaded and checked; see that section for the
+   file's own integrity checks.
 1. **Label.** At most 200 bytes, reverse-DNS with at least two non-empty
    segments, only characters `bundleid.Valid` allows (the same rule as
    `uninstall.validID`). Refuse any label starting with `com.apple.` (case
@@ -133,7 +139,7 @@ Any check failing means refusal and no `launchctl` call.
    job by that name and the helper refuses (`launchd_mismatch`).
    `launchctl print-disabled system` gives the before state.
 
-Only after all eight pass does the helper run the planned argv, each as a
+Only after check 0 and all eight pass does the helper run the planned argv, each as a
 fixed slice through the injected `CmdRunner`, never a shell. It then re-reads
 `print system` and `print-disabled system` to fill `after` and `mismatch`
 exactly as `startup.ChangeResult.verify` does.
@@ -146,9 +152,103 @@ Allowed, with `/bin/launchctl` and nothing else:
 - `bootout system/<label>` — only after a successful `disable`, only when
   loaded. A bootout still in progress sets `pending`.
 - `enable system/<label>` — removes the override.
+- `bootstrap system <plist_path>` — only inside `enable`, only when the job
+  is not loaded, and only with the plist path derived and bound at `prepare`.
 
-Never: deleting, moving, renaming or editing any file; `bootstrap`, `load`,
-`unload`, `kickstart`, `kill`, `remove`; any domain other than `system`.
+Never: deleting, moving, renaming or editing any file; `bootstrap` outside
+`enable`, `load`, `unload`, `kickstart`, `kill`, `remove`; any domain other
+than `system`.
+
+### Enable and bootstrap
+
+Decided by the owner (2026-11-20): `enable` matches user-scope
+`spectra startup enable`, so an enabled daemon is also started.
+
+1. `prepare` for `enable` records whether the job is loaded
+   (`launchctl print system/<label>`). The planned argv list shows the
+   `bootstrap` line only when it is not loaded.
+2. At execute, all checks re-run from scratch, including the denylist, and
+   the plist must be the same file `prepare` saw: same device, inode, size,
+   mtime and SHA-256, else `target_changed`. The helper bootstraps the path
+   it just re-verified from the descriptor it opened, never a path supplied
+   by the caller.
+3. The helper re-reads `print system/<label>` immediately before
+   `bootstrap`. If the job is now loaded (someone else loaded it), the
+   bootstrap is skipped and recorded as such. If it is loaded under a
+   different plist path or program, the result is `launchd_mismatch` and no
+   further command runs.
+4. After `bootstrap`, `print system/<label>` must show the job loaded with
+   `path` equal to the plist path and program equal to the derived program;
+   `print-disabled` must show it enabled. Otherwise `mismatch` is set.
+
+Failure handling:
+
+- `enable` fails: nothing else runs; `outcome: error`.
+- `enable` succeeds, `bootstrap` fails: the override stays removed (no
+  automatic re-disable), `outcome: error`, `pending: false`, and the result
+  says "enabled but not loaded", with argv, exit code, stderr and the
+  suggestion `sudo launchctl bootstrap system <plist>` or a reboot.
+- Bootstrap succeeds but the re-read disagrees: reported as `mismatch`,
+  exit 1. The helper does not `bootout` to undo it; the user is shown the
+  manual command.
+
+## Denylist
+
+Decided by the owner (2026-11-20): the helper ships with a root-owned
+denylist it always refuses, so an admin session cannot silently disable
+security tooling through this method.
+
+- **Path:** `/Library/Application Support/Spectra/helper-denylist.plist`.
+  `sudo spectra install-helper` creates the directory `root:wheel` `0755`
+  and writes the default file `root:wheel` `0644`. The directory is
+  system-wide, so only root can change it, and it keeps policy out of
+  `/etc` (managed by OS updates) and out of any user home. It sits next to
+  other per-product system data; the helper verifies it rather than trusting
+  the location.
+- **Format:** an XML property list parsed with `internal/plistread`, with
+  two string arrays and XML comments for the reason behind each entry:
+
+  ```xml
+  <dict>
+    <key>Labels</key>
+    <array>
+      <!-- endpoint security: exact label or trailing-* prefix -->
+      <string>com.example.edr.agentd</string>
+      <string>com.example.mdm.*</string>
+    </array>
+    <key>TeamIDs</key>
+    <array>
+      <!-- backup agents: every daemon signed by this team -->
+      <string>ABCDE12345</string>
+    </array>
+  </dict>
+  ```
+
+  Labels match case-folded, exactly, or by prefix when the entry ends in
+  `*`. A team id entry matches the team id the helper derived in check 7.
+  Unknown keys are ignored; a malformed entry makes the file invalid (below).
+- **Default contents, by category:** endpoint detection and response
+  agents; mobile device management and device-management enrollment
+  agents; backup agents; plus the helper's own label. No vendor list ships
+  in this design; the implementation PR proposes the entries for review.
+- **Editing:** only with `sudo`. Spectra never writes the file after
+  install, and install does not overwrite an existing, valid file.
+- **Integrity:** the helper `lstat`s the directory (a real directory, owned
+  by root, not group- or world-writable) and the file (regular, not a
+  symlink, owner uid 0, mode `0644` or stricter), opens it `O_NOFOLLOW`
+  and compares inode as in check 3. If the file **exists but fails any of
+  these checks, or fails to parse**, the helper refuses every mutation
+  (`denylist_invalid`) until it is fixed. If the file does not exist, the
+  built-in default set (the helper's own label and the `com.apple.`
+  prefix) still applies and a warning line is written to the audit log.
+- **Scope:** the denylist applies to `prepare`, `disable` and `enable`;
+  a listed daemon cannot be changed through the helper in either direction.
+- **Reporting:** a match is a normal refusal with `reason: denylisted`, the
+  matched entry and its kind (`label` or `team_id`) in the message, and the
+  CLI's usual manual `sudo launchctl` commands, so an administrator can still
+  act deliberately. The audit log records the refused `prepare` with the
+  matched entry. An invalid file reports `denylist_invalid` with the failed
+  check (owner, mode, symlink or parse error) and the path.
 
 ## Confirmation token and replay protection
 
@@ -176,8 +276,9 @@ security controls are the caller checks and target verification.
 
 - Peer uid from `peercred.PeerUID`, as today, with the socket still
   `root:_spectra` `0660`.
-- **New:** the mutating methods and `prepare` also require the caller to be
-  uid 0 or a member of the `admin` group, re-checked on every call. Being in
+- **New (decided 2026-11-20):** the mutating methods and `prepare` also
+  require the caller to be uid 0 or a member of the `admin` group,
+  re-checked on every call. Being in
   `_spectra` was granted for telemetry; changing system daemons needs the
   same standing as the `sudo` it replaces.
 - Not exposed over the per-user daemon, the MCP server or Spectra Remote.
@@ -240,6 +341,9 @@ is one audited path.
 |---|---|---|
 | Helper not installed or socket refused | — | Today's refusal plus install hint; exit 3 |
 | Caller not admin | `not_admin` | "changing system daemons needs an administrator account"; exit 3 |
+| Daemon on the denylist | `denylisted` | Matched entry and manual commands; exit 3 |
+| Denylist exists but not root-owned, not `0644` or stricter, or unparseable | `denylist_invalid` | Failed check and path; all mutations refused; exit 3 |
+| `enable` succeeded, `bootstrap` failed | `outcome: error` | "enabled but not loaded", argv, stderr, manual bootstrap command; exit 1 |
 | Apple label, Apple-signed, under `/System` | `apple_label`, `apple_signed`, `system_path` | Refusal with manual commands; exit 3 |
 | Plist or program is a symlink | `symlink` | Path named; exit 3 |
 | Plist not root-owned or writable by others | `plist_permissions` | Owner and mode shown; exit 3 |
@@ -274,12 +378,22 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
   machines. It installs the helper and a Developer ID-signed fixture app with
   a trivial daemon, then checks disable, enable, a replayed token, and
   refusals for a `com.apple.*` label, a symlinked plist and a non-root plist.
+  Enable is checked to bootstrap an unloaded fixture daemon.
+- **Denylist tests:** label, prefix and team id matches; file absent, wrong
+  owner, mode `0664`, symlink and malformed content each refuse (or fall back,
+  when absent) with the right reason; no mutation argv recorded.
+- **Bootstrap tests:** skipped when already loaded; plist changed between
+  `prepare` and execute; `enable` ok then `bootstrap` fails; post-bootstrap
+  mismatch.
 
 ## Out of scope
 
 - Deleting, moving or editing plists, programs or bundles (later steps of
   #600, each with its own design).
-- `bootstrap`, `kickstart`, `load` and starting jobs.
+- A stop-only method (`bootout` without the persistent `disable`). Decided
+  2026-11-20: step 1 has none; `disable` is the only way to stop a daemon.
+- `kickstart`, `load` and starting jobs, except the `bootstrap` that
+  `enable` performs on an unloaded daemon.
 - `/Library/LaunchAgents`, other users' `gui/<uid>` domains, and the
   user's own domain (the CLI already changes that without root).
 - `SMAppService` jobs (`BundleProgram`), BTM Login Items, and
@@ -293,12 +407,10 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
 
 ## Open questions for the owner
 
-1. Is requiring `admin` group membership right, or is `_spectra` enough?
-2. Should `enable` also `bootstrap` the plist so a re-enabled daemon runs
-   without a reboot, matching user-scope `enable`?
-3. Is a stop-only `bootout` (no persistent disable) worth a separate method?
-4. Should Developer ID-signed security agents (EDR, MDM) get a root-owned
-   denylist, since this method lets an admin's session disable them without
-   a password prompt?
-5. Which signing identity signs the VM fixture daemon, and where does that
+Answered 2026-11-20 and folded into the design above: the `admin` gate
+([caller authentication](#caller-authentication)), `enable` bootstrapping
+([enable and bootstrap](#enable-and-bootstrap)), no stop-only method
+([out of scope](#out-of-scope)), and the [denylist](#denylist).
+
+1. Which signing identity signs the VM fixture daemon, and where does that
    VM test run?

@@ -125,7 +125,10 @@ Notably absent:
       `helper.launchd.system.prepare`, `.disable` and `.enable` for a
       `/Library/LaunchDaemons` job owned by a verified third-party bundle.
       It takes a label only, re-derives and verifies every path itself,
-      never deletes, and needs a single-use confirmation token.
+      never deletes, needs a single-use confirmation token and an
+      `admin`-group caller, `enable` also bootstraps an unloaded daemon, and
+      it always refuses labels and team ids in a root-owned denylist
+      (`/Library/Application Support/Spectra/helper-denylist.plist`).
 
 ## Wire protocol
 
