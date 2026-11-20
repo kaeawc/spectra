@@ -216,6 +216,9 @@ func (s *Server) readFiringAlerts(_ context.Context, _ *sdk.ReadResourceRequest)
 		return callErr
 	})
 	var value any = alerts
+	if reason := s.alertsUnavailableReason(); reason != "" && err == nil {
+		value = map[string]any{"daemon": "alerts unavailable", "message": "the daemon accepted the connection but its alert stream failed: " + reason, "alerts": []hostwatch.Alert{}}
+	}
 	switch {
 	case errors.Is(err, errDaemonUnavailable):
 		// A subscriber keeps reading this resource while the daemon is down;
@@ -264,11 +267,14 @@ type hostHealthDoc struct {
 	ActiveAlerts     *int      `json:"active_alerts,omitempty"`
 }
 
-func newHostHealthDoc(s hostwatch.Sample, daemonUp bool, activeAlerts []hostwatch.Alert) hostHealthDoc {
+func newHostHealthDoc(s hostwatch.Sample, daemonUp bool, activeAlerts []hostwatch.Alert, verdict string) hostHealthDoc {
+	if verdict == "" {
+		verdict = loadVerdict(s.Load1, s.NCPU, "")
+	}
 	doc := hostHealthDoc{
 		Daemon: "not running", At: s.At, NCPU: s.NCPU,
 		Load1: round2(s.Load1), Load5: round2(s.Load5), Load15: round2(s.Load15),
-		LoadPerCPU: round2(loadPerCPU(s.Load1, s.NCPU)), LoadVerdict: loadVerdict(s.Load1, s.NCPU, ""),
+		LoadPerCPU: round2(loadPerCPU(s.Load1, s.NCPU)), LoadVerdict: verdict,
 		MemoryPressure: s.MemoryPressure, MemFreePct: round2(s.MemFreePct), SwapUsedMB: round2(s.SwapUsedMB),
 		DataFreeGB: round2(s.DataFreeGB), ThermalThrottled: s.ThermalThrottled,
 	}
@@ -293,7 +299,7 @@ func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest)
 	})
 	switch {
 	case err == nil:
-		return jsonResource(hostHealthURI, newHostHealthDoc(sample, true, alerts), hostHealthTTLMs)
+		return jsonResource(hostHealthURI, newHostHealthDoc(sample, true, alerts, s.hubVerdict(true)), hostHealthTTLMs)
 	case !errors.Is(err, errDaemonUnavailable):
 		return nil, &jsonrpc.Error{Code: -32000, Message: err.Error()}
 	}
@@ -301,7 +307,24 @@ func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest)
 	if err != nil {
 		return nil, &jsonrpc.Error{Code: -32000, Message: fmt.Sprintf("sample host: %v", err)}
 	}
-	return jsonResource(hostHealthURI, newHostHealthDoc(sample, false, nil), hostHealthTTLMs)
+	return jsonResource(hostHealthURI, newHostHealthDoc(sample, false, nil, s.hubVerdict(false)), hostHealthTTLMs)
+}
+
+// hubVerdict is the hysteresis-aware verdict the live hub notifies with, or
+// "" when no subscription is tracking it.
+func (s *Server) hubVerdict(daemon bool) string {
+	if s.live == nil {
+		return ""
+	}
+	v, _ := s.live.levelVerdict(daemon)
+	return v
+}
+
+func (s *Server) alertsUnavailableReason() string {
+	if s.live == nil {
+		return ""
+	}
+	return s.live.alertsUnavailable()
 }
 
 func (s *Server) localHostSample(ctx context.Context) (hostwatch.Sample, error) {

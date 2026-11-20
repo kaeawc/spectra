@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostwatch"
@@ -25,6 +26,9 @@ const (
 	loadHoldPerCPU     = 1.5
 	loadReleasePerCPU  = 1.35
 	localSampleTimeout = 15 * time.Second
+	// defaultAlertDebounce collapses a burst of alert events into one
+	// firing-alerts update.
+	defaultAlertDebounce = time.Second
 )
 
 // daemonStreamClient is the part of the daemon client the live watcher uses.
@@ -38,6 +42,10 @@ type liveConfig struct {
 	pollInterval      time.Duration
 	healthMinInterval time.Duration
 	sampleLocal       func(context.Context) (hostwatch.Sample, error)
+	alertDebounce     time.Duration
+	// afterFunc schedules f after d and returns its stop function; tests
+	// replace it to drive the debounce without waiting.
+	afterFunc func(d time.Duration, f func()) (stop func() bool)
 }
 
 func (c liveConfig) withDefaults() liveConfig {
@@ -46,6 +54,12 @@ func (c liveConfig) withDefaults() liveConfig {
 	}
 	if c.healthMinInterval <= 0 {
 		c.healthMinInterval = defaultHealthMinInterval
+	}
+	if c.alertDebounce <= 0 {
+		c.alertDebounce = defaultAlertDebounce
+	}
+	if c.afterFunc == nil {
+		c.afterFunc = func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
 	}
 	if c.sampleLocal == nil {
 		collector := &hostwatch.Collector{}
@@ -87,6 +101,8 @@ type liveHub struct {
 	lastHealthNotify time.Time
 	localSample      hostwatch.Sample
 	localAt          time.Time
+	alertStop        func() bool // pending debounced alerts update
+	streamErr        string      // why the daemon's stream is unusable, if it is
 }
 
 var liveURIs = map[string]bool{firingAlertsURI: true, hostHealthURI: true}
@@ -215,6 +231,7 @@ func (h *liveHub) startLocked() {
 	h.done = make(chan struct{})
 	h.daemonKnown, h.haveLevel = false, false
 	h.lastHealthNotify = time.Time{}
+	h.streamErr = ""
 	go h.run(ctx, h.gen, prev, h.done)
 }
 
@@ -224,7 +241,15 @@ func (h *liveHub) stopIfIdleLocked() {
 	}
 	h.cancel()
 	h.cancel = nil
+	h.stopAlertTimerLocked()
 	// A later start waits for this watcher to exit, so at most one runs.
+}
+
+func (h *liveHub) stopAlertTimerLocked() {
+	if h.alertStop != nil {
+		h.alertStop()
+		h.alertStop = nil
+	}
 }
 
 // close stops the watcher and waits for it; later subscriptions are ignored.
@@ -235,6 +260,7 @@ func (h *liveHub) close() {
 		h.cancel()
 		h.cancel = nil
 	}
+	h.stopAlertTimerLocked()
 	done := h.done
 	h.mu.Unlock()
 	if done != nil {
@@ -291,12 +317,19 @@ func (h *liveHub) followDaemon(ctx context.Context, gen uint64) bool {
 		return false
 	}
 	h.setDaemon(gen, true)
-	_ = client.Subscribe(ctx, true,
-		func(hostwatch.Event) { h.alertEvent(gen) },
-		func(sample hostwatch.Sample) { h.observe(gen, sample, true) })
+	var got atomic.Bool
+	err := client.Subscribe(ctx, true,
+		func(hostwatch.Event) { got.Store(true); h.setStreamErr(gen, ""); h.alertEvent(gen) },
+		func(sample hostwatch.Sample) { got.Store(true); h.setStreamErr(gen, ""); h.observe(gen, sample, true) })
 	_ = client.Close()
 	if ctx.Err() != nil {
 		return true
+	}
+	if err != nil && !got.Load() {
+		// The daemon accepted the connection but cannot stream (an older or
+		// broken daemon): sample locally and retry at the poll pace.
+		h.setStreamErr(gen, err.Error())
+		return false
 	}
 	probe, ok := h.connect(ctx)
 	if ok {
@@ -351,10 +384,49 @@ func (h *liveHub) setDaemon(gen uint64, up bool) {
 	}
 }
 
-func (h *liveHub) alertEvent(gen uint64) {
-	if h.wants(gen, firingAlertsURI) {
-		h.notify(firingAlertsURI)
+func (h *liveHub) setStreamErr(gen uint64, reason string) {
+	h.mu.Lock()
+	if gen == h.gen {
+		h.streamErr = reason
 	}
+	h.mu.Unlock()
+}
+
+// alertsUnavailable returns why the daemon's alert stream cannot be used.
+func (h *liveHub) alertsUnavailable() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.streamErr
+}
+
+// levelVerdict returns the load verdict the hub last notified for the given
+// source, so resource content agrees with notifications.
+func (h *liveHub) levelVerdict(daemon bool) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.haveLevel || h.level.daemon != daemon {
+		return "", false
+	}
+	return h.level.loadVerdict, true
+}
+
+// alertEvent schedules one firing-alerts update per burst: the first event
+// starts the debounce timer and later ones until it fires are absorbed.
+func (h *liveHub) alertEvent(gen uint64) {
+	h.mu.Lock()
+	if gen != h.gen || h.counts[firingAlertsURI] == 0 || h.alertStop != nil {
+		h.mu.Unlock()
+		return
+	}
+	h.alertStop = h.cfg.afterFunc(h.cfg.alertDebounce, func() {
+		h.mu.Lock()
+		h.alertStop = nil
+		h.mu.Unlock()
+		if h.wants(gen, firingAlertsURI) {
+			h.notify(firingAlertsURI)
+		}
+	})
+	h.mu.Unlock()
 }
 
 // observe compares a sample's health level with the last one notified and

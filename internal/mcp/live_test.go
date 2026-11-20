@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"runtime"
 	"strings"
@@ -24,6 +25,8 @@ type fakeStream struct {
 	samples    chan hostwatch.Sample
 	subscribed chan struct{}
 	streams    atomic.Int32
+	current    hostwatch.Sample // Current's answer; zero means a calm default
+	subErr     error            // when set, Subscribe fails before any data
 }
 
 func newFakeStream() *fakeStream {
@@ -37,6 +40,9 @@ func (f *fakeStream) connect(context.Context) (daemonWatchClient, bool) {
 type fakeStreamClient struct{ f *fakeStream }
 
 func (c *fakeStreamClient) Current(context.Context) (hostwatch.Sample, []hostwatch.Alert, error) {
+	if c.f.current.NCPU != 0 {
+		return c.f.current, []hostwatch.Alert{{ID: "a1"}}, nil
+	}
 	return hostwatch.Sample{NCPU: 4, Load1: 1, MemoryPressure: "normal"}, []hostwatch.Alert{{ID: "a1"}}, nil
 }
 func (c *fakeStreamClient) Samples(context.Context, time.Time, int) ([]hostwatch.Sample, error) {
@@ -57,6 +63,9 @@ func (c *fakeStreamClient) Subscribe(ctx context.Context, _ bool, onEvent func(h
 	c.f.streams.Add(1)
 	defer c.f.streams.Add(-1)
 	c.f.subscribed <- struct{}{}
+	if c.f.subErr != nil {
+		return c.f.subErr
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -211,7 +220,7 @@ func TestLiveHostHealthFromDaemonSamples(t *testing.T) {
 			if err := json.Unmarshal([]byte(res.Contents[0].Text), &doc); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Daemon != "running" || doc.ActiveAlerts == nil || *doc.ActiveAlerts != 1 || doc.LoadVerdict != "admit" {
+			if doc.Daemon != "running" || doc.ActiveAlerts == nil || *doc.ActiveAlerts != 1 || doc.LoadVerdict != "hold" { // the hub's level, as notified
 				t.Fatalf("host health = %+v", doc)
 			}
 		})
@@ -420,5 +429,111 @@ func TestLiveSubscribeValidation(t *testing.T) {
 	h.close()
 	if h.running() {
 		t.Fatal("closed hub running")
+	}
+}
+
+type fakeTimers struct {
+	mu      sync.Mutex
+	pending []func()
+}
+
+func (f *fakeTimers) after(_ time.Duration, fn func()) func() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pending = append(f.pending, fn)
+	return func() bool { return true }
+}
+
+func (f *fakeTimers) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.pending)
+}
+
+func (f *fakeTimers) fire() {
+	f.mu.Lock()
+	fns := f.pending
+	f.pending = nil
+	f.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+func TestLiveAlertBurstCoalesces(t *testing.T) {
+	f := newFakeStream()
+	timers := &fakeTimers{}
+	srv := NewServer(strings.NewReader(""), io.Discard)
+	srv.SetDaemonConnector(f.connect)
+	srv.liveCfg = liveConfig{afterFunc: timers.after}
+	l := startLiveSession(t, srv, "2025-11-25")
+	if err := l.cs.Subscribe(context.Background(), &sdk.SubscribeParams{URI: firingAlertsURI}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	<-f.subscribed
+	for i := 0; i < 5; i++ {
+		f.events <- hostwatch.Event{Type: "fired", Alert: hostwatch.Alert{ID: "a"}}
+	}
+	l.expectNoUpdate(t, 50*time.Millisecond)
+	if n := timers.count(); n != 1 {
+		t.Fatalf("scheduled %d timers for one burst, want 1", n)
+	}
+	timers.fire()
+	l.expectUpdate(t, firingAlertsURI)
+	l.expectNoUpdate(t, 50*time.Millisecond)
+}
+
+func TestLiveStreamFailureFallsBackToLocalPolling(t *testing.T) {
+	f := newFakeStream()
+	f.subErr = errors.New("method not found")
+	var samples atomic.Int32
+	srv := NewServer(strings.NewReader(""), io.Discard)
+	srv.SetDaemonConnector(f.connect)
+	srv.liveCfg = liveConfig{pollInterval: time.Hour, sampleLocal: func(context.Context) (hostwatch.Sample, error) {
+		samples.Add(1)
+		return hostwatch.Sample{NCPU: 4, Load1: 1}, nil
+	}}
+	l := startLiveSession(t, srv, "2025-11-25")
+	ctx := context.Background()
+	for _, uri := range []string{hostHealthURI, firingAlertsURI} {
+		if err := l.cs.Subscribe(ctx, &sdk.SubscribeParams{URI: uri}); err != nil {
+			t.Fatalf("subscribe: %v", err)
+		}
+	}
+	waitFor(t, "local poll after stream failure", func() bool { return samples.Load() > 0 })
+	waitFor(t, "alerts reason", func() bool { return srv.live.alertsUnavailable() != "" })
+	res, err := l.cs.ReadResource(ctx, &sdk.ReadResourceParams{URI: firingAlertsURI})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	text := res.Contents[0].Text
+	if !strings.Contains(text, "alerts unavailable") || !strings.Contains(text, "method not found") {
+		t.Fatalf("alerts content = %s", text)
+	}
+}
+
+func TestHostHealthContentUsesHubHysteresis(t *testing.T) {
+	f := newFakeStream()
+	f.current = hostwatch.Sample{NCPU: 4, Load1: 5.5, MemoryPressure: "normal"} // 1.375/CPU
+	srv := NewServer(strings.NewReader(""), io.Discard)
+	srv.SetDaemonConnector(f.connect)
+	srv.liveCfg = liveConfig{healthMinInterval: time.Millisecond}
+	l := startLiveSession(t, srv, "2025-11-25")
+	if err := l.cs.Subscribe(context.Background(), &sdk.SubscribeParams{URI: hostHealthURI}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	<-f.subscribed
+	f.samples <- hostwatch.Sample{NCPU: 4, Load1: 7, MemoryPressure: "normal"} // hold
+	f.samples <- f.current                                                     // inside the hysteresis band
+	res, err := l.cs.ReadResource(context.Background(), &sdk.ReadResourceParams{URI: hostHealthURI})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var doc hostHealthDoc
+	if err := json.Unmarshal([]byte(res.Contents[0].Text), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.LoadVerdict != "hold" {
+		t.Fatalf("load_verdict = %q, want hold (hub keeps hold above 1.35/CPU)", doc.LoadVerdict)
 	}
 }

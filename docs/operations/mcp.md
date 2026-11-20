@@ -58,16 +58,29 @@ accept a subscription and never send an update.
 | `spectra://alerts/firing` | The daemon's firing alerts as a JSON array. Without the daemon: `{"daemon": "not running", "message": ..., "alerts": []}` | `private`, `ttlMs` 5000 |
 | `spectra://host/health` | Compact JSON: `daemon` (`running` or `not running`), `at`, `ncpu`, `load1`/`load5`/`load15`, `load_per_cpu`, `load_verdict` (`admit` or `hold`), `memory_pressure`, `mem_free_pct`, `swap_used_mb`, `data_free_gb`, `thermal_throttled`, and `active_alerts` when the daemon is running | `private`, `ttlMs` 10000 |
 
+The alerts resource has two shapes. With the daemon running it is a bare JSON
+array of firing alerts (empty when none fire). Without it, it is an object,
+`{"daemon": "not running", "message": ..., "alerts": []}`, so a subscriber can
+tell a quiet host from a missing daemon. If the daemon accepts the connection
+but its alert stream fails before delivering anything (an older or broken
+daemon), the object reads `{"daemon": "alerts unavailable", "message": <reason>,
+"alerts": []}`, and host health falls back to local sampling. Both shapes carry
+the `private`, `ttlMs` 5000 cache hint, so a client may reuse a read for 5
+seconds unless it is notified first. A burst of alert events is coalesced into
+one `resources/updated` about 1 second after the first event.
+
 The host-health resource is built from the same sample as the `host_health`
 tool: the daemon's current sample when it runs, otherwise one taken locally.
 `load_verdict` is `hold` when the 1-minute load reaches 1.5 per CPU (the
-`load` tool's default limit).
+`load` tool's default limit). While a session subscribes, `load_verdict` is the
+watcher's level with the 1.35 release hysteresis, the same one that drives
+notifications, so content and updates agree.
 
 While a session subscribes to either resource, one watcher shared by all
 sessions runs:
 
-- **Daemon running.** It follows the daemon's alert stream. Each alert event
-  sends an update for `spectra://alerts/firing`. Each daemon sample is compared
+- **Daemon running.** It follows the daemon's alert stream. Alert events
+  send one debounced update for `spectra://alerts/firing`. Each daemon sample is compared
   with the last one notified, and `spectra://host/health` is updated when the
   load verdict, memory pressure level or thermal state changes, at most once
   every 10 seconds. Once the verdict is `hold`, it stays there until load drops
