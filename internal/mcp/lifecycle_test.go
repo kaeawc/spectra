@@ -169,8 +169,14 @@ func TestCancelStopsRunningToolAndSendsNoReply(t *testing.T) {
 	// The next reply on the wire must be the ping's: none is sent for "slow".
 	r.send(`{"jsonrpc":"2.0","id":"ping","method":"ping"}`)
 	r.reply("ping")
-	if !spawns.cancelled.Load() {
-		t.Fatal("the running tool's context was not cancelled")
+	// notifications/cancelled is applied asynchronously, so the ping can be
+	// answered first; wait for the running tool to see its context end.
+	deadline := time.Now().Add(10 * time.Second)
+	for !spawns.cancelled.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the running tool's context was not cancelled")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	r.call("after", "lineage", `{"pid":20}`)
 	if res := r.reply("after"); res["error"] != nil {
