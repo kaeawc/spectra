@@ -120,9 +120,9 @@ func Apply(ctx context.Context, opts Options, plan Plan, ao ApplyOptions) (Resul
 	if leftovers {
 		freshItems = collectLeftovers(ctx, o, ident)
 	} else {
-		freshItems, _ = collect(ctx, o, ident)
+		freshItems = collect(ctx, o, ident).items
 	}
-	todo, err := triage(o, plan, freshItems, ao, leftovers, &res)
+	todo, err := triage(o, ident, plan, freshItems, ao, leftovers, &res)
 	if err != nil {
 		return res, err
 	}
@@ -135,9 +135,10 @@ func Apply(ctx context.Context, opts Options, plan Plan, ao ApplyOptions) (Resul
 	return res, quitAndMove(ctx, o, ident, todo, ao, &res)
 }
 
-// quitAndMove stops the app, then boots out its agents, then moves items.
-// Agents are booted out only after every process has exited, so a failed
-// quit leaves launchd untouched.
+// quitAndMove stops the app, moves the bundle, boots out its agents, then
+// moves the remaining items. Agents are booted out only after every process
+// has exited and the bundle has moved, so a failed quit or a bundle that
+// will not move leaves launchd untouched.
 func quitAndMove(ctx context.Context, o Options, ident App, todo []Item, ao ApplyOptions, res *Result) error {
 	running := appProcesses(o.Procs(ctx), ident.Path)
 	res.Running = append(res.Running, running...)
@@ -147,16 +148,58 @@ func quitAndMove(ctx context.Context, o Options, ident App, todo []Item, ao Appl
 	if err := stopProcesses(ctx, o, ident.Path, running, ao.DryRun, res); err != nil {
 		return err
 	}
-	bootoutAgents(ctx, o, todo, ao.DryRun, res)
-	if !ao.DryRun {
-		if again := appProcesses(o.Procs(ctx), ident.Path); len(again) > 0 {
-			res.Relaunched = again
-			return fmt.Errorf("%w: %d processes run from the bundle after %d launch agents were booted out; nothing was moved, run apply --quit again",
-				ErrRelaunched, len(again), len(res.Bootouts))
+	if len(todo) == 0 {
+		return nil
+	}
+	mv, err := newMover(o, ident, ao, res)
+	if err != nil {
+		mv.skipAll(todo, "move failed: "+err.Error())
+		return fmt.Errorf("no Trash folder, so nothing was booted out or moved: %w", err)
+	}
+	sort.SliceStable(todo, func(i, j int) bool { return todo[i].Kind == KindBundle && todo[j].Kind != KindBundle })
+	rest, bundleDest := todo, ""
+	if todo[0].Kind == KindBundle {
+		rest = todo[1:]
+		dest, ok := mv.move(todo[0])
+		switch {
+		case ok:
+			bundleDest = dest
+		case !ao.DataOnly:
+			mv.skipAll(rest, "not moved: the app bundle could not be moved, so no launch agent was booted out (pass --data-only to move data anyway)")
+			return nil
 		}
 	}
-	moveToTrash(o, ident, todo, ao, res)
+	bootoutAgents(ctx, o, ident, rest, ao.DryRun, res)
+	if !ao.DryRun {
+		if err := checkRelaunch(ctx, o, ident, bundleDest, res); err != nil {
+			mv.skipAll(rest, "not moved: the app started again")
+			return err
+		}
+	}
+	for _, it := range rest {
+		mv.move(it)
+	}
 	return nil
+}
+
+// checkRelaunch looks for app processes that appeared after the quit, from
+// the bundle's old path or from where it was moved in the Trash.
+func checkRelaunch(ctx context.Context, o Options, ident App, bundleDest string, res *Result) error {
+	procs := o.Procs(ctx)
+	again := appProcesses(procs, ident.Path)
+	if bundleDest != "" {
+		again = append(again, appProcesses(procs, bundleDest)...)
+	}
+	if len(again) == 0 {
+		return nil
+	}
+	res.Relaunched = again
+	where := "nothing was moved"
+	if bundleDest != "" {
+		where = "the bundle is already in " + bundleDest + " and nothing else was moved; quit the app, move the bundle back to " + ident.Path + ", then plan and apply again"
+	}
+	return fmt.Errorf("%w: %d processes run from the bundle after %d launch agents were booted out; %s",
+		ErrRelaunched, len(again), len(res.Bootouts), where)
 }
 
 func hasBundle(todo []Item) bool {
@@ -221,37 +264,63 @@ func verifyPlanIdentity(ctx context.Context, o Options, plan Plan, ao ApplyOptio
 	} else if !ao.Leftovers {
 		return App{}, false, fmt.Errorf("%w: %s does not exist", ErrBundleMissing, plan.App.Path)
 	}
-	return leftoversIdentity(o, plan.App)
+	return leftoversIdentity(ctx, o, plan.App)
 }
 
-// leftoversIdentity keeps only the bundle id of a plan whose bundle is gone,
-// and refuses ids that belong to Apple or to any installed app.
-func leftoversIdentity(o Options, a App) (App, bool, error) {
-	if hasFoldPrefix(a.BundleID, "com.apple.") {
-		return App{}, false, fmt.Errorf("%w: --leftovers never acts on com.apple.* ids (%s)", ErrPlanRejected, a.BundleID)
+// leftoversIdentity keeps only the bundle id of a plan whose bundle is gone.
+// With no bundle there is no signature to check, so it refuses ids that
+// belong to Apple, ids of fewer than three segments, ids an installed app
+// has or sits under, and any id when Spotlight cannot be asked.
+func leftoversIdentity(ctx context.Context, o Options, a App) (App, bool, error) {
+	refuse := func(format string, args ...any) (App, bool, error) {
+		return App{}, false, fmt.Errorf("%w: %s", ErrPlanRejected, fmt.Sprintf(format, args...))
 	}
-	if p := (&otherApps{o: o}).sameID(a.BundleID); p != "" {
-		return App{}, false, fmt.Errorf("%w: %s belongs to the installed app %s", ErrPlanRejected, a.BundleID, p)
+	if isAppleID(a.BundleID) {
+		return refuse("--leftovers never acts on com.apple.* ids (%s)", a.BundleID)
+	}
+	if idSegments(a.BundleID) < 3 {
+		return refuse("--leftovers needs a bundle id of at least three segments; %s may be a vendor prefix", a.BundleID)
+	}
+	others := &otherApps{o: o}
+	if p := others.sameID(a.BundleID); p != "" {
+		return refuse("%s belongs to the installed app %s", a.BundleID, p)
+	}
+	if !others.spotlight(ctx, a.BundleID, nil) {
+		return refuse("Spotlight (mdfind) did not answer, so other installed copies of %s cannot be ruled out", a.BundleID)
+	}
+	if p := others.sameID(a.BundleID); p != "" {
+		return refuse("%s belongs to the installed app %s", a.BundleID, p)
+	}
+	if id, p := others.under(a.BundleID); id != "" {
+		return refuse("the installed app %s has the id %s, under %s", p, id, a.BundleID)
 	}
 	return App{Path: a.Path, BundleID: a.BundleID, Name: a.Name, HelperIDs: []string{}, DeclaredJobs: []string{}, AppGroups: []string{}, Receipts: []string{}}, true, nil
 }
 
-// checkPlanPaths runs the structural guard on the app path and every item.
+// checkPlanPaths runs the structural guard on the app path and every item,
+// then rejects a plan that lists a path more than once under any kind or
+// reason (ignoring case, as the volume does).
 func checkPlanPaths(o Options, plan Plan) error {
 	if err := checkItemPath(o, plan.App.Path, Item{Path: plan.App.Path, Kind: KindBundle}); err != nil {
 		return fmt.Errorf("%w: %w", ErrPlanRejected, err)
 	}
+	seen := make(map[string]bool, len(plan.Items))
 	for _, it := range plan.Items {
 		if err := checkItemPath(o, plan.App.Path, it); err != nil {
 			return fmt.Errorf("%w: %w", ErrPlanRejected, err)
 		}
+		key := strings.ToLower(it.Path)
+		if seen[key] {
+			return fmt.Errorf("%w: %s is listed more than once", ErrPlanRejected, it.Path)
+		}
+		seen[key] = true
 	}
 	return nil
 }
 
 // triage compares every planned item with its freshly derived state and
 // returns the ones to move. It changes nothing.
-func triage(o Options, plan Plan, freshItems []Item, ao ApplyOptions, leftovers bool, res *Result) ([]Item, error) {
+func triage(o Options, ident App, plan Plan, freshItems []Item, ao ApplyOptions, leftovers bool, res *Result) ([]Item, error) {
 	fresh := make(map[string]Item, len(freshItems))
 	for _, it := range freshItems {
 		fresh[it.Path] = it
@@ -283,7 +352,7 @@ func triage(o Options, plan Plan, freshItems []Item, ao ApplyOptions, leftovers 
 		case ActionTrash:
 			todo = append(todo, cur)
 		case ActionNeedsRoot:
-			cmd := rootCommand(o, cur)
+			cmd := rootCommand(o, ident, cur)
 			if commands[cmd] {
 				cmd = ""
 			}
@@ -311,6 +380,8 @@ func drift(planned, cur Item) string {
 	switch {
 	case planned.Kind != cur.Kind || planned.Reason != cur.Reason:
 		return fmt.Sprintf("match changed: planned %s/%s, now %s/%s", planned.Kind, planned.Reason, cur.Kind, cur.Reason)
+	case planned.Shared && !cur.Shared:
+		return "the plan reported it as shared"
 	case planned.OwnerUID != cur.OwnerUID:
 		return fmt.Sprintf("owner changed: planned uid %d, now %d", planned.OwnerUID, cur.OwnerUID)
 	case planned.Symlink != cur.Symlink:
@@ -396,11 +467,13 @@ func waitGone(ctx context.Context, o Options, procs []Process) error {
 }
 
 // bootoutAgents unloads the user's own launch agents that are about to be
-// moved, so launchd does not keep or respawn them.
-func bootoutAgents(ctx context.Context, o Options, todo []Item, dry bool, res *Result) {
+// moved, so launchd does not keep or respawn them. Only labels the app owns
+// are booted out (App.bootsOut); a job that merely runs from the bundle
+// under someone else's label has its plist moved but is not booted out.
+func bootoutAgents(ctx context.Context, o Options, ident App, todo []Item, dry bool, res *Result) {
 	userAgents := filepath.Join(o.UserLibrary, "LaunchAgents")
 	for _, it := range todo {
-		if it.Kind != KindLaunchAgent || filepath.Dir(it.Path) != userAgents {
+		if it.Kind != KindLaunchAgent || filepath.Dir(it.Path) != userAgents || !ident.bootsOut(it.Detail) {
 			continue
 		}
 		target := "gui/" + itoa(o.UID) + "/" + it.Detail
@@ -421,42 +494,47 @@ func bootoutAgents(ctx context.Context, o Options, todo []Item, dry bool, res *R
 	}
 }
 
-// moveToTrash renames each item into a new folder in the Trash, the bundle
-// first. The folder is created with Mkdir, which fails if anything already
-// has that name, so a file racing into the Trash is never overwritten. A
-// rename moves a symlink as the link and never copies or deletes; a move
-// across filesystems fails and the item is skipped. If the bundle cannot be
-// moved, its data stays unless DataOnly is set.
-func moveToTrash(o Options, ident App, todo []Item, ao ApplyOptions, res *Result) {
-	if len(todo) == 0 {
-		return
-	}
-	sort.SliceStable(todo, func(i, j int) bool { return todo[i].Kind == KindBundle && todo[j].Kind != KindBundle })
+// mover renames items into one new folder in the Trash. The folder is
+// created with Mkdir, which fails if anything already has that name, so a
+// file racing into the Trash is never overwritten. A rename moves a symlink
+// as the link and never copies or deletes; a move across filesystems fails
+// and the item is skipped.
+type mover struct {
+	o     Options
+	dir   string
+	dry   bool
+	taken map[string]bool
+	res   *Result
+}
+
+func newMover(o Options, ident App, ao ApplyOptions, res *Result) (*mover, error) {
+	m := &mover{o: o, dry: ao.DryRun, taken: map[string]bool{}, res: res}
 	dir, err := makeTrashDir(o, ident, ao.DryRun)
 	if err != nil {
-		for _, it := range todo {
-			res.Skipped = append(res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: "move failed: " + err.Error()})
-		}
-		return
+		return m, err
 	}
+	m.dir = dir
 	res.TrashDir = dir
-	taken := map[string]bool{}
-	bundleFailed := false
-	for _, it := range todo {
-		if bundleFailed && !ao.DataOnly {
-			res.Skipped = append(res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: "not moved: the app bundle could not be moved (pass --data-only to move data anyway)"})
-			continue
+	return m, nil
+}
+
+// move renames one item and records the outcome.
+func (m *mover) move(it Item) (string, bool) {
+	dest := uniqueDest(m.o.FS, m.dir, filepath.Base(it.Path), m.taken)
+	if !m.dry {
+		if err := m.o.FS.Rename(it.Path, dest); err != nil {
+			m.res.Skipped = append(m.res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: "move failed: " + err.Error()})
+			return "", false
 		}
-		dest := uniqueDest(o.FS, dir, filepath.Base(it.Path), taken)
-		if !ao.DryRun {
-			if err := o.FS.Rename(it.Path, dest); err != nil {
-				res.Skipped = append(res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: "move failed: " + err.Error()})
-				bundleFailed = bundleFailed || it.Kind == KindBundle
-				continue
-			}
-		}
-		taken[dest] = true
-		res.Moved = append(res.Moved, Moved{Path: it.Path, Kind: it.Kind, To: dest})
+	}
+	m.taken[dest] = true
+	m.res.Moved = append(m.res.Moved, Moved{Path: it.Path, Kind: it.Kind, To: dest})
+	return dest, true
+}
+
+func (m *mover) skipAll(items []Item, reason string) {
+	for _, it := range items {
+		m.res.Skipped = append(m.res.Skipped, Skipped{Path: it.Path, Kind: it.Kind, Reason: reason})
 	}
 }
 

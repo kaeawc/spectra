@@ -101,11 +101,14 @@ type Item struct {
 
 // App is the identity an uninstall plan was built from.
 type App struct {
-	Path          string   `json:"path"`
-	BundleID      string   `json:"bundle_id"`
-	Name          string   `json:"name"`
-	Version       string   `json:"version,omitempty"`
-	TeamID        string   `json:"team_id,omitempty"`
+	Path     string `json:"path"`
+	BundleID string `json:"bundle_id"`
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	TeamID   string `json:"team_id,omitempty"`
+	// AppleSigned is set when the bundle satisfies `anchor apple`; it is
+	// checked only when the app uses a com.apple.* id.
+	AppleSigned   bool     `json:"apple_signed,omitempty"`
 	HelperIDs     []string `json:"helper_bundle_ids"`
 	DeclaredJobs  []string `json:"declared_launchd_labels"`
 	AppGroups     []string `json:"app_groups"`
@@ -132,6 +135,9 @@ type Plan struct {
 	Processes     []Process `json:"processes"`
 	LaunchdLabels []string  `json:"launchd_labels"`
 	Limitations   []string  `json:"limitations"`
+	// Warnings are facts about this plan's inputs, such as Spotlight being
+	// unavailable for the installed-app check.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Options injects every root path, identity and side-effect seam so the
@@ -251,7 +257,10 @@ func supported(o Options) error {
 var planLimitations = []string{
 	"Only paths tied to the app by bundle id, declared helper ids, app-group entitlements, launchd jobs or pkgutil receipts are planned; nothing is matched by substring.",
 	"A declared launchd label, helper id or app group that is not under the app's own bundle id (or its verified team id, for groups) is reported as shared and never acted on.",
-	"If another installed app has the same bundle id (ignoring case), every id-derived item is reported as shared.",
+	"If another installed app (in the app folders, one folder below them, or found by Spotlight) has the same bundle id ignoring case, or an id under this app's id, every id-derived item is reported as shared; so is an item whose helper id or label is another installed app's id.",
+	"A com.apple.* id (main, helper, label or group.com.apple.* group) is report-only unless the bundle satisfies codesign's `anchor apple` requirement.",
+	"A bundle id of fewer than three segments is report-only for id-derived items unless the app has a verified team id; a team id counts only when `codesign --verify --strict` passes.",
+	"A launch agent or daemon is booted out (or a bootout command printed) only for a label under the app's own bundle id, never for com.apple.*.",
 	"Files a pkgutil receipt installed are reported only; another tool may have replaced them.",
 	"Name-only matches are low confidence and are acted on only with --include-low-confidence.",
 	"Items are moved to the Trash, never deleted. Root-owned items are listed with a sudo command and never touched.",

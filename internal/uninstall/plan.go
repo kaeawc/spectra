@@ -24,19 +24,26 @@ func BuildPlan(ctx context.Context, opts Options, target string) (Plan, error) {
 		return Plan{}, err
 	}
 	app.Receipts = receiptIDsFor(ctx, o.Runner, app.Path)
-	items, labels := collect(ctx, o, app)
+	c := collect(ctx, o, app)
+	var warnings []string
+	if !c.spotlightOK {
+		warnings = append(warnings, spotlightWarning)
+	}
 	return Plan{
 		Schema:        PlanSchema,
 		CreatedAt:     o.Now().UTC(),
 		Home:          o.Home,
 		UID:           o.UID,
 		App:           app,
-		Items:         items,
+		Items:         c.items,
 		Processes:     appProcesses(o.Procs(ctx), app.Path),
-		LaunchdLabels: labels,
+		LaunchdLabels: c.labels,
 		Limitations:   planLimitations,
+		Warnings:      warnings,
 	}, nil
 }
+
+const spotlightWarning = "Spotlight (mdfind) did not answer, so other copies of the app were looked for only in the app folders; an install elsewhere was not seen. apply --leftovers refuses until Spotlight answers."
 
 // appProcesses returns processes whose executable lives inside bundle.
 func appProcesses(procs []process.Info, bundle string) []Process {

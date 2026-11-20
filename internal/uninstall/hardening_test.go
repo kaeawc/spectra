@@ -238,7 +238,7 @@ func TestApplyRefusesMissingBundle(t *testing.T) {
 	p.App.Path = filepath.Join(f.apps, "Nope.app")
 	p.App.BundleID = "com.apple.Safari"
 	p.App.AppGroups = []string{"group.com.apple.notes"}
-	p.Items, _ = collect(context.Background(), f.opts.withDefaults(), p.App)
+	p.Items = collect(context.Background(), f.opts.withDefaults(), p.App).items
 
 	if _, err := f.apply(p, ApplyOptions{}); !errors.Is(err, ErrBundleMissing) {
 		t.Fatalf("err = %v, want ErrBundleMissing", err)
@@ -463,8 +463,12 @@ func TestApplyReportsRelaunchAfterBootout(t *testing.T) {
 	if !errors.Is(err, ErrRelaunched) {
 		t.Fatalf("err = %v, want ErrRelaunched", err)
 	}
-	if len(r.Relaunched) != 1 || r.Relaunched[0].PID != 300 || len(r.Bootouts) != 1 || len(r.Moved) != 0 || !existsPath(a.bundle) {
+	// The bundle moved first (before the bootout); nothing else moved.
+	if len(r.Relaunched) != 1 || r.Relaunched[0].PID != 300 || len(r.Bootouts) != 1 || len(r.Moved) != 1 || r.Moved[0].Path != a.bundle {
 		t.Fatalf("result = %+v", r)
+	}
+	if !strings.Contains(err.Error(), "move the bundle back") || !existsPath(a.support) || !existsPath(a.agent) {
+		t.Fatalf("err = %v; data moved after a relaunch", err)
 	}
 }
 

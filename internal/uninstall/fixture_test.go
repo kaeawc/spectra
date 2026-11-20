@@ -17,12 +17,23 @@ import (
 
 // fakeRunner answers by exact command line; anything unscripted exits 1.
 type fakeRunner struct {
-	mu    sync.Mutex
-	resp  map[string]proc.Result
-	calls []string
+	mu     sync.Mutex
+	resp   map[string]proc.Result
+	prefix map[string]proc.Result
+	calls  []string
 }
 
-func newFakeRunner() *fakeRunner { return &fakeRunner{resp: map[string]proc.Result{}} }
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{resp: map[string]proc.Result{}, prefix: map[string]proc.Result{}}
+}
+
+// onPrefix answers any command line starting with name and args that has
+// no exact answer; the longest prefix wins.
+func (f *fakeRunner) onPrefix(res proc.Result, name string, args ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prefix[strings.Join(append([]string{name}, args...), " ")] = res
+}
 
 func (f *fakeRunner) on(stdout, stderr string, name string, args ...string) {
 	f.mu.Lock()
@@ -37,6 +48,15 @@ func (f *fakeRunner) Run(_ context.Context, c proc.Cmd) (proc.Result, error) {
 	f.calls = append(f.calls, key)
 	if r, ok := f.resp[key]; ok {
 		return r, nil
+	}
+	best, found := "", false
+	for p := range f.prefix {
+		if strings.HasPrefix(key, p) && len(p) >= len(best) {
+			best, found = p, true
+		}
+	}
+	if found {
+		return f.prefix[best], nil
 	}
 	return proc.Result{ExitCode: 1}, nil
 }
@@ -102,6 +122,8 @@ func newFixture(t *testing.T) *fixture {
 		f.mkdir(d)
 	}
 	f.procs = func() []process.Info { return nil }
+	// Spotlight answers, with no hits, unless a test says otherwise.
+	f.runner.onPrefix(proc.Result{}, "mdfind")
 	f.opts = Options{
 		Home: f.home, AppRoots: []string{f.apps}, SystemLibrary: f.sysLib, Receipts: f.receipts,
 		SystemRoots:    []string{filepath.Join(root, "System")},
@@ -167,7 +189,18 @@ func (f *fixture) helper(bundle, sub, name, id string) {
 	f.write(filepath.Join(p, "Contents", "Info.plist"), plistXML(map[string]string{"CFBundleIdentifier": id}, ""))
 }
 
+// signing scripts a valid signature with team (verify passes when team is
+// set) and the given app groups.
 func (f *fixture) signing(bundle, team string, groups ...string) {
+	if team != "" {
+		f.runner.on("", "", "codesign", "--verify", "--strict", bundle)
+	}
+	f.signingUnverified(bundle, team, groups...)
+}
+
+// signingUnverified scripts `codesign -dv` and the entitlements only:
+// `codesign --verify` fails, as for a tampered or forged signature.
+func (f *fixture) signingUnverified(bundle, team string, groups ...string) {
 	f.runner.on("", "Identifier=x\nTeamIdentifier="+team+"\n", "codesign", "-dv", bundle)
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.application-groups</key><array>`)
@@ -176,6 +209,20 @@ func (f *fixture) signing(bundle, team string, groups ...string) {
 	}
 	b.WriteString(`</array></dict></plist>`)
 	f.runner.on(b.String(), "", "codesign", "-d", "--entitlements", ":-", bundle)
+}
+
+// appleSigned makes `codesign --verify --strict -R=anchor apple` pass.
+func (f *fixture) appleSigned(bundle string) {
+	f.runner.on("", "", "codesign", "--verify", "--strict", "-R=anchor apple", bundle)
+}
+
+// spotlight makes mdfind answer with hits for every query.
+func (f *fixture) spotlight(hits ...string) {
+	out := strings.Join(hits, "\n")
+	if out != "" {
+		out += "\n"
+	}
+	f.runner.onPrefix(proc.Result{Stdout: []byte(out)}, "mdfind")
 }
 
 func (f *fixture) launchd(path, label, program string, extra string) string {

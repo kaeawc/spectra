@@ -35,7 +35,10 @@ func uninstallFixture(t *testing.T) (uninstall.Options, string, string) {
 	if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(info), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	fake := proc.NewFake().On(func(proc.Cmd) bool { return true }, proc.Response{Result: proc.Result{ExitCode: 1}})
+	// Spotlight answers with no hits; every other command fails.
+	fake := proc.NewFake().
+		On(func(c proc.Cmd) bool { return c.Name == "mdfind" }, proc.Response{}).
+		On(func(proc.Cmd) bool { return true }, proc.Response{Result: proc.Result{ExitCode: 1}})
 	opts := uninstall.Options{
 		Home: home, AppRoots: []string{filepath.Join(root, "Applications")},
 		SystemLibrary: filepath.Join(root, "Library"), Receipts: filepath.Join(root, "receipts"),
@@ -115,8 +118,18 @@ func TestUninstallTextPlanAndUsage(t *testing.T) {
 	if code := runUninstallWithIO([]string{"plan", app}, &out, &errOut, optsFn); code != 0 {
 		t.Fatalf("plan exit %d: %s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "Moved to the Trash by apply: 2 items") {
+	if !strings.Contains(out.String(), "Moved to the Trash by apply: 2 items") || strings.Contains(out.String(), "warning") {
 		t.Fatalf("text plan:\n%s", out.String())
+	}
+	// With Spotlight unavailable the text plan says so.
+	noSpotlight := opts
+	noSpotlight.Runner = proc.NewFake().On(func(proc.Cmd) bool { return true }, proc.Response{Result: proc.Result{ExitCode: 1}})
+	out.Reset()
+	if code := runUninstallWithIO([]string{"plan", app}, &out, &errOut, func() uninstall.Options { return noSpotlight }); code != 0 {
+		t.Fatalf("plan exit %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "warning: Spotlight") {
+		t.Fatalf("text plan without Spotlight:\n%s", out.String())
 	}
 	for _, args := range [][]string{{}, {"bogus"}, {"plan"}, {"apply"}, {"apply", "x", "--plan", "p"}} {
 		if code := runUninstallWithIO(args, &out, &errOut, optsFn); code != 2 {

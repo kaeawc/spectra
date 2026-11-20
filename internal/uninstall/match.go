@@ -211,26 +211,83 @@ func (m *matcher) matchNames() {
 	}
 }
 
-// markDuplicateID reports every id-derived item as shared when another
-// installed app has the same bundle id: its data lives at the same paths.
-// The bundle itself, jobs that run from it and receipts that list it stay.
-func (m *matcher) markDuplicateID() {
-	dup := m.others.sameID(m.app.BundleID)
-	if dup == "" {
-		return
+// idDerived reports whether an item was tied to the app only through an id
+// (bundle, helper, label, group) or a name, as opposed to the bundle itself,
+// a job that runs from it, or a receipt that lists it.
+func idDerived(it *Item) bool {
+	return it.Kind != KindBundle && it.Reason != ReasonLaunchdProgram && it.Reason != ReasonReceipt
+}
+
+const appleNote = "a com.apple.* id, and the bundle is not signed by Apple (anchor apple)"
+
+// wholeAppSharedNote explains why none of the app's id-derived items may
+// be acted on, or returns "".
+func (m *matcher) wholeAppSharedNote() string {
+	id := m.app.BundleID
+	if dup := m.others.sameID(id); dup != "" {
+		return "another installed app has the same bundle id (ignoring case): " + dup
 	}
+	if other, p := m.others.under(id); other != "" {
+		return "another installed app's bundle id " + other + " is under this app's id: " + p
+	}
+	if isAppleID(id) && !m.app.AppleSigned {
+		return appleNote
+	}
+	if idSegments(id) < 3 && m.app.TeamID == "" {
+		return "the bundle id has fewer than three segments and the app has no verified team id"
+	}
+	return ""
+}
+
+// itemSharedNote explains why one id-derived item may not be acted on: its
+// id is Apple's, or is another installed app's bundle id.
+func (m *matcher) itemSharedNote(it *Item) string {
+	switch {
+	case it.Detail == "":
+		return ""
+	case isAppleID(it.Detail) && !m.app.AppleSigned:
+		return appleNote
+	case strings.EqualFold(it.Detail, m.app.BundleID):
+		return ""
+	}
+	if p := m.others.sameID(it.Detail); p != "" {
+		return "another installed app has the bundle id " + it.Detail + ": " + p
+	}
+	return ""
+}
+
+// markShared reports id-derived items as shared when the ids they came from
+// are not this app's alone. The bundle itself, jobs that run from it and
+// receipts that list it are judged on their own evidence.
+func (m *matcher) markShared() {
+	ids := append(append([]string{}, m.app.HelperIDs...), m.app.DeclaredJobs...)
+	m.others.spotlight(m.ctx, m.app.BundleID, ids)
+	whole := m.wholeAppSharedNote()
 	for _, it := range m.items {
-		switch {
-		case it.Kind == KindBundle, it.Reason == ReasonLaunchdProgram, it.Reason == ReasonReceipt:
-		default:
-			it.Shared = true
-			it.Note = "another installed app has the same bundle id (ignoring case): " + dup
+		if !idDerived(it) {
+			continue
+		}
+		note := whole
+		if note == "" {
+			note = m.itemSharedNote(it)
+		}
+		if note != "" && !it.Shared {
+			it.Shared, it.Note = true, note
 		}
 	}
 }
 
+// collected is what collect found.
+type collected struct {
+	items  []Item
+	labels []string
+	// spotlightOK is false when mdfind failed or timed out, so only the
+	// app folders were searched for other copies.
+	spotlightOK bool
+}
+
 // collect runs every matcher and returns the items in a stable order.
-func collect(ctx context.Context, o Options, app App) ([]Item, []string) {
+func collect(ctx context.Context, o Options, app App) collected {
 	m := newMatcher(ctx, o, app)
 	if app.BundlePresent || exists(o.FS, app.Path) {
 		m.add(app.Path, KindBundle, ReasonBundleID, app.BundleID)
@@ -240,8 +297,8 @@ func collect(ctx context.Context, o Options, app App) ([]Item, []string) {
 	m.matchLaunchd()
 	m.matchReceipts()
 	m.matchNames()
-	m.markDuplicateID()
-	return m.finish(), uniqueSorted(m.labels)
+	m.markShared()
+	return collected{items: m.finish(), labels: uniqueSorted(m.labels), spotlightOK: m.others.spotlightOK}
 }
 
 // collectLeftovers matches only <location>/<bundle id><suffix> for an app
@@ -260,7 +317,7 @@ func (m *matcher) finish() []Item {
 		if checkItemPath(m.o, m.app.Path, *it) != nil {
 			continue
 		}
-		finishItem(m.o, it)
+		finishItem(m.o, m.app, it)
 		items = append(items, *it)
 	}
 	items = dropNested(items)
@@ -309,7 +366,7 @@ func dropNested(items []Item) []Item {
 
 // finishItem fills ownership, size, removability, the default action and the
 // command from the current state of the path.
-func finishItem(o Options, it *Item) {
+func finishItem(o Options, app App, it *Item) {
 	meta, err := o.FS.Meta(it.Path)
 	if err != nil {
 		return
@@ -326,7 +383,7 @@ func finishItem(o Options, it *Item) {
 			it.Note = "installed by receipt " + it.Detail + "; check that no other tool replaced it, then remove it yourself"
 		}
 	case it.Action == ActionNeedsRoot:
-		it.Command = rootCommand(o, *it)
+		it.Command = rootCommand(o, app, *it)
 	}
 }
 
@@ -347,15 +404,16 @@ func actionFor(it Item, includeLow bool) Action {
 }
 
 // rootCommand is the command a user could run with sudo for an item Spectra
-// will not touch. Paths are single-quoted for a POSIX shell.
-func rootCommand(o Options, it Item) string {
+// will not touch. Paths are single-quoted for a POSIX shell. A bootout is
+// suggested only for a label the app owns (see App.bootsOut).
+func rootCommand(o Options, app App, it Item) string {
 	mv := "sudo mv -n -- " + shellQuote(it.Path) + " " + shellQuote(o.Trash+"/")
-	switch it.Kind {
-	case KindReceipt:
+	switch {
+	case it.Kind == KindReceipt:
 		return "sudo pkgutil --forget " + shellQuote(it.Detail)
-	case KindLaunchDaemon:
+	case it.Kind == KindLaunchDaemon && app.bootsOut(it.Detail):
 		return "sudo launchctl bootout system/" + shellQuote(it.Detail) + " ; " + mv
-	case KindLaunchAgent:
+	case it.Kind == KindLaunchAgent && app.bootsOut(it.Detail):
 		return "launchctl bootout gui/" + itoa(o.UID) + "/" + shellQuote(it.Detail) + " ; " + mv
 	default:
 		return mv

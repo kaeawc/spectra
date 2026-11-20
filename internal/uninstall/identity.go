@@ -79,11 +79,20 @@ func resolveApp(o Options, target string) (string, error) {
 	return "", fmt.Errorf("%s: %w", target, ErrAppNotFound)
 }
 
-// installedApps lists the .app bundle directories (not symlinks) directly
-// under each root. It scans only those directories; it never asks Spotlight.
+// installedApps lists the .app bundles under each root: directories and
+// top-level symbolic links directly in the root (Safari in /Applications is
+// a link into the system volume), and bundle directories one folder below
+// it (/Applications/<Vendor>/Foo.app). It only lists; Spotlight is asked
+// separately (see otherApps.spotlight).
 func installedApps(f FS, roots []string) []string {
 	var apps []string
 	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] {
+			seen[p] = true
+			apps = append(apps, p)
+		}
+	}
 	for _, root := range roots {
 		entries, err := f.ReadDir(root)
 		if err != nil {
@@ -91,13 +100,37 @@ func installedApps(f FS, roots []string) []string {
 		}
 		for _, e := range entries {
 			p := filepath.Join(root, e.Name())
-			if strings.HasSuffix(e.Name(), ".app") && !seen[p] && isDir(f, p) {
-				seen[p] = true
-				apps = append(apps, p)
+			meta, err := f.Meta(p)
+			switch {
+			case err != nil:
+			case strings.HasSuffix(e.Name(), ".app"):
+				if meta.Mode.IsDir() || meta.IsSymlink() {
+					add(p)
+				}
+			case meta.Mode.IsDir():
+				for _, sub := range appDirsIn(f, p) {
+					add(sub)
+				}
 			}
 		}
 	}
 	return apps
+}
+
+// appDirsIn lists the .app directories (not symlinks) directly in dir.
+func appDirsIn(f FS, dir string) []string {
+	entries, err := f.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if strings.HasSuffix(e.Name(), ".app") && isDir(f, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func underAny(path string, roots []string) bool {
@@ -142,6 +175,9 @@ func readIdentity(ctx context.Context, o Options, bundle string) (App, error) {
 	app.DeclaredJobs = declaredJobs(o.FS, bundle, bi)
 	app.TeamID = readTeamID(ctx, o.Runner, bundle)
 	app.AppGroups = readAppGroups(ctx, o.Runner, bundle)
+	if app.usesAppleID() {
+		app.AppleSigned = runOK(ctx, o.Runner, "codesign", "--verify", "--strict", "-R=anchor apple", bundle)
+	}
 	return app, nil
 }
 
@@ -221,9 +257,14 @@ func declaredJobs(f FS, bundle string, bi bundleInfo) []string {
 	return uniqueSorted(labels)
 }
 
-// readTeamID returns the bundle's verified team id, or "" when codesign
-// fails, the signature is ad hoc, or no team is set.
+// readTeamID returns the bundle's verified team id, or "" when the
+// signature does not verify, codesign fails, the signature is ad hoc, or no
+// team is set. `codesign -dv` alone only reads what the signature claims;
+// `--verify --strict` (not deep, which is codesign's default) checks it.
 func readTeamID(ctx context.Context, r proc.Runner, bundle string) string {
+	if !runOK(ctx, r, "codesign", "--verify", "--strict", bundle) {
+		return ""
+	}
 	res, err := r.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"-dv", bundle}})
 	if err != nil || res.ExitCode != 0 {
 		return ""
@@ -235,6 +276,41 @@ func readTeamID(ctx context.Context, r proc.Runner, bundle string) string {
 	}
 	return team
 }
+
+// runOK reports whether the command ran and exited 0.
+func runOK(ctx context.Context, r proc.Runner, name string, args ...string) bool {
+	res, err := r.Run(ctx, proc.Cmd{Name: name, Args: args})
+	return err == nil && res.ExitCode == 0
+}
+
+// isAppleID reports whether id is in Apple's namespace: com.apple,
+// com.apple.*, or the app group group.com.apple.*.
+func isAppleID(id string) bool {
+	return strings.EqualFold(id, "com.apple") || hasFoldPrefix(id, "com.apple.") || hasFoldPrefix(id, "group.com.apple.")
+}
+
+// usesAppleID reports whether the main id, a helper id, a declared label or
+// an app group is in Apple's namespace.
+func (a App) usesAppleID() bool {
+	ids := append(append(append([]string{a.BundleID}, a.HelperIDs...), a.DeclaredJobs...), a.AppGroups...)
+	for _, id := range ids {
+		if isAppleID(id) {
+			return true
+		}
+	}
+	return false
+}
+
+// bootsOut reports whether apply may run `launchctl bootout` for label: only
+// the app's own label (its bundle id or under it), never a com.apple.* one.
+// A job that merely runs from the bundle is not booted out by a label that
+// belongs to someone else.
+func (a App) bootsOut(label string) bool {
+	return ownsID(a.BundleID, label) && !isAppleID(label)
+}
+
+// idSegments counts the dot-separated segments of id.
+func idSegments(id string) int { return strings.Count(id, ".") + 1 }
 
 func validTeamID(s string) bool {
 	if len(s) != 10 {
@@ -346,6 +422,8 @@ func sameIdentity(plan, fresh App) error {
 		return fmt.Errorf("bundle id changed: plan %s, bundle %s", plan.BundleID, fresh.BundleID)
 	case plan.TeamID != fresh.TeamID:
 		return fmt.Errorf("team id changed: plan %q, bundle %q", plan.TeamID, fresh.TeamID)
+	case plan.AppleSigned != fresh.AppleSigned:
+		return fmt.Errorf("apple signature changed: plan %v, bundle %v", plan.AppleSigned, fresh.AppleSigned)
 	case strings.Join(plan.HelperIDs, ",") != strings.Join(fresh.HelperIDs, ","):
 		return errors.New("helper bundle ids differ from the bundle on disk")
 	case strings.Join(plan.DeclaredJobs, ",") != strings.Join(fresh.DeclaredJobs, ","):

@@ -25,15 +25,17 @@ with size, owner and whether you can move it. Save it with -json.
 
 apply acts only on the items in a plan file. It re-checks each item, skips any
 that drifted or are gone, refuses while the app runs (--quit sends SIGTERM and
-waits up to 10s), then boots out your own launch agents, and moves the bundle
-and then your own items into a new folder in the Trash. It never deletes and
-never touches root-owned, shared or receipt-installed items: those are printed
-with a command you can run yourself.
+waits up to 10s), moves the bundle into a new folder in the Trash, then boots
+out your own launch agents, then moves your own items into the same folder.
+If the bundle will not move, nothing is booted out. It never deletes and never
+touches root-owned, shared or receipt-installed items: those are printed with
+a command you can run yourself.
 
   --data-only  move the app's data even though the bundle cannot be moved
                (root-owned, or a move that fails); without it apply stops
   --leftovers  the bundle is gone: move only exact <location>/<bundle id>
-               folders, never for com.apple.* ids or an installed app's id
+               folders; refused for com.apple.* ids, ids of fewer than three
+               segments, an installed app's id, or when Spotlight is down
 
 Exit codes: 0 ok, 1 error or refused, 2 usage, 3 apply left items needing root
 or failed to move some.
@@ -209,6 +211,9 @@ func writeUninstallPlan(w io.Writer, p uninstall.Plan) error {
 	}
 	for _, l := range p.LaunchdLabels {
 		fmt.Fprintf(ew, "launchd  %s\n", l)
+	}
+	for _, w := range p.Warnings {
+		fmt.Fprintf(ew, "warning: %s\n", w)
 	}
 	sections := []struct {
 		action uninstall.Action
