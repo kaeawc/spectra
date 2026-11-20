@@ -31,3 +31,33 @@ the daemon stops if its socket is removed or replaced.
   sensitive local information.
 - Preserve an explicit user boundary around destructive diagnostics and helper
   installation.
+
+## Proposed: helper launchd mutation
+
+Status: proposed, not implemented. See
+[helper launchd mutation](helper-launchd-mutation.md).
+
+New assets:
+
+- The system launchd domain's enabled/disabled overrides and its loaded
+  jobs, including third-party daemons other software depends on.
+- Confirmation tokens held in the helper's memory.
+- Audit lines recording which daemon was changed, by which uid.
+
+| Threat | Mitigation |
+|---|---|
+| Caller names an arbitrary path or Apple job | Request carries a label only; the plist path is fixed to `/Library/LaunchDaemons/<label>.plist`; `com.apple.*`, `/System` and Apple-signed code are refused |
+| Symlink or swapped file redirects the change | `lstat` + `O_NOFOLLOW` + inode match; programs checked with `EvalSymlinks`; plist must be root-owned and not writable by others |
+| Launchd runs a different job by the same label | Duplicate-label scan and `launchctl print system/<label>` path and program cross-check |
+| Spoofed ownership of a daemon | Program must sit in a `/Applications` bundle (or `PrivilegedHelperTools` tied by bundle id); both pass strict `codesign` with the same verified team id |
+| Replay or prepare-one, execute-another | Single-use, uid- and action-bound token, 60 s expiry, every check re-run and the bound facts compared |
+| Argument injection into `launchctl` | Label charset validation; fixed argv to `/bin/launchctl`, no shell |
+| Non-admin `_spectra` member disables system daemons | Mutation requires uid 0 or `admin` group membership, checked per call |
+| Disabling security software or the helper itself | Helper's own label refused; every change audited; denylist for security agents is an open question |
+| Toggling a daemon to cause disruption | 10 mutations per 10 minutes per uid, one mutation in flight |
+| Loss of the files that launch a daemon | No delete, move or edit operation exists; `enable` undoes `disable` |
+
+Remaining risk: an admin user, or malware running as one, can disable a
+verified third-party daemon without the password prompt `sudo` would ask
+for. This is a deliberate, narrow privilege step; the audit log records it,
+and `enable` reverses it.

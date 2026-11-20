@@ -71,6 +71,7 @@ nav:
       - System inventory: design/system-inventory.md
       - Remote separation: design/remote-portal.md
       - Privileged helper: design/privileged-helper.md
+      - Helper launchd mutation: design/helper-launchd-mutation.md
       - Threat model: design/threat-model.md
       - Recommendations engine: design/recommendations-engine.md
   - Detection:
