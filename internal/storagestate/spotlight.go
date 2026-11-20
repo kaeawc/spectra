@@ -2,6 +2,7 @@ package storagestate
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -218,6 +219,55 @@ func dedupeSpotlight(volumes []SpotlightVolume) []SpotlightVolume {
 		out = append(out, volume)
 	}
 	return out
+}
+
+// SpotlightForPath reports the Spotlight state of the volume holding path,
+// read like `storage --spotlight`: df names the mount point, then mdutil -s
+// reads that volume. It never runs `mdutil -p`, which flushes caches and so is
+// not a read; Progress is therefore not set.
+func SpotlightForPath(run CmdRunner, path string) (SpotlightVolume, error) {
+	if run == nil {
+		run = execRunner
+	}
+	mount, err := MountPointForPath(run, path)
+	if err != nil {
+		return SpotlightVolume{}, err
+	}
+	volume := collectSpotlightMount(run, mount)
+	if volume.MountPoint == "" {
+		return SpotlightVolume{MountPoint: mount}, fmt.Errorf("mdutil -s %s: no status", mount)
+	}
+	volume.MountPoint = mount
+	return volume, nil
+}
+
+// MountPointForPath names the mount point holding path, from df.
+func MountPointForPath(run CmdRunner, path string) (string, error) {
+	if run == nil {
+		run = execRunner
+	}
+	out, err := run("df", "-Pk", path)
+	if err != nil {
+		return "", fmt.Errorf("df %s: %w", path, err)
+	}
+	mount := dfMountPoint(string(out))
+	if mount == "" {
+		return "", fmt.Errorf("df %s: no mount point in output", path)
+	}
+	return mount, nil
+}
+
+// dfMountPoint returns the mount column of the first data row of df -P
+// output, joining the remaining fields so a mount point with spaces survives.
+func dfMountPoint(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || fields[0] == "Filesystem" {
+			continue
+		}
+		return strings.Join(fields[5:], " ")
+	}
+	return ""
 }
 
 func attachSpotlightProgress(volumes []SpotlightVolume, progress map[string]*SpotlightProgress) []SpotlightVolume {
