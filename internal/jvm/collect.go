@@ -30,6 +30,12 @@ type CollectOptions struct {
 	// NMTTimeout bounds the per-JVM NMT summary sample. Zero means
 	// DefaultNMTSampleTimeout.
 	NMTTimeout time.Duration
+	// PathExists reports whether a path exists; nil means os.Stat. Used to
+	// detect a java.home that vanished after the JVM started.
+	PathExists func(path string) bool
+	// ReadLink resolves a symlink; nil means os.Readlink on Linux and
+	// disabled elsewhere. Used for the "(deleted)" /proc/<pid>/exe check.
+	ReadLink func(path string) (string, error)
 }
 
 // CollectAll discovers all running JVM processes and collects per-process
@@ -126,6 +132,7 @@ func collectOne(ctx context.Context, pid int, main string, run CmdRunner, opts C
 		}
 	}
 	attributeJDK(&info, opts.JDKs)
+	detectJDKGone(&info, opts)
 
 	return info
 }

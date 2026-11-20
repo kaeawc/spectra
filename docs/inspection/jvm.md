@@ -498,3 +498,11 @@ Implemented:
     only for explicitly targeted PIDs (`spectra rules --thread-dump-pid`,
     MCP `diagnose thread_dump_pids`, or MCP `triage` on a JVM PID), never for
     every JVM on every snapshot.
+18. Vanished JDK: each JVM records `java_home_missing` (no `bin/java` under
+    its `java.home`) and, on Linux, `executable_deleted` (`/proc/<pid>/exe`
+    ends in ` (deleted)`). For a Gradle or Kotlin daemon the high-severity
+    `build-daemon-jdk-gone` recommendation and a `jvm explain` observation
+    name the cause (for example `brew upgrade` removed the JDK) and advise
+    letting it idle out or stopping that PID, never `gradle --stop`.
+    Comparing the daemon's JDK to a project's configured toolchain is not
+    implemented.
