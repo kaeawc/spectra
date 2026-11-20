@@ -127,12 +127,42 @@ pub enum Done {
 /// Work that runs `ps` or `kill`, off the UI thread.
 pub type Job = Box<dyn FnOnce() -> Done + Send>;
 
+/// What a job lands as when it never answers (it panicked, or its thread never started):
+/// outcome number `job` and the reason.
+type Failure = fn(u64, String) -> Done;
+
+fn quit_failed(job: u64, why: String) -> Done {
+    Done::Quit { job, attempt: Attempt::Failed(format!("{why} Check whether the process is still running before trying again.")) }
+}
+
+fn probe_failed(job: u64, why: String) -> Done {
+    Done::Probe { job, now: Err(why) }
+}
+
+/// Runs `job`, turning a panic into the job's failure so the outcome never waits on an answer
+/// that isn't coming.
+fn run_guarded(job: Job, id: u64, failed: Failure) -> Done {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+        .unwrap_or_else(|_| failed(id, "Spectra hit an internal error while checking.".into()))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// A job a test's `Runner::Held` holds, with what it lands as if it panics.
+pub struct Held {
+    job: Job,
+    id: u64,
+    failed: Failure,
+}
+
 /// Where jobs run: a thread each, or (in tests) held until the test runs them, so a test can
 /// see the app while one is in flight.
 pub enum Runner {
     Thread,
     #[cfg_attr(not(test), allow(dead_code))]
-    Held(Arc<Mutex<Vec<Job>>>),
+    Held(Arc<Mutex<Vec<Held>>>),
+    /// A machine that can't start another thread.
+    #[cfg(test)]
+    NoThreads,
 }
 
 /// What the sidebar and the overview count, worked out once per reading.
@@ -698,9 +728,11 @@ impl App {
         }
     }
 
-    /// Why `pid` can't be quit from here, if it can't.
+    /// Why `pid` can't be quit from here, if it can't. A pid the reading doesn't list has ended.
     pub fn refusal(&self, pid: u32) -> Option<String> {
-        let p = self.process(pid)?;
+        let Some(p) = self.process(pid) else {
+            return Some("That process has already ended.".into());
+        };
         if let Some(o) = &self.outcome
             && o.target.is(p)
             && let Status::Waiting { parent } = &o.status
@@ -763,22 +795,35 @@ impl App {
         let signals = Arc::clone(&self.signals);
         let t = target.clone();
         self.outcome = Some(Outcome { target, signal, status: Status::Checking });
-        self.submit(Box::new(move || Done::Quit { job, attempt: signal::quit(signals.as_ref(), &t, signal) }));
+        self.submit(job, quit_failed, Box::new(move || Done::Quit { job, attempt: signal::quit(signals.as_ref(), &t, signal) }));
     }
 
-    fn submit(&self, job: Job) {
+    /// Hands `work`, outcome number `id`'s job, to the worker. If it panics or can't be started,
+    /// `failed` says so, so the outcome still settles.
+    fn submit(&self, id: u64, failed: Failure, work: Job) {
+        let start_failed = |e: std::io::Error| {
+            let _ = self.done_tx.send(failed(id, format!("Couldn't start a thread for the check: {e}.")));
+            if let Some(wake) = &self.wake {
+                wake();
+            }
+        };
         match &self.runner {
             Runner::Thread => {
                 let tx = self.done_tx.clone();
                 let wake = self.wake.clone();
-                std::thread::spawn(move || {
-                    let _ = tx.send(job());
+                let spawned = std::thread::Builder::new().name("spectra-quit".into()).spawn(move || {
+                    let _ = tx.send(run_guarded(work, id, failed));
                     if let Some(wake) = wake {
                         wake();
                     }
                 });
+                if let Err(e) = spawned {
+                    start_failed(e);
+                }
             }
-            Runner::Held(q) => q.lock().expect("the held jobs").push(job),
+            #[cfg(test)]
+            Runner::NoThreads => start_failed(std::io::Error::other("out of threads")),
+            Runner::Held(q) => q.lock().expect("the held jobs").push(Held { job: work, id, failed }),
         }
     }
 
@@ -787,10 +832,10 @@ impl App {
     pub fn run_held(&mut self) {
         let jobs = match &self.runner {
             Runner::Held(q) => std::mem::take(&mut *q.lock().unwrap()),
-            Runner::Thread => Vec::new(),
+            _ => Vec::new(),
         };
         for job in jobs {
-            self.land_done(job());
+            self.land_done(run_guarded(job.job, job.id, job.failed));
         }
     }
 
@@ -867,7 +912,7 @@ impl App {
         let Some(o) = &self.outcome else { return };
         let (job, pid) = (self.job, o.target.pid);
         let signals = Arc::clone(&self.signals);
-        self.submit(Box::new(move || Done::Probe { job, now: signals.identify(pid) }));
+        self.submit(job, probe_failed, Box::new(move || Done::Probe { job, now: signals.identify(pid) }));
     }
 
     /// Dismisses the outcome, except while it's being checked: the answer has to land somewhere.

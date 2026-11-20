@@ -233,6 +233,13 @@ pub fn parse_ps(line: &str) -> Option<Identity> {
     Some(Identity { started, comm: comm.trim().to_owned(), zombie: stat.starts_with('Z') })
 }
 
+/// Whether a Linux `/proc/<pid>/status` shows other threads still running. A process whose main
+/// thread exited while others run is listed as `Z` but is alive, and a signal still reaches it.
+pub fn still_has_threads(status: Option<&str>) -> bool {
+    let threads = status.and_then(|s| s.lines().find_map(|l| l.strip_prefix("Threads:")));
+    threads.and_then(|n| n.trim().parse::<u32>().ok()).is_some_and(|n| n > 1)
+}
+
 fn base(path: &str) -> &str {
     path.rsplit('/').find(|p| !p.is_empty()).unwrap_or(path)
 }
@@ -368,7 +375,12 @@ impl Signals for System {
                 Err(format!("ps failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
             };
         };
-        parse_ps(line).map(Some).ok_or_else(|| format!("couldn't read ps's answer: {}", line.trim()))
+        let mut id = parse_ps(line).ok_or_else(|| format!("couldn't read ps's answer: {}", line.trim()))?;
+        if cfg!(target_os = "linux") && id.zombie {
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
+            id.zombie = !still_has_threads(status.as_deref());
+        }
+        Ok(Some(id))
     }
 
     fn send(&self, pid: u32, signal: Signal) -> Result<(), SendError> {
@@ -392,6 +404,17 @@ impl Signals for System {
 pub(crate) mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn a_zombie_leader_with_running_threads_is_not_a_zombie() {
+        assert!(still_has_threads(Some("Name:\tjava\nState:\tZ (zombie)\nThreads:\t12\nVmRSS:\t1 kB\n")));
+        // A true zombie has no threads left but itself.
+        assert!(!still_has_threads(Some("State:\tZ (zombie)\nThreads:\t1\n")));
+        // Unreadable or unparseable: stay with what `ps` said.
+        assert!(!still_has_threads(None));
+        assert!(!still_has_threads(Some("State:\tZ (zombie)\n")));
+        assert!(!still_has_threads(Some("Threads:\tmany\n")));
+    }
 
     #[test]
     fn only_ordinary_pids_can_reach_kill() {

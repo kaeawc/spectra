@@ -970,14 +970,92 @@ fn an_answer_for_a_dismissed_outcome_is_dropped() {
     still_running(&mut rt);
     let started = rt.state.process(900).unwrap().started_at.clone();
     r.zombie(900, &started);
-    // Another reading queues another look; dismissing the outcome first makes it stale.
+    // Another reading queues another look at pid 900 (now a zombie). The outcome is then dismissed
+    // and a newer one for the same process is StillRunning, so only the job number tells the
+    // old look from the new outcome's.
     rt.update(|s, _| {
         if let Some(o) = &mut s.outcome {
             o.status = Status::Asked { at: s.now };
         }
     });
     reading(&mut rt, 6.0, true);
-    rt.update(|s, _| s.dismiss_outcome());
+    let stale = rt.state.outcome.clone().unwrap();
+    assert_eq!(stale.status, Status::StillRunning);
+    rt.update(|s, _| {
+        s.dismiss_outcome();
+        s.outcome = Some(stale);
+    });
     release(&mut rt);
-    assert!(rt.state.outcome.is_none());
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+}
+
+fn confirmed_quit(f: impl FnOnce(&mut App)) -> Runtime<App> {
+    let (mut rt, _) = recorded(quit_scene);
+    rt.update(|s, _| f(s));
+    press(&mut rt, "pd-quit");
+    press(&mut rt, "confirm-send");
+    rt
+}
+
+fn failed_text(rt: &Runtime<App>) -> String {
+    match &rt.state.outcome.as_ref().unwrap().status {
+        Status::Failed(why) => why.clone(),
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+struct Panics;
+
+impl crate::signal::Signals for Panics {
+    fn identify(&self, _: u32) -> Result<Option<crate::signal::Identity>, String> {
+        panic!("a bug in the check");
+    }
+
+    fn send(&self, _: u32, _: Signal) -> Result<(), SendError> {
+        unreachable!()
+    }
+}
+
+#[test]
+fn a_worker_that_panics_lands_failed_instead_of_checking_forever() {
+    let mut rt = confirmed_quit(|s| s.signals = std::sync::Arc::new(Panics));
+    assert!(rt.state.checking());
+    release(&mut rt);
+    assert!(failed_text(&rt).contains("internal error"));
+    assert!(!rt.state.checking());
+    rt.update(|s, _| s.dismiss_outcome());
+    assert!(rt.state.outcome.is_none(), "it can be dismissed");
+}
+
+#[test]
+fn a_panic_on_a_real_worker_thread_lands_failed_too() {
+    let mut rt = confirmed_quit(|s| {
+        s.signals = std::sync::Arc::new(Panics);
+        s.runner = Runner::Thread;
+    });
+    for _ in 0..500 {
+        rt.update(|s, _| {
+            s.land_work();
+        });
+        if !rt.state.checking() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(failed_text(&rt).contains("internal error"));
+}
+
+#[test]
+fn a_thread_that_cannot_start_lands_failed() {
+    let mut rt = confirmed_quit(|s| s.runner = Runner::NoThreads);
+    rt.update(|s, _| {
+        s.land_work();
+    });
+    assert!(failed_text(&rt).contains("Couldn't start a thread"));
+}
+
+#[test]
+fn an_unlisted_pid_is_said_to_have_ended() {
+    let (rt, _) = recorded(quit_scene);
+    assert_eq!(rt.state.refusal(4_000_000).as_deref(), Some("That process has already ended."));
 }
