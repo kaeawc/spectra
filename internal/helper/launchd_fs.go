@@ -89,7 +89,8 @@ func metaOf(fi fs.FileInfo) (FileMeta, error) {
 	}
 	return FileMeta{
 		Mode: fi.Mode(), UID: st.Uid, GID: st.Gid,
-		Dev: uint64(st.Dev), Ino: st.Ino, // #nosec G115 -- dev_t is a device number; only compared for equality
+		Dev:  devNum(st.Dev),
+		Ino:  st.Ino,
 		Size: fi.Size(), ModTime: fi.ModTime(),
 	}, nil
 }
@@ -147,4 +148,11 @@ func rootDir(f LaunchdFS, path string) (FileMeta, error) {
 		return m, fmt.Errorf("%s is writable by group or others (mode %s)", path, m.Mode.Perm())
 	}
 	return m, nil
+}
+
+// devNum widens a device number: dev_t is int32 on darwin and uint64 on
+// linux, so a plain conversion is redundant on one platform. Device numbers
+// are only compared for equality, so the bit pattern is what matters.
+func devNum[T ~int32 | ~uint64](d T) uint64 {
+	return uint64(d) // #nosec G115 -- bit pattern only, compared for equality
 }
