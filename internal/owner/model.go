@@ -28,6 +28,7 @@ type Holder struct {
 	Hold       string    `json:"hold"`
 	Mode       string    `json:"mode,omitempty"`
 	Detail     string    `json:"detail,omitempty"`
+	Cwd        string    `json:"cwd,omitempty"`   // set by Under
 	Chain      []Link    `json:"chain,omitempty"` // nearest parent first, up to pid 1
 }
 

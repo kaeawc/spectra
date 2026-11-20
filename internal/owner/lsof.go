@@ -14,7 +14,7 @@ const (
 )
 
 type lsofRec struct {
-	PID                                      int
+	PID, PPID                                int
 	Command, User                            string
 	FD, Type, Access, Name, Proto, TCPStatus string
 }
@@ -23,13 +23,13 @@ type lsofRec struct {
 // opening a process set and an "f" line opening a file set within it.
 func parseLsofF(out []byte) []lsofRec {
 	var recs []lsofRec
-	var pid int
+	var pid, ppid int
 	var cmd, user string
 	var cur lsofRec
 	open := false
 	flush := func() {
 		if open {
-			cur.PID, cur.Command, cur.User = pid, cmd, user
+			cur.PID, cur.PPID, cur.Command, cur.User = pid, ppid, cmd, user
 			recs = append(recs, cur)
 		}
 		open = false
@@ -46,7 +46,9 @@ func parseLsofF(out []byte) []lsofRec {
 		case 'p':
 			flush()
 			pid, _ = strconv.Atoi(val)
-			cmd, user = "", ""
+			ppid, cmd, user = 0, "", ""
+		case 'R':
+			ppid, _ = strconv.Atoi(val)
 		case 'c':
 			cmd = val
 		case 'L':
@@ -109,7 +111,7 @@ func lsofPortHolders(recs []lsofRec, port int) []Holder {
 func lsofPathHolders(recs []lsofRec, paths []string) []Holder {
 	var out []Holder
 	for _, r := range recs {
-		if !slices.Contains(paths, r.Name) {
+		if !slices.ContainsFunc(lsofNameSpellings(r.Name), func(n string) bool { return slices.Contains(paths, n) }) {
 			continue
 		}
 		h := Holder{PID: r.PID, User: r.User, Command: r.Command}
@@ -138,4 +140,81 @@ func accessMode(a string) string {
 		return "rw"
 	}
 	return ""
+}
+
+// lsofNameSpellings decodes an lsof -F name field. lsof prints a backslash as
+// `\\`, the C escapes \b \f \n \r \t, other non-printable bytes (including
+// each byte of non-ASCII UTF-8 under the C locale) as \xNN, and remaining
+// control characters as ^@..^_ and ^?. A literal caret is not escaped, so
+// when the name contains one, the reading with carets taken literally is
+// returned second.
+func lsofNameSpellings(s string) []string {
+	if !strings.ContainsAny(s, `\^`) {
+		return []string{s}
+	}
+	a := lsofUnescape(s, true)
+	if b := lsofUnescape(s, false); b != a {
+		return []string{a, b}
+	}
+	return []string{a}
+}
+
+func lsofUnescape(s string, carets bool) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '^' && carets && i+1 < len(s) {
+			if d, ok := lsofCaret(s[i+1]); ok {
+				b.WriteByte(d)
+				i++
+				continue
+			}
+		}
+		if c == '\\' && i+1 < len(s) {
+			if d, w, ok := lsofEscape(s[i+1:]); ok {
+				b.WriteByte(d)
+				i += w
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func lsofCaret(n byte) (byte, bool) {
+	switch {
+	case n == '?':
+		return 0x7f, true
+	case n >= '@' && n <= '_':
+		return n - '@', true
+	}
+	return 0, false
+}
+
+// lsofEscape decodes the escape after a backslash, returning the byte and
+// how many characters it used.
+func lsofEscape(s string) (byte, int, bool) {
+	switch s[0] {
+	case '\\':
+		return '\\', 1, true
+	case 'b':
+		return '\b', 1, true
+	case 'f':
+		return '\f', 1, true
+	case 'n':
+		return '\n', 1, true
+	case 'r':
+		return '\r', 1, true
+	case 't':
+		return '\t', 1, true
+	case 'x':
+		if len(s) >= 3 {
+			if v, err := strconv.ParseUint(s[1:3], 16, 8); err == nil {
+				return byte(v), 3, true
+			}
+		}
+	}
+	return 0, 0, false
 }

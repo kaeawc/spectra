@@ -25,7 +25,11 @@ type Finder struct {
 	FS     FS
 	ProcFS string // default "/proc"
 	IsRoot func() bool
-	Now    func() time.Time
+	// UID is the effective uid (default os.Geteuid); SelfPID is this
+	// process (default os.Getpid). Both are seams for Under.
+	UID     func() int
+	SelfPID func() int
+	Now     func() time.Time
 	// Procs lists running processes; default is process.CollectAll.
 	Procs func(ctx context.Context) []process.Info
 }
