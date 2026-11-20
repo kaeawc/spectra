@@ -52,6 +52,20 @@ Implemented code with passing tests is treated as complete in the docs.
 Code whose tests are failing or absent is documented as partial until the
 test suite catches up.
 
+## Install
+
+Prebuilt binaries for macOS (arm64, amd64) and Linux (amd64, arm64), with
+SHA-256 verification:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/install.sh | sh
+```
+
+Pin a release with `sh -s -- --version vX.Y.Z`; in GitHub Actions the bin
+directory is added to `PATH` automatically. Homebrew:
+`brew install kaeawc/tap/spectra`. See [docs/install.md](docs/install.md) and
+[Install release binaries](docs/operations/install-binaries.md).
+
 ## Documentation
 
 Full living docs at [`docs/`](docs/index.md):

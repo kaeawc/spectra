@@ -114,6 +114,7 @@ nav:
       - CLI: operations/cli.md
       - App uninstall: operations/uninstall.md
       - Issues: operations/issues.md
+      - Install release binaries: operations/install-binaries.md
       - Install services: operations/install-services.md
       - Startup items: operations/startup-items.md
       - Working-directory owners: operations/owner-under.md

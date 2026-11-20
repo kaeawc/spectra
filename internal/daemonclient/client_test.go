@@ -95,6 +95,11 @@ func TestCheckVersion(t *testing.T) {
 		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "1"}, "1", false},
 		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "dev"}, "2", false},
 		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "1"}, "2", true},
+		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "dev+abc"}, "dev+def", false},
+		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "dev+abc.dirty"}, "v0.1.0", false},
+		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "v0.1.0"}, "dev+abc", false},
+		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "v0.1.0"}, "v0.1.0", false},
+		{daemon.StatusResult{Protocol: daemon.ProtocolVersion, Version: "v0.1.0"}, "v0.2.0", true},
 		{daemon.StatusResult{Protocol: "wrong", Version: "1"}, "1", true},
 	} {
 		err := CheckVersion(tc.st, tc.client)
