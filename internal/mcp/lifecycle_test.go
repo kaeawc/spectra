@@ -184,6 +184,8 @@ func TestCancelWhileQueuedNeverRuns(t *testing.T) {
 	srv := lifecycleServer(spawns, procs)
 	queued := make(chan struct{}, 4)
 	srv.onQueued = func() { queued <- struct{}{} }
+	gaveUp := make(chan struct{}, 4)
+	srv.onQueuedCancelled = func() { gaveUp <- struct{}{} }
 	r := startWireSession(t, srv)
 
 	r.call("running", "spawns", `{"duration_seconds":30}`)
@@ -195,6 +197,13 @@ func TestCancelWhileQueuedNeverRuns(t *testing.T) {
 		t.Fatal("lineage never queued behind spawns")
 	}
 	r.cancel("queued")
+	// The SDK applies notifications/cancelled asynchronously; free the slot
+	// only once the queued call has seen its cancellation.
+	select {
+	case <-gaveUp:
+	case <-time.After(10 * time.Second):
+		t.Fatal("queued call never saw its cancellation")
+	}
 	close(spawns.release)
 	r.reply("running")
 	r.call("last", "lineage", `{"pid":20}`)

@@ -30,6 +30,9 @@ type Server struct {
 	// onQueued, when set, runs as a call starts waiting for a busy slot
 	// (tests use it to cancel a queued call deterministically).
 	onQueued func()
+	// onQueuedCancelled, when set, runs when a queued call gives up because
+	// its context ended. Tests use it to order a cancel before the slot frees.
+	onQueuedCancelled func()
 	// eofWait bounds how long Run keeps the session open after its input
 	// closes so in-flight calls can still reply.
 	eofWait time.Duration
@@ -273,6 +276,9 @@ func (s *Server) acquire(ctx context.Context) (func(), error) {
 		select {
 		case slot <- struct{}{}:
 		case <-ctx.Done():
+			if s.onQueuedCancelled != nil {
+				s.onQueuedCancelled()
+			}
 			return nil, ctx.Err()
 		}
 	}
