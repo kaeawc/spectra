@@ -240,14 +240,15 @@ pub fn list(s: &App, k: &Kit) -> El {
         .on_change(|s: &mut App, _| s.rebuild())
         .build(k)
         .key("search");
-    let bar = row()
-        .w_full()
-        .gap(12.0)
-        .center_y()
-        .child(search)
-        .child(el().grow(1.0))
-        .child(text(count).key("list-count").font(k.ty.small).color(c.text_muted));
+    let mut bar = row().w_full().gap(12.0).center_y().child(search).child(el().grow(1.0));
+    if let Some(actions) = super::quit::list_actions(s, k) {
+        bar = bar.child(actions);
+    }
+    let bar = bar.child(text(count).key("list-count").font(k.ty.small).color(c.text_muted));
     let mut page = page.child(bar);
+    if let Some(o) = super::quit::outcome(s, None, k) {
+        page = page.child(o);
+    }
     if let Some(status) = super::home::feed_status(s, k) {
         page = page.child(status);
     }

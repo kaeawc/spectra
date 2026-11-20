@@ -11,8 +11,10 @@ mod proc_findings;
 mod procs;
 mod run;
 mod sample;
+mod signal;
 mod ui;
 
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use app::{App, REFRESH};
@@ -40,8 +42,12 @@ fn setup(s: &mut App, wake: rune::Waker) {
             }
         });
     }
-    if let Some(tx) = s.proc_tx.take() {
-        // One call at a time: the next starts only after the last one landed.
+    if s.me.uid.is_none() {
+        s.me.uid = signal::my_uid();
+    }
+    if let (Some(tx), Some(poke)) = (s.proc_tx.take(), s.poke_rx.take()) {
+        // One call at a time: the next starts only after the last one landed, or at once when
+        // a Quit was just sent.
         std::thread::spawn(move || {
             loop {
                 let feed = procs::fetch();
@@ -50,7 +56,10 @@ fn setup(s: &mut App, wake: rune::Waker) {
                     return;
                 }
                 wake();
-                std::thread::sleep(if too_old { RETRY_OLD } else { REFRESH });
+                match poke.recv_timeout(if too_old { RETRY_OLD } else { REFRESH }) {
+                    Err(RecvTimeoutError::Disconnected) => return,
+                    _ => while poke.try_recv().is_ok() {},
+                }
             }
         });
     }
@@ -93,6 +102,13 @@ fn main() {
             ("detail", sample::detail_scene),
             ("stale", sample::stale_scene),
             ("old", sample::old_scene),
+            ("quit", sample::quit_scene),
+            ("quit-list", sample::quit_list_scene),
+            ("quit-confirm", sample::quit_confirm_scene),
+            ("force-confirm", sample::force_confirm_scene),
+            ("quit-root", sample::quit_root_scene),
+            ("quit-still", sample::quit_still_scene),
+            ("quit-ended", sample::quit_ended_scene),
         ],
         setup: Some(setup),
         poll: Some(poll),

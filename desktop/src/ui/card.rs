@@ -112,6 +112,21 @@ fn evidence(s: &App, f: &Finding, k: &Kit) -> El {
                 .wrap(),
         );
     }
+    // A broken signature may be worth stopping now; that's for its page, behind a confirmation.
+    if f.rule == "proc-invalid-signature"
+        && let Link::Process(pid) = f.link
+    {
+        body = body.child(
+            text(format!("To stop it now, open {} and choose Force quit.", f.subject))
+                .key(format!("fix-open-{pid}"))
+                .role("link")
+                .label(format!("Open {}", f.subject))
+                .cursor(Cursor::Pointer)
+                .font(k.ty.small)
+                .color(c.text_accent)
+                .on_press(move |s: &mut App| s.open(pid)),
+        );
+    }
     body
 }
 

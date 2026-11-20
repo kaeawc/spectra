@@ -444,3 +444,317 @@ fn one_reading_says_its_still_collecting() {
     assert!(rt.find("jd-timeline-collecting").is_some());
     assert!(rt.find("jd-lane-heap").is_none());
 }
+
+// Quit and Force quit. A recorder stands in for `ps` and `kill`: nothing here signals anything.
+
+use crate::app::Status;
+use crate::sample::{force_confirm_scene, quit_list_scene, quit_root_scene, quit_scene};
+use crate::signal::Signal;
+use crate::signal::tests::Recorder;
+
+/// `f`'s scene with a recorder that says every sample process is alive as listed.
+fn recorded(f: fn(&mut App)) -> (Runtime<App>, Recorder) {
+    let mut s = init();
+    f(&mut s);
+    let r = Recorder::default();
+    for p in &s.procs {
+        r.alive(p.pid, &p.started_at, &p.executable_path);
+    }
+    s.signals = Box::new(r.clone());
+    (runtime(s), r)
+}
+
+fn opt_cmd_q() -> KeyEvent {
+    KeyEvent { key: Key::Command('q'), mods: rune::Mods { cmd: true, alt: true, ..rune::Mods::default() } }
+}
+
+#[test]
+fn confirming_quit_sends_one_term_to_that_pid_and_polls_again() {
+    let (mut rt, r) = recorded(quit_scene);
+    press(&mut rt, "pd-quit");
+    assert!(rt.find("confirm-dialog").is_some(), "the confirmation opens");
+    assert!(r.sent().is_empty(), "opening it sends nothing");
+    assert!(shows_text(&rt, "Quit Slack?"));
+    assert!(shows_text(&rt, "Slack (pid 900) will be asked to close. Unsaved changes may be lost."));
+    press(&mut rt, "confirm-send");
+    assert_eq!(r.sent(), [(900, Signal::Term)]);
+    assert_eq!(*r.asked.borrow(), [900], "checked who has the pid first");
+    assert!(rt.find("confirm-dialog").is_none());
+    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"));
+    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(), "the feed is asked for a reading now");
+}
+
+#[test]
+fn confirming_force_quit_sends_one_kill_and_warns_about_macos() {
+    let (mut rt, r) = recorded(force_confirm_scene);
+    assert!(shows_text(&rt, "Force quit trustd?"));
+    assert!(shows_text(&rt, "trustd (pid 340) will be stopped immediately. Unsaved changes will be lost."));
+    assert_eq!(
+        text_of(&rt, "confirm-line-1").as_deref(),
+        Some("This is part of macOS and may restart or disrupt your session.")
+    );
+    press(&mut rt, "confirm-send");
+    assert_eq!(r.sent(), [(340, Signal::Kill)]);
+    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Stopping trustd"));
+}
+
+#[test]
+fn cancel_esc_the_close_button_and_return_on_the_default_button_send_nothing() {
+    let (mut rt, r) = recorded(quit_scene);
+    press(&mut rt, "pd-quit");
+    press(&mut rt, "confirm-cancel");
+    assert!(rt.state.confirm.is_none());
+    press(&mut rt, "pd-force");
+    key(&mut rt, Key::Escape);
+    assert!(rt.state.confirm.is_none(), "Esc cancels");
+    assert_eq!(rt.state.selected, Some(900), "and doesn't also go back");
+    press(&mut rt, "pd-force");
+    press(&mut rt, "close");
+    assert!(rt.state.confirm.is_none());
+    // Cancel has focus: Return sends nothing, Space presses Cancel.
+    press(&mut rt, "pd-force");
+    let focused = rt.elements().into_iter().find(|e| e.focused).and_then(|e| e.key);
+    assert_eq!(focused.as_deref(), Some("confirm-cancel"));
+    key(&mut rt, Key::Enter);
+    assert!(r.sent().is_empty(), "Return isn't a yes");
+    key(&mut rt, Key::Text(" ".into()));
+    assert!(rt.state.confirm.is_none(), "Space pressed Cancel");
+    assert!(r.sent().is_empty());
+    assert!(rt.state.outcome.is_none());
+}
+
+#[test]
+fn a_pid_that_changed_hands_or_ended_gets_nothing() {
+    let (mut rt, r) = recorded(quit_scene);
+    let exe = rt.state.process(900).unwrap().executable_path.clone();
+    let cases = [
+        (Some(("2026-11-19T08:00:05-05:00", exe.as_str())), "already ended; its pid now belongs to another process"),
+        (Some(("2026-11-19T08:00:04-05:00", "/usr/bin/node")), "pid 900 now runs /usr/bin/node, not Slack"),
+        (None, "That process has already ended. Nothing was sent."),
+    ];
+    for (now, says) in cases {
+        r.alive.borrow_mut().retain(|(pid, _)| *pid != 900);
+        if let Some((at, comm)) = now {
+            r.alive(900, at, comm);
+        }
+        press(&mut rt, "pd-force");
+        press(&mut rt, "confirm-send");
+        let line = text_of(&rt, "quit-outcome-text").unwrap();
+        assert!(line.contains(says), "{line}");
+        assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Refused(_)));
+    }
+    assert!(r.sent().is_empty(), "nothing was sent to a pid that isn't Slack's");
+}
+
+#[test]
+fn the_kernel_launchd_and_the_app_itself_are_refused() {
+    let (mut rt, r) = recorded(quit_scene);
+    rt.update(|s, _| {
+        let mut procs = s.procs.clone();
+        let mut me = procs.iter().find(|p| p.pid == 930).unwrap().clone();
+        me.pid = s.me.pid;
+        me.command = "spectra-desktop".into();
+        let mut reading = me.clone();
+        reading.pid = 5001;
+        reading.ppid = s.me.pid;
+        reading.command = "spectra".into();
+        let mut kernel = me.clone();
+        kernel.pid = 0;
+        procs.extend([me, reading, kernel]);
+        procs.sort_by_key(|p| p.pid);
+        s.land_procs(Ok(procs));
+    });
+    for pid in [0, 1, 5000, 5001] {
+        rt.update(move |s, _| s.open(pid));
+        settle(&mut rt);
+        assert!(rt.find("pd-refusal").is_some(), "pid {pid} says why");
+        press(&mut rt, "pd-quit");
+        press(&mut rt, "pd-force");
+        rt.key(opt_cmd_q());
+        settle(&mut rt);
+        assert!(rt.state.confirm.is_none(), "pid {pid} can't be asked");
+    }
+    rt.update(|s, _| s.open(1));
+    settle(&mut rt);
+    assert_eq!(
+        text_of(&rt, "pd-refusal").as_deref(),
+        Some("launchd starts and looks after everything else; Spectra Desktop won't stop it.")
+    );
+    assert!(r.sent().is_empty());
+}
+
+#[test]
+fn another_users_process_is_off_with_the_reason_shown() {
+    let (mut rt, r) = recorded(quit_root_scene);
+    assert_eq!(text_of(&rt, "pd-refusal").as_deref(), Some("Owned by root; Spectra Desktop can't stop it"));
+    press(&mut rt, "pd-force");
+    press(&mut rt, "pd-quit");
+    assert!(rt.state.confirm.is_none());
+    // Even asked directly, it won't open.
+    rt.update(|s, _| s.ask(301, Signal::Kill));
+    assert!(rt.state.confirm.is_none());
+    assert!(r.sent().is_empty());
+}
+
+#[test]
+fn an_app_rows_quit_is_its_main_process_and_other_groups_have_none() {
+    let (mut rt, r) = recorded(quit_list_scene);
+    assert_eq!(rt.state.cursor_target(), Some(900), "Slack's main process, not a helper");
+    assert_eq!(text_of(&rt, "list-target").as_deref(), Some("Slack · 900"));
+    press(&mut rt, "list-quit");
+    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Term)));
+    assert!(shows_text(&rt, "Quit Slack?"));
+    press(&mut rt, "confirm-cancel");
+    // Several zsh are no one process.
+    let zsh = rt.state.groups.iter().find(|g| g.name == "zsh").unwrap().id.clone();
+    rt.update(move |s, _| s.table.select(format!("g:{zsh}")));
+    settle(&mut rt);
+    assert_eq!(rt.state.cursor_target(), None);
+    assert!(rt.find("list-quit").is_none(), "no group action");
+    assert!(rt.find("list-no-target").is_some());
+    rt.key(opt_cmd_q());
+    settle(&mut rt);
+    assert!(rt.state.confirm.is_none());
+    // An app whose main process isn't running has none either.
+    rt.update(|s, _| {
+        let procs = s.procs.iter().filter(|p| p.pid != 900).cloned().collect();
+        s.land_procs(Ok(procs));
+        s.table.select(SLACK);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.cursor_target(), None, "only helpers left");
+    // A helper on its own row is its own target.
+    rt.update(|s, _| s.table.select("p:901"));
+    assert_eq!(rt.state.cursor_target(), Some(901));
+    assert!(r.sent().is_empty());
+}
+
+#[test]
+fn a_double_press_on_the_confirm_button_sends_once() {
+    let (mut rt, r) = recorded(quit_scene);
+    press(&mut rt, "pd-force");
+    double_press(&mut rt, "confirm-send");
+    assert_eq!(r.sent(), [(900, Signal::Kill)]);
+    // Twice in one go, as a key repeat might.
+    rt.update(|s, _| s.ask(900, Signal::Kill));
+    rt.update(|s, _| {
+        s.confirm();
+        s.confirm();
+    });
+    assert_eq!(r.sent().len(), 2, "one per confirmation");
+}
+
+#[test]
+fn the_shortcut_only_opens_the_confirmation() {
+    let (mut rt, r) = recorded(quit_list_scene);
+    for _ in 0..5 {
+        rt.key(opt_cmd_q());
+        settle(&mut rt);
+    }
+    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Term)));
+    assert!(r.sent().is_empty(), "a held shortcut never sends");
+    key(&mut rt, Key::Escape);
+    // On a page it acts on the page's process.
+    rt.update(|s, _| s.open(1300));
+    settle(&mut rt);
+    rt.key(opt_cmd_q());
+    settle(&mut rt);
+    assert_eq!(rt.state.confirm.as_ref().map(|c| c.target.pid), Some(1300));
+    // Without the shortcut's modifiers, Q is just a key.
+    key(&mut rt, Key::Escape);
+    rt.key(KeyEvent { key: Key::Command('q'), mods: rune::Mods { cmd: true, ..rune::Mods::default() } });
+    key(&mut rt, Key::Text("q".into()));
+    assert!(rt.state.confirm.is_none());
+    assert!(r.sent().is_empty());
+}
+
+#[test]
+fn typing_in_the_search_field_triggers_nothing() {
+    let (mut rt, r) = recorded(quit_list_scene);
+    press(&mut rt, "search");
+    for k in ["q", "u", "i", "t"] {
+        key(&mut rt, Key::Text(k.into()));
+    }
+    for k in [Key::Backspace, Key::Delete, Key::Enter] {
+        key(&mut rt, k);
+    }
+    assert!(rt.state.confirm.is_none(), "no confirmation from typing");
+    assert_eq!(rt.state.query.text, "qui", "the field took the keys");
+    assert!(r.sent().is_empty());
+}
+
+/// Lands the scene's processes again `secs` later, with or without Slack.
+fn reading(rt: &mut Runtime<App>, secs: f64, slack: bool) {
+    rt.update(move |s, _| {
+        s.now += secs;
+        let procs = s.procs.iter().filter(|p| slack || p.pid != 900).cloned().collect();
+        s.land_procs(Ok(procs));
+    });
+    settle(rt);
+}
+
+#[test]
+fn a_quit_that_isnt_taken_offers_force_quit() {
+    let (mut rt, r) = recorded(quit_scene);
+    press(&mut rt, "pd-quit");
+    press(&mut rt, "confirm-send");
+    reading(&mut rt, 2.0, true);
+    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"), "two seconds is patience");
+    assert!(rt.find("quit-outcome-force").is_none());
+    press(&mut rt, "pd-quit");
+    assert!(rt.state.confirm.is_none(), "already asked");
+    reading(&mut rt, 4.0, true);
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Slack is still running 5 s after being asked to quit")
+    );
+    press(&mut rt, "quit-outcome-force");
+    assert_eq!(rt.state.confirm.as_ref().map(|c| c.signal), Some(Signal::Kill), "it only opens the confirmation");
+    assert_eq!(r.sent(), [(900, Signal::Term)]);
+    press(&mut rt, "confirm-send");
+    assert_eq!(r.sent(), [(900, Signal::Term), (900, Signal::Kill)]);
+}
+
+#[test]
+fn a_quit_process_is_said_to_have_quit_and_its_page_offers_back() {
+    let (mut rt, _) = recorded(quit_scene);
+    press(&mut rt, "pd-quit");
+    press(&mut rt, "confirm-send");
+    reading(&mut rt, 2.0, false);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
+    assert_eq!(rt.state.selected, Some(900), "the page stays to say so");
+    assert!(rt.find("ended-page").is_some());
+    assert!(rt.find("pd-page").is_none());
+    assert_eq!(text_of(&rt, "ended-said").as_deref(), Some("Slack quit"));
+    press(&mut rt, "ended-back");
+    assert_eq!(rt.state.selected, None);
+    assert_eq!(rt.state.nav, Nav::Category(Category::Apps));
+    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Slack quit"), "the list says it too");
+    press(&mut rt, "quit-outcome-dismiss");
+    assert!(rt.find("quit-outcome").is_none());
+}
+
+#[test]
+fn a_failed_kill_says_why() {
+    let (mut rt, r) = recorded(quit_scene);
+    *r.fail_kill.borrow_mut() = Some("kill failed: Operation not permitted".into());
+    press(&mut rt, "pd-quit");
+    press(&mut rt, "confirm-send");
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Couldn't quit Slack: kill failed: Operation not permitted.")
+    );
+    assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Failed(_)));
+    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_err(), "nothing was sent, so no hurry");
+}
+
+#[test]
+fn an_invalid_signature_points_to_force_quit_on_its_page() {
+    let (mut rt, r) = recorded(sample_scene);
+    rt.update(|s, _| s.expanded = Some("941/proc-invalid-signature".into()));
+    settle(&mut rt);
+    press(&mut rt, "fix-open-941");
+    assert_eq!(rt.state.selected, Some(941), "it opens the page");
+    assert!(rt.state.confirm.is_none(), "and does nothing more");
+    assert!(r.sent().is_empty());
+}

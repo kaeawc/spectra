@@ -7,20 +7,36 @@ mod detail;
 mod home;
 mod list;
 mod process;
+mod quit;
 #[cfg(test)]
 mod tests;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
 use rune_kit::shell::{self, Sidebar, SidebarRow, SidebarSection, SplitView, Toolbar};
-use rune_kit::{Button, ButtonVariant, Kit};
+use rune_kit::{Button, ButtonVariant, Kit, root};
 
 use crate::app::App;
 use crate::groups::{Category, Nav};
 use crate::procs::{Runtime, fmt_count};
 use card::dot;
 
-/// Keys nothing focused took: the sidebar toggle, and Esc or Cmd-[ to go back from a page.
-pub fn on_key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
+/// Keys nothing focused took: the sidebar toggle, Esc or Cmd-[ to go back from a page, and
+/// ⌥⌘Q to open the Quit confirmation (which a key never answers on its own).
+pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if s.confirm.is_some() {
+        // The confirmation's own controls take keys; Esc cancels it rather than going back.
+        if ev.key == Key::Escape {
+            s.cancel();
+            return true;
+        }
+        return false;
+    }
+    if quit::shortcut().matches_tx(ev, tx) {
+        if let Some(pid) = s.shortcut_target() {
+            s.ask(pid, crate::signal::Signal::Term);
+        }
+        return true;
+    }
     if shell::is_sidebar_toggle(ev) {
         s.sidebar.toggle();
         return true;
@@ -81,12 +97,17 @@ fn sidebar(s: &App, k: &Kit) -> El {
 /// What the main pane shows and the toolbar's title for it.
 enum Page<'a> {
     Process(&'a crate::procs::Process),
+    /// A process the app stopped, gone since.
+    Ended(&'a crate::signal::Target),
     Jvm(&'a crate::data::Jvm),
     Home,
     List,
 }
 
 fn page_of(s: &App) -> Page<'_> {
+    if let Some(t) = s.ended_page() {
+        return Page::Ended(t);
+    }
     if let Some(pid) = s.selected {
         if let Some(p) = s.process(pid) {
             return Page::Process(p);
@@ -103,7 +124,7 @@ fn page_of(s: &App) -> Page<'_> {
 }
 
 /// What a page is called: a JVM by what it runs, anything else by its name.
-fn page_name(s: &App, pid: u32) -> String {
+pub(super) fn page_name(s: &App, pid: u32) -> String {
     match (s.jvm(pid), s.process(pid)) {
         (Some(j), _) => j.name(),
         (None, Some(p)) => p.name().into_owned(),
@@ -116,6 +137,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let page = page_of(s);
     let (body, title) = match page {
         Page::Process(p) => (process::page(s, p, &k), page_name(s, p.pid)),
+        Page::Ended(t) => (quit::ended(s, t, &k), t.name.clone()),
         Page::Jvm(j) => (detail::detail(s, j, &k), j.name()),
         Page::List => (list::list(s, &k), s.nav.title().to_owned()),
         Page::Home => {
@@ -162,12 +184,15 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .key("pin-baseline");
         toolbar = toolbar.trailing(pin);
     }
-    SplitView::new(main)
+    let split = SplitView::new(main)
         .sidebar(&s.sidebar, |s: &mut App| &mut s.sidebar, sidebar(s, &k))
         .toolbar(toolbar)
         .titlebar_inset(cx.titlebar_inset())
         .reduced_motion(cx.is_reduced_motion())
-        .build(&k)
+        .build(&k);
+    let mut layer = Vec::new();
+    quit::dialog(s, &k, &mut layer);
+    root(split, layer)
 }
 
 /// A process page for a process that is a JVM: its JVM numbers can be pinned too.

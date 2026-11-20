@@ -51,14 +51,36 @@ What it shows:
   baseline" compares its numbers against a moment you choose. Esc, Cmd-[ or the back button
   return to the page before, so following a parent link and going back lands on the child. A
   page closes if its pid comes back as another process.
+- **Quit and Force quit**: in a process page's header, and over the list for the row under the
+  cursor. An app's row acts on the app's main process ("Quit Slack"); a row of several
+  processes that isn't one app (twelve `zsh`) has no action, so open it and pick one. ⌥⌘Q opens
+  the Quit confirmation for the open page or the cursor's row. Quit asks the process to exit
+  (SIGTERM); Force quit, red and marked with a cross, ends it at once (SIGKILL).
+  - Nothing is sent without a confirmation that names the process and its pid and says what
+    will happen, with an extra warning for a part of macOS. Cancel has focus; Esc, the close
+    button or a click outside cancel. No key press sends on its own, and one confirmation sends
+    at most one signal however often its button is pressed.
+  - Just before sending, `ps` is asked who has the pid now (start time, in UTC, and command);
+    unless that is the same second and program the reading showed, nothing is sent and the
+    page says so: "That process has already ended."
+  - Off, with the reason beside them: the kernel and launchd, Spectra Desktop and the readings
+    it starts, another user's processes ("Owned by root; Spectra Desktop can't stop it"; there
+    is no sudo), and a process whose start time Spectra didn't give.
+  - Afterwards it says what happened, and no more: "Asked Slack to quit", then "Slack quit"
+    once a reading no longer lists it (the feed reads again at once). Still listed 5 s later,
+    it says so and offers Force quit. A failed `kill` says why. The page of a process that
+    ended this way stays, says so and offers Back.
+  - A finding about an invalid signature points to Force quit on the process's page.
 
-It only reads. It never quits or signals a process, except a Spectra reading of its own that
-runs past its deadline.
+It reads, and signals only a process the person confirmed (and a Spectra reading of its own
+that runs past its deadline).
 
 ```sh
 cargo run                                              # the window
 cargo run -- --snap out.png --scene sample --theme dark  # headless render with sample data
-cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail, stale, old
+cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail, stale, old,
+                            # quit, quit-list, quit-confirm, force-confirm, quit-root,
+                            # quit-still, quit-ended
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds
 ```
@@ -68,6 +90,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/groups.rs`: filtering, grouping and sorting the process list.
 - `src/proc_findings.rs`: the rules that turn a process's readings into findings.
 - `src/data.rs` and `src/findings.rs`: the JVM feed and its rules.
+- `src/signal.rs`: Quit and Force quit: what may be signalled, the `ps` identity check, and
+  `/bin/kill`, behind a `Signals` trait that tests replace with a recorder. Sample scenes use
+  one that sends nothing, since their pids are made up.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.

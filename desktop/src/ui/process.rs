@@ -26,6 +26,9 @@ pub fn page(s: &App, p: &Process, k: &Kit) -> El {
         .padding(24.0)
         .gap(24.0)
         .child(header(s, p, findings.first().copied(), k));
+    if let Some(o) = super::quit::outcome(s, Some(p.pid), k) {
+        page = page.child(o);
+    }
     if !findings.is_empty() {
         let list = findings
             .iter()
@@ -68,9 +71,9 @@ fn header(s: &App, p: &Process, worst: Option<&Finding>, k: &Kit) -> El {
         fmt_mem(p.rss_kib),
         fmt_count(p.thread_count)
     );
-    col()
-        .key("pd-header")
-        .w_full()
+    let about = col()
+        .grow(1.0)
+        .min_w(0.0)
         .gap(6.0)
         .child(
             row()
@@ -97,7 +100,14 @@ fn header(s: &App, p: &Process, worst: Option<&Finding>, k: &Kit) -> El {
                     .font(k.ty.ui_medium)
                     .color(ink(severity, k)),
             ),
-        )
+        );
+    row()
+        .key("pd-header")
+        .w_full()
+        .gap(16.0)
+        .items_start()
+        .child(about)
+        .child(super::quit::actions(s, p, "pd", k))
 }
 
 fn fact(key: &str, label: &str, value: El, k: &Kit) -> El {

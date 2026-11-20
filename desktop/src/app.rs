@@ -14,6 +14,7 @@ use crate::findings::{Finding, Link, Severity, diagnose};
 use crate::groups::{self, Category, Group, Nav, Row, Sort, SortKey};
 use crate::proc_findings;
 use crate::procs::{ProcError, ProcFeed, ProcSample, Process, Role, Runtime};
+use crate::signal::{self, Attempt, Me, Signal, Signals, Target};
 
 pub const HISTORY: usize = 120;
 /// Readings kept per process: three minutes at one every 2 s.
@@ -23,6 +24,9 @@ pub const PROC_HISTORY: usize = 90;
 pub const REFRESH: Duration = Duration::from_secs(2);
 /// How old the process numbers may get, in seconds, before the app says when they're from.
 pub const STALE_AFTER: f64 = 3.0 * REFRESH.as_secs_f64();
+/// How long, in seconds of readings, a process asked to quit may take before the app says it
+/// hasn't and offers Force quit.
+pub const STILL_AFTER: f64 = 5.0;
 
 pub type Feed = Result<Vec<Jvm>, String>;
 
@@ -46,6 +50,55 @@ pub struct Track {
 pub struct PageRef {
     pub pid: u32,
     pub started: String,
+}
+
+/// A Quit or Force quit waiting for the person to confirm it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Confirm {
+    pub target: Target,
+    pub signal: Signal,
+}
+
+/// Where a Quit or Force quit stands.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Status {
+    /// Sent at the window clock's `at`; no reading since has shown it gone.
+    Asked { at: f64 },
+    /// A later reading no longer lists it.
+    Ended,
+    /// Still listed `STILL_AFTER` seconds after it was sent.
+    StillRunning,
+    /// Nothing was sent: the pid is gone or someone else's.
+    Refused(String),
+    /// `ps` or `kill` failed.
+    Failed(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outcome {
+    pub target: Target,
+    pub signal: Signal,
+    pub status: Status,
+}
+
+impl Outcome {
+    /// The outcome in a line, as it stands.
+    pub fn line(&self) -> String {
+        let name = &self.target.name;
+        match (&self.status, self.signal) {
+            (Status::Asked { .. }, Signal::Term) => format!("Asked {name} to quit"),
+            (Status::Asked { .. }, Signal::Kill) => format!("Stopping {name}"),
+            (Status::Ended, Signal::Term) => format!("{name} quit"),
+            (Status::Ended, Signal::Kill) => format!("{name} was stopped"),
+            (Status::StillRunning, Signal::Term) => {
+                format!("{name} is still running {STILL_AFTER:.0} s after being asked to quit")
+            }
+            (Status::StillRunning, Signal::Kill) => {
+                format!("{name} is still running after Force quit; it may be stuck waiting on the system")
+            }
+            (Status::Refused(why) | Status::Failed(why), _) => why.clone(),
+        }
+    }
 }
 
 /// What the sidebar and the overview count, worked out once per reading.
@@ -148,11 +201,22 @@ pub struct App {
     /// The list as it stands: `nav` and the search applied, grouped and sorted.
     pub groups: Vec<Group>,
     pub rows: Vec<Row>,
+
+    /// Asks `ps` about a pid and sends signals; tests swap in a recorder.
+    pub signals: Box<dyn Signals>,
+    pub me: Me,
+    pub confirm: Option<Confirm>,
+    /// The last Quit or Force quit, until another replaces it or it's dismissed.
+    pub outcome: Option<Outcome>,
+    /// Wakes the process feed for a reading now, after a signal.
+    pub poke: Option<Sender<()>>,
+    pub poke_rx: Option<Receiver<()>>,
 }
 
 pub fn init() -> App {
     let (tx, rx) = channel();
     let (ptx, prx) = channel();
+    let (poke, poke_rx) = channel();
     let mut table = TableState::new().key("procs");
     table.set_sort("cpu", SortDir::Descending);
     App {
@@ -192,6 +256,12 @@ pub fn init() -> App {
         open_groups: HashSet::new(),
         groups: Vec::new(),
         rows: Vec::new(),
+        signals: Box::new(signal::System),
+        me: Me { pid: std::process::id(), uid: None },
+        confirm: None,
+        outcome: None,
+        poke: Some(poke),
+        poke_rx: Some(poke_rx),
     }
 }
 
@@ -249,6 +319,9 @@ impl App {
         };
         self.proc_error = None;
         self.proc_updated = Some(self.now);
+        if self.me.uid.is_none() {
+            self.me.uid = procs.iter().find(|p| p.pid == self.me.pid).map(|p| p.uid);
+        }
         let mut tracks = HashMap::with_capacity(procs.len());
         let mut reused = Vec::new();
         for p in &procs {
@@ -270,6 +343,7 @@ impl App {
         self.proc_index = procs.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
         self.procs = procs;
         self.forget_reused(&reused);
+        self.track_outcome();
         self.stats = Stats::of(&self.procs);
         let tracks = &self.tracks;
         let empty: &[ProcSample] = &[];
@@ -331,9 +405,11 @@ impl App {
     }
 
     /// Closes the open page once its process is in neither feed, or its pid is someone else's.
+    /// A page whose process the app was asked to stop stays, to say it ended.
     fn drop_gone_selection(&mut self) {
         if let Some(pid) = self.selected
             && !self.is_live(&PageRef { pid, started: self.selected_started.clone() })
+            && self.ended_page().is_none()
         {
             self.selected = None;
             self.selected_started.clear();
@@ -543,6 +619,111 @@ impl App {
     /// The page "back" would return to.
     pub fn back_to(&self) -> Option<u32> {
         self.back_stack.last().map(|p| p.pid)
+    }
+
+    /// The process a list row's Quit acts on: the process itself, or an app group's main
+    /// process. A group of several that isn't an app, or an app without its main process,
+    /// has none; its processes are quit one at a time.
+    pub fn row_target(&self, id: &str) -> Option<u32> {
+        if let Some(pid) = id.strip_prefix("p:") {
+            return pid.parse().ok().filter(|pid| self.process(*pid).is_some());
+        }
+        let id = id.strip_prefix("g:")?;
+        let g = self.groups.iter().find(|g| g.id == id)?;
+        if g.kind != groups::GroupKind::App {
+            return None;
+        }
+        g.pids.iter().copied().filter(|pid| self.process(*pid).is_some_and(|p| p.role == Role::App)).min()
+    }
+
+    /// What the list's Quit acts on: the row under the cursor's target.
+    pub fn cursor_target(&self) -> Option<u32> {
+        self.table.cursor().and_then(|id| self.row_target(id))
+    }
+
+    /// What ⌥⌘Q acts on: the open page's process, else the list cursor's.
+    pub fn shortcut_target(&self) -> Option<u32> {
+        match self.selected {
+            Some(pid) if self.ended_page().is_none() => self.process(pid).map(|p| p.pid),
+            Some(_) => None,
+            None if self.nav != Nav::Overview => self.cursor_target(),
+            None => None,
+        }
+    }
+
+    /// Why `pid` can't be quit from here, if it can't.
+    pub fn refusal(&self, pid: u32) -> Option<String> {
+        match self.process(pid) {
+            Some(p) => signal::refusal(p, self.me),
+            None => Some("That process has already ended.".into()),
+        }
+    }
+
+    /// Whether a Quit for `pid` was sent and hasn't settled yet, so asking again adds nothing.
+    pub fn quit_pending(&self, pid: u32) -> bool {
+        self.outcome.as_ref().is_some_and(|o| {
+            o.target.pid == pid && o.signal == Signal::Term && matches!(o.status, Status::Asked { .. })
+        })
+    }
+
+    /// Opens the confirmation for `signal` to `pid`. It never sends anything itself.
+    pub fn ask(&mut self, pid: u32, signal: Signal) {
+        if self.confirm.is_some() || self.refusal(pid).is_some() {
+            return;
+        }
+        if signal == Signal::Term && self.quit_pending(pid) {
+            return;
+        }
+        if let Some(p) = self.process(pid) {
+            self.confirm = Some(Confirm { target: Target::of(p), signal });
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        self.confirm = None;
+    }
+
+    /// The confirmation's button: checks the pid is still the process confirmed, then sends.
+    /// The confirmation is used up on the first press, so a second sends nothing.
+    pub fn confirm(&mut self) {
+        let Some(Confirm { target, signal }) = self.confirm.take() else {
+            return;
+        };
+        let status = match signal::quit(self.signals.as_ref(), &target, signal) {
+            Attempt::Sent => Status::Asked { at: self.now },
+            Attempt::Refused(why) => Status::Refused(why),
+            Attempt::Failed(why) => Status::Failed(why),
+        };
+        let sent = matches!(status, Status::Asked { .. });
+        self.outcome = Some(Outcome { target, signal, status });
+        if sent && let Some(poke) = &self.poke {
+            let _ = poke.send(());
+        }
+    }
+
+    pub fn dismiss_outcome(&mut self) {
+        self.outcome = None;
+    }
+
+    /// After a reading: a process that was sent a signal and is gone has ended; one still
+    /// there `STILL_AFTER` seconds on is still running.
+    fn track_outcome(&mut self) {
+        let Some(o) = &mut self.outcome else { return };
+        let Status::Asked { at } = o.status else { return };
+        let listed = self.proc_index.get(&o.target.pid).and_then(|&i| self.procs.get(i));
+        if !listed.is_some_and(|p| o.target.is(p)) {
+            o.status = Status::Ended;
+        } else if self.now - at >= STILL_AFTER {
+            o.status = Status::StillRunning;
+        }
+    }
+
+    /// The open page's process, when the app stopped it (or was stopping it) and it's gone.
+    pub fn ended_page(&self) -> Option<&Target> {
+        let o = self.outcome.as_ref()?;
+        let t = &o.target;
+        let gone = self.process(t.pid).is_none_or(|p| !t.is(p));
+        (self.selected == Some(t.pid) && self.selected_started == t.started && gone).then_some(t)
     }
 }
 

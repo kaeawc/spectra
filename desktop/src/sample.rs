@@ -2,11 +2,15 @@
 //! healthy) and a machine's worth of processes covering every role, most runtimes and every
 //! signing status. Each scene opens a different screen.
 
-use crate::app::App;
+use crate::app::{App, Confirm, Outcome, Status};
 use crate::data::{self, Jvm};
 use crate::findings::Finding;
 use crate::groups::{Category, Nav};
 use crate::procs::{AppInfo, ProcError, Process, Role, Runtime, SignStatus, Signing};
+use crate::signal::{self, Me, Signal, Target};
+
+/// The app's own pid and user in the sample: not one of the sample's processes.
+pub const SAMPLE_ME: Me = Me { pid: 5000, uid: Some(501) };
 
 /// Readings of every process the sample lands, enough for the memory-growth rule.
 const PROC_READINGS: usize = crate::proc_findings::GROWTH_READINGS + 4;
@@ -464,6 +468,9 @@ pub fn land_sample_procs(s: &mut App) {
     let all = sample_procs();
     s.cores = 10;
     s.wall = sample_now;
+    s.me = SAMPLE_ME;
+    // The sample's pids are made up; they may be real processes on this machine.
+    s.signals = Box::new(signal::Inert);
     for i in 0..PROC_READINGS {
         s.land_procs(Ok(all.iter().map(|x| process(x, i)).collect()));
     }
@@ -522,6 +529,64 @@ pub fn process_scene(s: &mut App) {
     s.show(Nav::Category(Category::Apps));
     s.open(901);
     s.expanded = None;
+}
+
+/// Slack's page, with Quit and Force quit in its header.
+pub fn quit_scene(s: &mut App) {
+    sample_scene(s);
+    s.show(Nav::Category(Category::Apps));
+    s.open(900);
+    s.expanded = None;
+}
+
+/// Every process, the cursor on Slack: the list's Quit acts on Slack's main process.
+pub fn quit_list_scene(s: &mut App) {
+    all_scene(s);
+    s.table.select("g:app::Applications:Slack.app");
+}
+
+fn confirming(s: &mut App, pid: u32, signal: Signal) {
+    let p = s.process(pid).expect("a sample process");
+    s.confirm = Some(Confirm { target: Target::of(p), signal });
+}
+
+/// Slack's page, confirming Quit.
+pub fn quit_confirm_scene(s: &mut App) {
+    quit_scene(s);
+    confirming(s, 900, Signal::Term);
+}
+
+/// A part of macOS the user owns, confirming Force quit.
+pub fn force_confirm_scene(s: &mut App) {
+    sample_scene(s);
+    s.show(Nav::Category(Category::System));
+    s.open(340);
+    s.expanded = None;
+    confirming(s, 340, Signal::Kill);
+}
+
+/// A root-owned process's page: Quit and Force quit are off, and it says why.
+pub fn quit_root_scene(s: &mut App) {
+    sample_scene(s);
+    s.show(Nav::Category(Category::System));
+    s.open(301);
+    s.expanded = None;
+}
+
+/// Slack's page, Slack still running after it was asked to quit: Force quit is offered.
+pub fn quit_still_scene(s: &mut App) {
+    quit_scene(s);
+    let p = s.process(900).expect("Slack");
+    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status: Status::StillRunning });
+}
+
+/// Slack's page after Slack quit: it says so and offers Back.
+pub fn quit_ended_scene(s: &mut App) {
+    quit_scene(s);
+    let p = s.process(900).expect("Slack");
+    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status: Status::Asked { at: s.now } });
+    let procs: Vec<Process> = s.procs.iter().filter(|p| p.pid != 900).cloned().collect();
+    s.land_procs(Ok(procs));
 }
 
 /// The JVMs only, as with a Spectra too old to list processes.
