@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/watchclient"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func mcpTestDaemon(t *testing.T) daemon.Paths {
@@ -89,12 +89,17 @@ func TestDaemonToolsUnavailable(t *testing.T) {
 
 func TestFiringAlertsResource(t *testing.T) {
 	p := mcpTestDaemon(t)
-	var out bytes.Buffer
-	s := NewServer(strings.NewReader(""), &out)
+	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	s.SetDaemonConnector(func(ctx context.Context) (daemonWatchClient, bool) { return watchclient.Connect(ctx, nil, p) })
-	s.handleResourcesRead(Request{ID: 1, Params: json.RawMessage(`{"uri":"spectra://alerts/firing"}`)})
-	if !strings.Contains(out.String(), "High load") || !strings.Contains(out.String(), "application/json") {
-		t.Fatalf("resource: %s", out.String())
+	res, err := s.readFiringAlerts(context.Background(), &sdk.ReadResourceRequest{Params: &sdk.ReadResourceParams{URI: firingAlertsURI}})
+	if err != nil {
+		t.Fatalf("read firing alerts: %v", err)
+	}
+	if len(res.Contents) != 1 || !strings.Contains(res.Contents[0].Text, "High load") || res.Contents[0].MIMEType != "application/json" {
+		t.Fatalf("resource: %+v", res.Contents)
+	}
+	if res.CacheScope != "private" || res.TTLMs != 0 {
+		t.Fatalf("firing alerts cache control = %+v, want private and immediately stale", res.Cacheable)
 	}
 }
 

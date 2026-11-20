@@ -1,34 +1,40 @@
 package mcp
 
-import "fmt"
+import (
+	"context"
 
-func resourceDefinitions() []ResourceDefinition {
-	return []ResourceDefinition{
-		{URI: "spectra://alerts/firing", Name: "Firing Alerts", Description: "Current daemon alerts in JSON.", MimeType: "application/json"},
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const firingAlertsURI = "spectra://alerts/firing"
+
+func resourceDefinitions() []*sdk.Resource {
+	return []*sdk.Resource{
+		{URI: firingAlertsURI, Name: "Firing Alerts", Description: "Current daemon alerts in JSON.", MIMEType: "application/json"},
 		{
 			URI:         "spectra://capabilities",
 			Name:        "Capabilities",
 			Description: "Tool list and when to use each one.",
-			MimeType:    "text/markdown",
+			MIMEType:    "text/markdown",
 		},
 		{
 			URI:         "spectra://workflows/debugging",
 			Name:        "Debug Workflows",
 			Description: "Short app, JVM, network, and baseline workflows.",
-			MimeType:    "text/markdown",
+			MIMEType:    "text/markdown",
 		},
 	}
 }
 
-func readResource(uri string) (string, string, error) {
-	switch uri {
-	case "spectra://capabilities":
-		return readResourceText(uri), "text/markdown", nil
-	case "spectra://workflows/debugging":
-		return readResourceText(uri), "text/markdown", nil
-	default:
-		return "", "", fmt.Errorf("resource not found: %s", uri)
-	}
+// readStaticResource serves the markdown resources. The SDK only routes URIs
+// that were registered, so an unknown URI never reaches it.
+func readStaticResource(_ context.Context, req *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+	uri := req.Params.URI
+	return &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{
+		URI:      uri,
+		MIMEType: "text/markdown",
+		Text:     readResourceText(uri),
+	}}}, nil
 }
 
 func readResourceText(uri string) string {
