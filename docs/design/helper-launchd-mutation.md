@@ -99,8 +99,8 @@ Any check failing means refusal and no `launchctl` call.
    file's own integrity checks.
 1. **Label.** At most 200 bytes, reverse-DNS with at least two non-empty
    segments, only characters `bundleid.Valid` allows (the same rule as
-   `uninstall.validID`). Refuse any label starting with `com.apple.` (case
-   folded) with `apple_label`, and the helper's own label
+   `uninstall.validID`). Refuse `com.apple` itself and any label starting
+   with `com.apple.` (both case folded) with `apple_label`, and the helper's own label
    `dev.spectra.helper` with `denylisted` (a built-in entry). A label that
    fails the shape rule is malformed params (JSON-RPC `-32602`).
 2. **Plist path.** Exactly `/Library/LaunchDaemons/<label>.plist`, joined
@@ -221,8 +221,8 @@ Neither source needs a prompt.
    `/usr/bin/sfltool dumpbtm` as root, which does not prompt as root. It
    parses the output with the `startup` BTM parser, extended to keep the
    `Flags` field, which today's `applyBTMField` drops. It then selects the
-   records whose `URL` is the target plist or whose `Identifier` ends in
-   `.<label>`. If a selected record carries a flag word that marks it as
+   records whose `URL` is the target plist, whose `Identifier` equals the
+   label (case folded), or whose `Identifier` ends in `.<label>`. If a selected record carries a flag word that marks it as
    managed, the helper refuses with `managed`. The same applies when a
    selected record carries a flag word outside the set that the
    implementation PR pins from `sfltool` fixtures for each supported macOS
@@ -294,7 +294,9 @@ Decided by the owner (2026-11-20): `enable` matches user-scope
    `bootstrap` line only when it is not loaded.
 2. At execute, all checks re-run from scratch, including the denylist and
    the management check. The plist must be the same file `prepare` saw
-   (same device, inode, size, mtime and SHA-256), and the loaded state and
+   (same device, inode, size, mtime and SHA-256), the program must be the
+   same file (same device, inode, size, mtime and code directory hash), and
+   the loaded state and
    planned argv must equal the bound ones, else `target_changed`. The
    helper bootstraps the path it just re-verified from the descriptor it
    opened, never a path supplied by the caller.
@@ -362,8 +364,11 @@ security tooling through this method.
   Unknown keys are ignored; a malformed entry makes the file invalid (below).
 - **Default contents, by category:** endpoint detection and response
   agents; mobile device management and device-management enrollment
-  agents; backup agents; plus the helper's own label. No vendor list ships
-  in this design; the implementation PR proposes the entries for review.
+  agents; backup agents; plus the helper's own label. The entries are the
+  label prefixes compiled into the helper as `DefaultDenylistPlist`.
+  `TeamIDs` ships empty: no vendor team id has been verified against the
+  vendors' own signed releases, and a guessed id would refuse an unrelated
+  vendor or give false assurance.
 - **Editing:** only with `sudo`. Spectra never writes the file after
   install, and install does not overwrite an existing, valid file.
 - **Integrity:** the helper `lstat`s the directory (a real directory, owned
@@ -371,9 +376,12 @@ security tooling through this method.
   symlink, owner uid 0, mode `0644` or stricter), opens it `O_NOFOLLOW`
   and compares inode as in check 3. If the file **exists but fails any of
   these checks, or fails to parse**, the helper refuses every mutation
-  (`denylist_invalid`) until it is fixed. If the file does not exist, the
-  built-in default set (the helper's own label and the `com.apple.`
-  prefix) still applies and a warning line is written to the audit log.
+  (`denylist_invalid`) until it is fixed. If the file (or its directory)
+  does not exist, the compiled-in default entries (`DefaultDenylistPlist`,
+  the same file `install-helper` writes) apply, along with the built-ins
+  (the helper's own label, `com.apple` and the `com.apple.` prefix), and a
+  warning line is written to the audit log. A refusal from the fallback
+  names "the built-in default denylist" as its source.
 - **Scope:** the denylist applies to `prepare`, `disable` and `enable`;
   a listed daemon cannot be changed through the helper in either direction.
 - **Reporting:** a match is a normal refusal with `reason: denylisted`, the
@@ -389,7 +397,11 @@ security tooling through this method.
   in tests) and returns them base64url-encoded.
 - The helper keeps, in memory only, the token's SHA-256 mapped to a binding:
   caller uid, action, label, plist path, device, inode, size, mtime,
-  SHA-256, program path, bundle path, bundle id, team id, expiry, the
+  SHA-256, program path, the program file's device, inode, size and mtime,
+  the program's code directory hash (`CDHash=` from
+  `codesign -dv --verbose=4`, read after the signature verified; best effort,
+  bound as empty when codesign does not report one), bundle path, bundle
+  id, team id, expiry, the
   daemon's **loaded state at prepare** (`loaded`, plus `path` and program
   when loaded), and the exact **planned argv list** returned to the caller.
 - At execute the helper recomputes the loaded state and the planned argv
@@ -476,7 +488,10 @@ spectra startup enable  <label> --scope system [--yes] [--json]
 1. With `--scope system` and no helper installed (or the socket refuses the
    connection), behaviour is today's system-scope refusal: exit 3 and the
    `sudo launchctl` commands, now with a line saying
-   `sudo spectra install-helper` enables this.
+   `sudo spectra install-helper` enables this. An installed helper that
+   predates these methods answers JSON-RPC `-32601` (method not found); the
+   CLI treats that the same way, with a line saying to update the helper
+   (`spectra install-helper`) instead.
 2. With `--scope system` and the helper, call `prepare`. A refusal prints the helper's reason and
    the manual commands; exit 3.
 3. Print the target (plist, program, bundle, team id, before state, planned
@@ -528,7 +543,7 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
   group lookup. One table test per refusal reason, each asserting no
   `launchctl` mutation argv was recorded.
 - **Token tests:** reuse, expiry, wrong uid, wrong action, eviction at five,
-  target changed between calls (plist bytes, inode, program, team id), and
+  target changed between calls (plist bytes, inode, program path, program bytes, inode or CDHash, team id), and
   loaded state changed between calls (unloaded at prepare and loaded at
   execute, for both `disable` and `enable`) refusing `target_changed` with
   no argv recorded.
@@ -590,12 +605,14 @@ restrictive reading:
 - A per-user entry of `/Library/Managed Preferences` that is a symlink
   refuses `management_unknown`; payload files use the denylist's file
   rule (root-owned, mode `0644` or stricter).
-- A BTM record is selected by an `Identifier` ending in `.<label>` or by its
-  file URL; any record so selected must pass the flag rule.
+- A BTM record is selected by an `Identifier` equal to the label (case
+  folded), an `Identifier` ending in `.<label>`, or its file URL; any record
+  so selected must pass the flag rule.
 - The denylist's directory must also resolve without symlinks. The default
   file `install-helper` writes lists the helper's label and label prefixes
   of common endpoint-security, device-management and backup agents, for
-  review; `TeamIDs` ships empty.
+  review, and the helper applies the same entries when the file is absent;
+  `TeamIDs` ships empty.
 - Commands run with a fixed environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`,
   `LC_ALL=C`) and a 60-second timeout each; a whole prepare or execute is
   bounded at 150 seconds.

@@ -21,6 +21,8 @@ type verified struct {
 	action, label string
 	target        LaunchdTarget
 	plistMeta     FileMeta
+	programMeta   FileMeta
+	cdhash        string
 	assoc         []string
 	state         LaunchdState
 	planned       [][]string
@@ -109,7 +111,7 @@ func checkLabel(label string) error {
 	switch {
 	case !validLabel(label):
 		return refuse(ReasonUnknownLabel, "%q is not a valid launchd label", label)
-	case hasFoldPrefix(label, "com.apple."):
+	case hasFoldPrefix(label, "com.apple."), strings.EqualFold(label, "com.apple"):
 		return refuse(ReasonAppleLabel, "refusing to change Apple job %s: macOS components can break when disabled", label)
 	case strings.EqualFold(label, HelperLabel):
 		return refuse(ReasonDenylisted, "refusing to change %s: it is the Spectra helper itself (built-in denylist entry, kind label)", label)
@@ -361,8 +363,9 @@ func jobProgram(root plistread.Value) string {
 }
 
 // checkProgramFile requires a clean absolute path outside the system
-// trees, with no symlink, to a regular file that only root can replace.
-func (s *launchdService) checkProgramFile(program string) error {
+// trees, with no symlink, to a regular file that only root can replace,
+// and records the file's identity for the token.
+func (s *launchdService) checkProgramFile(v *verified, program string) error {
 	if program == "" || !filepath.IsAbs(program) || filepath.Clean(program) != program {
 		return refuse(ReasonProgramNotInBundle, "the job's program %q is not a clean absolute path", program)
 	}
@@ -374,9 +377,11 @@ func (s *launchdService) checkProgramFile(program string) error {
 	if resolved, err := s.fs.EvalSymlinks(program); err != nil || resolved != program {
 		return refuse(ReasonSymlink, "the program path %s is or passes through a symbolic link (or does not resolve)", program)
 	}
-	if pm, err := s.fs.Lstat(program); err != nil || !pm.Mode.IsRegular() {
+	pm, err := s.fs.Lstat(program)
+	if err != nil || !pm.Mode.IsRegular() {
 		return refuse(ReasonProgramNotInBundle, "the program %s is not a regular file", program)
 	}
+	v.programMeta = pm
 	return s.checkProgramPath(program)
 }
 
@@ -385,7 +390,7 @@ func (s *launchdService) resolveProgram(v *verified, root plistread.Value) error
 	program := jobProgram(root)
 	v.assoc = stringList(root, "AssociatedBundleIdentifiers")
 	v.target.Program = program
-	if err := s.checkProgramFile(program); err != nil {
+	if err := s.checkProgramFile(v, program); err != nil {
 		return err
 	}
 	switch {

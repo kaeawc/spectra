@@ -44,7 +44,10 @@ type startupSystemRequest struct {
 	asJSON, yes bool
 }
 
-const helperInstallHint = "The privileged helper can make this change after verifying the daemon: sudo spectra install-helper"
+const (
+	helperInstallHint = "The privileged helper can make this change after verifying the daemon: sudo spectra install-helper"
+	helperUpdateHint  = "The installed privileged helper is too old to make this change; update the helper (spectra install-helper): sudo spectra install-helper"
+)
 
 // runStartupSystemChange prepares the change in the helper, shows the plan,
 // confirms, then executes it with the single-use token. Running as root
@@ -54,7 +57,9 @@ func runStartupSystemChange(req startupSystemRequest, stdout, stderr io.Writer, 
 	prep, err := c.LaunchdSystemPrepare(req.label, req.verb)
 	switch {
 	case helperclient.IsUnavailable(err):
-		return startupSystemFallback(req, stdout, stderr, opts)
+		return startupSystemFallback(req, stdout, stderr, opts, helperInstallHint)
+	case helperclient.IsMethodNotFound(err):
+		return startupSystemFallback(req, stdout, stderr, opts, helperUpdateHint)
 	case helperclient.IsRateLimited(err):
 		fmt.Fprintf(stderr, "startup %s: too many changes; try again later (%v)\n", req.verb, err)
 		return startupExitError
@@ -134,9 +139,10 @@ func confirmSystemChange(req startupSystemRequest, w, stderr io.Writer, sys star
 	return false, startupExitRefused
 }
 
-// startupSystemFallback is today's system-scope refusal plus the install
-// hint, used when the helper is not installed or refuses the connection.
-func startupSystemFallback(req startupSystemRequest, stdout, stderr io.Writer, opts startup.Options) int {
+// startupSystemFallback is today's system-scope refusal plus a hint, used
+// when the helper is not installed, refuses the connection, or is too old
+// to have the launchd methods.
+func startupSystemFallback(req startupSystemRequest, stdout, stderr io.Writer, opts startup.Options, hint string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 	res, err := startup.SystemScopeRefusal(ctx, opts, req.verb, req.label)
@@ -146,11 +152,11 @@ func startupSystemFallback(req startupSystemRequest, stdout, stderr io.Writer, o
 	}
 	if req.asJSON {
 		_ = writeStartupJSON(stdout, stderr, res)
-		fmt.Fprintln(stderr, helperInstallHint)
+		fmt.Fprintln(stderr, hint)
 		return startupExitRefused
 	}
 	printStartupChange(stdout, res)
-	fmt.Fprintln(stdout, helperInstallHint)
+	fmt.Fprintln(stdout, hint)
 	return startupExitRefused
 }
 

@@ -60,6 +60,13 @@ func IsRateLimited(err error) bool {
 	return errors.As(err, &re) && re.Code == -32001
 }
 
+// IsMethodNotFound reports whether err is JSON-RPC -32601: the installed
+// helper predates the method.
+func IsMethodNotFound(err error) bool {
+	var re *RPCError
+	return errors.As(err, &re) && re.Code == -32601
+}
+
 // call sends one JSON-RPC request and returns the raw result JSON.
 func (c *Client) call(method string, params any) (json.RawMessage, error) {
 	return c.callTimeout(method, params, 30*time.Second)

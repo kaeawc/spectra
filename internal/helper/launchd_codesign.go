@@ -41,7 +41,29 @@ func (s *launchdService) checkSigning(ctx context.Context, v *verified) error {
 		}
 	}
 	v.target.TeamID = team
+	v.cdhash = s.readCDHash(ctx, program)
 	return nil
+}
+
+// readCDHash reads the program's code directory hash from
+// codesign -dv --verbose=4, for the token binding only. It is best effort:
+// the signature already verified, so an unreadable hash binds as "" and
+// the program's device, inode, size and mtime still pin the file.
+func (s *launchdService) readCDHash(ctx context.Context, program string) string {
+	res, err := s.runCmd(ctx, codesignBin, "-dv", "--verbose=4", program)
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	return parseCDHash(joinOutput(res))
+}
+
+func parseCDHash(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if h, ok := strings.CutPrefix(strings.TrimSpace(line), "CDHash="); ok {
+			return strings.TrimSpace(h)
+		}
+	}
+	return ""
 }
 
 // verifyCode runs codesign --verify --strict [extra] path. A --strict

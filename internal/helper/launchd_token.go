@@ -21,6 +21,12 @@ type facts struct {
 	bundleID, teamID      string
 	loaded                bool
 	loadedPath, loadedPrg string
+	// The program file's identity: a program replaced or rewritten in place
+	// (new inode, size or mtime) or re-signed (new code directory hash)
+	// between prepare and execute is a different target.
+	progDev, progIno    uint64
+	progSize, progMtime int64
+	cdhash              string
 	// planned is the planned argv list, JSON-encoded.
 	planned string
 }
@@ -40,6 +46,8 @@ func (v *verified) facts() facts {
 		sha: v.target.PlistSHA256, program: v.target.Program, bundlePath: v.target.BundlePath,
 		bundleID: v.target.BundleID, teamID: v.target.TeamID,
 		loaded: v.state.Loaded, loadedPath: v.state.Path, loadedPrg: v.state.Program,
+		progDev: v.programMeta.Dev, progIno: v.programMeta.Ino, progSize: v.programMeta.Size,
+		progMtime: v.programMeta.ModTime.UnixNano(), cdhash: v.cdhash,
 		planned: string(planned),
 	}
 }

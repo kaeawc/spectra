@@ -190,6 +190,8 @@ type fakeHost struct {
 	detritus    map[string]bool
 	wrongTeam   map[string]bool
 	appleSigned map[string]bool
+	// cdhash overrides the CDHash codesign -dv reports for a path.
+	cdhash map[string]string
 
 	btm     string
 	btmExit int
@@ -251,7 +253,11 @@ func (h *fakeHost) codesign(args []string) proc.Result {
 		if h.adhoc {
 			return proc.Result{Stderr: []byte("Executable=" + path + "\nSignature=adhoc\nTeamIdentifier=not set\n")}
 		}
-		return proc.Result{Stderr: []byte("Executable=" + path + "\nAuthority=Developer ID Application: Example\nTeamIdentifier=" + h.team + "\n")}
+		cd := h.cdhash[path]
+		if cd == "" {
+			cd = "0123456789abcdef0123456789abcdef01234567"
+		}
+		return proc.Result{Stderr: []byte("Executable=" + path + "\nCDHash=" + cd + "\nAuthority=Developer ID Application: Example\nTeamIdentifier=" + h.team + "\n")}
 	}
 	strict := len(args) > 1 && args[1] == "--strict"
 	req := ""
@@ -372,7 +378,7 @@ func newWorld(t *testing.T) *world {
 	f.file(testProgram, "\xcf\xfa\xed\xfe", 0, 0, 0o755)
 
 	h := &fakeHost{label: testLabel, loaded: true, pid: 412, jobPath: testPlist, jobProgram: testProgram, team: testTeam,
-		unsigned: map[string]bool{}, detritus: map[string]bool{}, wrongTeam: map[string]bool{}, appleSigned: map[string]bool{}, btm: testBTM}
+		unsigned: map[string]bool{}, detritus: map[string]bool{}, wrongTeam: map[string]bool{}, appleSigned: map[string]bool{}, cdhash: map[string]string{}, btm: testBTM}
 	w := &world{t: t, fs: f, host: h, now: time.Date(2026, 11, 20, 17, 0, 0, 0, time.UTC), admin: map[uint32]bool{501: true}, audit: &bytes.Buffer{}}
 	w.d = NewDispatcher()
 	w.d.SetAuditWriter(w.audit)

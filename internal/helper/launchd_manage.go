@@ -173,7 +173,7 @@ func (s *launchdService) checkBTM(ctx context.Context, v *verified) error {
 }
 
 func btmSelects(rec startup.BTMRecord, v *verified) bool {
-	if strings.HasSuffix(rec.Identifier, "."+v.label) {
+	if strings.EqualFold(rec.Identifier, v.label) || strings.HasSuffix(rec.Identifier, "."+v.label) {
 		return true
 	}
 	u, err := url.Parse(rec.URL)

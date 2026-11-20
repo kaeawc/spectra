@@ -150,6 +150,14 @@ func TestLaunchdRefusals(t *testing.T) {
 		{"denylist bad entry", "", 0, func(w *world) { writeDenylist(w, "<string>bad label!</string>", "") }, ReasonDenylistInvalid},
 		{"denylist dir writable", "", 0, func(w *world) { writeDenylist(w, "", ""); w.fs.chmod(DenylistDir, 0o777) }, ReasonDenylistInvalid},
 		{"apple label", "com.apple.fake", 0, nil, ReasonAppleLabel},
+		{"bare com.apple label", "com.apple", 0, nil, ReasonAppleLabel},
+		{"bare com.apple label, any case", "COM.Apple", 0, nil, ReasonAppleLabel},
+		{"default denylist applies without a file", "com.crowdstrike.falcon.Agent", 0, nil, ReasonDenylisted},
+		{"BTM record whose Identifier is the label", "", 0, func(w *world) {
+			w.host.btm = strings.Replace(strings.Replace(testBTM, "[ legacy ] (0x1)", "[ legacy, managed ] (0x9)", 1),
+				"Identifier: 16.com.example.agentd\n                  URL: file:///Library/LaunchDaemons/com.example.agentd.plist\n",
+				"Identifier: COM.EXAMPLE.AGENTD\n", 1)
+		}, ReasonManaged},
 		{"helper's own label", HelperLabel, 0, nil, ReasonDenylisted},
 		{"unknown label", "com.example.missing", 0, nil, ReasonUnknownLabel},
 		{"label in another file", "com.example.renamed", 0, func(w *world) {
@@ -401,6 +409,9 @@ func TestLaunchdTargetChanged(t *testing.T) {
 			w.host.jobProgram = other
 		}},
 		{"team id", "disable", true, func(w *world) { w.host.team = "ZYXWV98765" }},
+		{"program bytes rewritten in place", "disable", true, func(w *world) { w.fs.rewrite(testProgram, "\xcf\xfa\xed\xfe\x07") }},
+		{"program replaced (new inode)", "disable", true, func(w *world) { w.fs.file(testProgram, "\xcf\xfa\xed\xfe", 0, 0, 0o755) }},
+		{"program cdhash", "disable", true, func(w *world) { w.host.cdhash[testProgram] = "fedcba9876543210fedcba9876543210fedcba98" }},
 		{"disable: loaded after prepare", "disable", false, func(w *world) { w.host.loaded, w.host.pid = true, 9 }},
 		{"enable: loaded after prepare", "enable", false, func(w *world) { w.host.loaded, w.host.pid = true, 9 }},
 		{"enable: unloaded after prepare", "enable", true, func(w *world) { w.host.loaded = false }},

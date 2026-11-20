@@ -17,10 +17,14 @@ type denylist struct {
 	source  string
 }
 
-// loadDenylist is check 0. A missing file falls back to the built-in set
-// (the helper's label and com.apple., enforced by checkLabel) with an audit
-// warning; a file that exists but fails any integrity check or does not
-// parse refuses every change.
+// defaultDenylistSource names the compiled-in denylist in refusals.
+const defaultDenylistSource = "the built-in default denylist"
+
+// loadDenylist is check 0. A missing file falls back to the compiled-in
+// DefaultDenylistPlist entries plus the built-ins (the helper's label and
+// com.apple, enforced by checkLabel) with an audit warning; a file that
+// exists but fails any integrity check or does not parse refuses every
+// change.
 func (s *launchdService) loadDenylist() (denylist, error) {
 	d := denylist{source: DenylistPath}
 	invalid := func(format string, args ...any) error {
@@ -28,8 +32,7 @@ func (s *launchdService) loadDenylist() (denylist, error) {
 	}
 	_, err := s.fs.Lstat(DenylistDir)
 	if errors.Is(err, fs.ErrNotExist) {
-		s.warn("launchd.system.denylist", DenylistPath+" does not exist; only the built-in denylist applies")
-		return d, nil
+		return s.defaultDenylist()
 	}
 	if err != nil {
 		return d, invalid("lstat %s: %v", DenylistDir, err)
@@ -42,8 +45,7 @@ func (s *launchdService) loadDenylist() (denylist, error) {
 	}
 	lst, err := s.fs.Lstat(DenylistPath)
 	if errors.Is(err, fs.ErrNotExist) {
-		s.warn("launchd.system.denylist", DenylistPath+" does not exist; only the built-in denylist applies")
-		return d, nil
+		return s.defaultDenylist()
 	}
 	if err != nil {
 		return d, invalid("lstat: %v", err)
@@ -60,6 +62,17 @@ func (s *launchdService) loadDenylist() (denylist, error) {
 	}
 	if err := d.parse(data); err != nil {
 		return d, invalid("parse: %v", err)
+	}
+	return d, nil
+}
+
+// defaultDenylist is the fallback when the denylist file is absent: the
+// entries install-helper would have written.
+func (s *launchdService) defaultDenylist() (denylist, error) {
+	s.warn("launchd.system.denylist", DenylistPath+" does not exist; the built-in default denylist applies")
+	d := denylist{source: defaultDenylistSource}
+	if err := d.parse([]byte(DefaultDenylistPlist)); err != nil {
+		return d, fmt.Errorf("built-in default denylist: %w", err)
 	}
 	return d, nil
 }
@@ -158,7 +171,11 @@ func (d denylist) matchTeam(team string) error {
 // DefaultDenylistPlist is the file `sudo spectra install-helper` writes
 // when none exists. The entries are label prefixes of common endpoint
 // security, device-management and backup agents, proposed for review; a
-// prefix match only ever refuses a change.
+// prefix match only ever refuses a change. The helper also applies these
+// entries when the file is absent. TeamIDs ships empty on purpose: no
+// vendor team id here is verified against the vendors' own signed
+// releases, and a guessed id would either refuse an unrelated vendor or
+// give false assurance.
 const DefaultDenylistPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

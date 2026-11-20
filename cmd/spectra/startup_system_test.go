@@ -150,6 +150,24 @@ func TestStartupSystemJSONKeepsStdoutOneObject(t *testing.T) {
 }
 
 func TestStartupSystemWithoutHelperPrintsSudoCommands(t *testing.T) {
+	out := runSystemFallback(t, helperclient.ErrHelperUnavailable)
+	if !strings.Contains(out, "sudo spectra install-helper") {
+		t.Fatalf("missing install hint:\n%s", out)
+	}
+}
+
+func TestStartupSystemOlderHelperPrintsUpdateHint(t *testing.T) {
+	out := runSystemFallback(t, &helperclient.RPCError{Code: -32601, Message: "method not found: launchd.system.prepare"})
+	if !strings.Contains(out, "update the helper (spectra install-helper)") {
+		t.Fatalf("missing update hint:\n%s", out)
+	}
+}
+
+// runSystemFallback runs a system-scope disable whose prepare fails with
+// prepErr and requires today's refusal: exit 3, the sudo commands, and no
+// mutating launchctl call.
+func runSystemFallback(t *testing.T, prepErr error) string {
+	t.Helper()
 	opts, f := startupTestOpts(t)
 	dir := t.TempDir()
 	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>com.example.agentd</string>` +
@@ -158,14 +176,14 @@ func TestStartupSystemWithoutHelperPrintsSudoCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts.PlistDirs = append(opts.PlistDirs, startup.PlistDir{Path: dir, Scope: startup.ScopeSystem, Kind: startup.KindLaunchDaemon})
-	c := &fakeLaunchdClient{prepErr: helperclient.ErrHelperUnavailable}
+	c := &fakeLaunchdClient{prepErr: prepErr}
 	var out, errOut bytes.Buffer
 	sys := startupSystem{client: func() launchdHelperClient { return c }, stdin: strings.NewReader(""), isTTY: func() bool { return true }}
 	code := runStartupWith([]string{"disable", "com.example.agentd", "--scope", "system"}, &out, &errOut, opts, sys)
 	if code != startupExitRefused {
 		t.Fatalf("exit %d: %s %s", code, out.String(), errOut.String())
 	}
-	for _, want := range []string{"sudo launchctl disable system/com.example.agentd", "sudo launchctl bootout system/com.example.agentd", "sudo spectra install-helper"} {
+	for _, want := range []string{"sudo launchctl disable system/com.example.agentd", "sudo launchctl bootout system/com.example.agentd"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, out.String())
 		}
@@ -175,6 +193,10 @@ func TestStartupSystemWithoutHelperPrintsSudoCommands(t *testing.T) {
 			t.Fatalf("fallback ran %v", call)
 		}
 	}
+	if len(c.executed) != 0 {
+		t.Fatalf("executed %v", c.executed)
+	}
+	return out.String()
 }
 
 func TestStartupUserScopeIgnoresHelper(t *testing.T) {
