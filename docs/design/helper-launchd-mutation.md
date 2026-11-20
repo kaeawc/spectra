@@ -6,7 +6,8 @@
     approves this design and an independent security review signs off.
     The owner answered four open questions on 2026-11-20 (admin gate,
     `enable` bootstrap, no stop-only method, denylist); those are now part
-    of the proposal below. Everything stays proposed.
+    of the proposal below. The fifth open question, VM fixture signing, is
+    resolved as proposed. Everything stays proposed until it is implemented.
 
 The privileged helper gains one narrow ability: disable (and stop) or
 re-enable a **system-domain launchd daemon** whose plist sits in
@@ -108,10 +109,26 @@ Any check failing means refusal and no `launchctl` call.
    `internal/plistread`. `Label` must equal the requested label. A plist with
    `BundleProgram` (an `SMAppService` job) is refused; those are out of scope.
    The SHA-256 of the bytes is part of the token binding.
-5. **Duplicate labels.** Scan `/Library/LaunchDaemons` and
-   `/System/Library/LaunchDaemons`. Refuse when another plist defines the same
-   label, or when a plist cannot be parsed and may define it (the same rule as
-   `startup.refuseCopies` and `refuseUnreadable`).
+5. **Duplicate labels.** Scan every entry of `/Library/LaunchDaemons` and
+   `/System/Library/LaunchDaemons`, the two directories whose jobs load into
+   the `system` domain. Refuse with `duplicate_label` when another plist
+   defines the same label (the `startup.refuseCopies` rule). Then apply a
+   **system-domain unreadable rule**. `startup.refuseUnreadable` is not
+   reused, because it skips every entry outside the `gui` domain and would
+   therefore ignore all of these plists. The helper's own rule takes every
+   entry in those two directories other than the target plist, and for each
+   one that cannot be opened, stat'd or parsed as a plist (too large,
+   malformed, not a regular file, permission error):
+   - if a partial scan read its `Label` as the requested label, refuse with
+     `duplicate_label`;
+   - if its label is unknown and the file is not inert (inert means empty,
+     or a dict with no `Label`, as in `PlistError.inert`), refuse with
+     `unreadable_plist` and list the paths;
+   - otherwise skip it.
+
+   A read error on either directory itself refuses with `unreadable_plist`.
+   The helper runs as root, so permission errors should not happen here; when
+   one does, something unusual is going on and the helper does not guess.
 6. **Program.** `Program`, else `ProgramArguments[0]`. Must be absolute and
    clean, and `EvalSymlinks(program) == program` (no symlink anywhere in the
    path). Must be a regular file not under `/System`, `/usr` (including
@@ -138,11 +155,83 @@ Any check failing means refusal and no `launchctl` call.
    argument) the derived program; otherwise launchd is running a different
    job by that name and the helper refuses (`launchd_mismatch`).
    `launchctl print-disabled system` gives the before state.
+9. **Configuration-profile management.** Runs after check 8 and before any
+   `launchctl` mutation. See
+   [Managed daemons](#managed-daemons) for the sources and the rules.
 
-Only after check 0 and all eight pass does the helper run the planned argv, each as a
+Only after check 0 and all nine pass does the helper run the planned argv, each as a
 fixed slice through the injected `CmdRunner`, never a shell. It then re-reads
 `print system` and `print-disabled system` to fill `after` and `mismatch`
 exactly as `startup.ChangeResult.verify` does.
+
+## Managed daemons
+
+A daemon that a configuration profile manages is out of scope. Its
+administrator decided its state, and the helper must not undo that decision
+on behalf of a local admin. The helper runs as root and reads two sources.
+Neither source needs a prompt.
+
+1. **Service-management payloads.** These are the managed-preferences files
+   a `com.apple.servicemanagement` profile payload installs:
+   `/Library/Managed Preferences/com.apple.servicemanagement.plist`, plus
+   `/Library/Managed Preferences/<user>/com.apple.servicemanagement.plist`
+   for each per-user directory. Per-user rules do not bind the `system`
+   domain, but they are checked anyway, conservatively. Each file is checked
+   like the denylist: a regular file, not a symlink, owner root, opened
+   `O_NOFOLLOW`. It is parsed with `internal/plistread`. Every entry of its
+   `Rules` array is matched against the target. `RuleType` `Label` and
+   `LabelPrefix` are matched against the label. `BundleIdentifier` and
+   `BundleIdentifierPrefix` are matched against the bundle id from check 7
+   and the plist's `AssociatedBundleIdentifiers`. `TeamIdentifier` is
+   matched against the team id from check 7. Any match refuses with
+   `managed`, and the message names the file and the rule.
+2. **Background Task Management.** The helper runs
+   `/usr/bin/sfltool dumpbtm` as root, which does not prompt as root. It
+   parses the output with the `startup` BTM parser, extended to keep the
+   `Flags` field, which today's `applyBTMField` drops. It then selects the
+   records whose `URL` is the target plist or whose `Identifier` ends in
+   `.<label>`. If a selected record carries a flag word that marks it as
+   managed, the helper refuses with `managed`. The same applies when a
+   selected record carries a flag word outside the set that the
+   implementation PR pins from `sfltool` fixtures for each supported macOS
+   version (today's fixtures show `legacy`, `curated` and `sandboxed`).
+   Disposition is not used as a management signal. `enabled`/`disabled` is
+   ordinary state, and `allowed` is the user's choice.
+
+The helper refuses with `management_unknown`, before any `launchctl` call,
+in these cases:
+
+- a service-management file exists but fails its integrity checks or does
+  not parse;
+- `/Library/Managed Preferences` exists but cannot be read;
+- `sfltool dumpbtm` exits non-zero, cannot be parsed, or is too large.
+
+The helper does not refuse in these cases:
+
+- no service-management file exists;
+- BTM parses and has no record for the target;
+- BTM has a record for the target that carries only known, unmanaged flags.
+
+The normal third-party daemon is in that last group, so it can still be
+disabled. The rule is conservative only when a source exists and cannot be
+read.
+
+What this detects: daemons named, by label, bundle id or team id, in a
+service-management managed login items payload; and daemons that BTM itself
+flags as managed or with an unrecognised flag.
+
+What this does not detect: a daemon that an MDM server installed (for
+example with an `InstallApplication` package) without any
+service-management rule covering it; restrictions an MDM enforces only
+server-side; and profiles that are pending or were removed after the
+helper's read. Those daemons look ordinary to the helper. The
+[denylist](#denylist) is the second layer for them. It names MDM,
+enrollment and endpoint-security agents by label and team id, whatever
+installed them.
+
+Both sources are re-read at execute along with every other check. A daemon
+that became managed between `prepare` and execute is refused with
+`managed`.
 
 ## Operations
 
@@ -167,16 +256,22 @@ Decided by the owner (2026-11-20): `enable` matches user-scope
 1. `prepare` for `enable` records whether the job is loaded
    (`launchctl print system/<label>`). The planned argv list shows the
    `bootstrap` line only when it is not loaded.
-2. At execute, all checks re-run from scratch, including the denylist, and
-   the plist must be the same file `prepare` saw: same device, inode, size,
-   mtime and SHA-256, else `target_changed`. The helper bootstraps the path
-   it just re-verified from the descriptor it opened, never a path supplied
-   by the caller.
-3. The helper re-reads `print system/<label>` immediately before
-   `bootstrap`. If the job is now loaded (someone else loaded it), the
-   bootstrap is skipped and recorded as such. If it is loaded under a
-   different plist path or program, the result is `launchd_mismatch` and no
-   further command runs.
+2. At execute, all checks re-run from scratch, including the denylist and
+   the management check. The plist must be the same file `prepare` saw
+   (same device, inode, size, mtime and SHA-256), and the loaded state and
+   planned argv must equal the bound ones, else `target_changed`. The
+   helper bootstraps the path it just re-verified from the descriptor it
+   opened, never a path supplied by the caller.
+3. Between those checks and `bootstrap` the helper runs `enable`, and
+   another process could load the job in that window. To cover it, the
+   helper re-reads `print system/<label>` immediately before `bootstrap`.
+   If the job is now loaded from the bound plist and program, the bootstrap
+   is skipped and the result records it as skipped. That is one confirmed
+   step left out, never an extra one. If the job is loaded under a different
+   plist path or program, the result is `launchd_mismatch` and no further
+   command runs. The same rule holds for `disable`: a `bootout` that was not
+   in the plan is never added. If the job loads after the re-check, the
+   result says "disabled but running".
 4. After `bootstrap`, `print system/<label>` must show the job loaded with
    `path` equal to the plist path and program equal to the derived program;
    `print-disabled` must show it enabled. Otherwise `mismatch` is set.
@@ -256,16 +351,28 @@ security tooling through this method.
   in tests) and returns them base64url-encoded.
 - The helper keeps, in memory only, the token's SHA-256 mapped to a binding:
   caller uid, action, label, plist path, device, inode, size, mtime,
-  SHA-256, program path, bundle path, bundle id, team id, and expiry.
+  SHA-256, program path, bundle path, bundle id, team id, expiry, the
+  daemon's **loaded state at prepare** (`loaded`, plus `path` and program
+  when loaded), and the exact **planned argv list** returned to the caller.
+- At execute the helper recomputes the loaded state and the planned argv
+  list from scratch. If either differs from the binding, it refuses with
+  `target_changed` and runs nothing. This covers a `disable` prepared
+  against an unloaded daemon that is loaded by execute (a `bootout` would be
+  added), and an `enable` prepared against an unloaded daemon that is
+  loaded by execute (the `bootstrap` would be dropped). The CLI then tells
+  the user to run the command again, which makes a new `prepare` and shows
+  the new plan. The helper never runs an argv that was not in the plan
+  the user confirmed.
 - A token expires 60 seconds after `prepare`. Each uid may hold at most four
   live tokens; a fifth `prepare` evicts the oldest.
 - `disable`/`enable` look the token up and **delete it before doing
   anything else**, so it is single use whatever the outcome. Then they
   require the same caller uid and the same action as the method name, re-run
   every check, and refuse with `target_changed` if any bound fact differs.
-- A helper restart drops all tokens. Tokens never appear in the audit log;
-  the log records the first 8 hex characters of the token's hash to pair a
-  `prepare` with its execution.
+- A helper restart drops all tokens. Tokens never appear in the audit log.
+  Each successful `prepare` and each execution record includes the first 8
+  hex characters of the token's SHA-256 (`token_hash`), so an execution
+  record can be paired with its prepare record (see [audit log](#audit-log)).
 
 The token stops a captured or repeated request from acting twice and ties the
 user's confirmation to the exact target they saw. It is not proof that a
@@ -294,12 +401,17 @@ security controls are the caller checks and target verification.
 
 ## Audit log
 
-The existing per-request line stays unchanged (no params). Each mutating
-call, and each refused `prepare`, adds one line:
+The existing per-request line stays unchanged (no params). Every
+`prepare`, successful or refused, and every mutating call adds one line.
+A successful `prepare` line has `event: launchd.system.prepare`, the
+action, the label, the target fields, the `before` state, the planned
+argv and `token_hash`, and `outcome: ok`. A refused `prepare` has no
+token, so it has no `token_hash`, and carries `outcome: refused` with the
+`reason`. A mutating call looks like this:
 
 ```json
 {"time":"2026-11-20T17:00:12Z","uid":501,"event":"launchd.system.disable",
- "token":"3f9a0c1e","label":"com.example.agentd",
+ "token_hash":"3f9a0c1e","label":"com.example.agentd",
  "plist":"/Library/LaunchDaemons/com.example.agentd.plist","plist_sha256":"…",
  "program":"/Applications/Example.app/Contents/Library/LaunchServices/agentd",
  "bundle_id":"com.example.app","team_id":"ABCDE12345",
@@ -308,8 +420,10 @@ call, and each refused `prepare`, adds one line:
  "outcome":"ok","mismatch":""}
 ```
 
-`outcome` is `ok`, `refused` (with `reason`), `mismatch` or `error`. The
-log keeps its newsyslog rotation.
+`token_hash` is the first 8 hex characters of SHA-256(token), never the
+token. An execution with an unknown or expired token still logs the hash
+of what it received. `outcome` is `ok`, `refused` (with `reason`),
+`mismatch` or `error`. The log keeps its newsyslog rotation.
 
 ## CLI
 
@@ -318,10 +432,14 @@ spectra startup disable <label> --scope system [--yes] [--json]
 spectra startup enable  <label> --scope system [--yes] [--json]
 ```
 
-1. Without the helper, or without `--scope system`, behaviour is today's:
-   refuse with exit 3 and print the `sudo launchctl` commands, now with a
-   line saying `sudo spectra install-helper` enables this.
-2. With the helper, call `prepare`. A refusal prints the helper's reason and
+0. Without `--scope system` nothing here applies. User-scope requests keep
+   today's behaviour: the CLI changes the user's own `gui/<uid>` domain
+   directly, without root and without the helper.
+1. With `--scope system` and no helper installed (or the socket refuses the
+   connection), behaviour is today's system-scope refusal: exit 3 and the
+   `sudo launchctl` commands, now with a line saying
+   `sudo spectra install-helper` enables this.
+2. With `--scope system` and the helper, call `prepare`. A refusal prints the helper's reason and
    the manual commands; exit 3.
 3. Print the target (plist, program, bundle, team id, before state, planned
    commands) and ask `Disable com.example.agentd for all users? [y/N]` on a
@@ -350,7 +468,9 @@ is one audited path.
 | File name differs from label, duplicate or unreadable plist | `label_file_mismatch`, `duplicate_label`, `unreadable_plist` | Plists listed; exit 3 |
 | Program outside a bundle, unsigned, wrong team | `program_not_in_bundle`, `unsigned`, `team_mismatch` | Program, bundle and team ids shown; exit 3 |
 | Loaded job differs from the plist | `launchd_mismatch` | Both paths shown; exit 3 |
-| Token unknown, expired, other uid, or target changed | `token_invalid`, `token_expired`, `target_changed` | "run the command again"; exit 3 |
+| Daemon covered by a service-management rule or flagged managed in BTM | `managed` | Source file or BTM record and the matching rule; exit 3 |
+| A management source exists but cannot be read or parsed | `management_unknown` | The source and the error; exit 3 |
+| Token unknown, expired, other uid, or target changed (including loaded state or planned argv) | `token_invalid`, `token_expired`, `target_changed` | "run the command again"; exit 3 |
 | Rate limit | JSON-RPC `-32001` | "too many changes; try again in N minutes"; exit 1 |
 | `launchctl` non-zero | `outcome: error` | argv, exit code and stderr; exit 1 |
 | After state disagrees | `mismatch` | the mismatch sentence; exit 1 |
@@ -367,18 +487,37 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
   group lookup. One table test per refusal reason, each asserting no
   `launchctl` mutation argv was recorded.
 - **Token tests:** reuse, expiry, wrong uid, wrong action, eviction at five,
-  target changed between calls (plist bytes, inode, program, team id).
-- **Dispatcher tests:** the new rate limits, the mutation mutex, and the audit
-  line's fields (and that the token itself never appears).
+  target changed between calls (plist bytes, inode, program, team id), and
+  loaded state changed between calls (unloaded at prepare and loaded at
+  execute, for both `disable` and `enable`) refusing `target_changed` with
+  no argv recorded.
+- **Dispatcher tests:** the new rate limits, the mutation mutex, and the
+  audit line's fields: a successful `prepare` line and its execution line
+  carry the same `token_hash`, and the token itself never appears.
+- **Duplicate and unreadable tests:** an unreadable, non-inert plist in
+  `/Library/LaunchDaemons` or `/System/Library/LaunchDaemons` refuses
+  `unreadable_plist`; inert ones are skipped; a partially read duplicate
+  label refuses `duplicate_label`.
+- **Management tests:** a service-management rule matching by each
+  `RuleType`; a BTM record flagged managed; an unknown BTM flag word; a
+  symlinked or malformed payload file and a failing `sfltool` each refuse
+  `management_unknown`; no payload file and an unmanaged BTM record pass.
 - **Fuzz:** label validation and plist parsing.
 - **CLI tests:** helper absent, refusal, no TTY without `--yes`, success and
   mismatch output, all against a fake helper client.
-- **VM-only integration:** build tag `helper_vm` plus `SPECTRA_VM_TEST=1`,
-  run only inside a disposable macOS VM, never on CI hosts or developer
-  machines. It installs the helper and a Developer ID-signed fixture app with
-  a trivial daemon, then checks disable, enable, a replayed token, and
-  refusals for a `com.apple.*` label, a symlinked plist and a non-root plist.
-  Enable is checked to bootstrap an unloaded fixture daemon.
+- **VM-only integration (manual pre-release step):** build tag `helper_vm`
+  plus `SPECTRA_VM_TEST=1`. It runs only inside a disposable macOS VM, never
+  on CI hosts or developer machines. The owner runs it by hand before each
+  release that changes the helper, and the release checklist records the
+  result. It installs the helper and a fixture app with a trivial daemon.
+  It then checks disable, enable, a replayed token, and refusals for a
+  `com.apple.*` label, a symlinked plist, a non-root plist and a
+  service-management rule. Enable is checked to bootstrap an unloaded
+  fixture daemon. The fixture is signed with a **Developer ID test
+  certificate provisioned only in that VM**. An ad-hoc signature is not
+  enough: check 7 requires a verified non-Apple team id, and an ad-hoc
+  signature has none. The certificate and its key never leave the VM image
+  and are never used to sign anything shipped.
 - **Denylist tests:** label, prefix and team id matches; file absent, wrong
   owner, mode `0664`, symlink and malformed content each refuse (or fall back,
   when absent) with the right reason; no mutation argv recorded.
@@ -396,8 +535,10 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
   `enable` performs on an unloaded daemon.
 - `/Library/LaunchAgents`, other users' `gui/<uid>` domains, and the
   user's own domain (the CLI already changes that without root).
-- `SMAppService` jobs (`BundleProgram`), BTM Login Items, and
-  configuration-profile managed items.
+- `SMAppService` jobs (`BundleProgram`) and BTM Login Items. Check 4
+  refuses `BundleProgram` jobs.
+- Configuration-profile managed daemons. Check 9 refuses them, within the
+  limits stated under [managed daemons](#managed-daemons).
 - Programs outside an `.app` or `/Library/PrivilegedHelperTools`, such as
   Homebrew services under `/usr/local` or `/opt/homebrew`.
 - Signalling processes, batch changes, and any caller besides the local
@@ -407,10 +548,13 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
 
 ## Open questions for the owner
 
-Answered 2026-11-20 and folded into the design above: the `admin` gate
+None remain open. Answered 2026-11-20 and folded into the design above: the `admin` gate
 ([caller authentication](#caller-authentication)), `enable` bootstrapping
 ([enable and bootstrap](#enable-and-bootstrap)), no stop-only method
 ([out of scope](#out-of-scope)), and the [denylist](#denylist).
 
-1. Which signing identity signs the VM fixture daemon, and where does that
-   VM test run?
+1. *Resolved as proposed:* which signing identity signs the VM fixture
+   daemon, and where does that VM test run? A Developer ID test certificate
+   that exists only in the disposable test VM. Ad-hoc signing cannot pass
+   check 7. The owner runs the test by hand inside that VM before each
+   helper release (see [testing](#testing)).
