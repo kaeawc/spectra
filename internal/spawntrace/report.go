@@ -51,6 +51,8 @@ type Options struct {
 	Duration time.Duration
 	// PID scopes the trace to this process and its descendants; 0 is all.
 	PID int
+	// Progress, when set, runs after each collection (see Config.Progress).
+	Progress func(elapsed time.Duration, events int)
 }
 
 // DefaultOptions are the CLI flag defaults.
@@ -84,7 +86,7 @@ func (o Options) Config(deps Deps, emit func(Event), notify func(string)) Config
 	return Config{
 		Collect: deps.Collect, Ticker: deps.Ticker, Deadline: deps.Deadline, Clock: deps.Clock,
 		Interval: o.Interval, Duration: o.Duration, Root: o.PID,
-		Emit: emit, Notify: notify, IgnoreChildrenOf: deps.SelfPID,
+		Emit: emit, Notify: notify, IgnoreChildrenOf: deps.SelfPID, Progress: o.Progress,
 	}
 }
 

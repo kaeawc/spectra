@@ -18,7 +18,7 @@ import (
 )
 
 // toolPower reports battery/thermal state or a per-pid energy-impact ranking.
-func (s *Server) toolPower(raw json.RawMessage) ToolResult {
+func (s *Server) toolPower(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation       string `json:"operation"`
 		Pids            []int  `json:"pids"`
@@ -38,17 +38,16 @@ func (s *Server) toolPower(raw json.RawMessage) ToolResult {
 			Timestamp:   s.now(),
 		})
 	case "impact":
-		return s.toolPowerImpact(p.Pids, p.DurationSeconds, p.Limit)
+		return s.toolPowerImpact(ctx, p.Pids, p.DurationSeconds, p.Limit)
 	default:
 		return toolError("unknown power operation: " + p.Operation)
 	}
 }
 
-func (s *Server) toolPowerImpact(pids []int, durationSeconds, limit int) ToolResult {
+func (s *Server) toolPowerImpact(ctx context.Context, pids []int, durationSeconds, limit int) ToolResult {
 	if durationSeconds <= 0 {
 		durationSeconds = 1
 	}
-	ctx := context.Background()
 	if len(pids) == 0 {
 		for _, proc := range s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{}) {
 			if proc.PID > 0 {
@@ -56,7 +55,9 @@ func (s *Server) toolPowerImpact(pids []int, durationSeconds, limit int) ToolRes
 			}
 		}
 	}
+	stop := progressFrom(ctx).elapsed(ctx, time.Duration(durationSeconds)*time.Second, "sampling energy")
 	deltas, err := s.collect.Power.SampleEnergy(ctx, time.Duration(durationSeconds)*time.Second, pids)
+	stop()
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -76,7 +77,7 @@ func (s *Server) toolPowerImpact(pids []int, durationSeconds, limit int) ToolRes
 }
 
 // toolMemory reports VM compressor, swap, and memory-pressure state.
-func (s *Server) toolMemory(raw json.RawMessage) ToolResult {
+func (s *Server) toolMemory(_ context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
 		return toolError(err.Error())
 	}
@@ -92,7 +93,7 @@ func (s *Server) toolMemory(raw json.RawMessage) ToolResult {
 }
 
 // toolStorage reports disk volumes and the ~/Library storage footprint.
-func (s *Server) toolStorage(raw json.RawMessage) ToolResult {
+func (s *Server) toolStorage(_ context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Paths        []string `json:"paths"`
 		LargestAppsN int      `json:"limit"`
@@ -113,7 +114,7 @@ func (s *Server) toolStorage(raw json.RawMessage) ToolResult {
 }
 
 // toolSystem reports kernel resource limits, saturation, and top holders.
-func (s *Server) toolSystem(raw json.RawMessage) ToolResult {
+func (s *Server) toolSystem(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
 		Limit     int    `json:"limit"`
@@ -135,7 +136,7 @@ func (s *Server) toolSystem(raw json.RawMessage) ToolResult {
 		if limit <= 0 {
 			limit = 10
 		}
-		holders := s.collect.System.CollectTopHolders(context.Background(), limit, process.CollectOptions{})
+		holders := s.collect.System.CollectTopHolders(ctx, limit, process.CollectOptions{})
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("collected top resource holders (limit %d)", limit),
 			Raw:       holders,
@@ -147,11 +148,11 @@ func (s *Server) toolSystem(raw json.RawMessage) ToolResult {
 }
 
 // toolServices reports launchd jobs and plist schedules.
-func (s *Server) toolServices(raw json.RawMessage) ToolResult {
+func (s *Server) toolServices(ctx context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
 		return toolError(err.Error())
 	}
-	inv, err := s.collect.Services.List(context.Background(), services.Options{})
+	inv, err := s.collect.Services.List(ctx, services.Options{})
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -163,7 +164,7 @@ func (s *Server) toolServices(raw json.RawMessage) ToolResult {
 }
 
 // toolLogs runs a bounded unified-log query.
-func (s *Server) toolLogs(raw json.RawMessage) ToolResult {
+func (s *Server) toolLogs(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Process              string `json:"process"`
 		Subsystem            string `json:"subsystem"`
@@ -189,7 +190,7 @@ func (s *Server) toolLogs(raw json.RawMessage) ToolResult {
 	if p.LastSeconds > 0 {
 		q.Last = time.Duration(p.LastSeconds) * time.Second
 	}
-	result, err := s.collect.Logs.Run(context.Background(), q)
+	result, err := s.collect.Logs.Run(ctx, q)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -201,7 +202,7 @@ func (s *Server) toolLogs(raw json.RawMessage) ToolResult {
 }
 
 // toolUpdates reports macOS install/update history or install-log entries.
-func (s *Server) toolUpdates(raw json.RawMessage) ToolResult {
+func (s *Server) toolUpdates(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
 		Process   string `json:"process"`
@@ -213,7 +214,7 @@ func (s *Server) toolUpdates(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "history", "":
-		history, err := s.collect.Updates.CollectHistory(context.Background())
+		history, err := s.collect.Updates.CollectHistory(ctx)
 		if err != nil {
 			return toolError(err.Error())
 		}
@@ -239,11 +240,11 @@ func (s *Server) toolUpdates(raw json.RawMessage) ToolResult {
 }
 
 // toolTimeMachine reports Time Machine status, destinations, and snapshots.
-func (s *Server) toolTimeMachine(raw json.RawMessage) ToolResult {
+func (s *Server) toolTimeMachine(ctx context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
 		return toolError(err.Error())
 	}
-	state, err := s.collect.TimeMachine.Collect(context.Background())
+	state, err := s.collect.TimeMachine.Collect(ctx)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -255,7 +256,7 @@ func (s *Server) toolTimeMachine(raw json.RawMessage) ToolResult {
 }
 
 // toolPlaybook lists the built-in diagnostic playbooks or fetches one by id.
-func (s *Server) toolPlaybook(raw json.RawMessage) ToolResult {
+func (s *Server) toolPlaybook(_ context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
 		ID        string `json:"id"`
@@ -291,7 +292,7 @@ func (s *Server) toolPlaybook(raw json.RawMessage) ToolResult {
 }
 
 // toolCore inspects a crashed-process core file and suggests offline analyzers.
-func (s *Server) toolCore(raw json.RawMessage) ToolResult {
+func (s *Server) toolCore(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Path       string `json:"path"`
 		Executable string `json:"executable"`
@@ -302,7 +303,7 @@ func (s *Server) toolCore(raw json.RawMessage) ToolResult {
 	if p.Path == "" {
 		return toolError("core inspect requires path")
 	}
-	report, err := s.collect.CoreFiles.Inspect(context.Background(), p.Path, p.Executable)
+	report, err := s.collect.CoreFiles.Inspect(ctx, p.Path, p.Executable)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -314,7 +315,7 @@ func (s *Server) toolCore(raw json.RawMessage) ToolResult {
 }
 
 // toolCache reports or clears the local blob cache.
-func (s *Server) toolCache(raw json.RawMessage) ToolResult {
+func (s *Server) toolCache(_ context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
 		Kind      string `json:"kind"`
@@ -356,7 +357,7 @@ func (s *Server) toolCache(raw json.RawMessage) ToolResult {
 }
 
 // toolMetrics reads locally stored process metrics and app-churn aggregates.
-func (s *Server) toolMetrics(raw json.RawMessage) ToolResult {
+func (s *Server) toolMetrics(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation string `json:"operation"`
 		PID       int    `json:"pid"`
@@ -375,7 +376,6 @@ func (s *Server) toolMetrics(raw json.RawMessage) ToolResult {
 		return toolError(err.Error())
 	}
 	defer db.Close()
-	ctx := context.Background()
 	switch p.Operation {
 	case "process", "":
 		var rows []store.ProcessMetricRow

@@ -27,6 +27,42 @@ save JVM and file-descriptor samples to the local store.
 Tool calls and resource reads run one at a time. `ping` and the list methods
 are still answered while a long call such as `spawns` runs.
 
+### Cancellation and end of input
+
+A `notifications/cancelled` for a running call cancels the tool's context,
+so collectors that take one stop early, and the server sends no reply for
+that request. A call cancelled while it waits behind another one never runs.
+When stdin closes with calls still running (`printf ... | spectra-mcp`), the
+server waits up to 30 seconds for their replies before it exits.
+
+### Progress
+
+A call whose `_meta` carries a `progressToken` gets `notifications/progress`
+from the tools with a natural measure of progress, at most four a second:
+
+| Tool | Progress |
+| --- | --- |
+| `spawns` | seconds traced of `duration_seconds` (as `total`), with the event count in the message |
+| `idle` | seconds of the CPU `window` elapsed |
+| `process` `sample`, `jvm` `flamegraph`, `power` `impact` | seconds of the sampling duration elapsed |
+| `load` | phases: reading load and memory, collecting processes, sampling CPU |
+| `snapshot` `create`, `diagnose`, `triage` | phases: building the snapshot, evaluating rules, saving or persisting |
+
+Phase progress counts the phases started and has no `total`, because the
+phases a call runs depend on its arguments. Other tools send no progress.
+
+### Structured output
+
+Every tool lists an `outputSchema`, and a successful call returns
+`structuredContent` holding the same value as its text content; the text is
+unchanged for clients that ignore structured output. Error results carry
+text only. The report tools' schemas are inferred from the Go result types
+the CLI's `--json` output uses; a field whose type marshals itself (a
+custom JSON or text marshaler) is left unconstrained, and `lineage` (a
+recursive tree) and `owner` (two result shapes) get a plain object schema.
+Every other tool returns the `summary`/`evidence`/`next_actions`/`raw`/
+`timestamp` envelope, whose `raw` is free-form.
+
 ## Daemon-backed tools
 
 Start the local service with `spectra daemon start` or install it with
@@ -120,7 +156,8 @@ results here; read `exit_code`, `total` or `holders`. A failed lookup (an
 unreadable load average, an unknown pid, a CPU window that could not be
 measured) is a tool error.
 
-`spawns` holds up other tool calls for its whole duration. The CLI streams one JSON
+`spawns` holds up other tool calls for its whole duration unless it is
+cancelled. The CLI streams one JSON
 object per event and then a summary line; the tool collects the same values
 into one document: `events` holds the event objects in order (at most 5000;
 `events_dropped` counts the rest, which the summary still counts), `summary`

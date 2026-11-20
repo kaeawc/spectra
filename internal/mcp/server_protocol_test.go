@@ -24,18 +24,25 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/surface.golden.j
 // stdio transport clients use, and connects an SDK client at version.
 func startSession(t *testing.T, version string) *sdk.ClientSession {
 	t.Helper()
+	return startServerSession(t, NewServer(nil, nil), version, nil)
+}
+
+// startServerSession is startSession for a configured server; its reader and
+// writer are replaced by the pipes.
+func startServerSession(t *testing.T, srv *Server, version string, opts *sdk.ClientOptions) *sdk.ClientSession {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	serverIn, clientOut := io.Pipe()
 	clientIn, serverOut := io.Pipe()
-	srv := NewServer(serverIn, serverOut)
+	srv.reader, srv.writer = serverIn, serverOut
 	srv.Version = "test"
 	done := make(chan error, 1)
 	go func() {
 		done <- srv.Run(ctx)
 		_ = serverOut.Close()
 	}()
-	client := sdk.NewClient(&sdk.Implementation{Name: "spectra-test", Version: "0"}, nil)
+	client := sdk.NewClient(&sdk.Implementation{Name: "spectra-test", Version: "0"}, opts)
 	cs, err := client.Connect(ctx, &sdk.IOTransport{Reader: clientIn, Writer: clientOut}, &sdk.ClientSessionOptions{ProtocolVersion: version})
 	if err != nil {
 		t.Fatalf("connect at %s: %v", version, err)
@@ -55,14 +62,22 @@ func startSession(t *testing.T, version string) *sdk.ClientSession {
 	return cs
 }
 
+// surfaceTool is the part of a listed tool the golden pins.
+type surfaceTool struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	InputSchema  any    `json:"inputSchema"`
+	OutputSchema any    `json:"outputSchema,omitempty"`
+}
+
 type surface struct {
 	Tools     []any `json:"tools"`
 	Resources []any `json:"resources"`
 	Prompts   []any `json:"prompts"`
 }
 
-// listSurface returns the tools (name, description, inputSchema only),
-// resources and prompts the server lists, sorted, as generic JSON values.
+// listSurface returns the tools (name, description, inputSchema and
+// outputSchema only), resources and prompts the server lists, sorted, as generic JSON values.
 func listSurface(t *testing.T, cs *sdk.ClientSession) surface {
 	t.Helper()
 	ctx := context.Background()
@@ -83,7 +98,7 @@ func listSurface(t *testing.T, cs *sdk.ClientSession) surface {
 	sort.Slice(prompts.Prompts, func(i, j int) bool { return prompts.Prompts[i].Name < prompts.Prompts[j].Name })
 	var out surface
 	for _, tool := range tools.Tools {
-		out.Tools = append(out.Tools, toGeneric(t, ToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema}))
+		out.Tools = append(out.Tools, toGeneric(t, surfaceTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema, OutputSchema: tool.OutputSchema}))
 	}
 	for _, r := range resources.Resources {
 		out.Resources = append(out.Resources, toGeneric(t, r))
@@ -107,9 +122,9 @@ func toGeneric(t *testing.T, v any) any {
 	return out
 }
 
-// TestSurfaceMatchesGolden pins every tool name, description and input
-// schema, and every resource and prompt, to the list the pre-SDK server
-// returned, at each protocol revision a client can negotiate.
+// TestSurfaceMatchesGolden pins every tool name, description, input schema
+// (unchanged from the pre-SDK server) and output schema, and every resource
+// and prompt, at each protocol revision a client can negotiate.
 func TestSurfaceMatchesGolden(t *testing.T) {
 	path := filepath.Join("testdata", "surface.golden.json")
 	for _, version := range sdk.SupportedProtocolVersions() {

@@ -1,6 +1,8 @@
 // Package mcp implements the Spectra MCP server on the official MCP Go SDK.
 package mcp
 
+import "encoding/json"
+
 // ToolDefinition is one tool's name, description and JSON Schema input,
 // registered with the SDK server as-is.
 type ToolDefinition struct {
@@ -14,6 +16,9 @@ type ToolDefinition struct {
 type ToolResult struct {
 	Content []ContentBlock `json:"content"`
 	IsError bool           `json:"isError,omitempty"`
+	// Structured is the compact JSON of the value Content's text renders; it
+	// is sent as structuredContent on success.
+	Structured json.RawMessage `json:"-"`
 }
 
 // ContentBlock is one text content item of a tool result.
