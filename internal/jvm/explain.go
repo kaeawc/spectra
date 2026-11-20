@@ -89,6 +89,7 @@ func CollectExplanation(ctx context.Context, pid int, opts ExplainOptions) (*Exp
 		explainGC(e, info.GC)
 	}
 	explainVMArgs(e, info.VMArgs)
+	explainJDKGone(e, info)
 	explainMemorySections(e, collectExplainMemory(pid, run))
 	if opts.SoftRefs {
 		explainSoftRefs(e, pid, run)

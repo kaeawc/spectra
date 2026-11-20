@@ -41,6 +41,7 @@ func V1Catalog() []Rule {
 		ruleJVMOOMDetected(),
 		ruleJVMHeapDumpFound(),
 		ruleJVMDeadlock(),
+		ruleBuildDaemonJDKGone(),
 		ruleJDKMajorVersionDrift(),
 		ruleJavaHomeMismatch(),
 		ruleStorageFootprint(),

@@ -227,6 +227,9 @@ Implemented rules:
 - `jvm-heap-dump-found`
 - `jvm-deadlock` (targeted: only JVMs named via `--thread-dump-pid`, MCP
   `diagnose thread_dump_pids`, or MCP `triage pid=<jvm>` are thread-dumped)
+- `build-daemon-jdk-gone` (a running Gradle or Kotlin daemon whose `java.home`
+  or executable no longer exists; fix is to let it idle out or stop that PID,
+  never `gradle --stop`)
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`
