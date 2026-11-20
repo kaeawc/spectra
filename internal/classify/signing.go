@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/codesignout"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
@@ -57,10 +58,13 @@ type signingVerdict struct {
 	// binary" or "Software Signing leaf"); empty when there was none.
 	Claim string `json:"claim,omitempty"`
 	// Detritus is set when codesign --verify --strict rejected only
-	// extended attributes or resource forks in the bundle: a packaging
-	// defect, not evidence of altered code, so the status is kept and
+	// extended attributes or resource forks in the bundle and a plain
+	// verify did not pass either, so the status is kept and
 	// Signing.Validated stays false.
 	Detritus bool `json:"detritus,omitempty"`
+	// FinderMetadata is set when --strict rejected only Finder metadata but a
+	// plain verify passed: Signing.Validated is true.
+	FinderMetadata bool `json:"finder_metadata,omitempty"`
 }
 
 const codesignTimeout = 10 * time.Second
@@ -125,11 +129,32 @@ func verifyThirdParty(ctx context.Context, runner proc.Runner, exe string, v sig
 	switch {
 	case res.ExitCode == 0:
 		v.Signing.Validated = true
-	case onlyDetritus(string(res.Stderr) + string(res.Stdout)):
-		v.Detritus = true
+	case codesignout.OnlyDetritus(string(res.Stderr) + string(res.Stdout)):
+		return verifyWithoutStrict(ctx, runner, exe, v)
 	default:
 		v.Signing.Status = SigningInvalid
 	}
+	return v, nil
+}
+
+// verifyWithoutStrict retries a --strict rejection that was only Finder
+// metadata with a plain verify: it still checks code pages, resources and the
+// signature, and only skips the extended-attribute check. A pass is a
+// validated signature; a failure stays unvalidated (Detritus).
+func verifyWithoutStrict(ctx context.Context, runner proc.Runner, exe string, v signingVerdict) (signingVerdict, error) {
+	res, err := runner.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"--verify", exe}})
+	if err == nil {
+		err = noVerdict(res)
+	}
+	if err != nil {
+		return v, fmt.Errorf("codesign --verify: %w", err)
+	}
+	if res.ExitCode == 0 {
+		v.Signing.Validated = true
+		v.FinderMetadata = true
+		return v, nil
+	}
+	v.Detritus = true
 	return v, nil
 }
 
@@ -151,27 +176,6 @@ func noVerdict(res proc.Result) error {
 		return nil
 	}
 	return fmt.Errorf("codesign --verify exited %d without a verdict", res.ExitCode)
-}
-
-// detritusComplaint is codesign --strict's rejection of extended attributes
-// or resource forks on files in the signed code.
-const detritusComplaint = "resource fork, Finder information, or similar detritus not allowed"
-
-// onlyDetritus reports whether the detritus rejection is the only complaint
-// codesign printed.
-func onlyDetritus(out string) bool {
-	found := false
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case line == "" || strings.HasPrefix(line, "In subcomponent:") || strings.HasPrefix(line, "In architecture:"):
-		case strings.HasSuffix(line, detritusComplaint):
-			found = true
-		default:
-			return false
-		}
-	}
-	return found
 }
 
 // applyVerify settles a display-output Apple claim with the verify result.
@@ -247,6 +251,10 @@ func signingEvidence(v signingVerdict) string {
 		shown += ", team " + v.Signing.TeamID
 	}
 	switch {
+	case v.Signing.Validated && v.FinderMetadata:
+		return fmt.Sprintf("signing: %s validated by codesign --verify; %s; %s", shown, codesignout.FinderMetadataEvidence, disk)
+	case v.Signing.Validated && v.FinderMetadata:
+		return fmt.Sprintf("signing: %s validated by codesign --verify; %s; %s", shown, codesignout.FinderMetadataEvidence, disk)
 	case v.Signing.Validated:
 		return fmt.Sprintf("signing: %s validated by %s; %s", shown, strictVerify, disk)
 	case v.Signing.Status == SigningInvalid:

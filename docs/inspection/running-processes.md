@@ -276,11 +276,16 @@ with its displayed `team_id`, and is checked with
 requirement. Resource seals are checked here, because an Electron or JVM
 app's running code lives in its bundle resources. Passing sets
 `validated`; failing (a modified code page, resource or signature) is
-`invalid`. Two failures keep `developer_id` with `validated: false`: a
-`--strict` rejection of only extended attributes or resource forks
-("detritus", a packaging defect rather than altered code; cached), and a
-verify that could not run (timeout, cancel, the file vanished; not cached,
-retried next run). `Signature=adhoc` is `adhoc` and "not signed at all" is
+`invalid`. A `--strict` rejection of only extended attributes or resource
+forks ("detritus", Finder metadata: a packaging defect rather than altered
+code) is retried with a plain `codesign --verify <exe>`, which still checks
+code, resources and signature. If that passes the signature is `validated`
+and the evidence says "has Finder metadata (codesign --strict rejects it);
+code signature verified without --strict"; if it fails the status stays
+`developer_id` with `validated: false` (cached). A verify that could not run
+(timeout, cancel, the file vanished, codesign crashed on either run) keeps
+`developer_id` with `validated: false` and is not cached, so it is retried
+next run. Any other `--strict` failure is `invalid` with no retry. `Signature=adhoc` is `adhoc` and "not signed at all" is
 `unsigned`, both as displayed and never `validated`. The `signing:`
 evidence line says which verify ran and that the verdict describes the
 file on disk, which may no longer be what a long-running process loaded.
