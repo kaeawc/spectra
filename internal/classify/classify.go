@@ -34,6 +34,15 @@ type Input struct {
 	// deleted (Linux "(deleted)" suffix): the path no longer holds the code.
 	ExecutableDeleted bool
 	CommandLine       string // argv joined by spaces
+	// Argv is the argument vector with its boundaries intact, when known.
+	// It is preferred over CommandLine for finding an interpreter's script:
+	// in the joined string a space inside an argument looks like a separator.
+	Argv []string
+	// LoadArgv, when set and Argv is empty, fetches argv on demand. It is
+	// called at most once, and only for a process whose runtime is an
+	// interpreter, so argv costs nothing for every other process. An empty
+	// result falls back to CommandLine.
+	LoadArgv func() []string
 }
 
 // App is the outermost .app that owns a process.
@@ -498,7 +507,7 @@ func (c *Classifier) finish(p plan) Result {
 		os: c.os, pid: p.in.PID, ppid: p.in.PPID, uid: p.in.UID,
 		exe: p.exe, argv0: p.in.Command, cmdline: p.in.CommandLine,
 		runtime: r.Runtime, loc: p.loc, bundle: p.bundle, platform: platform,
-		goModule: goMod, script: c.script(p.in.CommandLine, r.Runtime),
+		goModule: goMod, script: c.script(p.in, r.Runtime),
 	})
 	r.Role = role
 	r.Evidence = []string{"role: " + roleEv, "runtime: " + runtimeEv}
@@ -508,15 +517,29 @@ func (c *Classifier) finish(p plan) Result {
 	return r
 }
 
+// scriptArgs returns the interpreter's arguments: argv when known,
+// otherwise the command line split on whitespace.
+func scriptArgs(in Input) []string {
+	if len(in.Argv) > 0 {
+		return in.Argv
+	}
+	if in.LoadArgv != nil {
+		if argv := in.LoadArgv(); len(argv) > 0 {
+			return argv
+		}
+	}
+	return strings.Fields(in.CommandLine)
+}
+
 // script returns the script an interpreter runs, following symlinks (an npm
 // bin/ link) when the path alone names no package.
-func (c *Classifier) script(cmdline string, rt Runtime) string {
+func (c *Classifier) script(in Input, rt Runtime) string {
 	switch rt {
 	case RuntimeNode, RuntimeBun, RuntimeDeno, RuntimePython:
 	default:
 		return ""
 	}
-	s := interpreterScript(cmdline, rt)
+	s := interpreterArgsScript(scriptArgs(in), rt)
 	if s == "" || npmPackage(s) != "" || !filepath.IsAbs(s) {
 		return s
 	}

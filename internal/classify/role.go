@@ -291,7 +291,12 @@ func setOf(s ...string) map[string]bool {
 // interpreter command line runs: the first argument after argv[0] that is
 // not an option or an option's value, skipping bun/deno subcommands.
 func interpreterScript(cmdline string, rt Runtime) string {
-	args := strings.Fields(cmdline)
+	return interpreterArgsScript(strings.Fields(cmdline), rt)
+}
+
+// interpreterArgsScript is interpreterScript over argv, so an argument
+// containing a space (a script path, or argv[0] itself) stays one argument.
+func interpreterArgsScript(args []string, rt Runtime) string {
 	if len(args) < 2 {
 		return ""
 	}
