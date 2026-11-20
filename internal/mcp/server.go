@@ -55,6 +55,8 @@ type Server struct {
 	homeDir     func() (string, error)
 	// artifactKindBytes overrides the per-kind retention size (tests).
 	artifactKindBytes int64
+	// artifactCopyBytes overrides the cap on a dest copy (tests).
+	artifactCopyBytes int64
 	// wallClock times progress, job progress and completion caches. It is
 	// wall time even when collect.Clock is fixed; nil is the system clock.
 	wallClock Clock

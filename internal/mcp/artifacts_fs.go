@@ -23,8 +23,12 @@ const (
 	// sweeps older and then oldest-first excess artifacts.
 	artifactMaxAge    = 7 * 24 * time.Hour
 	artifactKindBytes = 512 << 20
-	// maxArtifactSweep bounds the entries one sweep reads.
-	maxArtifactSweep = 10000
+	// artifactSweepBatch is how many entries a sweep reads at a time; it
+	// reads the whole kind directory.
+	artifactSweepBatch = 1024
+	// stagingDirName holds captures still being written. It is not a kind,
+	// so it is never served or swept.
+	stagingDirName = ".staging"
 )
 
 var errUnsafeArtifactDir = errors.New("artifacts directory is unsafe")
@@ -73,6 +77,16 @@ func (s *Server) artifactKindDir(kind string, create bool) (string, error) {
 	if !validArtifactKind(kind) {
 		return "", fmt.Errorf("unknown artifact kind %q", kind)
 	}
+	return s.artifactSubdir(kind, create)
+}
+
+// artifactStagingDir is where captures are written before they are
+// published into a kind directory, with the same checks as a kind's.
+func (s *Server) artifactStagingDir(create bool) (string, error) {
+	return s.artifactSubdir(stagingDirName, create)
+}
+
+func (s *Server) artifactSubdir(name string, create bool) (string, error) {
 	root, spectraDir, err := s.artifactsRoot()
 	if err != nil {
 		return "", err
@@ -85,7 +99,7 @@ func (s *Server) artifactKindDir(kind string, create bool) (string, error) {
 	if err := checkDir(root, create, true); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(root, kind)
+	dir := filepath.Join(root, name)
 	if err := checkDir(dir, create, false); err != nil {
 		return "", err
 	}
@@ -130,32 +144,7 @@ func readCapped(r io.Reader, limit int64) (data []byte, over bool, err error) {
 // the oldest until the kind holds at most artifactKindBytes. keep is never
 // deleted.
 func (s *Server) sweepArtifacts(dir, keep string) {
-	f, err := os.Open(dir) // #nosec G304 -- a checked artifacts directory
-	if err != nil {
-		return
-	}
-	entries, _ := f.ReadDir(maxArtifactSweep)
-	f.Close()
-	type item struct {
-		name string
-		mod  time.Time
-		size int64
-	}
-	var items []item
-	var total int64
-	now := s.now()
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil || e.Name() == keep || !validArtifactID(e.Name()) || !info.Mode().IsRegular() || !ownedByMe(info) {
-			continue
-		}
-		if now.Sub(info.ModTime()) > artifactMaxAge {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
-			continue
-		}
-		items = append(items, item{e.Name(), info.ModTime(), info.Size()})
-		total += info.Size()
-	}
+	items, total := s.inventoryArtifacts(dir, keep)
 	if keepInfo, err := os.Lstat(filepath.Join(dir, keep)); err == nil {
 		total += keepInfo.Size()
 	}
@@ -171,6 +160,44 @@ func (s *Server) sweepArtifacts(dir, keep string) {
 	}
 }
 
+type sweepItem struct {
+	name string
+	mod  time.Time
+	size int64
+}
+
+// inventoryArtifacts reads every entry of dir, a batch at a time, deleting
+// those past artifactMaxAge and returning the rest (except keep) with their
+// total size.
+func (s *Server) inventoryArtifacts(dir, keep string) ([]sweepItem, int64) {
+	f, err := os.Open(dir) // #nosec G304 -- a checked artifacts directory
+	if err != nil {
+		return nil, 0
+	}
+	defer f.Close()
+	var items []sweepItem
+	var total int64
+	now := s.now()
+	for {
+		entries, err := f.ReadDir(artifactSweepBatch)
+		for _, e := range entries {
+			info, ierr := e.Info()
+			if ierr != nil || e.Name() == keep || !validArtifactID(e.Name()) || !info.Mode().IsRegular() || !ownedByMe(info) {
+				continue
+			}
+			if now.Sub(info.ModTime()) > artifactMaxAge {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+				continue
+			}
+			items = append(items, sweepItem{e.Name(), info.ModTime(), info.Size()})
+			total += info.Size()
+		}
+		if err != nil || len(entries) == 0 {
+			return items, total
+		}
+	}
+}
+
 func (s *Server) artifactKindLimit() int64 {
 	if s.artifactKindBytes > 0 {
 		return s.artifactKindBytes
@@ -178,18 +205,20 @@ func (s *Server) artifactKindLimit() int64 {
 	return artifactKindBytes
 }
 
-// newArtifactFile creates a fresh, empty artifact file for a tool to write
-// into (O_EXCL, so it is ours and new) and returns its path and id.
-func (s *Server) newArtifactFile(kind, prefix, ext string) (path, id string, err error) {
-	dir, err := s.artifactKindDir(kind, true)
+// newStagedArtifact creates a fresh, empty file in the staging directory for
+// a tool to capture into (O_EXCL, so it is ours and new) and returns the
+// staging directory, the file's path and its id. publishStaged moves it into
+// its kind directory once the capture succeeds.
+func (s *Server) newStagedArtifact(prefix, ext string) (staging, path, id string, err error) {
+	staging, err = s.artifactStagingDir(true)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	id = s.newArtifactID(prefix, ext)
-	path = filepath.Join(dir, id)
+	path = filepath.Join(staging, id)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600) // #nosec G304 -- a generated name in a checked directory
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return path, id, f.Close()
+	return staging, path, id, f.Close()
 }

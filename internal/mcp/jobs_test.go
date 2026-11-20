@@ -204,7 +204,8 @@ func TestJobValidationMatchesHandlers(t *testing.T) {
 		"process":  {`{"operation":"sample"}`, `{"operation":"sample","pid":20,"duration_seconds":61}`, `{"operation":"sample","pid":20,"duration_seconds":-1}`},
 		"jvm": {`{"operation":"flamegraph","pid":1}`, `{"operation":"flamegraph","confirm_sensitive":true}`,
 			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"duration_seconds":61}`,
-			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"event":"bogus"}`},
+			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"event":"bogus"}`,
+			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"dest":"/tmp/graph.png"}`},
 		"triage":   {`{"pid":"x"}`},
 		"snapshot": {`{"operation":5}`},
 	}

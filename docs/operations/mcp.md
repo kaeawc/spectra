@@ -69,7 +69,12 @@ Limits:
 
 - At most 2 jobs run at once. Further jobs are accepted and queue in start
   order (`working`, with a `queued behind N job(s)` status message); a queued
-  job that is cancelled never runs.
+  job that is cancelled leaves the queue at once and never runs.
+- A job's `arguments` may be at most 1 MiB; a job drops them once it starts
+  (or is cancelled), keeping only its result.
+- A `job_start` whose request is already cancelled registers nothing. Once a
+  job is registered it runs independently of that request, and the call
+  returns its job id.
 - At most 32 jobs are working (queued or running) at once; `job_start` refuses
   a job beyond that.
 - A finished job and its result are kept for 15 minutes (`ttl`), and at most
@@ -217,7 +222,7 @@ their text (the text and `structuredContent` are unchanged). The link points at
 | Tool | Kind | Read returns |
 | --- | --- | --- |
 | `process` `sample` | `sample` | The sample report as `text/plain` |
-| `jvm` `flamegraph` | `flamegraph` | The profile the capture wrote into a fresh file in the artifacts directory: `image/svg+xml` for `.svg`, `text/html` otherwise. A `dest` gets a copy of that file; `dest` itself is never read back |
+| `jvm` `flamegraph` | `flamegraph` | The profile the capture wrote into a fresh file in the artifacts directory, in `dest`'s format: `text/html` for `.html`, `image/svg+xml` for `.svg`, `text/plain` for `.collapsed`, `.folded` and `.txt`, `application/octet-stream` for `.jfr`. A `dest` gets a copy of that file; `dest` itself is never read back |
 | `jvm` `heap_dump` | `heap` | Metadata only (`application/json`): pid, local `path`, size, whether the file still exists. The dump itself is never served |
 | `snapshot` `create` (with `store`) and `get` | `snapshot` | The stored snapshot as `application/json` |
 
@@ -239,9 +244,25 @@ artifacts older than 7 days go, then the oldest until the kind holds at most
 
 `process` `sample` and `jvm` `flamegraph` take `duration_seconds` 1–60 (0 or
 omitted is the default), and `jvm` `flamegraph` takes `event` `cpu`, `wall`,
-`alloc`, `lock`, `itimer` or `ctimer`; `job_start` checks both up front. A
-cancelled `snapshot` (`store`), `diagnose` (`persist`) or `issues` `check`
-never writes to the local store.
+`alloc`, `lock`, `itimer` or `ctimer`; `job_start` checks both up front.
+`jvm` `flamegraph`'s `dest` extension picks asprof's output format, and the
+capture keeps it: `.html` (the default when `dest` is omitted), `.jfr`,
+`.collapsed`, `.folded`, `.svg` (async-profiler 1.x) or `.txt` (a text
+summary). Any other extension is refused before the capture starts. A capture
+is written into `~/.spectra/artifacts/.staging/` (same ownership and mode
+checks, never served or swept) and moved into `flamegraph/` only once it
+succeeds, so a concurrent sweep cannot delete it; a `dest` copy over 64 MiB
+fails and leaves `dest` as it was.
+
+Writes to the local store are atomic per call. `snapshot` (`store`) saves the
+snapshot and its indexed process, login-item and permission rows in one
+transaction; `diagnose` (`persist`) and `issues` `check` save the snapshot and
+every issue update in one transaction. A call cancelled before that commit
+stores nothing; a cancellation that lands while the commit is already running
+does not undo it, so the call can be reported cancelled with everything
+stored. Either way the store never holds half a call's writes. Check the store
+(`snapshot` `list`, `issues` `list`) before retrying such a call: a retry
+stores another snapshot, though its issues are upserted, not duplicated.
 
 ### Completions
 

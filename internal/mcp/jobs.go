@@ -40,6 +40,7 @@ const (
 	defaultMaxJobResult      = 4 << 20
 	defaultMaxRetainedResult = 32 << 20
 	defaultJobShutdownWait   = 5 * time.Second
+	defaultMaxJobArgs        = 1 << 20
 )
 
 var errUnknownJob = errors.New("unknown job_id (jobs are visible only to the session that started them, and expire after their ttl)")
@@ -66,6 +67,8 @@ type jobConfig struct {
 	MaxRetainedBytes int
 	// ShutdownWait bounds how long close waits for cancelled jobs to return.
 	ShutdownWait time.Duration
+	// MaxArgsBytes caps a job's raw arguments, which it holds until it runs.
+	MaxArgsBytes int
 }
 
 func (c jobConfig) withDefaults(clock Clock) jobConfig {
@@ -86,6 +89,7 @@ func (c jobConfig) withDefaults(clock Clock) jobConfig {
 	setDefault(&c.MaxResultBytes, defaultMaxJobResult)
 	setDefault(&c.MaxRetainedBytes, defaultMaxRetainedResult)
 	setDefault(&c.ShutdownWait, defaultJobShutdownWait)
+	setDefault(&c.MaxArgsBytes, defaultMaxJobArgs)
 	return c
 }
 
@@ -178,12 +182,24 @@ func newJobID() (string, error) {
 
 // start registers a job and runs it in the background; it returns at once.
 func (st *jobStore) start(owner any, tool, op string, args json.RawMessage, run toolHandler) (jobRecord, error) {
+	return st.startCtx(context.Background(), owner, tool, op, args, run)
+}
+
+// startCtx is start for a request: a request already cancelled registers
+// nothing. Once registered, the job runs under the store's context, not ctx.
+func (st *jobStore) startCtx(ctx context.Context, owner any, tool, op string, args json.RawMessage, run toolHandler) (jobRecord, error) {
+	if len(args) > st.cfg.MaxArgsBytes {
+		return jobRecord{}, fmt.Errorf("arguments are %d bytes, over the %d-byte job limit", len(args), st.cfg.MaxArgsBytes)
+	}
 	id, err := newJobID()
 	if err != nil {
 		return jobRecord{}, err
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return jobRecord{}, err
+	}
 	if st.closed {
 		return jobRecord{}, errors.New("the server is shutting down")
 	}
@@ -192,8 +208,8 @@ func (st *jobStore) start(owner any, tool, op string, args json.RawMessage, run 
 	if live := st.liveLocked(); live >= st.cfg.MaxLive {
 		return jobRecord{}, fmt.Errorf("%d jobs are already working (the limit); wait for one to finish or cancel one", live)
 	}
-	ctx, cancel := context.WithCancel(st.base)
-	j := &job{id: id, tool: tool, op: op, owner: owner, args: args, run: run, ctx: ctx, cancel: cancel,
+	jctx, cancel := context.WithCancel(st.base)
+	j := &job{id: id, tool: tool, op: op, owner: owner, args: args, run: run, ctx: jctx, cancel: cancel,
 		status: jobWorking, created: now, updated: now}
 	st.jobs[id] = j
 	if st.running < st.cfg.MaxConcurrent {
@@ -205,20 +221,40 @@ func (st *jobStore) start(owner any, tool, op string, args json.RawMessage, run 
 	return st.recordLocked(j), nil
 }
 
+// launchLocked hands the job's handler and arguments to its worker and drops
+// them from the job, so a finished job retains only its result.
 func (st *jobStore) launchLocked(j *job) {
 	st.running++
 	j.msg = "running"
+	run, args := j.run, j.args
+	releaseLocked(j)
 	st.wg.Add(1)
-	go st.execute(j)
+	go st.execute(j, run, args)
 }
 
-// launchNextLocked starts the oldest queued job that is still working.
+// releaseLocked drops what only a job that has yet to run needs.
+func releaseLocked(j *job) { j.args, j.run = nil, nil }
+
+// launchNextLocked starts the oldest queued job. cancelJob removes a
+// cancelled job from the queue, so every queued job is still working.
 func (st *jobStore) launchNextLocked() {
 	for len(st.queue) > 0 && st.running < st.cfg.MaxConcurrent && !st.closed {
 		j := st.queue[0]
+		st.queue[0] = nil
 		st.queue = st.queue[1:]
-		if j.status == jobWorking {
-			st.launchLocked(j)
+		st.launchLocked(j)
+	}
+}
+
+// dequeueLocked removes j from the queue, keeping the rest in order, and
+// clears the vacated slot so the backing array does not retain it.
+func (st *jobStore) dequeueLocked(j *job) {
+	for i, q := range st.queue {
+		if q == j {
+			copy(st.queue[i:], st.queue[i+1:])
+			st.queue[len(st.queue)-1] = nil
+			st.queue = st.queue[:len(st.queue)-1]
+			return
 		}
 	}
 }
@@ -233,10 +269,10 @@ func (st *jobStore) liveLocked() int {
 	return n
 }
 
-func (st *jobStore) execute(j *job) {
+func (st *jobStore) execute(j *job, run toolHandler, args json.RawMessage) {
 	defer st.wg.Done()
 	defer j.cancel()
-	res := st.call(j.ctx, j)
+	res := st.call(j.ctx, j, run, args)
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.running--
@@ -246,7 +282,7 @@ func (st *jobStore) execute(j *job) {
 
 // call runs the wrapped handler with a progress reporter that records into
 // the job instead of notifying the client.
-func (st *jobStore) call(ctx context.Context, j *job) (res ToolResult) {
+func (st *jobStore) call(ctx context.Context, j *job, run toolHandler, args json.RawMessage) (res ToolResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			res = toolError(fmt.Sprintf("%s panicked: %v", j.tool, r))
@@ -257,7 +293,7 @@ func (st *jobStore) call(ctx context.Context, j *job) (res ToolResult) {
 			st.update(j, func() { j.progress = &jobProgress{Progress: p.Progress, Total: p.Total, Message: p.Message} })
 			return nil
 		}}
-	return j.run(withProgress(ctx, pr), j.args)
+	return run(withProgress(ctx, pr), args)
 }
 
 // update applies fn to a working job and stamps lastUpdatedAt.
@@ -397,6 +433,8 @@ func (st *jobStore) cancelJob(owner any, id string) (jobRecord, error) {
 	now := st.now()
 	j.status, j.msg, j.updated, j.finished = jobCancelled, "cancelled by the client", now, now
 	j.cancel()
+	st.dequeueLocked(j)
+	releaseLocked(j)
 	return st.recordLocked(j), nil
 }
 
@@ -431,6 +469,7 @@ func (st *jobStore) close() {
 		if j.status == jobWorking {
 			j.status, j.msg, j.updated, j.finished = jobCancelled, "cancelled: the server shut down", now, now
 		}
+		releaseLocked(j)
 	}
 	st.queue = nil
 	st.mu.Unlock()

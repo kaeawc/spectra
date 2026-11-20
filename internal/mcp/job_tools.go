@@ -124,8 +124,14 @@ func (s *Server) jobToolHandler(name string) sdk.ToolHandler {
 				args = req.Params.Arguments
 			}
 		}
-		res := s.jobTool(name, owner, args)
 		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		res := s.jobTool(ctx, name, owner, args)
+		// A started or cancelled job is a state change the caller must learn
+		// about (the job id, the cancelled record), so only reads give way to a
+		// request cancelled meanwhile.
+		if err := ctx.Err(); err != nil && jobToolReadOnly[name] {
 			return nil, err
 		}
 		return sdkResult(res), nil
@@ -133,7 +139,7 @@ func (s *Server) jobToolHandler(name string) sdk.ToolHandler {
 }
 
 // jobTool runs one job tool for owner (the calling session).
-func (s *Server) jobTool(name string, owner any, raw json.RawMessage) ToolResult {
+func (s *Server) jobTool(ctx context.Context, name string, owner any, raw json.RawMessage) ToolResult {
 	if s.jobs == nil {
 		return toolError("jobs are not available")
 	}
@@ -141,7 +147,7 @@ func (s *Server) jobTool(name string, owner any, raw json.RawMessage) ToolResult
 		return toolError("jobs need a session")
 	}
 	if name == "job_start" {
-		return s.jobStart(owner, raw)
+		return s.jobStart(ctx, owner, raw)
 	}
 	if name == "job_list" {
 		return toolText(s.jobs.list(owner))
@@ -178,7 +184,7 @@ func recordResult(r jobRecord, err error) ToolResult {
 	return toolText(r)
 }
 
-func (s *Server) jobStart(owner any, raw json.RawMessage) ToolResult {
+func (s *Server) jobStart(ctx context.Context, owner any, raw json.RawMessage) ToolResult {
 	var p struct {
 		Tool      string          `json:"tool"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -198,7 +204,7 @@ func (s *Server) jobStart(owner any, raw json.RawMessage) ToolResult {
 		return toolError(err.Error())
 	}
 	handler := s.toolHandlers()[p.Tool]
-	rec, err := s.jobs.start(owner, p.Tool, op, p.Arguments, handler)
+	rec, err := s.jobs.startCtx(ctx, owner, p.Tool, op, p.Arguments, handler)
 	if err != nil {
 		return toolError("job_start: " + err.Error())
 	}

@@ -64,6 +64,22 @@ func TestCancelledCallsNeverPersist(t *testing.T) {
 	}
 }
 
+func TestStoredSnapshotKeepsItsIndexedRows(t *testing.T) {
+	s := structuredTestServer(t)
+	s.collect.Snapshots = fakeSnapshotCollector{snap: snapshot.Snapshot{ID: "snap-rows", Processes: []process.Info{{PID: 10, PPID: 1, Command: "java"}}}}
+	if res := s.toolSnapshot(context.Background(), json.RawMessage(`{"operation":"create","store":true}`)); res.IsError {
+		t.Fatal(res.Content[0].Text)
+	}
+	db, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if procs, err := db.GetSnapshotProcesses(context.Background(), "snap-rows"); err != nil || len(procs) != 1 {
+		t.Fatalf("stored snapshot has %d process row(s), %v; want 1", len(procs), err)
+	}
+}
+
 // homeServer serves artifacts from the default ~/.spectra/artifacts under an
 // injected home directory.
 func homeServer(t *testing.T) (*Server, string) {

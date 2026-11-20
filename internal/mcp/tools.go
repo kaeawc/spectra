@@ -1222,22 +1222,23 @@ func checkFlamegraphArgs(p jvmParams) error {
 	if p.Event != "" && !flamegraphEvents[p.Event] {
 		return fmt.Errorf("event must be one of %s", strings.Join(flamegraphEventNames(), ", "))
 	}
+	if flamegraphExt(p.Dest) == "" {
+		return fmt.Errorf("dest must end in %s (asprof picks the output format from it)", strings.Join(flamegraphFormats, ", "))
+	}
 	return nil
 }
 
 // toolJVMFlamegraph captures into a fresh file it creates in the artifacts
-// directory and links only that file; dest, when given, gets a copy. The
-// capture never reads back a file it did not create, so dest cannot make the
-// server serve an arbitrary file.
+// staging directory, in the format dest's extension names, and links only
+// that file once it is published into the flamegraph directory; dest, when
+// given, gets a copy. The capture never reads back a file it did not create,
+// so dest cannot make the server serve an arbitrary file, and a capture is
+// out of the retention sweep's reach until it is published.
 func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
 	if err := checkFlamegraphArgs(p); err != nil {
 		return toolError(err.Error())
 	}
-	ext := safeArtifactExt(p.Dest)
-	if ext == ".bin" || ext == ".txt" {
-		ext = ".html"
-	}
-	out, id, err := s.newArtifactFile(kindFlamegraph, fmt.Sprintf("flamegraph-%d", p.PID), ext)
+	staging, out, id, err := s.newStagedArtifact(fmt.Sprintf("flamegraph-%d", p.PID), flamegraphExt(p.Dest))
 	linked := err == nil
 	if !linked {
 		// No safe artifacts directory: capture straight to dest, unlinked.
@@ -1258,16 +1259,25 @@ func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult 
 	if !linked {
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": out}, Timestamp: s.now()})
 	}
-	link, ok := s.linkCapturedFile(kindFlamegraph, id, fmt.Sprintf("Flamegraph of pid %d", p.PID))
+	size, ok := stagedSize(staging, id)
 	if !ok {
 		return toolError(fmt.Sprintf("flamegraph capture for pid %d produced no output", p.PID))
 	}
-	dest := out
 	if p.Dest != "" {
-		if err := s.copyArtifactTo(kindFlamegraph, id, p.Dest); err != nil {
+		if err := s.copyArtifactTo(staging, id, p.Dest); err != nil {
+			_ = os.Remove(out)
 			return toolError(fmt.Sprintf("copy flamegraph to dest: %v", err))
 		}
-		dest = p.Dest
+	}
+	link, ok := s.publishStaged(kindFlamegraph, staging, id, fmt.Sprintf("Flamegraph of pid %d", p.PID), size)
+	if !ok {
+		_ = os.Remove(out)
+		return toolError(fmt.Sprintf("flamegraph capture for pid %d could not be published", p.PID))
+	}
+	dest := p.Dest
+	if dest == "" {
+		root, _, _ := s.artifactsRoot()
+		dest = filepath.Join(root, kindFlamegraph, id)
 	}
 	res := toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": dest}, Timestamp: s.now()})
 	return withLinks(res, link)
@@ -1766,13 +1776,13 @@ func saveSnapshot(ctx context.Context, snap snapshot.Snapshot) error {
 		return err
 	}
 	defer db.Close()
-	if err := db.SaveSnapshot(ctx, store.FromSnapshot(snap)); err != nil {
-		return err
-	}
-	_ = db.SaveSnapshotProcesses(ctx, snap.ID, store.ProcessesFromSnapshot(snap))
-	_ = db.SaveLoginItems(ctx, snap.ID, store.LoginItemsFromSnapshot(snap))
-	_ = db.SaveGrantedPerms(ctx, snap.ID, store.GrantedPermsFromSnapshot(snap))
-	return nil
+	// One transaction: a cancel before the commit stores neither the snapshot
+	// nor its indexed rows, so a stored snapshot always has them.
+	return db.SaveSnapshotWithRows(ctx, store.FromSnapshot(snap), store.SnapshotRows{
+		Processes:    store.ProcessesFromSnapshot(snap),
+		LoginItems:   store.LoginItemsFromSnapshot(snap),
+		GrantedPerms: store.GrantedPermsFromSnapshot(snap),
+	})
 }
 
 func (s *Server) evaluateLiveRules(ctx context.Context, config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
@@ -1848,10 +1858,9 @@ func persistFindings(ctx context.Context, snap snapshot.Snapshot, findings []rul
 	return persistFindingsWithDB(ctx, db, snap, findings)
 }
 
+// persistFindingsWithDB stores snap and its issue updates in one transaction:
+// a cancel before the commit leaves neither.
 func persistFindingsWithDB(ctx context.Context, db *store.DB, snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
-	if err := db.SaveSnapshot(ctx, store.FromSnapshot(snap)); err != nil {
-		return nil, err
-	}
 	inputs := make([]store.FindingInput, 0, len(findings))
 	for _, f := range findings {
 		inputs = append(inputs, store.FindingInput{RuleID: f.RuleID, Subject: f.Subject, Severity: string(f.Severity), Message: f.Message, Fix: f.Fix})
@@ -1863,7 +1872,7 @@ func persistFindingsWithDB(ctx context.Context, db *store.DB, snap snapshot.Snap
 	if machineUUID == "" {
 		machineUUID = "local"
 	}
-	return db.UpsertIssues(ctx, machineUUID, snap.ID, inputs)
+	return db.SaveSnapshotAndUpsertIssues(ctx, store.FromSnapshot(snap), machineUUID, inputs)
 }
 
 func (s *Server) jvmOptions(ctx context.Context) jvm.CollectOptions {

@@ -109,7 +109,7 @@ func artifactMIME(ext string) string {
 		return "text/html"
 	case ".svg":
 		return "image/svg+xml"
-	case ".txt", ".collapsed":
+	case ".txt", ".collapsed", ".folded":
 		return "text/plain"
 	case ".json":
 		return "application/json"
@@ -121,14 +121,25 @@ func textMIME(mime string) bool {
 	return strings.HasPrefix(mime, "text/") || mime == "image/svg+xml" || mime == "application/json"
 }
 
-// safeArtifactExt maps a source file's extension to one Spectra stores.
-func safeArtifactExt(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".html", ".svg", ".txt", ".collapsed":
-		return ext
+// flamegraphFormats are the dest extensions jvm flamegraph accepts. asprof
+// picks its output format from the output file's extension (.html flame
+// graph, .jfr recording, .collapsed/.folded stacks, .svg on async-profiler
+// 1.x, anything else a text summary), so the capture file keeps it.
+var flamegraphFormats = []string{".html", ".svg", ".jfr", ".collapsed", ".folded", ".txt"}
+
+// flamegraphExt is the capture's extension for dest: its own when asprof
+// supports it, .html when dest is empty, and "" (unsupported) otherwise.
+func flamegraphExt(dest string) string {
+	if dest == "" {
+		return ".html"
 	}
-	return ".bin"
+	ext := strings.ToLower(filepath.Ext(dest))
+	for _, f := range flamegraphFormats {
+		if ext == f {
+			return ext
+		}
+	}
+	return ""
 }
 
 func (s *Server) newArtifactID(prefix, ext string) string {
@@ -150,41 +161,61 @@ func (s *Server) saveArtifact(kind, prefix, ext, description string, data []byte
 	return artifactLink{URI: artifactURI(kind, id), Name: id, Description: description, MIMEType: artifactMIME(ext), Size: int64(len(data))}, true
 }
 
-// linkCapturedFile links an artifact a tool wrote into a file newArtifactFile
-// created. An empty or unreadable capture is removed and yields no link.
-func (s *Server) linkCapturedFile(kind, id, description string) (artifactLink, bool) {
-	dir, err := s.artifactKindDir(kind, false)
+// stagedSize checks a capture a tool wrote into a file newStagedArtifact
+// created. An empty or unreadable capture is removed and reports false.
+func stagedSize(staging, id string) (int64, bool) {
+	f, info, err := openArtifact(staging, id)
 	if err != nil {
-		return artifactLink{}, false
-	}
-	f, info, err := openArtifact(dir, id)
-	if err != nil {
-		return artifactLink{}, false
+		return 0, false
 	}
 	f.Close()
 	if info.Size() == 0 {
-		_ = os.Remove(filepath.Join(dir, id))
+		_ = os.Remove(filepath.Join(staging, id))
+		return 0, false
+	}
+	return info.Size(), true
+}
+
+// publishStaged moves a finished capture from the staging directory into its
+// kind directory and links it. Only then can a sweep see it.
+func (s *Server) publishStaged(kind, staging, id, description string, size int64) (artifactLink, bool) {
+	dir, err := s.artifactKindDir(kind, true)
+	if err != nil {
+		return artifactLink{}, false
+	}
+	if err := os.Rename(filepath.Join(staging, id), filepath.Join(dir, id)); err != nil {
 		return artifactLink{}, false
 	}
 	s.sweepArtifacts(dir, id)
-	return artifactLink{URI: artifactURI(kind, id), Name: id, Description: description, MIMEType: artifactMIME(filepath.Ext(id)), Size: info.Size()}, true
+	return artifactLink{URI: artifactURI(kind, id), Name: id, Description: description, MIMEType: artifactMIME(filepath.Ext(id)), Size: size}, true
 }
 
-// copyArtifactTo writes the caller's requested copy of a captured artifact.
-// dest is replaced atomically, so a symlink there is replaced, not followed.
-func (s *Server) copyArtifactTo(kind, id, dest string) error {
-	dir, err := s.artifactKindDir(kind, false)
-	if err != nil {
-		return err
+func (s *Server) artifactCopyLimit() int64 {
+	if s.artifactCopyBytes > 0 {
+		return s.artifactCopyBytes
 	}
-	f, _, err := openArtifact(dir, id)
+	return maxArtifactCopy
+}
+
+// copyArtifactTo writes the caller's requested copy of a staged capture.
+// dest is replaced atomically, so a symlink there is replaced, not followed,
+// and a capture over the copy cap fails without touching dest.
+func (s *Server) copyArtifactTo(staging, id, dest string) error {
+	f, _, err := openArtifact(staging, id)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	limit := s.artifactCopyLimit()
 	return fsutil.WriteFileAtomicStream(dest, 0o600, func(w io.Writer) error {
-		_, err := io.Copy(w, io.LimitReader(f, maxArtifactCopy))
-		return err
+		n, err := io.Copy(w, io.LimitReader(f, limit+1))
+		if err != nil {
+			return err
+		}
+		if n > limit {
+			return fmt.Errorf("capture is over the %d-byte copy limit", limit)
+		}
+		return nil
 	})
 }
 

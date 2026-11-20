@@ -402,12 +402,81 @@ type HostRow struct {
 // SaveSnapshot persists snap and all its apps. It upserts the host row
 // and inserts the snapshot + apps rows inside a single transaction.
 func (s *DB) SaveSnapshot(ctx context.Context, snap SnapshotInput) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error { return saveSnapshotTx(ctx, tx, snap) })
+}
+
+// inTx runs fn in one transaction. database/sql rolls the transaction back
+// once ctx is done, so a cancellation before the commit leaves nothing; a
+// commit already under way reports its outcome.
+func (s *DB) inTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// testHookInSnapshotTx runs inside the combined snapshot transactions, after
+// the snapshot row is written, so tests can cancel mid-transaction.
+var testHookInSnapshotTx func()
+
+func runSnapshotTxHook() {
+	if testHookInSnapshotTx != nil {
+		testHookInSnapshotTx()
+	}
+}
+
+// SnapshotRows are a snapshot's indexed child rows.
+type SnapshotRows struct {
+	Processes    []ProcessSnapshotRow
+	LoginItems   []LoginItemRow
+	GrantedPerms []GrantedPermRow
+}
+
+// SaveSnapshotWithRows persists snap and its indexed rows in one
+// transaction: either all of them are stored or none is.
+func (s *DB) SaveSnapshotWithRows(ctx context.Context, snap SnapshotInput, rows SnapshotRows) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := saveSnapshotTx(ctx, tx, snap); err != nil {
+			return err
+		}
+		runSnapshotTxHook()
+		if err := saveSnapshotProcessesTx(ctx, tx, snap.ID, rows.Processes); err != nil {
+			return err
+		}
+		if err := saveLoginItemsTx(ctx, tx, snap.ID, rows.LoginItems); err != nil {
+			return err
+		}
+		return saveGrantedPermsTx(ctx, tx, snap.ID, rows.GrantedPerms)
+	})
+}
+
+// SaveSnapshotAndUpsertIssues persists snap and reconciles findings against
+// the issues table (as UpsertIssues) in one transaction, returning the
+// touched issue IDs. Either the snapshot and every issue change are stored or
+// none is.
+func (s *DB) SaveSnapshotAndUpsertIssues(ctx context.Context, snap SnapshotInput, machineUUID string, findings []FindingInput) ([]string, error) {
+	var ids []string
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := saveSnapshotTx(ctx, tx, snap); err != nil {
+			return err
+		}
+		runSnapshotTxHook()
+		var err error
+		ids, err = s.upsertIssuesTx(ctx, tx, machineUUID, snap.ID, findings)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func saveSnapshotTx(ctx context.Context, tx *sql.Tx, snap SnapshotInput) error {
 	if err := upsertHost(tx, snap); err != nil {
 		return err
 	}
@@ -430,7 +499,7 @@ func (s *DB) SaveSnapshot(ctx context.Context, snap SnapshotInput) error {
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func upsertHost(tx *sql.Tx, s SnapshotInput) error {
@@ -688,11 +757,13 @@ func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []P
 	if len(procs) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	return s.inTx(ctx, func(tx *sql.Tx) error { return saveSnapshotProcessesTx(ctx, tx, snapID, procs) })
+}
+
+func saveSnapshotProcessesTx(ctx context.Context, tx *sql.Tx, snapID string, procs []ProcessSnapshotRow) error {
+	if len(procs) == 0 {
+		return nil
 	}
-	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR IGNORE INTO snapshot_processes
 		  (snapshot_id, pid, ppid, command, rss_kib, cpu_pct, app_path)
@@ -706,7 +777,7 @@ func (s *DB) SaveSnapshotProcesses(ctx context.Context, snapID string, procs []P
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // GetSnapshotProcesses returns all process rows for snapID.
@@ -747,11 +818,13 @@ func (s *DB) SaveLoginItems(ctx context.Context, snapID string, items []LoginIte
 	if len(items) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	return s.inTx(ctx, func(tx *sql.Tx) error { return saveLoginItemsTx(ctx, tx, snapID, items) })
+}
+
+func saveLoginItemsTx(ctx context.Context, tx *sql.Tx, snapID string, items []LoginItemRow) error {
+	if len(items) == 0 {
+		return nil
 	}
-	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR IGNORE INTO login_items
 		  (snapshot_id, bundle_id, plist_path, label, scope, daemon, run_at_load, keep_alive)
@@ -766,7 +839,7 @@ func (s *DB) SaveLoginItems(ctx context.Context, snapID string, items []LoginIte
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // GetLoginItems returns all login item rows for snapID.
@@ -808,11 +881,13 @@ func (s *DB) SaveGrantedPerms(ctx context.Context, snapID string, perms []Grante
 	if len(perms) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	return s.inTx(ctx, func(tx *sql.Tx) error { return saveGrantedPermsTx(ctx, tx, snapID, perms) })
+}
+
+func saveGrantedPermsTx(ctx context.Context, tx *sql.Tx, snapID string, perms []GrantedPermRow) error {
+	if len(perms) == 0 {
+		return nil
 	}
-	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR IGNORE INTO granted_perms (snapshot_id, bundle_id, service)
 		VALUES (?,?,?)`)
@@ -825,7 +900,7 @@ func (s *DB) SaveGrantedPerms(ctx context.Context, snapID string, perms []Grante
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // GetGrantedPerms returns all TCC permission rows for snapID.
@@ -1791,12 +1866,19 @@ type AppliedFixRow struct {
 // inserted.
 // Returns the IDs of all touched (inserted or updated) issues.
 func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, findings []FindingInput) ([]string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	var ids []string
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		ids, err = s.upsertIssuesTx(ctx, tx, machineUUID, snapshotID, findings)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("store: begin tx: %w", err)
+		return nil, err
 	}
-	defer tx.Rollback() //nolint:errcheck
+	return ids, nil
+}
 
+func (s *DB) upsertIssuesTx(ctx context.Context, tx *sql.Tx, machineUUID, snapshotID string, findings []FindingInput) ([]string, error) {
 	now := s.nowString()
 	var ids []string
 	for _, f := range findings {
@@ -1852,7 +1934,7 @@ func (s *DB) UpsertIssues(ctx context.Context, machineUUID, snapshotID string, f
 		}
 		ids = append(ids, id)
 	}
-	return ids, tx.Commit()
+	return ids, nil
 }
 
 // FindingInput is the data from a rules engine finding used to upsert an issue.
