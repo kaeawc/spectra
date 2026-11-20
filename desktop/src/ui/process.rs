@@ -5,7 +5,7 @@ use rune::{Cursor, El, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, Kit};
 
 use super::card::{card, dot, ink};
-use super::chart::{Lane, Mark, lanes};
+use super::chart::{Lane, Mark, count, lanes};
 use super::detail::{jvm_part, section};
 use super::list::sign_badge;
 use crate::app::App;
@@ -40,6 +40,11 @@ pub fn page(s: &App, p: &Process, k: &Kit) -> El {
     page = page
         .child(section("About", facts(s, p, k), k))
         .child(section("Activity", activity(s, p, k), k));
+    if s.ended_page().is_none() {
+        page = page
+            .child(section("Network and energy", super::app_page::live(s, "pd", k), k))
+            .child(super::tools::panel(s, p.pid, k));
+    }
     if let Some(j) = s.jvm(p.pid) {
         page = page.child(jvm_part(s, j, k));
     }
@@ -47,7 +52,7 @@ pub fn page(s: &App, p: &Process, k: &Kit) -> El {
     if !kids.is_empty() {
         page = page.child(section(
             &format!("Started by it ({})", fmt_count(kids.len() as u64)),
-            children(&kids, k),
+            children("pd", &kids, k),
             k,
         ));
     }
@@ -110,7 +115,7 @@ fn header(s: &App, p: &Process, worst: Option<&Finding>, k: &Kit) -> El {
         .child(super::quit::actions(s, p, "pd", k))
 }
 
-fn fact(key: &str, label: &str, value: El, k: &Kit) -> El {
+pub(super) fn fact(key: &str, label: &str, value: El, k: &Kit) -> El {
     row()
         .key(format!("pd-fact-{key}"))
         .w_full()
@@ -124,7 +129,7 @@ fn fact(key: &str, label: &str, value: El, k: &Kit) -> El {
         .child(col().grow(1.0).min_w(0.0).child(value))
 }
 
-fn value(v: impl Into<String>, k: &Kit) -> El {
+pub(super) fn value(v: impl Into<String>, k: &Kit) -> El {
     text(v.into())
         .font(k.ty.small)
         .color(k.c.text_base)
@@ -244,17 +249,25 @@ fn activity(s: &App, p: &Process, k: &Kit) -> El {
             unit: fmt_mem,
             mark: Mark::Line,
         },
+        Lane {
+            key: "pd-lane-threads",
+            label: "Threads",
+            values: h.iter().map(|x| x.threads as f64).collect(),
+            unit: count,
+            mark: Mark::Line,
+        },
     ];
     lanes("pd", h.len(), &all, None, k.c.text_accent, k)
 }
 
-fn children(kids: &[&Process], k: &Kit) -> El {
+/// Processes a row each, busiest first; each opens its page. `prefix` keys them.
+pub(super) fn children(prefix: &str, kids: &[&Process], k: &Kit) -> El {
     let c = &k.c;
     let mut kids: Vec<&&Process> = kids.iter().collect();
     kids.sort_by(|a, b| crate::groups::Sort::default().processes(a, b));
     let figures = k.ty.small.features("'tnum' 1");
     let mut list = col()
-        .key("pd-children")
+        .key(format!("{prefix}-children"))
         .w_full()
         .radius(k.radius.md)
         .fill(c.layer_01)
@@ -263,7 +276,7 @@ fn children(kids: &[&Process], k: &Kit) -> El {
     for p in kids.iter().take(CHILDREN) {
         let pid = p.pid;
         let r = row()
-            .key(format!("pd-child-{pid}"))
+            .key(format!("{prefix}-child-{pid}"))
             .role("link")
             .label(format!("Open {}", p.name()))
             .cursor(Cursor::Pointer)
@@ -291,7 +304,7 @@ fn children(kids: &[&Process], k: &Kit) -> El {
     if kids.len() > CHILDREN {
         list = list.child(
             text(format!("and {} more", kids.len() - CHILDREN))
-                .key("pd-children-more")
+                .key(format!("{prefix}-children-more"))
                 .px(12.0)
                 .py(6.0)
                 .font(k.ty.small)

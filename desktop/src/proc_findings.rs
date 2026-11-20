@@ -171,11 +171,11 @@ mod tests {
     use crate::procs::Signing;
 
     fn cpu(values: &[f64]) -> Vec<ProcSample> {
-        values.iter().map(|&cpu| ProcSample { cpu, rss_kib: 1.0 }).collect()
+        values.iter().map(|&cpu| ProcSample { cpu, rss_kib: 1.0, threads: 1 }).collect()
     }
 
     fn mem(values: &[f64]) -> Vec<ProcSample> {
-        values.iter().map(|&mb| ProcSample { cpu: 0.0, rss_kib: mb * 1024.0 }).collect()
+        values.iter().map(|&mb| ProcSample { cpu: 0.0, rss_kib: mb * 1024.0, threads: 1 }).collect()
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
     }
 
     fn rising(readings: usize) -> Vec<ProcSample> {
-        (0..readings).map(|i| ProcSample { cpu: 150.0, rss_kib: (300.0 + 5.0 * i as f64) * 1024.0 }).collect()
+        (0..readings).map(|i| ProcSample { cpu: 150.0, rss_kib: (300.0 + 5.0 * i as f64) * 1024.0, threads: 1 }).collect()
     }
 
     #[test]

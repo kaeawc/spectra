@@ -494,7 +494,7 @@ pub(crate) mod tests {
             pid: 900,
             ppid: 1,
             uid: 501,
-            user: "jason".into(),
+            user: "user".into(),
             command: "Slack".into(),
             executable_path: "/Applications/Slack.app/Contents/MacOS/Slack".into(),
             started_at: "2026-11-19T19:28:38-05:00".into(),

@@ -13,6 +13,7 @@ use rune_kit::{SortDir, TableState};
 use crate::data::{Jvm, Sample};
 use crate::findings::{Finding, Link, Severity, diagnose};
 use crate::groups::{self, Category, Group, Nav, Row, Sort, SortKey};
+use crate::inspect::Inspector;
 use crate::proc_findings;
 use crate::procs::{ProcError, ProcFeed, ProcSample, Process, Role, Runtime};
 use crate::signal::{self, Attempt, Identity, Me, Signal, Signals, Target};
@@ -46,11 +47,19 @@ pub struct Track {
     pub samples: Vec<ProcSample>,
 }
 
-/// A process page: the pid, and when that process started, so a reused pid isn't taken for it.
+/// A page to go back to: a process, by pid and when it started so a reused pid isn't taken for
+/// it, or an app, by its bundle's path (`pid` is then 0).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PageRef {
     pub pid: u32,
     pub started: String,
+    pub app: Option<String>,
+}
+
+impl PageRef {
+    fn app(path: String) -> PageRef {
+        PageRef { pid: 0, started: String::new(), app: Some(path) }
+    }
 }
 
 /// A Quit or Force quit waiting for the person to confirm it.
@@ -223,8 +232,12 @@ pub struct App {
     pub selected: Option<u32>,
     /// When the open page's process started, empty for a JVM the process feed doesn't list.
     pub selected_started: String,
+    /// The app (by bundle path) whose page is open, when no process page is.
+    pub app_page: Option<String>,
     /// The pages "back" returns to, most recent last.
     pub back_stack: Vec<PageRef>,
+    /// The open page's tools, live readings and bundle.
+    pub inspect: Inspector,
     pub expanded: Option<String>,
     pub args_open: bool,
     /// Whether a process page shows its whole command line.
@@ -299,7 +312,9 @@ pub fn init() -> App {
         baseline: HashMap::new(),
         selected: None,
         selected_started: String::new(),
+        app_page: None,
         back_stack: Vec::new(),
+        inspect: Inspector::new(),
         expanded: None,
         args_open: false,
         cmd_all: false,
@@ -475,6 +490,10 @@ impl App {
 
     /// Whether `page` still names a running process (or a JVM the process feed doesn't list).
     fn is_live(&self, page: &PageRef) -> bool {
+        // An app page shows its bundle whether or not it runs.
+        if page.app.is_some() {
+            return true;
+        }
         match self.process(page.pid) {
             Some(p) => page.started.is_empty() || p.started_at == page.started,
             None => self.jvm(page.pid).is_some(),
@@ -485,7 +504,7 @@ impl App {
     /// A page whose process the app was asked to stop stays, to say it ended.
     fn drop_gone_selection(&mut self) {
         if let Some(pid) = self.selected
-            && !self.is_live(&PageRef { pid, started: self.selected_started.clone() })
+            && !self.is_live(&PageRef { pid, started: self.selected_started.clone(), app: None })
             && self.ended_page().is_none()
         {
             self.selected = None;
@@ -494,6 +513,7 @@ impl App {
         }
         let stack = std::mem::take(&mut self.back_stack);
         self.back_stack = stack.into_iter().filter(|p| self.is_live(p)).collect();
+        self.sync_inspector();
     }
 
     /// Whether the process feed has given a list; without one the app shows only JVMs. A failed
@@ -574,14 +594,24 @@ impl App {
         self.rebuild();
     }
 
-    /// A list row was opened (Return or a double click): a group opens or closes, a process
-    /// opens its page. Moving the cursor onto a row does neither.
+    /// A list row was opened (Return or a double click): an app opens its page, another group
+    /// opens or closes, a process opens its page. Moving the cursor onto a row does neither, and
+    /// the triangle only opens or closes the group.
     pub fn open_row(&mut self, id: &str) {
         if let Some(group) = id.strip_prefix("g:") {
-            self.toggle_group(group);
+            match self.app_path_of(group) {
+                Some(path) => self.open_app(&path),
+                None => self.toggle_group(group),
+            }
         } else if let Some(pid) = id.strip_prefix("p:").and_then(|p| p.parse().ok()) {
             self.open(pid);
         }
+    }
+
+    /// The bundle path of an app group, by its id.
+    fn app_path_of(&self, group: &str) -> Option<String> {
+        let g = self.groups.iter().find(|g| g.id == group && g.kind == groups::GroupKind::App)?;
+        g.pids.iter().find_map(|pid| self.process(*pid).and_then(|p| p.bundle_path()).map(str::to_owned))
     }
 
     pub fn follow(&mut self, link: Link) {
@@ -654,6 +684,7 @@ impl App {
         PageRef {
             pid,
             started: self.process(pid).map_or_else(String::new, |p| p.started_at.clone()),
+            app: None,
         }
     }
 
@@ -667,35 +698,72 @@ impl App {
         if self.selected != pid {
             self.cmd_all = false;
         }
+        self.app_page = None;
         self.selected = pid;
         self.selected_started = pid.map_or_else(String::new, |pid| self.page_ref(pid).started);
+        self.sync_inspector();
+    }
+
+    /// Remembers the open page, if any, for "back".
+    fn push_current(&mut self) {
+        if let Some(cur) = self.selected {
+            self.back_stack.push(PageRef { pid: cur, started: self.selected_started.clone(), app: None });
+        } else if let Some(path) = self.app_page.take() {
+            self.back_stack.push(PageRef::app(path));
+        }
     }
 
     /// Opens `pid`'s page from wherever we are, so "back" returns here.
     pub fn open(&mut self, pid: u32) {
-        if let Some(cur) = self.selected {
-            if cur == pid {
-                return;
-            }
-            self.back_stack.push(PageRef { pid: cur, started: self.selected_started.clone() });
+        if self.selected == Some(pid) {
+            return;
         }
+        self.push_current();
         self.set_page(Some(pid));
+    }
+
+    /// Opens the page of the app whose bundle is at `path`, so "back" returns here.
+    pub fn open_app(&mut self, path: &str) {
+        if self.selected.is_none() && self.app_page.as_deref() == Some(path) {
+            return;
+        }
+        self.push_current();
+        self.show_app(path.to_owned());
+    }
+
+    fn show_app(&mut self, path: String) {
+        self.set_page(None);
+        self.app_page = Some(path);
+        self.sync_inspector();
+    }
+
+    /// Whether a page (a process's or an app's) is over the list.
+    pub fn on_page(&self) -> bool {
+        self.selected.is_some() || self.app_page.is_some()
     }
 
     /// Returns to the page before this one, or to the list once there is none.
     pub fn back(&mut self) {
         while let Some(page) = self.back_stack.pop() {
             if self.is_live(&page) {
-                self.set_page(Some(page.pid));
+                match page.app {
+                    Some(path) => self.show_app(path),
+                    None => self.set_page(Some(page.pid)),
+                }
                 return;
             }
         }
         self.set_page(None);
     }
 
-    /// The page "back" would return to.
+    /// The process page "back" would return to.
     pub fn back_to(&self) -> Option<u32> {
-        self.back_stack.last().map(|p| p.pid)
+        self.back_stack.last().filter(|p| p.app.is_none()).map(|p| p.pid)
+    }
+
+    /// The page "back" would return to.
+    pub fn back_page(&self) -> Option<&PageRef> {
+        self.back_stack.last()
     }
 
     /// The process a list row's Quit acts on: the process itself, or an app group's main
@@ -723,6 +791,8 @@ impl App {
         match self.selected {
             Some(pid) if self.ended_page().is_none() => self.process(pid).map(|p| p.pid),
             Some(_) => None,
+            // An app page hides the list and its cursor.
+            None if self.app_page.is_some() => None,
             None if self.nav != Nav::Overview => self.cursor_target(),
             None => None,
         }

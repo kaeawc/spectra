@@ -1,6 +1,7 @@
 //! The view: a sidebar of places (the overview, every process, categories and runtimes) beside
 //! the place's page, or one process's page over it.
 
+mod app_page;
 mod card;
 mod chart;
 mod detail;
@@ -10,6 +11,7 @@ mod process;
 mod quit;
 #[cfg(test)]
 mod tests;
+mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
 use rune_kit::shell::{self, Sidebar, SidebarRow, SidebarSection, SplitView, Toolbar};
@@ -41,7 +43,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.sidebar.toggle();
         return true;
     }
-    if s.selected.is_some() && (ev.key == Key::Escape || ev.is_command('[')) {
+    if s.on_page() && (ev.key == Key::Escape || ev.is_command('[')) {
         s.back();
         return true;
     }
@@ -51,7 +53,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 fn place(s: &App, nav: Nav, key: String, count: Option<usize>, k: &Kit) -> El {
     let mut r = SidebarRow::new(nav.title())
         .height(30.0)
-        .selected(s.nav == nav && s.selected.is_none())
+        .selected(s.nav == nav && !s.on_page())
         .on_select(move |s: &mut App, _| s.show(nav));
     if let Some(n) = count {
         r = r.detail(fmt_count(n as u64));
@@ -100,6 +102,8 @@ enum Page<'a> {
     /// A process the app stopped, gone since.
     Ended(&'a crate::signal::Target),
     Jvm(&'a crate::data::Jvm),
+    /// An app, by its bundle's path.
+    App(&'a str),
     Home,
     List,
 }
@@ -115,6 +119,9 @@ fn page_of(s: &App) -> Page<'_> {
         if let Some(j) = s.jvm(pid) {
             return Page::Jvm(j);
         }
+    }
+    if let Some(path) = &s.app_page {
+        return Page::App(path);
     }
     if s.nav == Nav::Overview {
         Page::Home
@@ -139,6 +146,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Process(p) => (process::page(s, p, &k), page_name(s, p.pid)),
         Page::Ended(t) => (quit::ended(s, t, &k), t.name.clone()),
         Page::Jvm(j) => (detail::detail(s, j, &k), j.name()),
+        Page::App(path) => (app_page::page(s, path, &k), s.app_name(path)),
         Page::List => (list::list(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             let problems = s.problems();
@@ -163,8 +171,12 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             .child(body),
     };
     let mut toolbar = Toolbar::new().title(title);
-    if s.selected.is_some() {
-        let to = s.back_to().map_or_else(|| s.nav.title().to_owned(), |pid| page_name(s, pid));
+    if s.on_page() {
+        let to = match s.back_page() {
+            Some(crate::app::PageRef { app: Some(path), .. }) => s.app_name(path),
+            Some(p) => page_name(s, p.pid),
+            None => s.nav.title().to_owned(),
+        };
         let back = Button::new(format!("‹ {to}"))
             .variant(ButtonVariant::Ghost)
             .on_press(|s: &mut App| s.back())

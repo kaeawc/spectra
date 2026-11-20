@@ -134,10 +134,49 @@ fn the_triangle_opens_a_group_and_a_double_click_toggles_it_once() {
 
     press(&mut rt, SLACK);
     assert!(!rt.state.open_groups.contains(SLACK_ID), "a click on the row only moves the cursor");
+    assert_eq!(rt.state.app_page, None, "and opens no page");
+
+    // A group that isn't an app toggles on a double click, once.
+    let zsh = rt.state.groups.iter().find(|g| g.name == "zsh").unwrap().id.clone();
+    let row = format!("g:{zsh}");
+    double_press(&mut rt, &row);
+    assert!(rt.state.open_groups.contains(&zsh), "a double click toggles once");
+    double_press(&mut rt, &row);
+    assert!(!rt.state.open_groups.contains(&zsh));
+}
+
+#[test]
+fn a_double_click_on_an_app_opens_its_page_and_back_returns() {
+    let mut rt = sample();
+    press(&mut rt, "all");
     double_press(&mut rt, SLACK);
-    assert!(rt.state.open_groups.contains(SLACK_ID), "a double click toggles once");
-    double_press(&mut rt, SLACK);
-    assert!(!rt.state.open_groups.contains(SLACK_ID));
+    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"));
+    assert_eq!(rt.state.selected, None);
+    assert!(!rt.state.open_groups.contains(SLACK_ID), "the group stays closed");
+    for key in ["ap-header", "ap-lane-cpu", "ap-lane-threads", "ap-children", "ap-live"] {
+        assert!(rt.find(key).is_some(), "the app page shows {key}");
+    }
+    assert_eq!(text_of(&rt, "ap-name").as_deref(), Some("Slack"));
+    assert_eq!(text_of(&rt, "ap-meta").as_deref().map(|m| m.starts_with("4 processes")), Some(true));
+    // One of its processes, then back to the app, then back to the list.
+    press(&mut rt, "ap-child-901");
+    assert_eq!(rt.state.selected, Some(901));
+    assert_eq!(back_label(&rt).as_deref(), Some("‹ Slack"));
+    key(&mut rt, Key::Escape);
+    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"), "back to the app page");
+    key(&mut rt, Key::Escape);
+    assert_eq!((rt.state.selected, rt.state.app_page.as_deref()), (None, None));
+    assert_eq!(rt.state.nav, Nav::All);
+}
+
+#[test]
+fn return_on_an_app_row_opens_its_page_and_quit_shortcuts_ignore_the_hidden_cursor() {
+    let mut rt = sample();
+    press(&mut rt, "all");
+    press(&mut rt, SLACK);
+    key(&mut rt, Key::Enter);
+    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"));
+    assert_eq!(rt.state.shortcut_target(), None, "the list's cursor is under the page");
 }
 
 #[test]
@@ -1058,4 +1097,142 @@ fn a_thread_that_cannot_start_lands_failed() {
 fn an_unlisted_pid_is_said_to_have_ended() {
     let (rt, _) = recorded(quit_scene);
     assert_eq!(rt.state.refusal(4_000_000).as_deref(), Some("That process has already ended."));
+}
+
+// The inspector: tools and live readings with a fake Spectra.
+
+use crate::inspect::tests::Fake;
+use crate::inspect::{Exec, RunState};
+use crate::tools::Tool;
+
+/// rust-analyzer's page (the sample's own process) with `fake` for Spectra and its work held.
+fn inspecting(fake: Fake) -> (Runtime<App>, std::sync::Arc<Fake>) {
+    let mut s = init();
+    sample_scene(&mut s);
+    s.expanded = None;
+    let fake = std::sync::Arc::new(fake);
+    s.inspect.spectra = fake.clone();
+    s.inspect.exec = Exec::Held(Default::default());
+    s.inspect.auto = true;
+    s.show(Nav::All);
+    s.open(1300);
+    (runtime(s), fake)
+}
+
+fn run_held(rt: &mut Runtime<App>) {
+    rt.update(|s, _| s.run_held_inspect());
+    settle(rt);
+}
+
+#[test]
+fn a_tool_runs_from_its_button_and_shows_its_result() {
+    let (mut rt, fake) = inspecting(Fake::all());
+    assert!(rt.find("tools").is_some(), "the page has its tools");
+    press(&mut rt, "tool-sample-run");
+    assert!(rt.find("tool-sample-running").is_some(), "it says it's running");
+    assert!(rt.find("tool-sample-cancel").is_some());
+    run_held(&mut rt);
+    assert!(rt.find("tool-sample-result").is_some());
+    assert!(rt.find("sample-stacks-0").is_some(), "its top stacks");
+    assert_eq!(text_of(&rt, "sample-verdict").as_deref(), Some("Idle: waiting for work"));
+    assert_eq!(fake.calls(), [vec!["sample", "-json", "1300"]]);
+}
+
+#[test]
+fn every_tools_result_view_renders() {
+    let (mut rt, _) = inspecting(Fake::all());
+    for (tool, key) in [
+        (Tool::Hang, "hang-verdict"),
+        (Tool::Vmmap, "vmmap-regions"),
+        (Tool::Vmregions, "vmregions-top"),
+        (Tool::Memtrace, "memtrace-verdict"),
+        (Tool::Lineage, "lineage-tree"),
+        (Tool::Owner, "owner-0"),
+        (Tool::Runtime, "runtime-steps"),
+    ] {
+        press(&mut rt, &format!("tool-{}-run", tool.id()));
+        run_held(&mut rt);
+        assert!(rt.find(key).is_some(), "{tool:?} shows {key}");
+    }
+    assert_eq!(text_of(&rt, "hang-verdict").as_deref(), Some("Blocked on a lock"));
+}
+
+#[test]
+fn cancel_stops_a_tool_and_nothing_else_runs_meanwhile() {
+    let (mut rt, fake) = inspecting(Fake::all());
+    press(&mut rt, "tool-memtrace-run");
+    press(&mut rt, "tool-lineage-run");
+    assert!(rt.state.inspect.state(Tool::Lineage).is_none(), "lineage waits: one tool at a time");
+    press(&mut rt, "tool-memtrace-cancel");
+    assert_eq!(rt.state.inspect.state(Tool::Memtrace), Some(&RunState::Cancelling));
+    run_held(&mut rt);
+    assert!(rt.find("tool-memtrace-cancelled").is_some());
+    assert_eq!(fake.calls().len(), 1, "only memtrace was asked");
+    press(&mut rt, "tool-lineage-run");
+    run_held(&mut rt);
+    assert!(rt.find("lineage-tree").is_some());
+}
+
+#[test]
+fn a_failed_tool_shows_why() {
+    let (mut rt, _) = inspecting(Fake::with(&[("vmmap", Err("vmmap: cannot examine process 1300"))]));
+    press(&mut rt, "tool-vmmap-run");
+    run_held(&mut rt);
+    assert!(rt.find("tool-vmmap-error").is_some());
+    assert!(shows_text(&rt, "vmmap: cannot examine process 1300"));
+}
+
+#[test]
+fn root_tools_are_off_with_the_reason_and_pressing_runs_nothing() {
+    let (mut rt, fake) = inspecting(Fake::all());
+    assert_eq!(
+        text_of(&rt, "tool-spindump-refusal").as_deref(),
+        Some("Needs root; Spectra Desktop doesn't run sudo")
+    );
+    press(&mut rt, "tool-spindump-run");
+    press(&mut rt, "tool-lsmp-run");
+    run_held(&mut rt);
+    assert!(fake.calls().is_empty());
+    // A root process: the tools that read its threads or memory are off too.
+    rt.update(|s, _| s.open(301));
+    settle(&mut rt);
+    assert!(text_of(&rt, "tool-sample-refusal").is_some_and(|t| t.starts_with("Owned by root")));
+    assert!(text_of(&rt, "tool-lineage-refusal").is_none());
+}
+
+#[test]
+fn live_readings_feed_the_charts_while_the_page_is_open() {
+    let (mut rt, _) = inspecting(Fake::with(&[
+        ("network", Ok(crate::live::tests::NET)),
+        ("impact", Err("impact: not available here")),
+    ]));
+    for i in 0..3 {
+        rt.update(move |s, _| {
+            s.now = 100.0 + 10.0 * i as f64;
+            s.tick_inspector();
+        });
+        run_held(&mut rt);
+    }
+    assert_eq!(rt.state.inspect.net.points.len(), 3);
+    assert!(rt.find("live-lane-in").is_some() && rt.find("live-lane-out").is_some());
+    assert_eq!(text_of(&rt, "live-lane-in-now").as_deref(), Some("2.7 MB/s"));
+    assert_eq!(text_of(&rt, "pd-energy-off").as_deref(), Some("Energy impact: impact: not available here"));
+    // Readings also feed the CPU, memory and threads lanes.
+    assert!(rt.find("pd-lane-threads").is_some());
+    assert_eq!(text_of(&rt, "pd-lane-threads-now").as_deref(), Some("18"));
+    // Leaving stops them.
+    press(&mut rt, "back");
+    rt.update(|s, _| {
+        s.now += 60.0;
+        s.tick_inspector();
+    });
+    assert_eq!(rt.state.inspect.subject, None);
+    assert!(rt.state.inspect.net.points.is_empty());
+}
+
+#[test]
+fn a_jvms_page_keeps_its_jvm_part_and_gets_tools() {
+    let rt = scene(detail_scene);
+    assert!(rt.find("jd-detail").is_some());
+    assert!(rt.find("tools").is_some());
 }

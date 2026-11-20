@@ -4,14 +4,18 @@
 //! renders it headless with sample data; `--list-scenes` names the other screens.
 
 mod app;
+mod bundle;
 mod data;
 mod findings;
 mod groups;
+mod inspect;
+mod live;
 mod proc_findings;
 mod procs;
 mod run;
 mod sample;
 mod signal;
+mod tools;
 mod ui;
 
 use std::sync::mpsc::RecvTimeoutError;
@@ -80,8 +84,12 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     }
     // A Quit's check and send, and the look at a process that didn't end, run on threads.
     landed |= s.land_work();
-    // A hung Spectra sends nothing, so look again on a timer to say the numbers are getting old.
-    if s.has_processes() {
+    // An open page's tools, live readings and bundle, and its next live round once it's due.
+    landed |= s.land_inspect();
+    s.tick_inspector();
+    // A hung Spectra sends nothing, so look again on a timer to say the numbers are getting old;
+    // an open page also looks for its next live round.
+    if s.has_processes() || s.on_page() {
         tx.wake_after(STATUS_TICK);
     }
     landed || s.feed_status() != status
@@ -115,6 +123,19 @@ fn main() {
             ("quit-checking", sample::quit_checking_scene),
             ("quit-maybe", sample::quit_maybe_scene),
             ("quit-zombie", sample::quit_zombie_scene),
+            ("app", sample::app_scene),
+            ("app-loading", sample::app_loading_scene),
+            ("tools", sample::tools_scene),
+            ("tools-root", sample::tools_root_scene),
+            ("tool-sample", sample::tool_sample_scene),
+            ("tool-hang", sample::tool_hang_scene),
+            ("tool-vmmap", sample::tool_vmmap_scene),
+            ("tool-vmregions", sample::tool_vmregions_scene),
+            ("tool-memtrace", sample::tool_memtrace_scene),
+            ("tool-lineage", sample::tool_lineage_scene),
+            ("tool-owner", sample::tool_owner_scene),
+            ("tool-runtime", sample::tool_runtime_scene),
+            ("tool-failed", sample::tool_failed_scene),
         ],
         setup: Some(setup),
         poll: Some(poll),

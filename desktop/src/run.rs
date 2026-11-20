@@ -3,6 +3,7 @@
 
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,14 @@ pub enum RunError {
     /// It printed more than the cap; it was killed.
     TooLarge(usize),
     Io(String),
+}
+
+/// How a cancellable run ended without output.
+#[derive(Debug, PartialEq)]
+pub enum Ended {
+    Failed(RunError),
+    /// Asked to stop before it finished; it was killed.
+    Cancelled,
 }
 
 /// Reads a pipe on its own thread until it closes, keeping at most `cap` bytes. Past the cap it
@@ -64,18 +73,27 @@ fn drain(mut pipe: impl Read + Send + 'static, cap: usize) -> Receiver<Result<Ve
 
 /// Runs `cmd` to completion, or kills it once `deadline` passes or it prints more than `cap`
 /// bytes to either pipe.
-pub fn run(mut cmd: Command, deadline: Duration, cap: usize) -> Result<Output, RunError> {
+pub fn run(cmd: Command, deadline: Duration, cap: usize) -> Result<Output, RunError> {
+    // Nothing sets this flag, so the run is never cancelled.
+    run_until(cmd, deadline, cap, &AtomicBool::new(false)).map_err(|e| match e {
+        Ended::Failed(e) => e,
+        Ended::Cancelled => RunError::Io("stopped".into()),
+    })
+}
+
+/// [`run`], also killing it once `cancel` is set. Only the command it started is stopped.
+pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<Output, Ended> {
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| RunError::Spawn(e.to_string()))?;
+        .map_err(|e| Ended::Failed(RunError::Spawn(e.to_string())))?;
     let out = drain(child.stdout.take().expect("piped stdout"), cap);
     let err = drain(child.stderr.take().expect("piped stderr"), cap);
     let start = Instant::now();
     let (mut stdout, mut stderr) = (None, None);
-    let stop = |child: &mut std::process::Child, why: RunError| {
+    let stop = |child: &mut std::process::Child, why: Ended| {
         let _ = child.kill();
         let _ = child.wait();
         Err(why)
@@ -86,7 +104,7 @@ pub fn run(mut cmd: Command, deadline: Duration, cap: usize) -> Result<Output, R
             if slot.is_none() {
                 match rx.try_recv() {
                     Ok(Ok(bytes)) => *slot = Some(bytes),
-                    Ok(Err(e)) => return stop(&mut child, e),
+                    Ok(Err(e)) => return stop(&mut child, Ended::Failed(e)),
                     Err(_) => {}
                 }
             }
@@ -100,13 +118,14 @@ pub fn run(mut cmd: Command, deadline: Duration, cap: usize) -> Result<Output, R
                     Some(b) => Ok(b),
                     None => rx.recv_timeout(left).map_err(|_| RunError::Timeout(deadline))?,
                 };
-                let stdout = take(&out, stdout)?;
-                let stderr = take(&err, stderr)?;
+                let stdout = take(&out, stdout).map_err(Ended::Failed)?;
+                let stderr = take(&err, stderr).map_err(Ended::Failed)?;
                 return Ok(Output { status, stdout, stderr });
             }
-            Ok(None) if start.elapsed() >= deadline => return stop(&mut child, RunError::Timeout(deadline)),
+            Ok(None) if cancel.load(Ordering::Relaxed) => return stop(&mut child, Ended::Cancelled),
+            Ok(None) if start.elapsed() >= deadline => return stop(&mut child, Ended::Failed(RunError::Timeout(deadline))),
             Ok(None) => std::thread::sleep(CHECK),
-            Err(e) => return stop(&mut child, RunError::Io(e.to_string())),
+            Err(e) => return stop(&mut child, Ended::Failed(RunError::Io(e.to_string()))),
         }
     }
 }
@@ -144,6 +163,20 @@ pub(crate) mod tests {
         let start = Instant::now();
         assert_eq!(run(Command::new(&bin), deadline, 1024).unwrap_err(), RunError::Timeout(deadline));
         assert!(start.elapsed() < Duration::from_secs(30), "it didn't wait for the sleep");
+    }
+
+    #[test]
+    fn a_cancelled_command_is_killed() {
+        let bin = script("cancel", "exec sleep 60");
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let start = Instant::now();
+        assert_eq!(run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(), Ended::Cancelled);
+        assert!(start.elapsed() < Duration::from_secs(20), "it didn't wait for the sleep");
     }
 
     #[test]

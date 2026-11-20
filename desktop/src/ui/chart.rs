@@ -94,7 +94,7 @@ pub fn fmt_secs(s: f64) -> String {
     }
 }
 
-fn count(n: f64) -> String {
+pub fn count(n: f64) -> String {
     format!("{n:.0}")
 }
 

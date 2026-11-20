@@ -38,7 +38,14 @@ What it shows:
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
   name running one executable; two `java` from different JDKs stay apart, each with the folder
   that tells them apart beside its name. Clicking a row or arrowing onto it only moves the
-  cursor; Return or a double click opens a process or a group, as does the triangle of a group.
+  cursor. Return or a double click opens a process's page or an app's page; on any other group
+  (twelve `zsh`) it opens or closes the group. The triangle always only opens or closes it.
+- **An app's page**: all its processes together (CPU, memory and threads over the last few
+  minutes, summed), its network and energy while the page is open, its processes (each opens its
+  page), and its bundle from `spectra --json <App.app>`, read once each time the page opens: what
+  it's built with, version, frameworks, architectures, size, signature (team, hardened runtime,
+  sandbox, App Store receipt), Gatekeeper, permissions granted, entitlements, helpers, login items
+  and the data it keeps. A failed read says why and offers Try again.
 - **Signatures**: a check only for a signature Spectra validated (Apple's, today). A Developer
   ID that Spectra only read from `codesign -dv` shows as "Developer ID · not verified" with a
   dash, and its page says the team is "as displayed, not verified" and quotes Spectra's
@@ -51,6 +58,29 @@ What it shows:
   baseline" compares its numbers against a moment you choose. Esc, Cmd-[ or the back button
   return to the page before, so following a parent link and going back lands on the child. A
   page closes if its pid comes back as another process.
+- **Live charts** on a process or app page: CPU, memory and threads from the regular readings,
+  and, only while the page is open, network in and out from `spectra network top --pid <pid>
+  --json --duration 2s` (an app's main process with what it started) and energy impact from
+  `spectra impact --json` (an app's processes summed). One round at a time, off the UI thread,
+  each command with a deadline (15 s and 10 s), then a 2 s rest. A series that fails says why and
+  isn't asked for again until the page is opened again; leaving the page stops its round.
+- **Tools** on a process page, run only when you press Run, one at a time, each with a deadline,
+  Cancel (Spectra is stopped; the row says "Cancelled" once it has), and a result or the reason it
+  failed. Leaving the page stops what it was running.
+  - CPU: Sample stacks (`spectra sample -json <pid>`): the main thread's verdict and the busiest
+    stacks with their share, plus the `spectra flamegraph` command to run for a flame graph.
+    Hang check (`spectra hang --json <pid>`): idle, busy, or blocked on a lock or I/O, and where.
+  - Memory: Memory map (`spectra vmmap --json`): footprint, peak, dirty and swapped, and region
+    types by dirty size. Dirty regions (`spectra vmregions --json`): anonymous and file-backed
+    dirty memory and the single regions holding most. Memory trend (`spectra memtrace <pid>
+    --duration 20s --json`): growing, steady, shrinking or sawtooth, with its readings charted.
+  - Relations: Lineage (`spectra lineage --json`): what started it from launchd down, and its
+    tree of descendants; each listed process opens its page. Owner (`spectra owner --json`): its
+    user, executable, start and parent chain.
+  - Runtime (`spectra runtime --json`): what it runs on, why, and Spectra's next steps.
+  - Spindump and Mach ports (`lsmp`) need root and are shown off with the reason; Spectra Desktop
+    never runs sudo. Tools that read another user's threads or memory (sample, hang, vmmap,
+    vmregions) are off on their processes, with the reason.
 - **Quit and Force quit**: in a process page's header, and over the list for the row under the
   cursor. An app's row acts on the app's main process ("Quit Slack"); a row of several
   processes that isn't one app (twelve `zsh`) has no action, so open it and pick one. ⌥⌘Q opens
@@ -72,17 +102,21 @@ What it shows:
     ended this way stays, says so and offers Back.
   - A finding about an invalid signature points to Force quit on the process's page.
 
-It reads, and signals only a process the person confirmed (and a Spectra reading of its own
-that runs past its deadline).
+It reads, and signals only a process the person confirmed (and a Spectra run of its own that
+runs past its deadline or is cancelled).
 
 ```sh
 cargo run                                              # the window
 cargo run -- --snap out.png --scene sample --theme dark  # headless render with sample data
 cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail, stale, old,
                             # quit, quit-list, quit-confirm, force-confirm, quit-root,
-                            # quit-still, quit-ended
+                            # quit-still, quit-ended, app, app-loading, tools, tools-root,
+                            # tool-sample, tool-hang, tool-vmmap, tool-vmregions,
+                            # tool-memtrace, tool-lineage, tool-owner, tool-runtime, tool-failed
+cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
-SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds
+SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
+                            # runs every tool on a `sleep` the test starts and then stops
 ```
 
 - `src/procs.rs`: the process feed and its parsing; `src/run.rs`: running Spectra with a
@@ -93,6 +127,10 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/signal.rs`: Quit and Force quit: what may be signalled, the `ps` identity check, and
   `/bin/kill`, behind a `Signals` trait that tests replace with a recorder. Sample scenes use
   one that sends nothing, since their pids are made up.
+- `src/inspect.rs`: what an open page runs (tools, live rounds, the bundle read): one job per
+  thread, numbered so an answer lands only on the page it was for, behind a `Spectra` trait that
+  tests replace with a fake. `src/tools.rs`, `src/live.rs` and `src/bundle.rs`: those commands
+  and their JSON.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.
