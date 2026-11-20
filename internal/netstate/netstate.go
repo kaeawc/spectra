@@ -78,12 +78,19 @@ type CmdRunner func(name string, args ...string) ([]byte, error)
 // because process.CollectAll, which this runner also feeds, parses lstart as
 // UTC.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	if name == "ps" {
-		ctx, cancel := context.WithTimeout(context.Background(), proc.DefaultTimeout)
-		defer cancel()
-		return proc.OutputEnv(ctx, nil, proc.StableTimeEnv(), name, args...)
+	return ContextRunner(context.Background())(name, args...)
+}
+
+// ContextRunner is DefaultRunner with the child also killed when ctx ends.
+func ContextRunner(parent context.Context) CmdRunner {
+	return func(name string, args ...string) ([]byte, error) {
+		if name == "ps" {
+			ctx, cancel := context.WithTimeout(parent, proc.DefaultTimeout)
+			defer cancel()
+			return proc.OutputEnv(ctx, nil, proc.StableTimeEnv(), name, args...)
+		}
+		return proc.BoundedOutputContext(parent, name, args...)
 	}
-	return proc.BoundedOutput(name, args...)
 }
 
 // Collect gathers network state. Any sub-command failure is silently

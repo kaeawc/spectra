@@ -21,7 +21,7 @@ func (f *fakeDBInspector) DiscoverDBEnv() []dbinspect.EnvHint {
 	return []dbinspect.EnvHint{{Name: "DATABASE_URL", Value: "postgres://app:[redacted]@db/orders", Engine: dbinspect.EnginePostgres}}
 }
 
-func (f *fakeDBInspector) DiscoverSQLiteFiles() []dbinspect.FileCandidate {
+func (f *fakeDBInspector) DiscoverSQLiteFiles(context.Context) []dbinspect.FileCandidate {
 	return []dbinspect.FileCandidate{{Engine: dbinspect.EngineSQLite, PID: 200, Command: "notes-app", Path: "/Users/x/Library/notes.sqlite"}}
 }
 

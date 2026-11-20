@@ -833,7 +833,7 @@ func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResul
 			interval = 10
 		}
 		stop := progressFrom(ctx).elapsed(ctx, time.Duration(duration)*time.Second, fmt.Sprintf("sampling pid %d", p.PID))
-		out, err := s.collect.Processes.SampleProcess(p.PID, duration, interval)
+		out, err := s.collect.Processes.SampleProcess(ctx, p.PID, duration, interval)
 		stop()
 		if err != nil {
 			return toolError(err.Error())
@@ -859,13 +859,13 @@ func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
 		"list":    s.toolJVMList,
 		"inspect": s.toolJVMInspect,
 		"explain": s.toolJVMExplain,
-		"thread_dump": func(_ context.Context, p jvmParams) ToolResult {
-			return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump)
+		"thread_dump": func(ctx context.Context, p jvmParams) ToolResult {
+			return s.jcmdText(ctx, p.PID, "thread dump", s.collect.JVMs.ThreadDump)
 		},
 		"gc_stats":  s.toolJVMGCStats,
 		"vm_memory": s.toolJVMVMMemory,
-		"heap_histogram": func(_ context.Context, p jvmParams) ToolResult {
-			return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram)
+		"heap_histogram": func(ctx context.Context, p jvmParams) ToolResult {
+			return s.jcmdText(ctx, p.PID, "heap histogram", s.collect.JVMs.HeapHistogram)
 		},
 		"attach":             s.toolJVMAttach,
 		"mbeans":             s.toolJVMMBeans,
@@ -905,7 +905,7 @@ type jvmParams struct {
 // withAgentAttached invokes op; if the agent isn't attached and auto-attach is
 // enabled (default), it attempts a one-time attach and retries. On persistent
 // failure it returns a structured agent_not_attached tool error.
-func (s *Server) withAgentAttached(p jvmParams, op func() error) (ToolResult, bool) {
+func (s *Server) withAgentAttached(ctx context.Context, p jvmParams, op func() error) (ToolResult, bool) {
 	err := op()
 	if err == nil {
 		return ToolResult{}, true
@@ -916,7 +916,7 @@ func (s *Server) withAgentAttached(p jvmParams, op func() error) (ToolResult, bo
 	}
 	autoAttach := p.AutoAttach == nil || *p.AutoAttach
 	if autoAttach {
-		if _, attachErr := jvm.AttachAgent(p.PID, p.Agent, nil); attachErr == nil {
+		if _, attachErr := jvm.AttachAgent(p.PID, p.Agent, jvm.ContextRunner(ctx)); attachErr == nil {
 			if retryErr := op(); retryErr == nil {
 				return ToolResult{}, true
 			} else if !errors.As(retryErr, &notAttached) {
@@ -978,43 +978,43 @@ func (s *Server) toolJVMExplain(ctx context.Context, p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMGCStats(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMGCStats(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm gc_stats requires pid")
 	}
-	stats, err := s.collect.JVMs.CollectGCStats(p.PID)
+	stats, err := s.collect.JVMs.CollectGCStats(ctx, p.PID)
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMVMMemory(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMVMMemory(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm vm_memory requires pid")
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(p.PID), Timestamp: s.now()})
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(ctx, p.PID), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMAttach(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMAttach(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm attach requires pid")
 	}
-	status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
+	status, err := jvm.AttachAgent(p.PID, p.Agent, jvm.ContextRunner(ctx))
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeans(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeans(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm mbeans requires pid")
 	}
 	var mbeans jvm.MBeansResult
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		mbeans, err = jvm.FetchMBeans(p.PID, nil)
+		mbeans, err = jvm.FetchMBeans(p.PID, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1023,14 +1023,14 @@ func (s *Server) toolJVMMBeans(_ context.Context, p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeanRead(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeanRead(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
 		return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
 	}
 	var value jvm.MBeanAttributeValue
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		value, err = jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
+		value, err = jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1039,14 +1039,14 @@ func (s *Server) toolJVMMBeanRead(_ context.Context, p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeanInvoke(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeanInvoke(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
 		return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
 	}
 	var value jvm.MBeanInvocation
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		value, err = jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
+		value, err = jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1055,14 +1055,14 @@ func (s *Server) toolJVMMBeanInvoke(_ context.Context, p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMProbe(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMProbe(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm probe requires pid")
 	}
 	var probes jvm.AgentProbes
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		probes, err = jvm.FetchAgentProbes(p.PID, nil)
+		probes, err = jvm.FetchAgentProbes(p.PID, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1071,7 +1071,7 @@ func (s *Server) toolJVMProbe(_ context.Context, p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMHeapDump(_ context.Context, p jvmParams) ToolResult {
+func (s *Server) toolJVMHeapDump(ctx context.Context, p jvmParams) ToolResult {
 	if !p.ConfirmSensitive {
 		return toolError("jvm heap_dump requires confirm_sensitive=true")
 	}
@@ -1081,7 +1081,7 @@ func (s *Server) toolJVMHeapDump(_ context.Context, p jvmParams) ToolResult {
 	if p.Dest == "" {
 		p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 	}
-	if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
+	if err := s.collect.JVMs.HeapDump(ctx, p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{
@@ -1157,7 +1157,7 @@ func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult 
 		p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
 	}
 	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
-	err := s.collect.JVMs.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
 	stop()
 	if err != nil {
 		return toolError(err.Error())
@@ -1179,21 +1179,21 @@ func (s *Server) toolNetwork(ctx context.Context, raw json.RawMessage) ToolResul
 	}
 	switch p.Operation {
 	case "state", "":
-		state := s.collect.Network.CollectNetworkState()
+		state := s.collect.Network.CollectNetworkState(ctx)
 		return toolText(toolEnvelope{Summary: summarizeNetworkState(state), Evidence: networkEvidence(state), Raw: optionalRaw(p.IncludeRaw, state), Timestamp: s.now()})
 	case "connections":
-		conns := s.collect.Network.CollectConnections()
+		conns := s.collect.Network.CollectConnections(ctx)
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d active connection(s)", len(conns)), Raw: optionalRaw(true, conns), Timestamp: s.now()})
 	case "by_app":
 		bundles := append([]string{}, p.Bundles...)
 		bundles = append(bundles, p.Paths...)
-		conns := s.collect.Network.CollectConnections()
+		conns := s.collect.Network.CollectConnections(ctx)
 		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles})
 		grouped := netstate.GroupConnectionsByApp(conns, procs)
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("grouped %d connection(s) by app", len(conns)), Raw: grouped, Timestamp: s.now()})
 	case "diagnose":
-		state := s.collect.Network.CollectNetworkState()
-		conns := s.collect.Network.CollectConnections()
+		state := s.collect.Network.CollectNetworkState(ctx)
+		conns := s.collect.Network.CollectConnections(ctx)
 		evidence := networkEvidence(state)
 		if p.Host != "" {
 			evidence = append(evidence, connectionEvidenceForHost(conns, p.Host)...)
@@ -1225,9 +1225,9 @@ func (s *Server) toolDB(ctx context.Context, raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "discover", "":
-		conns := dbinspect.DiscoverConnections(s.collect.Network.CollectConnections())
+		conns := dbinspect.DiscoverConnections(s.collect.Network.CollectConnections(ctx))
 		env := s.collect.DB.DiscoverDBEnv()
-		files := s.collect.DB.DiscoverSQLiteFiles()
+		files := s.collect.DB.DiscoverSQLiteFiles(ctx)
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("found %d live database connection(s), %d connection env var(s), and %d open sqlite file(s)", len(conns), len(env), len(files)),
 			Raw:       dbinspect.Discovery{Connections: conns, Env: env, SQLiteFiles: files},
@@ -1453,7 +1453,7 @@ func (s *Server) deepInspectApp(ctx context.Context, appPath string, app detect.
 	appProcs := filterAppProcesses(procs, appPath)
 	sortProcesses(appProcs)
 
-	conns := s.collect.Network.CollectConnections()
+	conns := s.collect.Network.CollectConnections(ctx)
 	grouped := netstate.GroupConnectionsByApp(conns, appProcs)
 	attributed := append([]netstate.AttributedConnection{}, grouped[appPath]...)
 	sort.SliceStable(attributed, func(i, j int) bool {
@@ -1463,7 +1463,7 @@ func (s *Server) deepInspectApp(ctx context.Context, appPath string, app detect.
 		return attributed[i].RemoteAddr < attributed[j].RemoteAddr
 	})
 
-	state := s.collect.Network.CollectNetworkState()
+	state := s.collect.Network.CollectNetworkState(ctx)
 	listening := listeningPortsForProcesses(state.ListeningPorts, appPath, appProcs)
 
 	out := deepInspectResult{
@@ -1764,25 +1764,28 @@ func (s *Server) inspectJVM(ctx context.Context, pid int) *jvm.Info {
 	return s.collect.JVMs.InspectJVM(ctx, pid, s.jvmOptions(ctx))
 }
 
-func (s *Server) jcmdText(pid int, label string, fn func(int) ([]byte, error)) ToolResult {
+func (s *Server) jcmdText(ctx context.Context, pid int, label string, fn func(context.Context, int) ([]byte, error)) ToolResult {
 	if pid == 0 {
 		return toolError("jvm " + label + " requires pid")
 	}
-	out, err := fn(pid)
+	out, err := fn(ctx, pid)
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %s for pid %d", label, pid), Raw: map[string]interface{}{"pid": pid, "output": string(out)}, Timestamp: s.now()})
 }
 
-func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
+func sampleProcess(parent context.Context, pid, durationSec, intervalMS int) (string, error) {
 	if hostos.Current() != hostos.Darwin {
 		return "", hostos.Unsupported("process sampling (sample(1))")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
+	ctx, cancel := context.WithTimeout(parent, time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+		// #nosec G204 -- fixed tool name; pid and timings are integers
+		c := exec.CommandContext(ctx, name, args...)
+		c.WaitDelay = 2 * time.Second
+		return c.CombinedOutput()
 	}
 	report, out, err := process.RunSampleReport(ctx, nil, run, fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS))
 	if err != nil {

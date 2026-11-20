@@ -141,7 +141,9 @@ func (c *countingProcessCollector) CollectProcesses(context.Context, process.Col
 	return lineageProcs
 }
 
-func (c *countingProcessCollector) SampleProcess(_, _, _ int) (string, error) { return "", nil }
+func (c *countingProcessCollector) SampleProcess(context.Context, int, int, int) (string, error) {
+	return "", nil
+}
 
 func lifecycleServer(spawns *blockingSpawnDeps, procs ProcessCollector) *Server {
 	s := NewServer(nil, nil)
@@ -322,9 +324,9 @@ func TestProgressSentOnlyWithToken(t *testing.T) {
 
 func TestReplyWriterDropsCancelledRepliesFromBatches(t *testing.T) {
 	tr := newReplyTracker()
-	tr.request(`1`)
-	tr.request(`2`)
-	tr.cancel(`2`)
+	tr.request(idKey(json.RawMessage(`1`)))
+	tr.request(idKey(json.RawMessage(`2`)))
+	tr.cancel(idKey(json.RawMessage(`2`)))
 	var out strings.Builder
 	w := &replyWriter{w: &out, t: tr}
 	frame := `[{"jsonrpc":"2.0","id":1,"result":{}},{"jsonrpc":"2.0","id":2,"result":{}}]` + "\n"

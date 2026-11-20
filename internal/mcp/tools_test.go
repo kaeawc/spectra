@@ -23,7 +23,7 @@ func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	disabled := false
 	calls := 0
-	res, ok := s.withAgentAttached(jvmParams{PID: 4321, AutoAttach: &disabled}, func() error {
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 4321, AutoAttach: &disabled}, func() error {
 		calls++
 		return &jvm.NotAttachedError{PID: 4321}
 	})
@@ -63,7 +63,7 @@ func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
 func TestWithAgentAttachedPassesThroughOtherErrors(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	disabled := false
-	res, ok := s.withAgentAttached(jvmParams{PID: 1, AutoAttach: &disabled}, func() error {
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 1, AutoAttach: &disabled}, func() error {
 		return errors.New("boom")
 	})
 	if ok {
@@ -76,7 +76,7 @@ func TestWithAgentAttachedPassesThroughOtherErrors(t *testing.T) {
 
 func TestWithAgentAttachedReturnsSuccess(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
-	res, ok := s.withAgentAttached(jvmParams{PID: 1}, func() error { return nil })
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 1}, func() error { return nil })
 	if !ok {
 		t.Fatalf("expected success, got %+v", res)
 	}
@@ -344,7 +344,7 @@ func (f *fakeProcessCollector) CollectProcesses(_ context.Context, opts process.
 	return append([]process.Info{}, f.procs...)
 }
 
-func (f *fakeProcessCollector) SampleProcess(_, _, _ int) (string, error) {
+func (f *fakeProcessCollector) SampleProcess(_ context.Context, _, _, _ int) (string, error) {
 	return "sample", nil
 }
 
@@ -353,11 +353,11 @@ type fakeNetworkCollector struct {
 	conns []netstate.Connection
 }
 
-func (f fakeNetworkCollector) CollectNetworkState() netstate.State {
+func (f fakeNetworkCollector) CollectNetworkState(context.Context) netstate.State {
 	return f.state
 }
 
-func (f fakeNetworkCollector) CollectConnections() []netstate.Connection {
+func (f fakeNetworkCollector) CollectConnections(context.Context) []netstate.Connection {
 	return append([]netstate.Connection{}, f.conns...)
 }
 

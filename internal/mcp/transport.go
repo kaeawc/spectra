@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 )
 
 // The SDK's stdio transport cancels every in-flight call as soon as its input
@@ -19,7 +22,8 @@ import (
 // reply and drops the ones the client cancelled.
 
 // trackedLineMax bounds one buffered input line. Longer lines (only very
-// large tool arguments) pass through untracked.
+// large tool arguments) pass through untracked: a cancellation of such a call
+// does not drop its reply, and EOF does not wait for it.
 const trackedLineMax = 1 << 20
 
 // replyTracker records the JSON-RPC calls that are still owed a reply.
@@ -70,6 +74,13 @@ func (t *replyTracker) replied(id string) {
 	delete(t.pending, id)
 	t.mu.Unlock()
 	t.signal()
+}
+
+// tracking reports whether any call, cancelled or not, is still open.
+func (t *replyTracker) tracking() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.pending) > 0
 }
 
 func (t *replyTracker) open() int {
@@ -134,12 +145,29 @@ func decodeWire(raw json.RawMessage) (wireMessage, bool) {
 	return m, true
 }
 
+// idKey returns the key for a request id as the SDK will see it: decoded and
+// coerced by jsonrpc.MakeID, so 5 and 5.0, or "a" and "\u0061", are one call.
+// It returns "" for an absent, null, or invalid id.
 func idKey(raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 {
 		return ""
 	}
-	return string(raw)
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	id, err := jsonrpc.MakeID(v)
+	if err != nil || !id.IsValid() {
+		return ""
+	}
+	switch v := id.Raw().(type) {
+	case int64:
+		return "n:" + strconv.FormatInt(v, 10)
+	case string:
+		return "s:" + v
+	}
+	return ""
 }
 
 // trackingReader passes input through unchanged, line by line.
@@ -151,6 +179,10 @@ type trackingReader struct {
 	out     []byte
 	long    bool // inside a line too long to track
 	err     error
+	// atEOF defers the wait for open calls to the Read after the final
+	// chunk, so a last request without a trailing newline reaches the SDK
+	// before EOF is held back.
+	atEOF bool
 }
 
 func newTrackingReader(ctx context.Context, src io.Reader, t *replyTracker, eofWait time.Duration) *trackingReader {
@@ -160,6 +192,10 @@ func newTrackingReader(ctx context.Context, src io.Reader, t *replyTracker, eofW
 func (r *trackingReader) Read(p []byte) (int, error) {
 	for len(r.out) == 0 {
 		if r.err != nil {
+			if r.atEOF {
+				r.atEOF = false
+				r.t.waitIdle(r.ctx, r.eofWait)
+			}
 			return 0, r.err
 		}
 		chunk, err := r.src.ReadSlice('\n')
@@ -174,10 +210,8 @@ func (r *trackingReader) Read(p []byte) (int, error) {
 		}
 		r.out = append(r.out[:0], chunk...)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				r.t.waitIdle(r.ctx, r.eofWait)
-			}
 			r.err = err
+			r.atEOF = errors.Is(err, io.EOF)
 		}
 	}
 	n := copy(p, r.out)
@@ -209,6 +243,10 @@ type replyWriter struct {
 }
 
 func (w *replyWriter) Write(p []byte) (int, error) {
+	if !w.t.tracking() {
+		// No call is open, so there is no reply to drop or close.
+		return w.w.Write(p)
+	}
 	msgs := splitMessages(p)
 	var replies []string
 	var keep []json.RawMessage

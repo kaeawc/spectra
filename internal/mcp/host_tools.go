@@ -30,7 +30,7 @@ func (s *Server) toolPower(ctx context.Context, raw json.RawMessage) ToolResult 
 	}
 	switch p.Operation {
 	case "state", "":
-		state := s.collect.Power.CollectPower()
+		state := s.collect.Power.CollectPower(ctx)
 		return toolText(toolEnvelope{
 			Summary:     "collected battery and thermal state",
 			NextActions: []string{"Use power operation=impact to rank processes by energy use."},
@@ -65,7 +65,7 @@ func (s *Server) toolPowerImpact(ctx context.Context, pids []int, durationSecond
 	for _, d := range deltas {
 		inputs = append(inputs, sysinfo.FromRusage(d))
 	}
-	rows := sysinfo.ScoreImpacts(inputs, s.collect.Power.CollectAssertions(), sysinfo.DefaultWeights)
+	rows := sysinfo.ScoreImpacts(inputs, s.collect.Power.CollectAssertions(ctx), sysinfo.DefaultWeights)
 	if limit > 0 && limit < len(rows) {
 		rows = rows[:limit]
 	}
@@ -124,7 +124,7 @@ func (s *Server) toolSystem(ctx context.Context, raw json.RawMessage) ToolResult
 	}
 	switch p.Operation {
 	case "limits", "":
-		limits := s.collect.System.Collect(syslimits.Options{})
+		limits := s.collect.System.Collect(ctx, syslimits.Options{})
 		return toolText(toolEnvelope{
 			Summary:     "collected system resource limits and saturation",
 			NextActions: []string{"Use system operation=top to see which processes hold saturated resources."},

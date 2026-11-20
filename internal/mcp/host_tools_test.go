@@ -30,8 +30,8 @@ type fakePowerCollector struct {
 	sawPids    []int
 }
 
-func (f *fakePowerCollector) CollectPower() sysinfo.PowerState { return f.state }
-func (f *fakePowerCollector) CollectAssertions() []sysinfo.PowerAssertion {
+func (f *fakePowerCollector) CollectPower(context.Context) sysinfo.PowerState { return f.state }
+func (f *fakePowerCollector) CollectAssertions(context.Context) []sysinfo.PowerAssertion {
 	return f.assertions
 }
 func (f *fakePowerCollector) SampleEnergy(_ context.Context, _ time.Duration, pids []int) ([]sysinfo.EnergyDelta, error) {
@@ -62,7 +62,9 @@ type fakeSystemCollector struct {
 	sawLimit int
 }
 
-func (f *fakeSystemCollector) Collect(_ syslimits.Options) syslimits.SystemLimits { return f.limits }
+func (f *fakeSystemCollector) Collect(context.Context, syslimits.Options) syslimits.SystemLimits {
+	return f.limits
+}
 func (f *fakeSystemCollector) CollectTopHolders(_ context.Context, limit int, _ process.CollectOptions) syslimits.TopHolders {
 	f.sawLimit = limit
 	return f.holders
