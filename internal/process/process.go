@@ -14,30 +14,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/classify"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Info is one running process at snapshot time.
 type Info struct {
-	PID             int           `json:"pid"`
-	PPID            int           `json:"ppid"`
-	UID             int           `json:"uid"`
-	User            string        `json:"user,omitempty"`
-	Command         string        `json:"command"`            // short (comm) — just the exe name
-	BSDName         string        `json:"bsd_name,omitempty"` // p_comm from libproc when available
-	ExecutablePath  string        `json:"executable_path,omitempty"`
-	FullCommandLine string        `json:"full_command_line"` // full argv[0...] string
-	RSSKiB          int64         `json:"rss_kib"`
-	VSizeKiB        int64         `json:"vsize_kib"`
-	VSZBytes        uint64        `json:"vsz_bytes,omitempty"`
-	ThreadCount     int           `json:"thread_count"`         // number of process threads
-	CPUPct          float64       `json:"cpu_pct"`              // CPU % at sample time (pcpu)
-	CPUPercent      float64       `json:"cpu_percent"`          // alias for CPU percent in new process views
-	MemPercent      float64       `json:"mem_percent"`          // RSS / physical memory * 100
-	StartTime       time.Time     `json:"start_time,omitempty"` // process start time (lstart)
-	StartedAt       time.Time     `json:"started_at,omitempty"` // alias for StartTime
-	Elapsed         time.Duration `json:"elapsed,omitempty"`
+	PID            int    `json:"pid"`
+	PPID           int    `json:"ppid"`
+	UID            int    `json:"uid"`
+	User           string `json:"user,omitempty"`
+	Command        string `json:"command"`            // short (comm) — just the exe name
+	BSDName        string `json:"bsd_name,omitempty"` // p_comm from libproc when available
+	ExecutablePath string `json:"executable_path,omitempty"`
+	// ExecutableDeleted is set on Linux when /proc/<pid>/exe reports the
+	// file as deleted; ExecutablePath is then where it used to be.
+	ExecutableDeleted bool          `json:"executable_deleted,omitempty"`
+	FullCommandLine   string        `json:"full_command_line"` // full argv[0...] string
+	RSSKiB            int64         `json:"rss_kib"`
+	VSizeKiB          int64         `json:"vsize_kib"`
+	VSZBytes          uint64        `json:"vsz_bytes,omitempty"`
+	ThreadCount       int           `json:"thread_count"`         // number of process threads
+	CPUPct            float64       `json:"cpu_pct"`              // CPU % at sample time (pcpu)
+	CPUPercent        float64       `json:"cpu_percent"`          // alias for CPU percent in new process views
+	MemPercent        float64       `json:"mem_percent"`          // RSS / physical memory * 100
+	StartTime         time.Time     `json:"start_time,omitempty"` // process start time (lstart)
+	StartedAt         time.Time     `json:"started_at,omitempty"` // alias for StartTime
+	Elapsed           time.Duration `json:"elapsed,omitempty"`
 
 	// Deep fields — populated only when CollectOptions.Deep is true.
 	OpenFDs             int          `json:"open_fds,omitempty"`             // open file descriptor count
@@ -51,6 +55,14 @@ type Info struct {
 	// .app bundle path. Populated only when CollectAll is called with a set
 	// of app paths (BundlePaths option).
 	AppPath string `json:"app_path,omitempty"`
+
+	// Classification fields — populated only by `spectra process --classify`
+	// (see internal/classify); all omitted otherwise.
+	Role     classify.Role     `json:"role,omitempty"`
+	Runtime  classify.Runtime  `json:"runtime,omitempty"`
+	App      *classify.App     `json:"app,omitempty"`
+	Signing  *classify.Signing `json:"signing,omitempty"`
+	Evidence []string          `json:"evidence,omitempty"`
 }
 
 // FDBreakdown groups open descriptors by lsof TYPE and path.

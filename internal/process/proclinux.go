@@ -113,6 +113,8 @@ func readLinuxProc(root string, pid int, bootTime time.Time, haveBoot bool, at t
 		info.FullCommandLine = "[" + st.comm + "]"
 	}
 
+	info.ExecutablePath, info.ExecutableDeleted = readExeLink(root, pid)
+
 	if uid, ok := readProcUID(root, pid); ok {
 		info.UID = uid
 		info.User = lookupUser(uid, users)
@@ -182,6 +184,24 @@ func parseLinuxStat(data []byte) (linuxStat, bool) {
 		vsizeBytes:     atoi(idxVsize),
 		rssPages:       atoi(idxRSS),
 	}, true
+}
+
+// deletedSuffix is what the kernel appends to /proc/<pid>/exe once the file
+// has been unlinked or replaced.
+const deletedSuffix = " (deleted)"
+
+// readExeLink returns the kernel-reported executable of pid. Kernel threads
+// and other users' processes (without privilege) have no readable link and
+// return "".
+func readExeLink(root string, pid int) (string, bool) {
+	target, err := os.Readlink(filepath.Join(root, strconv.Itoa(pid), "exe"))
+	if err != nil || target == "" {
+		return "", false
+	}
+	if trimmed, ok := strings.CutSuffix(target, deletedSuffix); ok {
+		return trimmed, true
+	}
+	return target, false
 }
 
 func readCmdline(root string, pid int) string {

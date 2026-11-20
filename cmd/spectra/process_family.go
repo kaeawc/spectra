@@ -39,7 +39,7 @@ func groupByConflict(fs *flag.FlagSet, groupBy string) string {
 	var bad []string
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "sort", "tree", "ppid", "user", "min-rss", "min-vsz", "min-elapsed":
+		case "sort", "tree", "ppid", "user", "min-rss", "min-vsz", "min-elapsed", "classify":
 			bad = append(bad, "--"+f.Name)
 		}
 	})

@@ -91,6 +91,30 @@ one object at the end.
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
 
+`spectra process --classify [--json]` adds `role` (`app`, `app_helper`,
+`system`, `shell`, `terminal`, `ai_agent`, `cli`), `runtime` (`electron`,
+`native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`,
+`shell`, `unknown`), `app` (`{name, bundle_path, bundle_id}` of the outermost
+owning `.app`; present only when an owning app is found), `signing` (macOS only: `{status, team_id, hardened_runtime}`,
+status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown`)
+and `evidence` to every listed process; the table gains `ROLE`, `RUNTIME`,
+`SIGN` (macOS only) and `APP` (truncated) columns. Every rule reads the kernel-reported
+executable, never argv[0] as a path. Runtime comes from the executable name,
+the owning bundle (Electron Framework, a bundled JBR) and then the binary
+itself (Go build info, Bun's segment, a Rust `std::rt::lang_start` entry
+point or, when stripped, rustc markers without a C++ runtime); signing is one
+`codesign -dv` per unique executable, plus
+`codesign --verify --ignore-resources -R="anchor apple"` when the display claims Apple: a claim
+that fails verification is `invalid` and never makes a process `system`.
+Results are cached per executable by (path, size, mtime, device, inode,
+ctime) in the `classify` cache kind, so only the first run is slow. On Linux,
+`spectra process` now reports `executable_path` (from `/proc/<pid>/exe`,
+plus `executable_deleted` when the file is gone) with or without
+`--classify`. Without `--classify` the macOS output and the cost of
+`spectra process` are otherwise unchanged. The rules
+and precedence are in
+[Running processes](../inspection/running-processes.md#process-classification).
+
 `spectra alerts [--state firing|resolved|all] [--limit N] [--json]` lists alerts.
 `spectra alerts ack <id> [--json]` acknowledges one. `spectra alerts health
 [--json]` summarizes load, memory, disk, processes, and active alerts.

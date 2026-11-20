@@ -164,8 +164,124 @@ unchanged.
 | `heaviest` | Top members: `pid`, `command`, `cpu_pct`, `age_seconds` |
 
 `--group-by family` cannot be combined with `--sort`, `--tree`, `--ppid`,
-`--user`, `--min-rss`, `--min-vsz` or `--min-elapsed` (exit status 2): filters
-would remove ancestors needed for attribution.
+`--user`, `--min-rss`, `--min-vsz`, `--min-elapsed` or `--classify` (exit
+status 2): filters would remove ancestors needed for attribution.
+
+## Process classification
+
+`spectra process --classify` gives every listed process (after `--top`)
+a role, a runtime, its owning app and, on macOS, a code-signing summary,
+so a desktop client can group processes the way Activity Monitor does.
+Without the flag none of this runs and the macOS output is unchanged. On
+Linux, `executable_path` and `executable_deleted` are now always present,
+with or without `--classify`.
+
+| JSON field | Values |
+|---|---|
+| `role` | `app`, `app_helper`, `system`, `shell`, `terminal`, `ai_agent`, `cli` |
+| `runtime` | `electron`, `native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`, `shell`, `unknown` |
+| `app` | `{name, bundle_path, bundle_id}` for the outermost owning `.app` (macOS); present only when an owning app is found |
+| `signing` | macOS only: `{status, team_id, hardened_runtime}`, status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown` |
+| `evidence` | `["role: …", "runtime: …", "signing: …"]`, why each was chosen (the `signing` line on macOS only) |
+
+Every path rule uses the kernel-reported executable: libproc on macOS,
+`readlink /proc/<pid>/exe` on Linux (`executable_path`, with
+`executable_deleted` when the kernel reports the file as deleted). argv[0]
+is never used as a path, since any process can set it (`exec -a`). When the
+executable is not visible (another user's process on Linux), the runtime,
+shell, terminal and agent rules may match on the argv[0] name with evidence
+marked "from argv[0], unverified"; app and system roles cannot match. On
+Linux the binary is read through `/proc/<pid>/exe`, so a replaced or deleted
+file still yields the code the process runs. Only regular files are opened,
+without blocking (a FIFO named like an executable or `Info.plist` is
+skipped), `Info.plist` reads stop at 1 MiB, and bundle reads run on the
+worker pool so cancelling returns promptly.
+
+**Runtime**, first match wins:
+
+1. Interpreter or managed runtime by executable base name: `java`, `node`,
+   `bun`, `deno`, `python*`, `ruby*`, and shells (`sh`, `bash`, `zsh`,
+   `fish`, …) as `shell`.
+2. `electron` for any executable inside an `.app` whose outermost bundle has
+   `Contents/Frameworks/Electron Framework.framework`, helpers included.
+3. `jvm` for the main executable of an app that bundles a Java runtime
+   (`Contents/jbr` or `Contents/runtime`, as JetBrains IDEs and jpackage apps do).
+4. The binary itself, read with `debug/macho` (host slice of a universal
+   binary) or `debug/elf`: a `__BUN` segment / `.bun` section is `bun`
+   (a `bun build --compile` executable) and a `__go_buildinfo` /
+   `.go.buildinfo` section is `go`. A defined `std::rt::lang_start` symbol
+   (legacy or v0 mangling), which only a Rust `main` calls, is `rust`.
+   Otherwise `/rustc/` or `RUST_BACKTRACE` in read-only data (at most
+   32 MiB scanned per file) shows Rust std is linked, which C++ programs
+   with Rust libraries (`adb`, `netsimd`) also have: it is `rust` only for
+   a stripped binary with no C++ runtime (no `std::` or `operator new`
+   symbols, no `__gxx_personality_v0`, no libc++/libstdc++ link), and
+   `native` with evidence "links Rust std" when the symbol table survives
+   without `lang_start` or a C++ runtime is present. Anything else is
+   `native`; an unreadable or unknown file is `unknown`.
+
+**Role** precedence (documented in `internal/classify/role.go`):
+
+1. `system` for Linux kernel threads.
+2. `ai_agent`, from the agent table in `internal/classify/role.go`:
+   - `claude`, `codex`, `ollama`, `aider`, `cursor-agent` and `opencode`
+     match on the executable base name alone; so does Claude Code's native
+     install, a file named after its version inside a `claude` directory
+     (`~/.local/share/claude/versions/2.1.220`), matched by path shape.
+   - `gemini`, `copilot`, `qwen`, `amp`, `crush` and `goose` are names other
+     tools also use (pressly/goose is a database migration tool), so they
+     need a confirming signal: the binary's Go module
+     (`github.com/charmbracelet/crush`), the npm package of the script
+     (`@google/gemini-cli`, `@github/copilot`, `@qwen-code/qwen-code`,
+     `@sourcegraph/amp`, `@charmland/crush`), the owning bundle id
+     (`com.block.goose`) or a known install path (`~/.amp/bin/`,
+     `~/.local/bin/goose`). Without one they are `cli`.
+   - A node/bun/deno/python interpreter running a script from any listed
+     npm package, or a script/module named after an unambiguous agent, is
+     `ai_agent` with the interpreter's runtime. A bin/ symlink to the script
+     is followed to find its package. Options that take a value
+     (`node --require x app.js`) are skipped, so the value is never taken
+     for the script, and arguments are never substring-matched.
+   - argv[0] counts only when the executable is not visible, and only for
+     the unambiguous names.
+3. `terminal` for Terminal, iTerm2, Ghostty, kitty, Alacritty, WezTerm, Warp,
+   Hyper, tmux, screen, zellij and similar.
+4. `shell` by executable.
+5. `app` for an app's `CFBundleExecutable`, `app_helper` for anything else in
+   it. Bundles under `/System/Library/` or `/Library/Apple/` are `system`;
+   a `.app` inside a `.framework` (Homebrew's `Python.app`) and tools under
+   `<app>/Contents/Developer/` (Xcode's toolchain) are not app processes.
+6. `system` on macOS under `/System`, `/usr/libexec`, `/usr/sbin`, `/sbin`,
+   or a validated Apple platform binary (a non-root `/bin` or `/usr/bin`
+   tool stays `cli`); on Linux a uid 0 process under `/usr/lib/systemd`,
+   `/usr/sbin` or `/sbin`.
+7. `cli` otherwise.
+
+**Signing** runs `codesign -dv --verbose=2 <exe>` once per unique
+executable. That output displays what the signature claims without
+validating it, so an Apple claim (a `Platform identifier` or a
+"Software Signing" leaf) is checked with
+`codesign --verify --ignore-resources -R="anchor apple" <exe>`: passing is
+`apple` (and only then counts as a platform binary for the `system` role),
+failing is `invalid`, and a codesign failure (timeout, cancel) is `unknown`
+and not cached. The verify still checks the code pages and CodeDirectory
+(a patched byte in either fails it) but not bundle resource seals, which
+genuine Apple code such as Simulator runtimes, Safari's cryptex XPC
+services and XProtect fails with "resource envelope is obsolete". Other statuses are taken from the display: a Developer ID, Mac App
+Store or Apple Development leaf is `developer_id` with its displayed
+`team_id`, `Signature=adhoc` is `adhoc`, "not signed at all" is
+`unsigned`. The `signing:` evidence line says whether the verdict was
+validated and that it describes the file on disk, which may no longer be
+what a long-running process loaded. Linux never runs codesign and omits
+`signing`.
+
+The per-executable work is cached by (path, size, mtime, device, inode,
+ctime) in memory and in the `classify` cache kind, so a second run skips
+codesign and binary reads entirely, while a replacement that keeps size and
+mtime (`cp -p`, `rsync`, `tar`) still misses. Cold classification runs on a
+bounded worker pool. On a Mac with about 1,000 processes the first run
+takes a few seconds and later runs add well under 100 ms. The table adds
+`ROLE` and `RUNTIME` columns, plus `SIGN` on macOS.
 
 ## Implementation reference
 
