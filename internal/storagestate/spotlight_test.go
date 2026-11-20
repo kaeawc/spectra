@@ -70,21 +70,10 @@ func TestSpotlightForPathNeverRunsMdutilProgress(t *testing.T) {
 	}
 }
 
-func TestParseMdutilProgress(t *testing.T) {
-	got := parseMdutilProgress([]byte("/:\n\tIndexing 42.5%\n/System/Volumes/Data:\n\tScanning 7%\n/Volumes/Idle:\n\tIdle\n"))
-	if got["/"].Phase != "Indexing" || got["/"].Percent != 42.5 {
-		t.Fatalf("root progress = %+v", got["/"])
-	}
-	if got["/System/Volumes/Data"].Phase != "Scanning" || got["/System/Volumes/Data"].Percent != 7 {
-		t.Fatalf("data progress = %+v", got["/System/Volumes/Data"])
-	}
-	if got["/Volumes/Idle"].Phase != "Idle" || got["/Volumes/Idle"].Percent != 0 {
-		t.Fatalf("idle progress = %+v", got["/Volumes/Idle"])
-	}
-}
-
 func TestCollectSpotlightFiltersWritableAPFS(t *testing.T) {
+	var calls [][]string
 	stub := func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{name}, args...))
 		switch {
 		case name == "/usr/bin/mdutil" && len(args) == 1 && args[0] == "-sa":
 			return []byte("/:\n\tIndexing enabled.\n/System/Volumes/Data:\n\tIndexing enabled.\n/System/Volumes/Data:\n\tIndexing enabled.\n/System/Volumes/Preboot:\n\tIndexing disabled.\n"), nil
@@ -107,8 +96,13 @@ func TestCollectSpotlightFiltersWritableAPFS(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("spotlight volumes = %d, want 3: %+v", len(got), got)
 	}
-	if got[0].MountPoint != "/System/Volumes/Data" || got[0].Progress == nil {
-		t.Fatalf("first volume = %+v, want data with progress", got[0])
+	if got[0].MountPoint != "/System/Volumes/Data" || got[0].Progress != nil {
+		t.Fatalf("first volume = %+v, want data without progress", got[0])
+	}
+	for _, c := range calls {
+		if c[0] == "/usr/bin/mdutil" && len(c) > 1 && c[1] != "-s" && c[1] != "-sa" {
+			t.Fatalf("storage --spotlight ran %v; only mdutil -s and -sa are reads", c)
+		}
 	}
 	if got[2].MountPoint != "/System/Volumes/Update" || got[2].Status != SpotlightNoIndex {
 		t.Fatalf("missing per-mount fallback: %+v", got)
