@@ -53,11 +53,16 @@ New assets:
 | Replay or prepare-one, execute-another | Single-use, uid- and action-bound token, 60 s expiry, every check re-run and the bound facts compared |
 | Argument injection into `launchctl` | Label charset validation; fixed argv to `/bin/launchctl`, no shell |
 | Non-admin `_spectra` member disables system daemons | Mutation requires uid 0 or `admin` group membership, checked per call |
-| Disabling security software or the helper itself | Helper's own label refused; every change audited; denylist for security agents is an open question |
+| Disabling security software or the helper itself | Helper's own label refused; every change audited; root-owned denylist (`/Library/Application Support/Spectra/helper-denylist.plist`: endpoint security, MDM, backup agents) always refused, and all mutations refused if the file exists but is not root-owned `0644` or stricter |
 | Toggling a daemon to cause disruption | 10 mutations per 10 minutes per uid, one mutation in flight |
 | Loss of the files that launch a daemon | No delete, move or edit operation exists; `enable` undoes `disable` |
 
 Remaining risk: an admin user, or malware running as one, can disable a
-verified third-party daemon without the password prompt `sudo` would ask
-for. This is a deliberate, narrow privilege step; the audit log records it,
-and `enable` reverses it.
+verified third-party daemon that is not on the denylist without the
+password prompt `sudo` would ask for. The denylist covers security, MDM and
+backup agents by category, but it is only as complete as its entries, and
+anyone with `sudo` can edit it; an admin can still run `sudo launchctl`
+directly with the commands the refusal prints. `enable` also loads the
+daemon, so re-enabling a verified daemon starts it at once. This is a
+deliberate, narrow privilege step; the audit log records it, and `enable`
+reverses `disable`.
