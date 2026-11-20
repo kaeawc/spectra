@@ -161,6 +161,24 @@ macOS uses `lsof`, Linux uses `ss` and `/proc`. Without root only your own
 processes are visible, and the output says the result may be incomplete. Exit
 codes: 0 owner found, 1 error, 2 usage, 3 no owner found.
 
+`spectra owner --under [--json] [--timeout 30s] DIR [DIR...]` lists every
+visible process whose working directory is DIR or below it, with pid, command,
+cwd, start time and parent chain. Directories and cwds are compared as given
+and symlink-resolved. Spectra itself and its own children are left out.
+`incomplete: true` means another user's process could not be read. `--timeout`
+bounds the run (default 30s); reaching it exits `1`, never "none found". Exit
+codes are the same as `owner`: `0` found, `3` none found, `1` error, `2` usage.
+See [Working-directory owners](owner-under.md).
+
+`spectra idle [--root DIR]... [--pids N,N] [--min-age 10m] [--max-cpu 1]
+[--window 5s] [--timeout 1m] [--json]` lists long-idle holders: processes
+under a root or named by pid that are older than `--min-age` and that, with
+all their descendants, used under `--max-cpu` percent of one CPU (summed) over
+the `--window` sample. Each has its parent chain, descendants and cheap wait
+evidence (Linux `wchan`; open files named like locks). Nothing is killed.
+Exit codes: `0` none found, `3` idle holders found, `1` error, `2` usage. See
+[Idle holders](idle-holders.md).
+
 `spectra whatswrong` adds the same attribution, such as `OSLogService (17874)
 busy, driven by CtrlProxyUITests-Runner (17649), launched by xcodebuild (17491)`,
 when the busiest process is over 80% CPU.

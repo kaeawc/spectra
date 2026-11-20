@@ -39,7 +39,7 @@ func TestRunOwner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var out, errb bytes.Buffer
 			find := func(context.Context, owner.Target) (owner.Result, error) { return tt.res, tt.err }
-			if code := runOwnerWithIO(tt.args, &out, &errb, "/work", find); code != tt.wantCode {
+			if code := runOwnerWithIO(tt.args, &out, &errb, "/work", find, nil); code != tt.wantCode {
 				t.Fatalf("code = %d, want %d (out=%q err=%q)", code, tt.wantCode, out.String(), errb.String())
 			}
 			if !strings.Contains(out.String(), tt.wantOut) || !strings.Contains(errb.String(), tt.wantErr) {
@@ -54,7 +54,7 @@ func TestRunOwnerJSON(t *testing.T) {
 	find := func(_ context.Context, tg owner.Target) (owner.Result, error) {
 		return owner.Result{Target: tg}, nil
 	}
-	if code := runOwnerWithIO([]string{"--json", "tcp:80"}, &out, &bytes.Buffer{}, "/work", find); code != 3 {
+	if code := runOwnerWithIO([]string{"--json", "tcp:80"}, &out, &bytes.Buffer{}, "/work", find, nil); code != 3 {
 		t.Fatalf("code = %d", code)
 	}
 	var got struct {
@@ -65,6 +65,70 @@ func TestRunOwnerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Target.Kind != "port" || got.Target.Proto != "tcp" || got.Holders == nil {
+		t.Errorf("json = %s", out.String())
+	}
+}
+
+func TestRunOwnerUnder(t *testing.T) {
+	busy := owner.UnderResult{Holders: []owner.Holder{{
+		PID: 20, User: "jason", Command: "gradle", Hold: owner.HoldCwd, Cwd: "/work/repo/app",
+		Chain: []owner.Link{{PID: 10, Command: "zsh"}},
+	}}}
+	tests := []struct {
+		name     string
+		args     []string
+		res      owner.UnderResult
+		err      error
+		wantDirs []string
+		wantCode int
+		wantOut  string
+		wantErr  string
+	}{
+		{name: "found", args: []string{"--under", "/work/repo"}, res: busy, wantDirs: []string{"/work/repo"}, wantCode: 0, wantOut: "cwd: /work/repo/app"},
+		{name: "relative", args: []string{"--under", "repo", "/b/../c"}, wantDirs: []string{"/work/repo", "/c"}, wantCode: 3, wantOut: "No process is working under /work/repo, /c"},
+		{name: "incomplete", args: []string{"--under", "/x"}, res: owner.UnderResult{Incomplete: true, Hint: "denied"}, wantCode: 3, wantOut: "may be incomplete: denied"},
+		{name: "deadline", args: []string{"--under", "--timeout", "1ms", "/x"}, err: context.DeadlineExceeded, wantCode: 1, wantErr: "deadline"},
+		{name: "no dirs", args: []string{"--under"}, wantCode: 2, wantErr: "--under"},
+		{name: "bad timeout", args: []string{"--under", "--timeout", "0s", "/x"}, wantCode: 2, wantErr: "positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			var gotDirs []string
+			under := func(_ context.Context, dirs []string) (owner.UnderResult, error) {
+				gotDirs = dirs
+				return tt.res, tt.err
+			}
+			if code := runOwnerWithIO(tt.args, &out, &errb, "/work", nil, under); code != tt.wantCode {
+				t.Fatalf("code = %d, want %d (out=%q err=%q)", code, tt.wantCode, out.String(), errb.String())
+			}
+			if !strings.Contains(out.String(), tt.wantOut) || !strings.Contains(errb.String(), tt.wantErr) {
+				t.Errorf("out=%q err=%q", out.String(), errb.String())
+			}
+			if tt.wantDirs != nil && strings.Join(gotDirs, ",") != strings.Join(tt.wantDirs, ",") {
+				t.Errorf("dirs = %v, want %v", gotDirs, tt.wantDirs)
+			}
+		})
+	}
+}
+
+func TestRunOwnerUnderJSON(t *testing.T) {
+	var out bytes.Buffer
+	under := func(_ context.Context, dirs []string) (owner.UnderResult, error) {
+		return owner.UnderResult{Dirs: dirs, Incomplete: true}, nil
+	}
+	if code := runOwnerWithIO([]string{"--under", "--json", "/w"}, &out, &bytes.Buffer{}, "/", nil, under); code != 3 {
+		t.Fatalf("code = %d", code)
+	}
+	var got struct {
+		Dirs       []string `json:"dirs"`
+		Holders    []any    `json:"holders"`
+		Incomplete bool     `json:"incomplete"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Dirs) != 1 || got.Holders == nil || !got.Incomplete {
 		t.Errorf("json = %s", out.String())
 	}
 }
