@@ -116,8 +116,16 @@ Notably absent:
   path. Each method has a fixed source.
 - **No arbitrary command execution.** Each method invokes exactly one
   pre-defined system command with structured arguments.
-- **No mutation methods.** The helper observes; it does not change
-  system state.
+- **Mutation methods only per the reviewed designs listed here.** Today
+  the helper observes and changes no system state. A mutating method is
+  added only after its own design, threat-model update, security review and
+  owner approval (issue #600), one method per step:
+    - *Proposed, not approved:*
+      [helper launchd mutation](helper-launchd-mutation.md) —
+      `helper.launchd.system.prepare`, `.disable` and `.enable` for a
+      `/Library/LaunchDaemons` job owned by a verified third-party bundle.
+      It takes a label only, re-derives and verifies every path itself,
+      never deletes, and needs a single-use confirmation token.
 
 ## Wire protocol
 
