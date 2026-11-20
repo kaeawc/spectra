@@ -55,8 +55,9 @@ set.
 `process`, `taken_at`, `duration_ms`, `interval_ms`, `total_samples` (sum of
 self-time counts), `stack_count`, `stacks` (the 50 heaviest self-time stacks as
 `{frames, count, percent}`, root first) and `main_thread` (the `spectra hang`
-verdict). The raw text report is not retained. Failures exit non-zero with the
-error on stderr and nothing on stdout.
+verdict). The raw text report is still stored in the sample blob cache unless
+`--no-cache` is set; only the temporary capture file is removed. Failures exit
+non-zero with the error on stderr and nothing on stdout.
 
 Use samples when:
 
