@@ -148,6 +148,8 @@ func (c *countingProcessCollector) SampleProcess(context.Context, int, int, int)
 func lifecycleServer(spawns *blockingSpawnDeps, procs ProcessCollector) *Server {
 	s := NewServer(nil, nil)
 	s.SetCollectors(Collectors{Processes: procs, Reports: ReportDeps{Spawns: spawns.deps}})
+	// These tests count collector calls; keep the start-up warm-up out of them.
+	s.skipWarm = true
 	return s
 }
 

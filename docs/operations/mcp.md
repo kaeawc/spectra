@@ -217,27 +217,40 @@ their text (the text and `structuredContent` are unchanged). The link points at
 | Tool | Kind | Read returns |
 | --- | --- | --- |
 | `process` `sample` | `sample` | The sample report as `text/plain` |
-| `jvm` `flamegraph` | `flamegraph` | The profile copied from `dest`: `image/svg+xml` for `.svg`, `text/html` for `.html` |
+| `jvm` `flamegraph` | `flamegraph` | The profile the capture wrote into a fresh file in the artifacts directory: `image/svg+xml` for `.svg`, `text/html` otherwise. A `dest` gets a copy of that file; `dest` itself is never read back |
 | `jvm` `heap_dump` | `heap` | Metadata only (`application/json`): pid, local `path`, size, whether the file still exists. The dump itself is never served |
 | `snapshot` `create` (with `store`) and `get` | `snapshot` | The stored snapshot as `application/json` |
 
 Spectra serves only files it wrote itself, under `~/.spectra/artifacts/<kind>/`
-(mode 0600, directory 0700). A request names a kind and an id, never a path:
-the id must match `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}` and contain no `..`, the
-path is resolved through symlinks and must stay directly inside the kind's
-directory, and it must be a regular file. Anything else answers "resource not
-found". Reads above 8 MiB return a `truncated` JSON document with the local path
-instead of the bytes; non-text artifacts are returned as a base64 `blob` with
-their `mimeType`. A tool that cannot store its artifact still succeeds, just
-without a link.
+(mode 0600, directory 0700). `~/.spectra`, `~/.spectra/artifacts` and each kind
+directory must be real directories (not symlinks) owned by the current user
+and not group- or world-writable; an owned `~/.spectra/artifacts` is tightened
+to 0700, and otherwise Spectra neither stores nor serves artifacts. A request
+names a kind and an id, never a path: the id must match
+`[A-Za-z0-9][A-Za-z0-9_.-]{0,127}` and contain no `..`, and the file is opened
+without following symlinks and must be a regular file the current user owns.
+Anything else answers "resource not found". Reads of more than 8 MiB of raw
+artifact bytes (about 10.7 MiB once base64-encoded) return a `truncated` JSON
+document with the local path instead of the bytes; non-text artifacts are
+returned as a base64 `blob` with their `mimeType`. A tool that cannot store its
+artifact still succeeds, just without a link. Each save sweeps its kind:
+artifacts older than 7 days go, then the oldest until the kind holds at most
+512 MiB.
+
+`process` `sample` and `jvm` `flamegraph` take `duration_seconds` 1–60 (0 or
+omitted is the default), and `jvm` `flamegraph` takes `event` `cpu`, `wall`,
+`alloc`, `lock`, `itimer` or `ctimer`; `job_start` checks both up front. A
+cancelled `snapshot` (`store`), `diagnose` (`persist`) or `issues` `check`
+never writes to the local store.
 
 ### Completions
 
 The server advertises `completions` and answers `completion/complete` in
 under 200 ms, returning at most 50 values with `hasMore` set when it cut the
-list. Process and JVM listings are reused for 2 seconds; a listing slower than
-150 ms is answered from the previous one (or empty) while it finishes in the
-background, so the first `pid` completion of a session can be empty.
+list. Process, JVM and stored-snapshot listings are reused for 2 seconds; a
+listing slower than 150 ms is answered from the previous one (or empty) while
+it finishes in the background. The process listing starts loading when the
+session starts, so the first `pid` completion is normally answered from it.
 
 | Argument | Values |
 | --- | --- |

@@ -36,12 +36,18 @@ func (f *sampleProcs) SampleProcess(context.Context, int, int, int) (string, err
 	return f.out, nil
 }
 
-func artifactSession(t *testing.T) (*sdk.ClientSession, *Server) {
+func artifactServer(t *testing.T) *Server {
 	t.Helper()
 	s := structuredTestServer(t)
 	s.SetArtifactDir(filepath.Join(t.TempDir(), "artifacts"))
 	s.collect.JVMs = artifactJVMs{}
 	s.collect.Processes = &sampleProcs{out: "Call graph:\n  main"}
+	return s
+}
+
+func artifactSession(t *testing.T) (*sdk.ClientSession, *Server) {
+	t.Helper()
+	s := artifactServer(t)
 	return startServerSession(t, s, "2025-11-25", nil), s
 }
 
@@ -84,6 +90,9 @@ func TestFlamegraphToolLinksReadableSVG(t *testing.T) {
 	}
 	if c := got.Contents[0]; c.Text != svgBody || c.MIMEType != "image/svg+xml" {
 		t.Fatalf("contents = %+v", c)
+	}
+	if b, err := os.ReadFile(dest); err != nil || string(b) != svgBody {
+		t.Fatalf("dest copy = %q, %v", b, err)
 	}
 }
 
@@ -152,7 +161,7 @@ func TestSnapshotLinkReadsStoredSnapshot(t *testing.T) {
 
 func TestArtifactReadRejectsBadIDs(t *testing.T) {
 	cs, s := artifactSession(t)
-	root, _ := s.artifactsRoot()
+	root, _, _ := s.artifactsRoot()
 	if err := os.MkdirAll(filepath.Join(root, "sample"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +191,7 @@ func TestArtifactReadRejectsBadIDs(t *testing.T) {
 
 func TestArtifactSizeCapAndBlob(t *testing.T) {
 	cs, s := artifactSession(t)
-	root, _ := s.artifactsRoot()
+	root, _, _ := s.artifactsRoot()
 	dir := filepath.Join(root, "flamegraph")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -231,10 +240,11 @@ var (
 )
 
 func TestCompletePIDs(t *testing.T) {
-	cs, s := artifactSession(t)
+	s := artifactServer(t)
 	s.collect.Processes = &fakeProcessCollector{procs: []process.Info{
 		{PID: 100, Command: "launchd"}, {PID: 1234, Command: "java"}, {PID: 1299, Command: "zsh"}, {PID: 7, Command: "Gradle Daemon"},
 	}}
+	cs := startServerSession(t, s, "2025-11-25", nil)
 	if got := complete(t, cs, triagePrompt, "pid", "12", nil); strings.Join(got, ",") != "1234,1299" {
 		t.Errorf("pid prefix = %v", got)
 	}
@@ -275,7 +285,7 @@ func TestCompleteDirs(t *testing.T) {
 
 func TestCompleteArtifactVariables(t *testing.T) {
 	cs, s := artifactSession(t)
-	root, _ := s.artifactsRoot()
+	root, _, _ := s.artifactsRoot()
 	dir := filepath.Join(root, "sample")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -313,8 +323,9 @@ func TestCompletionLatencyBounds(t *testing.T) {
 	}
 	for name, procs := range map[string]ProcessCollector{"large table": &fakeProcessCollector{procs: big}, "slow collector": &slowProcs{}} {
 		t.Run(name, func(t *testing.T) {
-			cs, s := artifactSession(t)
+			s := artifactServer(t)
 			s.collect.Processes = procs
+			cs := startServerSession(t, s, "2025-11-25", nil)
 			for i := 0; i < 3; i++ {
 				start := time.Now()
 				got := complete(t, cs, triagePrompt, "pid", "1", nil)

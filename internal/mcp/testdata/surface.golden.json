@@ -228,11 +228,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
@@ -900,11 +900,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
@@ -1526,11 +1526,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
@@ -2480,11 +2480,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
@@ -3157,11 +3157,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
@@ -3721,11 +3721,11 @@
             "type": "string"
           },
           "duration_seconds": {
-            "description": "Duration.",
+            "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
           "event": {
-            "description": "Profiler event.",
+            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {

@@ -3,8 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,10 +22,12 @@ import (
 const (
 	artifactURIPrefix   = "spectra://artifact/"
 	artifactURITemplate = "spectra://artifact/{kind}/{id}"
-	// maxArtifactBlob caps how much of one artifact a resource read returns.
-	// Larger ones answer with metadata and the local path instead.
+	// maxArtifactBlob caps the raw bytes of one artifact a resource read
+	// returns (a binary one goes out base64-encoded, about 10.7 MiB on the
+	// wire). Larger ones answer with metadata and the local path instead.
 	maxArtifactBlob = 8 << 20
-	// maxArtifactCopy caps what a tool copies into the artifacts directory.
+	// maxArtifactCopy caps the copy of a captured artifact written to a
+	// caller's dest.
 	maxArtifactCopy = 64 << 20
 
 	kindSample     = "sample"
@@ -74,20 +76,32 @@ func (l artifactLink) content() *sdk.ResourceLink {
 func artifactURI(kind, id string) string { return artifactURIPrefix + kind + "/" + id }
 
 // artifactsRoot is where Spectra keeps artifacts: ~/.spectra/artifacts unless
-// the server was given another directory.
-func (s *Server) artifactsRoot() (string, error) {
+// the server was given another directory. spectraDir is the ~/.spectra parent
+// that must also be safe, or "" for an overridden root.
+func (s *Server) artifactsRoot() (root, spectraDir string, err error) {
 	if s.artifactDir != "" {
-		return s.artifactDir, nil
+		return s.artifactDir, "", nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := s.home()
 	if err != nil {
-		return "", fmt.Errorf("artifacts directory: %w", err)
+		return "", "", fmt.Errorf("artifacts directory: %w", err)
 	}
-	return filepath.Join(home, ".spectra", "artifacts"), nil
+	spectraDir = filepath.Join(home, ".spectra")
+	return filepath.Join(spectraDir, "artifacts"), spectraDir, nil
+}
+
+func (s *Server) home() (string, error) {
+	if s.homeDir != nil {
+		return s.homeDir()
+	}
+	return os.UserHomeDir()
 }
 
 // SetArtifactDir overrides the artifacts directory (mainly for tests).
 func (s *Server) SetArtifactDir(dir string) { s.artifactDir = dir }
+
+// SetHomeDir overrides how the home directory is found (mainly for tests).
+func (s *Server) SetHomeDir(home func() (string, error)) { s.homeDir = home }
 
 func artifactMIME(ext string) string {
 	switch strings.ToLower(ext) {
@@ -124,33 +138,54 @@ func (s *Server) newArtifactID(prefix, ext string) string {
 // saveArtifact stores data as a new artifact and returns its link. A failure
 // to store only means the result carries no link.
 func (s *Server) saveArtifact(kind, prefix, ext, description string, data []byte) (artifactLink, bool) {
-	root, err := s.artifactsRoot()
+	dir, err := s.artifactKindDir(kind, true)
 	if err != nil {
-		return artifactLink{}, false
-	}
-	dir := filepath.Join(root, kind)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return artifactLink{}, false
 	}
 	id := s.newArtifactID(prefix, ext)
 	if err := fsutil.WriteFileAtomic(filepath.Join(dir, id), data, 0o600); err != nil {
 		return artifactLink{}, false
 	}
+	s.sweepArtifacts(dir, id)
 	return artifactLink{URI: artifactURI(kind, id), Name: id, Description: description, MIMEType: artifactMIME(ext), Size: int64(len(data))}, true
 }
 
-// adoptFile copies a regular file a tool just wrote (a flamegraph at a
-// caller-chosen path) into the artifacts directory.
-func (s *Server) adoptFile(kind, prefix, path, description string) (artifactLink, bool) {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxArtifactCopy {
-		return artifactLink{}, false
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- a file the tool just produced
+// linkCapturedFile links an artifact a tool wrote into a file newArtifactFile
+// created. An empty or unreadable capture is removed and yields no link.
+func (s *Server) linkCapturedFile(kind, id, description string) (artifactLink, bool) {
+	dir, err := s.artifactKindDir(kind, false)
 	if err != nil {
 		return artifactLink{}, false
 	}
-	return s.saveArtifact(kind, prefix, safeArtifactExt(path), description, data)
+	f, info, err := openArtifact(dir, id)
+	if err != nil {
+		return artifactLink{}, false
+	}
+	f.Close()
+	if info.Size() == 0 {
+		_ = os.Remove(filepath.Join(dir, id))
+		return artifactLink{}, false
+	}
+	s.sweepArtifacts(dir, id)
+	return artifactLink{URI: artifactURI(kind, id), Name: id, Description: description, MIMEType: artifactMIME(filepath.Ext(id)), Size: info.Size()}, true
+}
+
+// copyArtifactTo writes the caller's requested copy of a captured artifact.
+// dest is replaced atomically, so a symlink there is replaced, not followed.
+func (s *Server) copyArtifactTo(kind, id, dest string) error {
+	dir, err := s.artifactKindDir(kind, false)
+	if err != nil {
+		return err
+	}
+	f, _, err := openArtifact(dir, id)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return fsutil.WriteFileAtomicStream(dest, 0o600, func(w io.Writer) error {
+		_, err := io.Copy(w, io.LimitReader(f, maxArtifactCopy))
+		return err
+	})
 }
 
 // heapRecord is the sidecar for a heap dump: dumps are large and sensitive,
@@ -202,35 +237,6 @@ func parseArtifactURI(uri string) (kind, id string, ok bool) {
 	return kind, id, true
 }
 
-// resolveArtifactFile returns the on-disk path of a stored artifact, after
-// resolving symlinks and requiring the result to stay inside the kind's
-// directory.
-func (s *Server) resolveArtifactFile(kind, id string) (string, os.FileInfo, error) {
-	root, err := s.artifactsRoot()
-	if err != nil {
-		return "", nil, err
-	}
-	realRoot, err := filepath.EvalSymlinks(filepath.Join(root, kind))
-	if err != nil {
-		return "", nil, err
-	}
-	resolved, err := filepath.EvalSymlinks(filepath.Join(realRoot, id))
-	if err != nil {
-		return "", nil, err
-	}
-	if filepath.Dir(resolved) != realRoot {
-		return "", nil, errors.New("artifact is outside the artifacts directory")
-	}
-	info, err := os.Lstat(resolved)
-	if err != nil {
-		return "", nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return "", nil, errors.New("artifact is not a regular file")
-	}
-	return resolved, info, nil
-}
-
 func artifactTemplates() []*sdk.ResourceTemplate {
 	return []*sdk.ResourceTemplate{{
 		Name:        "Artifact",
@@ -253,24 +259,34 @@ func (s *Server) readArtifact(ctx context.Context, req *sdk.ReadResourceRequest)
 	}
 	defer release()
 	if kind == kindSnapshot {
-		return s.readSnapshotArtifact(uri, id)
+		return s.readSnapshotArtifact(ctx, uri, id)
 	}
-	path, info, err := s.resolveArtifactFile(kind, id)
+	dir, err := s.artifactKindDir(kind, false)
 	if err != nil {
 		return nil, sdk.ResourceNotFoundError(uri)
 	}
-	mime := artifactMIME(filepath.Ext(id))
+	f, _, err := openArtifact(dir, id)
+	if err != nil {
+		return nil, sdk.ResourceNotFoundError(uri)
+	}
+	defer f.Close()
 	if kind == kindHeap {
-		return s.readHeapRecord(uri, path)
+		return s.readHeapRecord(uri, f)
 	}
-	if info.Size() > maxArtifactBlob {
-		return tooLargeResource(uri, path, info.Size())
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- resolved inside the artifacts directory
+	// The cap applies to the open file's bytes, so a file that grows after
+	// the open still cannot push a larger read through.
+	data, over, err := readCapped(f, maxArtifactBlob)
 	if err != nil {
 		return nil, sdk.ResourceNotFoundError(uri)
 	}
-	return contentsResource(uri, mime, data), nil
+	if over {
+		size := int64(maxArtifactBlob + 1)
+		if info, err := f.Stat(); err == nil {
+			size = info.Size()
+		}
+		return tooLargeResource(uri, filepath.Join(dir, id), size)
+	}
+	return contentsResource(uri, artifactMIME(filepath.Ext(id)), data), nil
 }
 
 func contentsResource(uri, mime string, data []byte) *sdk.ReadResourceResult {
@@ -297,9 +313,12 @@ func tooLargeResource(uri, path string, size int64) (*sdk.ReadResourceResult, er
 	return contentsResource(uri, "application/json", doc), nil
 }
 
-func (s *Server) readHeapRecord(uri, recordPath string) (*sdk.ReadResourceResult, error) {
-	raw, err := os.ReadFile(recordPath) // #nosec G304 -- resolved inside the artifacts directory
-	if err != nil {
+// maxHeapRecord caps a heap sidecar read; real ones are a few hundred bytes.
+const maxHeapRecord = 64 << 10
+
+func (s *Server) readHeapRecord(uri string, r io.Reader) (*sdk.ReadResourceResult, error) {
+	raw, over, err := readCapped(r, maxHeapRecord)
+	if err != nil || over {
 		return nil, sdk.ResourceNotFoundError(uri)
 	}
 	var rec heapRecord
@@ -328,13 +347,13 @@ func (s *Server) readHeapRecord(uri, recordPath string) (*sdk.ReadResourceResult
 	return contentsResource(uri, "application/json", out), nil
 }
 
-func (s *Server) readSnapshotArtifact(uri, id string) (*sdk.ReadResourceResult, error) {
+func (s *Server) readSnapshotArtifact(ctx context.Context, uri, id string) (*sdk.ReadResourceResult, error) {
 	db, err := openStore()
 	if err != nil {
 		return nil, sdk.ResourceNotFoundError(uri)
 	}
 	defer db.Close()
-	raw, err := db.GetSnapshotJSON(context.Background(), id)
+	raw, err := db.GetSnapshotJSON(ctx, id)
 	if err != nil || len(raw) == 0 {
 		return nil, sdk.ResourceNotFoundError(uri)
 	}

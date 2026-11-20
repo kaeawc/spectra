@@ -49,8 +49,18 @@ type Server struct {
 	// overrides its intervals and local sampler (mainly for tests).
 	live    *liveHub
 	liveCfg liveConfig
-	// artifactDir overrides where tool artifacts are stored and served from.
+	// artifactDir overrides where tool artifacts are stored and served from;
+	// homeDir overrides how the default ~/.spectra/artifacts is found.
 	artifactDir string
+	homeDir     func() (string, error)
+	// artifactKindBytes overrides the per-kind retention size (tests).
+	artifactKindBytes int64
+	// wallClock times progress, job progress and completion caches. It is
+	// wall time even when collect.Clock is fixed; nil is the system clock.
+	wallClock Clock
+	// skipWarm leaves the completion caches cold at start (tests that count
+	// collector calls).
+	skipWarm    bool
 	completions completionCache
 	// jobs runs job_start's background tool calls for the current Run;
 	// jobsCfg overrides its limits and clock (mainly for tests).
@@ -162,6 +172,7 @@ func (s *Server) Run(ctx context.Context) error {
 	srv := s.sdkServer()
 	defer s.live.close()
 	defer s.jobs.close()
+	s.warmCompletions(ctx)
 	tracker := newReplyTracker()
 	err := srv.Run(ctx, &sdk.IOTransport{
 		Reader: io.NopCloser(newTrackingReader(ctx, s.reader, tracker, s.eofWait)),
@@ -207,7 +218,11 @@ func (s *Server) sdkServer() *sdk.Server {
 	for _, def := range toolDefinitions() {
 		srv.AddTool(sdkTool(def), s.sdkToolHandler(handlers[def.Name]))
 	}
-	s.jobs = newJobStore(s.jobsCfg, s.collect.Clock)
+	jobsCfg := s.jobsCfg
+	if jobsCfg.ProgressClock == nil {
+		jobsCfg.ProgressClock = s.wall()
+	}
+	s.jobs = newJobStore(jobsCfg, s.collect.Clock)
 	for _, def := range jobToolDefinitions() {
 		srv.AddTool(jobSDKTool(def), s.jobToolHandler(def.Name))
 	}
@@ -282,6 +297,13 @@ func sdkResult(res ToolResult) *sdk.CallToolResult {
 		out.StructuredContent = res.Structured
 	}
 	return out
+}
+
+func (s *Server) wall() Clock {
+	if s.wallClock != nil {
+		return s.wallClock
+	}
+	return systemClock{}
 }
 
 func (s *Server) slot() chan struct{} {

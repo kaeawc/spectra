@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -168,6 +169,9 @@ func TestJobStartValidatesArguments(t *testing.T) {
 		{`{"tool":"orphans","arguments":{"roots":["rel"]}}`, "must be absolute"},
 		{`{"tool":"process","arguments":{"operation":"list"}}`, "only for operation sample"},
 		{`{"tool":"jvm","arguments":{"operation":"flamegraph","pid":1}}`, "confirm_sensitive"},
+		{`{"tool":"jvm","arguments":{"operation":"flamegraph","pid":1,"confirm_sensitive":true,"duration_seconds":600}}`, "duration_seconds must be 1..60"},
+		{`{"tool":"jvm","arguments":{"operation":"flamegraph","pid":1,"confirm_sensitive":true,"event":"x;rm"}}`, "event must be one of"},
+		{`{"tool":"process","arguments":{"operation":"sample","pid":1,"duration_seconds":3600}}`, "duration_seconds must be 1..60"},
 		{`{"tool":"snapshot","arguments":{"operation":"diff"}}`, "only for operation create or baseline"},
 		{`{"tool":"triage","arguments":{"pid":"x"}}`, "invalid params"},
 	} {
@@ -197,8 +201,10 @@ func TestJobValidationMatchesHandlers(t *testing.T) {
 		"load":     {`{"top":500}`, `{"roots":["rel"]}`, `{"min_free_gb":-1}`, `{"top":0}`},
 		"orphans":  {`{}`, `{"roots":["rel"]}`, `{"roots":["/a"],"min_age":"-1m"}`, `{"roots":["/a"],"min_age":"bogus"}`},
 		"diagnose": {`{"snapshot_id":"x","thread_dump_pids":[1]}`, `{"persist":"x"}`},
-		"process":  {`{"operation":"sample"}`},
-		"jvm":      {`{"operation":"flamegraph","pid":1}`, `{"operation":"flamegraph","confirm_sensitive":true}`},
+		"process":  {`{"operation":"sample"}`, `{"operation":"sample","pid":20,"duration_seconds":61}`, `{"operation":"sample","pid":20,"duration_seconds":-1}`},
+		"jvm": {`{"operation":"flamegraph","pid":1}`, `{"operation":"flamegraph","confirm_sensitive":true}`,
+			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"duration_seconds":61}`,
+			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"event":"bogus"}`},
 		"triage":   {`{"pid":"x"}`},
 		"snapshot": {`{"operation":5}`},
 	}
@@ -211,20 +217,39 @@ func TestJobValidationMatchesHandlers(t *testing.T) {
 			}
 		}
 	}
-	good := map[string]string{
-		"process": `{"operation":"sample","pid":20}`,
-		"jvm":     `{"operation":"flamegraph","pid":20,"confirm_sensitive":true}`,
+	// good exercises each argument a wrapped tool takes: job validation and
+	// a direct call both accept them.
+	good := map[string][]string{
+		"spawns":   {`{"duration_seconds":1,"interval_millis":1000}`, `{"duration_seconds":3,"interval_millis":1000}`, `{"pid":100,"duration_seconds":2,"interval_millis":1000}`},
+		"idle":     {`{"pids":[20]}`, `{"roots":["/work"]}`, `{"pids":[20],"min_age":"1m"}`, `{"pids":[20],"window":"100ms"}`, `{"pids":[20],"max_cpu":5}`},
+		"load":     {`{}`, `{"roots":["/r"]}`, `{"max_load_per_cpu":2}`, `{"min_free_gb":1}`, `{"backoff_free_gb":2}`, `{"top":5}`},
+		"orphans":  {`{"roots":["/work"]}`, `{"roots":["/work"],"min_age":"1h"}`},
+		"triage":   {`{}`, `{"pid":20}`},
+		"diagnose": {`{}`, `{"include_raw":true}`, `{"thread_dump_pids":[20]}`, `{"persist":true}`},
+		"snapshot": {`{}`, `{"operation":"create"}`, `{"operation":"baseline"}`, `{"operation":"create","store":true,"skip_apps":true,"limit_summary":3}`},
+		"process":  {`{"operation":"sample","pid":20}`, `{"operation":"sample","pid":20,"duration_seconds":1}`, `{"operation":"sample","pid":20,"duration_seconds":60}`, `{"operation":"sample","pid":20,"interval_millis":5}`},
+		"jvm": {`{"operation":"flamegraph","pid":20,"confirm_sensitive":true}`, `{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"duration_seconds":60}`,
+			`{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"event":"wall"}`, `{"operation":"flamegraph","pid":20,"confirm_sensitive":true,"event":"alloc","duration_seconds":1}`},
 	}
+	srv.SetArtifactDir(filepath.Join(t.TempDir(), "artifacts"))
+	srv.collect.JVMs = artifactJVMs{}
+	srv.collect.Processes = &sampleProcs{out: "ok"}
 	for _, tool := range jobToolNames() {
-		args, ok := good[tool]
-		if !ok {
-			args = structuredCalls[tool]
-		}
-		if _, err := jobTools[tool].validate(json.RawMessage(args)); err != nil {
-			t.Errorf("%s %s: valid arguments rejected: %v", tool, args, err)
+		cases, ok := good[tool]
+		if !ok || len(cases) == 0 {
+			t.Errorf("job tool %s has no accept cases", tool)
 		}
 		if _, ok := handlers[tool]; !ok {
 			t.Errorf("job tool %s has no handler", tool)
+			continue
+		}
+		for _, args := range cases {
+			if _, err := jobTools[tool].validate(json.RawMessage(args)); err != nil {
+				t.Errorf("%s %s: valid arguments rejected: %v", tool, args, err)
+			}
+			if res := handlers[tool](context.Background(), json.RawMessage(args)); res.IsError {
+				t.Errorf("%s %s: direct call failed: %s", tool, args, res.Content[0].Text)
+			}
 		}
 	}
 }

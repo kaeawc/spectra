@@ -342,8 +342,10 @@ func validateSnapshotArgs(raw json.RawMessage) (string, error) {
 
 func validateProcessArgs(raw json.RawMessage) (string, error) {
 	var p struct {
-		Operation string `json:"operation"`
-		PID       int    `json:"pid"`
+		Operation       string `json:"operation"`
+		PID             int    `json:"pid"`
+		DurationSeconds int    `json:"duration_seconds"`
+		IntervalMillis  int    `json:"interval_millis"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
 		return "", err
@@ -353,6 +355,9 @@ func validateProcessArgs(raw json.RawMessage) (string, error) {
 	}
 	if p.PID == 0 {
 		return "", errors.New("process sample requires pid")
+	}
+	if p.DurationSeconds < 0 || p.DurationSeconds > maxCaptureSeconds {
+		return "", fmt.Errorf("duration_seconds must be 1..%d", maxCaptureSeconds)
 	}
 	return p.Operation, nil
 }
@@ -365,11 +370,5 @@ func validateJVMArgs(raw json.RawMessage) (string, error) {
 	if p.Operation != "flamegraph" {
 		return "", fmt.Errorf("job_start wraps jvm only for operation flamegraph, not %q", p.Operation)
 	}
-	if !p.ConfirmSensitive {
-		return "", errors.New("jvm flamegraph requires confirm_sensitive=true")
-	}
-	if p.PID == 0 {
-		return "", errors.New("jvm flamegraph requires pid")
-	}
-	return p.Operation, nil
+	return p.Operation, checkFlamegraphArgs(p)
 }

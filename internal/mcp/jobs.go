@@ -47,6 +47,9 @@ var errUnknownJob = errors.New("unknown job_id (jobs are visible only to the ses
 // jobConfig bounds the job store. Zero fields take the defaults.
 type jobConfig struct {
 	Clock Clock
+	// ProgressClock times the progress a job's tool reports (wall time even
+	// when Clock is fixed); nil is the system clock.
+	ProgressClock Clock
 	// MaxLive bounds jobs that are working (queued or running); job_start
 	// refuses a job beyond it.
 	MaxLive int
@@ -71,6 +74,9 @@ func (c jobConfig) withDefaults(clock Clock) jobConfig {
 	}
 	if c.Clock == nil {
 		c.Clock = systemClock{}
+	}
+	if c.ProgressClock == nil {
+		c.ProgressClock = systemClock{}
 	}
 	setDefault(&c.MaxLive, defaultMaxLiveJobs)
 	setDefault(&c.MaxConcurrent, defaultMaxConcurrentJobs)
@@ -246,7 +252,7 @@ func (st *jobStore) call(ctx context.Context, j *job) (res ToolResult) {
 			res = toolError(fmt.Sprintf("%s panicked: %v", j.tool, r))
 		}
 	}()
-	pr := &progressReporter{token: j.id, now: time.Now, every: defaultProgressEvery,
+	pr := &progressReporter{token: j.id, now: st.cfg.ProgressClock.Now, every: defaultProgressEvery,
 		send: func(_ context.Context, p *sdk.ProgressNotificationParams) error {
 			st.update(j, func() { j.progress = &jobProgress{Progress: p.Progress, Total: p.Total, Message: p.Message} })
 			return nil

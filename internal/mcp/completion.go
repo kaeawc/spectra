@@ -33,26 +33,22 @@ type pidEntry struct {
 	name string
 }
 
-// pidListing caches one listing of pids and refreshes it in the background,
-// so a completion never waits longer than completionBudget.
-type pidListing struct {
+// listing caches one host listing and refreshes it in the background, so a
+// completion never waits longer than completionBudget.
+type listing[T any] struct {
 	mu       sync.Mutex
-	entries  []pidEntry
+	entries  []T
 	at       time.Time
 	inflight bool
 	// done is closed when the in-flight refresh finishes.
 	done chan struct{}
 }
 
-// get returns the cached listing, refreshing it first when it is older than
-// completionTTL. now is the caller's clock; load runs the real collection.
-func (l *pidListing) get(ctx context.Context, now time.Time, load func(context.Context) []pidEntry) []pidEntry {
-	l.mu.Lock()
-	if !l.at.IsZero() && now.Sub(l.at) < completionTTL {
-		out := l.entries
-		l.mu.Unlock()
-		return out
-	}
+type pidListing = listing[pidEntry]
+
+// refreshLocked starts a background refresh unless one is running and
+// returns the channel closed when it finishes.
+func (l *listing[T]) refreshLocked(ctx context.Context, now time.Time, load func(context.Context) []T) chan struct{} {
 	if !l.inflight {
 		l.inflight = true
 		done := make(chan struct{})
@@ -67,7 +63,29 @@ func (l *pidListing) get(ctx context.Context, now time.Time, load func(context.C
 			close(done)
 		}()
 	}
-	done := l.done
+	return l.done
+}
+
+// warm starts a refresh without waiting for it, so the first completion
+// finds a listing.
+func (l *listing[T]) warm(ctx context.Context, now time.Time, load func(context.Context) []T) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.at.IsZero() {
+		l.refreshLocked(ctx, now, load)
+	}
+}
+
+// get returns the cached listing, refreshing it first when it is older than
+// completionTTL. now is the caller's clock; load runs the real collection.
+func (l *listing[T]) get(ctx context.Context, now time.Time, load func(context.Context) []T) []T {
+	l.mu.Lock()
+	if !l.at.IsZero() && now.Sub(l.at) < completionTTL {
+		out := l.entries
+		l.mu.Unlock()
+		return out
+	}
+	done := l.refreshLocked(ctx, now, load)
 	l.mu.Unlock()
 	timer := time.NewTimer(completionBudget)
 	defer timer.Stop()
@@ -82,8 +100,22 @@ func (l *pidListing) get(ctx context.Context, now time.Time, load func(context.C
 }
 
 type completionCache struct {
-	procs pidListing
-	jvms  pidListing
+	procs     pidListing
+	jvms      pidListing
+	snapshots listing[string]
+}
+
+// completionClock times the completion caches: wall time even when tests fix
+// the result clock, so cached listings expire.
+func (s *Server) completionClock() time.Time { return s.wall().Now() }
+
+// warmCompletions starts the process listing in the background when a
+// session starts, bounded like any refresh.
+func (s *Server) warmCompletions(ctx context.Context) {
+	if s.skipWarm {
+		return
+	}
+	s.completions.procs.warm(ctx, s.completionClock(), s.loadProcesses)
 }
 
 func (s *Server) loadProcesses(ctx context.Context) []pidEntry {
@@ -141,7 +173,7 @@ func (s *Server) completeValues(ctx context.Context, p *sdk.CompleteParams) ([]s
 }
 
 func (s *Server) completePIDs(ctx context.Context, l *pidListing, load func(context.Context) []pidEntry, prefix string) ([]string, bool) {
-	entries := l.get(ctx, s.now(), load)
+	entries := l.get(ctx, s.completionClock(), load)
 	_, numErr := strconv.Atoi(prefix)
 	isNum := numErr == nil
 	needle := strings.ToLower(prefix)
@@ -229,20 +261,28 @@ func isDirEntry(e os.DirEntry, full string) bool {
 	return err == nil && info.IsDir()
 }
 
-func (s *Server) completeSnapshotIDs(ctx context.Context, prefix string) ([]string, bool) {
+func loadSnapshotIDs(ctx context.Context) []string {
 	db, err := openStore()
 	if err != nil {
-		return nil, false
+		return nil
 	}
 	defer db.Close()
 	rows, err := db.ListSnapshots(ctx, "")
 	if err != nil {
-		return nil, false
+		return nil
 	}
-	var out []string
+	ids := make([]string, 0, len(rows))
 	for _, r := range rows {
-		if strings.HasPrefix(r.ID, prefix) {
-			out = append(out, r.ID)
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
+func (s *Server) completeSnapshotIDs(ctx context.Context, prefix string) ([]string, bool) {
+	var out []string
+	for _, id := range s.completions.snapshots.get(ctx, s.completionClock(), loadSnapshotIDs) {
+		if strings.HasPrefix(id, prefix) {
+			out = append(out, id)
 		}
 	}
 	return capValues(out)
@@ -279,14 +319,16 @@ func (s *Server) completeArtifact(ctx context.Context, name, prefix string, c *s
 // completeArtifactIDs lists stored artifact ids, newest first (ids start with
 // a timestamp).
 func (s *Server) completeArtifactIDs(kind, prefix string) ([]string, bool) {
-	root, err := s.artifactsRoot()
+	dir, err := s.artifactKindDir(kind, false)
 	if err != nil {
 		return nil, false
 	}
-	entries, err := os.ReadDir(filepath.Join(root, kind))
+	f, err := os.Open(dir) // #nosec G304 -- a checked artifacts directory
 	if err != nil {
 		return nil, false
 	}
+	entries, _ := f.ReadDir(maxDirScan)
+	f.Close()
 	var out []string
 	for _, e := range entries {
 		if e.Type().IsRegular() && validArtifactID(e.Name()) && strings.HasPrefix(e.Name(), prefix) {
