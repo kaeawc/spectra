@@ -98,8 +98,8 @@ func TestFiringAlertsResource(t *testing.T) {
 	if len(res.Contents) != 1 || !strings.Contains(res.Contents[0].Text, "High load") || res.Contents[0].MIMEType != "application/json" {
 		t.Fatalf("resource: %+v", res.Contents)
 	}
-	if res.CacheScope != "private" || res.TTLMs != 0 {
-		t.Fatalf("firing alerts cache control = %+v, want private and immediately stale", res.Cacheable)
+	if res.CacheScope != "private" || res.TTLMs != alertsTTLMs {
+		t.Fatalf("firing alerts cache control = %+v, want private with a short TTL", res.Cacheable)
 	}
 }
 

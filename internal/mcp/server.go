@@ -32,6 +32,10 @@ type Server struct {
 	daemon        daemonWatchClient
 	connectDaemon func(context.Context) (daemonWatchClient, bool)
 	daemonTimeout time.Duration
+	// live serves resource subscriptions for the current Run; liveCfg
+	// overrides its intervals and local sampler (mainly for tests).
+	live    *liveHub
+	liveCfg liveConfig
 }
 
 // NewServer returns a configured MCP server from stdin/stdout handles.
@@ -127,7 +131,9 @@ func mergeHostStateCollectors(c, defaults Collectors) Collectors {
 // Run serves one MCP session over the reader and writer until the client
 // closes its end or ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
-	err := s.sdkServer().Run(ctx, &sdk.IOTransport{
+	srv := s.sdkServer()
+	defer s.live.close()
+	err := srv.Run(ctx, &sdk.IOTransport{
 		Reader: io.NopCloser(s.reader),
 		Writer: nopWriteCloser{s.writer},
 	})
@@ -143,29 +149,35 @@ func (nopWriteCloser) Close() error { return nil }
 
 // sdkServer builds the SDK server with every Spectra tool, resource and prompt.
 func (s *Server) sdkServer() *sdk.Server {
+	hub := newLiveHub(s.liveCfg, streamConnector(s.connectDaemon), s.now)
 	opts := &sdk.ServerOptions{
 		// Advertise tools, resources and prompts without the SDK's default
 		// logging capability; the surface never changes at runtime.
+		// Resource subscriptions make alerts and host health live.
 		Capabilities: &sdk.ServerCapabilities{
 			Tools:     &sdk.ToolCapabilities{},
-			Resources: &sdk.ResourceCapabilities{},
+			Resources: &sdk.ResourceCapabilities{Subscribe: true},
 			Prompts:   &sdk.PromptCapabilities{},
 		},
+		SubscribeHandler:   hub.subscribe,
+		UnsubscribeHandler: hub.unsubscribe,
 	}
 	if s.Verbose {
 		opts.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 	srv := sdk.NewServer(&sdk.Implementation{Name: "spectra-mcp", Version: s.Version}, opts)
+	// ResourceUpdated reaches legacy sessions on the session channel and
+	// 2026-07-28 sessions only on their subscriptions/listen stream.
+	hub.notify = func(uri string) {
+		_ = srv.ResourceUpdated(context.Background(), &sdk.ResourceUpdatedNotificationParams{URI: uri})
+	}
+	s.live = hub
 	handlers := s.toolHandlers()
 	for _, def := range toolDefinitions() {
 		srv.AddTool(sdkTool(def), s.sdkToolHandler(handlers[def.Name]))
 	}
 	for _, r := range resourceDefinitions() {
-		h := readStaticResource
-		if r.URI == firingAlertsURI {
-			h = s.readFiringAlerts
-		}
-		srv.AddResource(r, h)
+		srv.AddResource(r, s.resourceHandler(r.URI))
 	}
 	for _, p := range promptDefinitions() {
 		srv.AddPrompt(p, getPrompt)
