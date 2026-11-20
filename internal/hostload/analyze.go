@@ -319,10 +319,73 @@ func classify(rows []ProcRow, roots []Root, ci map[int]ciWork) Cause {
 			lead = c
 		}
 	}
+	if lead.cause.Kind == CauseCIRunner {
+		if c, ok := g.rootBeatsCI(lead); ok {
+			lead = c
+		}
+	}
 	if lead.cpu < idleCPUPct {
 		return Cause{Kind: CauseNone, CPUPct: lead.cpu, Detail: fmt.Sprintf("host is idle: leading group uses under %.0f%% CPU", idleCPUPct)}
 	}
 	return lead.cause
+}
+
+// rootTotal is one --root's CPU summed over all its worktrees.
+type rootTotal struct {
+	cpu     float64
+	dir     string
+	heavy   float64
+	members int
+}
+
+// rootBeatsCI compares each --root's total CPU (all its worktrees together)
+// with the leading CI runner's total, because CI is summed across every runner
+// install while a lane is otherwise scored per worktree. The busiest root wins
+// when its total is at least the CI total.
+func (g *groups) rootBeatsCI(ci candidate) (candidate, bool) {
+	totals := map[string]*rootTotal{}
+	var order []string
+	for _, dir := range sortedKeys(g.dirs) {
+		d := g.dirs[dir]
+		if d.root == "" {
+			continue
+		}
+		t := totals[d.root]
+		if t == nil {
+			t = &rootTotal{}
+			totals[d.root] = t
+			order = append(order, d.root)
+		}
+		t.cpu += d.cpu
+		t.members++
+		if t.dir == "" || d.cpu > t.heavy {
+			t.dir, t.heavy = dir, d.cpu
+		}
+	}
+	var best string
+	for _, r := range order {
+		if best == "" || totals[r].cpu > totals[best].cpu {
+			best = r
+		}
+	}
+	if best == "" || totals[best].cpu < ci.cpu {
+		return candidate{}, false
+	}
+	t := totals[best]
+	c := dirCause(t.dir, g.dirs[t.dir])
+	c.CPUPct = t.cpu
+	c.Detail = fmt.Sprintf("%d worktree(s) under %s total %.0f%% CPU, at least the CI runner (%s) total of %.0f%%; heaviest is %s",
+		t.members, best, t.cpu, ci.cause.Runner, ci.cpu, path.Base(t.dir))
+	return candidate{cpu: t.cpu, cause: c}, true
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (g *groups) add(r *ProcRow, roots []Root, ci map[int]ciWork) {

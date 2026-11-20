@@ -1,6 +1,7 @@
 package hostload
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -123,12 +124,58 @@ func TestRunnerInstallsSumAcrossJobDirectories(t *testing.T) {
 		4: "/Users/tester/actions-runner-4/_work/app/app",
 		5: "/Users/tester/src/app",
 	}
-	c := Analyze(procs, cwds, Options{}).Cause
+	// A smaller root (100% < 170%) does not displace the summed CI work.
+	procs = append(procs, process.Info{PID: 6, Command: "go", CPUPct: 100})
+	cwds[6] = "/wt/lane1"
+	c := Analyze(procs, cwds, Options{Roots: []Root{{Path: "/wt"}}}).Cause
 	if c.Kind != CauseCIRunner || c.CPUPct != 170 || c.Repo != "/Users/tester/actions-runner-2/_work/app/app" {
 		t.Fatalf("cause = %+v", c)
 	}
 	if !contains(c.Detail, "across 2 job directories") {
 		t.Fatalf("detail = %q", c.Detail)
+	}
+}
+
+// ciVsRoot builds n CI jobs at ciCPU percent each in distinct runner
+// installs, plus one lane under /wt per lanes value.
+func ciVsRoot(n int, ciCPU float64, lanes ...float64) ([]process.Info, map[int]string) {
+	var procs []process.Info
+	cwds := map[int]string{}
+	for i := 0; i < n; i++ {
+		pid := 10 + i
+		procs = append(procs, process.Info{PID: pid, Command: "swift-frontend", CPUPct: ciCPU})
+		cwds[pid] = fmt.Sprintf("/Users/tester/actions-runner-%d/_work/app/app", i)
+	}
+	for i, l := range lanes {
+		pid := 100 + i
+		procs = append(procs, process.Info{PID: pid, Command: "go", CPUPct: l})
+		cwds[pid] = fmt.Sprintf("/wt/lane%d", i)
+	}
+	return procs, cwds
+}
+
+func TestRootTotalBeatsSummedCI(t *testing.T) {
+	roots := Options{Roots: []Root{{Path: "/wt"}}}
+	// Four lanes at 50% make a 200% root; four CI jobs at 40% make 160%.
+	procs, cwds := ciVsRoot(4, 40, 50, 50, 50, 50)
+	c := Analyze(procs, cwds, roots).Cause
+	if c.Kind != CauseRoots || c.Root != "/wt" || c.CPUPct != 200 || !contains(c.Detail, "CI runner") {
+		t.Fatalf("root at 200 vs CI at 160: cause = %+v", c)
+	}
+	// Equal totals go to the root.
+	procs, cwds = ciVsRoot(4, 50, 50, 50, 50, 50)
+	if c := Analyze(procs, cwds, roots).Cause; c.Kind != CauseRoots {
+		t.Fatalf("tie: cause = %+v", c)
+	}
+	// Four CI jobs at 80% (320%) beat the same 200% root.
+	procs, cwds = ciVsRoot(4, 80, 50, 50, 50, 50)
+	if c := Analyze(procs, cwds, roots).Cause; c.Kind != CauseCIRunner || c.CPUPct != 320 {
+		t.Fatalf("root at 200 vs CI at 320: cause = %+v", c)
+	}
+	// Without --root, CI stays the cause.
+	procs, cwds = ciVsRoot(4, 40, 50, 50, 50, 50)
+	if c := Analyze(procs, cwds, Options{}).Cause; c.Kind != CauseCIRunner {
+		t.Fatalf("no roots: cause = %+v", c)
 	}
 }
 

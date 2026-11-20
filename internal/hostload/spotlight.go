@@ -2,10 +2,12 @@ package hostload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/plistread"
@@ -43,8 +45,11 @@ type RootSpotlight struct {
 	Unsupported string `json:"unsupported,omitempty"`
 	// Excluded is null when it cannot be told: no marker and a privacy list
 	// that cannot be read without root.
-	Excluded     *bool                         `json:"excluded"`
-	Marker       string                        `json:"marker,omitempty"`
+	Excluded *bool  `json:"excluded"`
+	Marker   string `json:"marker,omitempty"`
+	// NoIndexDir is the root or ancestor directory whose name ends in
+	// .noindex, which Spotlight skips.
+	NoIndexDir   string                        `json:"noindex_dir,omitempty"`
 	PrivacyList  string                        `json:"privacy_list,omitempty"`
 	PrivacyEntry string                        `json:"privacy_entry,omitempty"`
 	Volume       *storagestate.SpotlightVolume `json:"volume,omitempty"`
@@ -61,13 +66,37 @@ type SpotlightProbe struct {
 	Exists   func(string) bool
 	ReadFile func(string) ([]byte, error)
 	Volume   func(ctx context.Context, path string) (storagestate.SpotlightVolume, error)
-	Size     func(ctx context.Context, path string) (RootSize, error)
+	// VolumeKey names the mount holding a path cheaply (df). When set, Volume
+	// runs once per mount within one Inspect call rather than once per root.
+	VolumeKey func(ctx context.Context, path string) (string, error)
+	Size      func(ctx context.Context, path string) (RootSize, error)
+	// Timeout bounds the whole Inspect call (zero means DefaultSpotlightTimeout).
+	// Once it passes, remaining roots report marker state only.
+	Timeout time.Duration
+}
+
+// DefaultSpotlightTimeout is the overall deadline for inspecting all roots.
+const DefaultSpotlightTimeout = 5 * time.Second
+
+// errSpotlightDeadline marks a root skipped because the overall deadline passed.
+const errSpotlightDeadline = "spotlight inspection deadline exceeded"
+
+type volumeResult struct {
+	v   storagestate.SpotlightVolume
+	err error
 }
 
 // Inspect reports each root. It only reads: no marker is written and no
 // setting is changed.
 func (p SpotlightProbe) Inspect(ctx context.Context, roots []Root) []RootSpotlight {
 	out := make([]RootSpotlight, 0, len(roots))
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = DefaultSpotlightTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cache := map[string]volumeResult{}
 	for _, r := range roots {
 		if k := hostos.Resolve(p.OS); k != hostos.Darwin {
 			// hostos.Unsupported names the running host; name the selected OS.
@@ -75,24 +104,27 @@ func (p SpotlightProbe) Inspect(ctx context.Context, roots []Root) []RootSpotlig
 			out = append(out, RootSpotlight{Root: r.Path, Unsupported: err.Error()})
 			continue
 		}
-		out = append(out, p.inspect(ctx, r))
+		out = append(out, p.inspect(ctx, r, cache))
 	}
 	return out
 }
 
-func (p SpotlightProbe) inspect(ctx context.Context, r Root) RootSpotlight {
+func (p SpotlightProbe) inspect(ctx context.Context, r Root, cache map[string]volumeResult) RootSpotlight {
 	dir := rootDir(r)
-	rs := RootSpotlight{Root: r.Path, Marker: p.marker(dir)}
+	rs := RootSpotlight{Root: r.Path, Marker: p.marker(dir), NoIndexDir: noIndexDir(dir)}
 	if p.Volume != nil {
-		if v, err := p.Volume(ctx, dir); err != nil {
-			rs.VolumeError = err.Error()
+		if res := p.volume(ctx, dir, cache); res.err != nil {
+			rs.VolumeError = res.err.Error()
 		} else {
+			v := res.v
 			rs.Volume = &v
 		}
 	}
 	rs.PrivacyList, rs.PrivacyEntry = p.privacy(dir, rs.Volume)
 	rs.Excluded = excluded(rs)
-	if p.Size != nil {
+	if p.Size != nil && ctx.Err() != nil {
+		rs.SizeError = errSpotlightDeadline
+	} else if p.Size != nil {
 		if s, err := p.Size(ctx, dir); err != nil {
 			rs.SizeError = err.Error()
 		} else {
@@ -101,6 +133,28 @@ func (p SpotlightProbe) inspect(ctx context.Context, r Root) RootSpotlight {
 	}
 	rs.Hint = spotlightHint(rs)
 	return rs
+}
+
+// volume reads the volume state, once per mount when VolumeKey is set.
+func (p SpotlightProbe) volume(ctx context.Context, dir string, cache map[string]volumeResult) volumeResult {
+	if ctx.Err() != nil {
+		return volumeResult{err: errors.New(errSpotlightDeadline)}
+	}
+	key := ""
+	if p.VolumeKey != nil {
+		if k, err := p.VolumeKey(ctx, dir); err == nil {
+			key = k
+			if res, ok := cache[key]; ok {
+				return res
+			}
+		}
+	}
+	v, err := p.Volume(ctx, dir)
+	res := volumeResult{v: v, err: err}
+	if key != "" {
+		cache[key] = res
+	}
+	return res
 }
 
 func rootDir(r Root) string {
@@ -118,6 +172,19 @@ func (p SpotlightProbe) marker(dir string) string {
 	for d := dir; ; d = path.Dir(d) {
 		if m := path.Join(d, NeverIndexMarker); p.Exists(m) {
 			return m
+		}
+		if d == "/" || d == "." || d == path.Dir(d) {
+			return ""
+		}
+	}
+}
+
+// noIndexDir returns the nearest directory at or above dir whose name ends in
+// ".noindex", or "".
+func noIndexDir(dir string) string {
+	for d := dir; ; d = path.Dir(d) {
+		if strings.HasSuffix(strings.ToLower(path.Base(d)), ".noindex") {
+			return d
 		}
 		if d == "/" || d == "." || d == path.Dir(d) {
 			return ""
@@ -190,7 +257,7 @@ func stripDataVolume(p string) string {
 func excluded(rs RootSpotlight) *bool {
 	yes, no := true, false
 	switch {
-	case rs.Marker != "" || rs.PrivacyList == PrivacyListed:
+	case rs.Marker != "" || rs.PrivacyList == PrivacyListed || rs.NoIndexDir != "":
 		return &yes
 	case rs.PrivacyList == PrivacyNotListed:
 		return &no

@@ -140,6 +140,13 @@ func defaultSpotlightProbe(host hostload.Host) hostload.SpotlightProbe {
 				return proc.Output(ctx, host.Runner, name, args...)
 			}, p)
 		},
+		VolumeKey: func(ctx context.Context, p string) (string, error) {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return storagestate.MountPointForPath(func(name string, args ...string) ([]byte, error) {
+				return proc.Output(ctx, host.Runner, name, args...)
+			}, p)
+		},
 		Size: func(ctx context.Context, p string) (hostload.RootSize, error) {
 			ctx, cancel := context.WithTimeout(ctx, rootSizeBound)
 			defer cancel()

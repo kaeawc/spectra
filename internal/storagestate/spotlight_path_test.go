@@ -13,7 +13,7 @@ func TestSpotlightForPath(t *testing.T) {
 		case name == "/usr/bin/mdutil" && len(args) == 2 && args[0] == "-s" && args[1] == "/System/Volumes/Data":
 			return []byte("/System/Volumes/Data:\n\tIndexing enabled. \n"), nil
 		case name == "/usr/bin/mdutil" && len(args) == 1 && args[0] == "-p":
-			return []byte("/System/Volumes/Data:\n\tIndexing 42%\n"), nil
+			t.Error("mdutil -p flushes caches and must not run")
 		}
 		return nil, errors.New("unexpected " + name)
 	}
@@ -21,7 +21,7 @@ func TestSpotlightForPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.MountPoint != "/System/Volumes/Data" || v.Status != SpotlightEnabled || v.Progress == nil || v.Progress.Percent != 42 {
+	if v.MountPoint != "/System/Volumes/Data" || v.Status != SpotlightEnabled || v.Progress != nil {
 		t.Fatalf("volume = %+v", v)
 	}
 	if _, err := SpotlightForPath(run, "/elsewhere"); err == nil {

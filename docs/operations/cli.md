@@ -259,11 +259,17 @@ with a GitHub Actions `Runner.Worker` / `Runner.Listener`, `gitlab-runner` or
 directory. Its `runner` field names the runner and `repo` the job's
 repository directory (`_work/<repo>/<repo>`) when a cwd shows it; the same
 processes form one `ci-runner` family per runner. A process whose cwd is
-under a `--root` stays with that root, and on equal CPU a root group wins, so
-a leading lane is still reported as `roots`.
+under a `--root` stays with that root. CI is summed across every runner
+install, so when `--root` is given each root's total CPU (all its worktrees
+together) is compared with the CI total: the busiest root wins when its total
+is at least the CI total (a root at 200% beats four CI jobs at 40% each, 160%;
+it loses to four at 80% each, 320%), and CI stays the cause otherwise. A
+leading lane is therefore still reported as `roots`.
 
 `devices` counts booted iOS simulators (one per CoreSimulator device UDID) and
-running emulator instances (one per `qemu-system-*` process, or an `emulator`
+running Android emulator instances (one per `qemu-system-*` process that has
+an `emulator` launcher ancestor, an AVD name or an `/emulator/qemu/` path, so
+colima, lima, podman machine and libvirt qemu are not counted; or an `emulator`
 launcher with none below it; `avd` from `-avd NAME` or `@NAME`). `booted_recently`
 counts those whose earliest process started within `--boot-window` (default
 `5m`, also `boot_window_seconds`); `by_root` counts devices whose process cwd
@@ -273,8 +279,10 @@ root. Each `list` entry has `kind`, `id`, `pid`, `members`, `cpu_pct`,
 `rss_kib`, `started_at`, `age_seconds`, `booted_recently` and `root`.
 
 When the cause is `indexing` and `--root` is given, `spotlight` reports each
-root: `excluded` (`true` for a `.metadata_never_index` marker at the root or
-above, or a matching entry in the volume's Spotlight privacy list; `false`
+root: `excluded` (`true` for a `.noindex` suffix on the root or any ancestor
+directory name, a `.metadata_never_index` marker at the root or above (newer
+macOS may ignore that marker inside ordinary folders, so prefer `.noindex` or
+the privacy list), or a matching entry in the volume's Spotlight privacy list; `false`
 when that list was read and does not name it; `null` when there is no marker
 and the list, which is root-only on current macOS, cannot be read),
 `privacy_list` (`listed`, `not_listed` or `unreadable`), `volume` (the

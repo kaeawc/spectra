@@ -76,7 +76,8 @@ func CollectDevices(procs []process.Info, cwds map[int]string, roots []Root, now
 	for _, p := range procs {
 		s.byPID[p.PID] = p
 	}
-	list := append(s.simulators(procs), s.emulators(procs)...)
+	list := append([]Device{}, s.simulators(procs)...) // [] not null in JSON when empty
+	list = append(list, s.emulators(procs)...)
 	d := Devices{BootWindowSeconds: int64(window.Seconds()), ByRoot: []RootDevices{}, List: list}
 	perRoot := map[string]*RootDevices{}
 	for _, dev := range list {
@@ -149,8 +150,22 @@ func simPrimary(f process.Family) int {
 	return best
 }
 
-func isQemu(p process.Info) bool {
-	return strings.HasPrefix(strings.ToLower(path.Base(p.Command)), "qemu-system-")
+// isQemu reports an Android emulator's qemu. Any qemu-system-* also backs
+// colima, lima, podman machine and libvirt, so it counts only with an
+// emulator launcher ancestor, an AVD name, or the SDK's emulator/qemu path.
+func (s deviceScan) isQemu(p process.Info) bool {
+	if !strings.HasPrefix(strings.ToLower(path.Base(p.Command)), "qemu-system-") {
+		return false
+	}
+	if AVDName(p.FullCommandLine) != "" || strings.Contains(p.ExecutablePath, "/emulator/qemu/") || strings.Contains(p.FullCommandLine, "/emulator/qemu/") {
+		return true
+	}
+	for _, a := range ancestorsOf(p, s.byPID) {
+		if isEmulatorLauncher(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func isEmulatorLauncher(p process.Info) bool {
@@ -160,7 +175,7 @@ func isEmulatorLauncher(p process.Info) bool {
 func (s deviceScan) emulators(procs []process.Info) []Device {
 	launchersWithQemu := map[int]bool{}
 	for _, p := range procs {
-		if !isQemu(p) {
+		if !s.isQemu(p) {
 			continue
 		}
 		for _, a := range ancestorsOf(p, s.byPID) {
@@ -169,7 +184,7 @@ func (s deviceScan) emulators(procs []process.Info) []Device {
 	}
 	var out []Device
 	for _, p := range procs {
-		if isQemu(p) || (isEmulatorLauncher(p) && !launchersWithQemu[p.PID] && !s.underEmulator(p)) {
+		if s.isQemu(p) || (isEmulatorLauncher(p) && !launchersWithQemu[p.PID] && !s.underEmulator(p)) {
 			out = append(out, s.emulator(p))
 		}
 	}
@@ -179,7 +194,7 @@ func (s deviceScan) emulators(procs []process.Info) []Device {
 
 func (s deviceScan) underEmulator(p process.Info) bool {
 	for _, a := range ancestorsOf(p, s.byPID) {
-		if isEmulatorLauncher(a) || isQemu(a) {
+		if isEmulatorLauncher(a) || s.isQemu(a) {
 			return true
 		}
 	}

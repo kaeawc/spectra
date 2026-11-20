@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/storagestate"
@@ -86,6 +87,50 @@ func TestSpotlightRootStates(t *testing.T) {
 				t.Fatalf("hint %q lacks %q", rs.Hint, tc.hint)
 			}
 		})
+	}
+}
+
+func TestSpotlightNoIndexSuffixExcludes(t *testing.T) {
+	f := spotFake{status: storagestate.SpotlightEnabled, plist: exclusionsPlist}
+	for root, want := range map[string]bool{
+		"/Users/tester/build.noindex/wt": true,
+		"/Users/tester/wt.noindex":       true,
+		"/Users/tester/wt":               false,
+	} {
+		rs := f.probe().Inspect(context.Background(), []Root{{Path: root}})[0]
+		if rs.Excluded == nil || *rs.Excluded != want {
+			t.Errorf("%s: excluded = %v, want %v", root, rs.Excluded, want)
+		}
+	}
+}
+
+func TestSpotlightVolumeOncePerMount(t *testing.T) {
+	calls := 0
+	p := spotFake{status: storagestate.SpotlightEnabled}.probe()
+	inner := p.Volume
+	p.Volume = func(ctx context.Context, path string) (storagestate.SpotlightVolume, error) {
+		calls++
+		return inner(ctx, path)
+	}
+	p.VolumeKey = func(context.Context, string) (string, error) { return "/System/Volumes/Data", nil }
+	got := p.Inspect(context.Background(), []Root{{Path: "/Users/tester/a"}, {Path: "/Users/tester/b"}, {Path: "/Users/tester/c"}})
+	if calls != 1 || len(got) != 3 || got[2].Volume == nil {
+		t.Fatalf("volume calls = %d, entries = %+v", calls, got)
+	}
+}
+
+func TestSpotlightOverallDeadline(t *testing.T) {
+	p := spotFake{status: storagestate.SpotlightEnabled}.probe()
+	p.Timeout = 20 * time.Millisecond
+	sizes := 0
+	p.Volume = func(ctx context.Context, _ string) (storagestate.SpotlightVolume, error) {
+		<-ctx.Done()
+		return storagestate.SpotlightVolume{}, ctx.Err()
+	}
+	p.Size = func(context.Context, string) (RootSize, error) { sizes++; return RootSize{}, nil }
+	got := p.Inspect(context.Background(), []Root{{Path: "/Users/tester/a"}, {Path: "/Users/tester/b"}})
+	if len(got) != 2 || got[1].VolumeError != errSpotlightDeadline || sizes != 0 || got[1].SizeError != errSpotlightDeadline {
+		t.Fatalf("entries = %+v sizes = %d", got, sizes)
 	}
 }
 

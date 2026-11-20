@@ -222,26 +222,39 @@ func dedupeSpotlight(volumes []SpotlightVolume) []SpotlightVolume {
 }
 
 // SpotlightForPath reports the Spotlight state of the volume holding path,
-// read the same way as `storage --spotlight`: df names the mount point, then
-// mdutil -s and -p read that volume. It is read-only.
+// read like `storage --spotlight`: df names the mount point, then mdutil -s
+// reads that volume. It never runs `mdutil -p`, which flushes caches and so is
+// not a read; Progress is therefore not set.
 func SpotlightForPath(run CmdRunner, path string) (SpotlightVolume, error) {
 	if run == nil {
 		run = execRunner
 	}
-	out, err := run("df", "-Pk", path)
+	mount, err := MountPointForPath(run, path)
 	if err != nil {
-		return SpotlightVolume{}, fmt.Errorf("df %s: %w", path, err)
-	}
-	mount := dfMountPoint(string(out))
-	if mount == "" {
-		return SpotlightVolume{}, fmt.Errorf("df %s: no mount point in output", path)
+		return SpotlightVolume{}, err
 	}
 	volume := collectSpotlightMount(run, mount)
 	if volume.MountPoint == "" {
 		return SpotlightVolume{MountPoint: mount}, fmt.Errorf("mdutil -s %s: no status", mount)
 	}
 	volume.MountPoint = mount
-	return attachSpotlightProgress([]SpotlightVolume{volume}, parseMdutilProgressOutput(run))[0], nil
+	return volume, nil
+}
+
+// MountPointForPath names the mount point holding path, from df.
+func MountPointForPath(run CmdRunner, path string) (string, error) {
+	if run == nil {
+		run = execRunner
+	}
+	out, err := run("df", "-Pk", path)
+	if err != nil {
+		return "", fmt.Errorf("df %s: %w", path, err)
+	}
+	mount := dfMountPoint(string(out))
+	if mount == "" {
+		return "", fmt.Errorf("df %s: no mount point in output", path)
+	}
+	return mount, nil
 }
 
 // dfMountPoint returns the mount column of the first data row of df -P

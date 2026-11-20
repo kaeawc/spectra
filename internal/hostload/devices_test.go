@@ -1,6 +1,8 @@
 package hostload
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +93,33 @@ func TestAnalyzeCarriesDevices(t *testing.T) {
 	a := Analyze(procs, cwds, Options{Now: devNow, Roots: []Root{{Path: "/wt"}}, BootWindow: time.Minute})
 	if a.Devices.Booted != 4 || a.Devices.BootedRecently != 1 || a.Devices.BootWindowSeconds != 60 {
 		t.Fatalf("devices = %+v", a.Devices)
+	}
+}
+
+func TestQemuCountedOnlyForAndroid(t *testing.T) {
+	procs := []process.Info{
+		{PID: 10, PPID: 1, Command: "limactl", FullCommandLine: "limactl hostagent colima"},
+		{PID: 11, PPID: 10, Command: "qemu-system-aarch64", ExecutablePath: "/opt/homebrew/bin/qemu-system-aarch64",
+			FullCommandLine: "qemu-system-aarch64 -m 4096 -name colima", CPUPct: 80},
+		{PID: 20, PPID: 1, Command: "qemu-system-x86_64", ExecutablePath: "/sdk/emulator/qemu/darwin-x86_64/qemu-system-x86_64",
+			FullCommandLine: "qemu-system-x86_64 -netdelay none"},
+		{PID: 30, PPID: 1, Command: "qemu-system-x86_64", FullCommandLine: "qemu-system-x86_64 -avd Pixel_C"},
+	}
+	d := CollectDevices(procs, nil, nil, devNow, 0)
+	if d.Emulators != 2 {
+		t.Fatalf("emulators = %d, want 2 (not colima): %+v", d.Emulators, d.List)
+	}
+	for _, dev := range d.List {
+		if dev.PID == 11 {
+			t.Fatalf("colima qemu counted: %+v", dev)
+		}
+	}
+}
+
+func TestEmptyDevicesListEncodesAsArray(t *testing.T) {
+	b, err := json.Marshal(CollectDevices(nil, nil, nil, devNow, 0))
+	if err != nil || !strings.Contains(string(b), `"list":[]`) {
+		t.Fatalf("json = %s, err %v", b, err)
 	}
 }
 

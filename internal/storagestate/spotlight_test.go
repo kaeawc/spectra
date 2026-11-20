@@ -3,6 +3,7 @@ package storagestate
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,29 @@ func TestParseMdutilStatusFixtures(t *testing.T) {
 				t.Fatalf("statuses = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSpotlightForPathNeverRunsMdutilProgress(t *testing.T) {
+	var calls []string
+	run := func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		switch {
+		case name == "df":
+			return []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 100 50 50 50% /System/Volumes/Data\n"), nil
+		case name == "/usr/bin/mdutil" && len(args) == 2 && args[0] == "-s":
+			return []byte(args[1] + ":\n\tIndexing enabled.\n"), nil
+		}
+		return nil, os.ErrNotExist
+	}
+	v, err := SpotlightForPath(run, "/Users/tester/wt")
+	if err != nil || v.MountPoint != "/System/Volumes/Data" || v.Status != SpotlightEnabled {
+		t.Fatalf("volume = %+v, err %v", v, err)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "mdutil -p") {
+			t.Fatalf("ran %q; calls = %v", c, calls)
+		}
 	}
 }
 
