@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rune::TextEdit;
@@ -14,7 +15,7 @@ use crate::findings::{Finding, Link, Severity, diagnose};
 use crate::groups::{self, Category, Group, Nav, Row, Sort, SortKey};
 use crate::proc_findings;
 use crate::procs::{ProcError, ProcFeed, ProcSample, Process, Role, Runtime};
-use crate::signal::{self, Attempt, Me, Signal, Signals, Target};
+use crate::signal::{self, Attempt, Identity, Me, Signal, Signals, Target};
 
 pub const HISTORY: usize = 120;
 /// Readings kept per process: three minutes at one every 2 s.
@@ -62,12 +63,19 @@ pub struct Confirm {
 /// Where a Quit or Force quit stands.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
+    /// Confirmed; the worker is checking the pid is still the process confirmed, then sending.
+    Checking,
     /// Sent at the window clock's `at`; no reading since has shown it gone.
     Asked { at: f64 },
+    /// `kill` ran at `at` but how it went is unknown (`why`), so it's watched as if sent.
+    MaybeSent { at: f64, why: String },
     /// A later reading no longer lists it.
     Ended,
     /// Still listed `STILL_AFTER` seconds after it was sent.
     StillRunning,
+    /// Still listed, but `ps` says it has exited (state `Z`) and waits for `parent` to collect
+    /// it. No signal can help.
+    Waiting { parent: String },
     /// Nothing was sent: the pid is gone or someone else's.
     Refused(String),
     /// `ps` or `kill` failed.
@@ -86,6 +94,13 @@ impl Outcome {
     pub fn line(&self) -> String {
         let name = &self.target.name;
         match (&self.status, self.signal) {
+            (Status::Checking, _) => format!("Checking that pid {} is still {name}…", self.target.pid),
+            (Status::MaybeSent { why, .. }, signal) => {
+                format!("{} may have been sent to {name} ({why}); watching whether it ends", signal.verb())
+            }
+            (Status::Waiting { parent }, _) => {
+                format!("{name} has exited and is waiting for {parent} to collect it; Force quit can't help")
+            }
             (Status::Asked { .. }, Signal::Term) => format!("Asked {name} to quit"),
             (Status::Asked { .. }, Signal::Kill) => format!("Stopping {name}"),
             (Status::Ended, Signal::Term) => format!("{name} quit"),
@@ -99,6 +114,25 @@ impl Outcome {
             (Status::Refused(why) | Status::Failed(why), _) => why.clone(),
         }
     }
+}
+
+/// What the worker hands back.
+pub enum Done {
+    /// A confirmed Quit's check and send, for outcome number `job`.
+    Quit { job: u64, attempt: Attempt },
+    /// What `ps` says of a process still listed after its signal, for outcome number `job`.
+    Probe { job: u64, now: Result<Option<Identity>, String> },
+}
+
+/// Work that runs `ps` or `kill`, off the UI thread.
+pub type Job = Box<dyn FnOnce() -> Done + Send>;
+
+/// Where jobs run: a thread each, or (in tests) held until the test runs them, so a test can
+/// see the app while one is in flight.
+pub enum Runner {
+    Thread,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Held(Arc<Mutex<Vec<Job>>>),
 }
 
 /// What the sidebar and the overview count, worked out once per reading.
@@ -203,7 +237,14 @@ pub struct App {
     pub rows: Vec<Row>,
 
     /// Asks `ps` about a pid and sends signals; tests swap in a recorder.
-    pub signals: Box<dyn Signals>,
+    pub signals: Arc<dyn Signals>,
+    pub runner: Runner,
+    pub done_tx: Sender<Done>,
+    pub done_rx: Receiver<Done>,
+    /// Wakes the window when a job is done; `None` headless.
+    pub wake: Option<rune::Waker>,
+    /// Numbers outcomes, so a job's answer lands only on the outcome it was for.
+    pub job: u64,
     pub me: Me,
     pub confirm: Option<Confirm>,
     /// The last Quit or Force quit, until another replaces it or it's dismissed.
@@ -217,6 +258,7 @@ pub fn init() -> App {
     let (tx, rx) = channel();
     let (ptx, prx) = channel();
     let (poke, poke_rx) = channel();
+    let (done_tx, done_rx) = channel();
     let mut table = TableState::new().key("procs");
     table.set_sort("cpu", SortDir::Descending);
     App {
@@ -256,7 +298,12 @@ pub fn init() -> App {
         open_groups: HashSet::new(),
         groups: Vec::new(),
         rows: Vec::new(),
-        signals: Box::new(signal::System),
+        signals: Arc::new(signal::System),
+        runner: Runner::Thread,
+        done_tx,
+        done_rx,
+        wake: None,
+        job: 0,
         me: Me { pid: std::process::id(), uid: None },
         confirm: None,
         outcome: None,
@@ -653,28 +700,50 @@ impl App {
 
     /// Why `pid` can't be quit from here, if it can't.
     pub fn refusal(&self, pid: u32) -> Option<String> {
-        match self.process(pid) {
-            Some(p) => signal::refusal(p, self.me),
-            None => Some("That process has already ended.".into()),
+        let p = self.process(pid)?;
+        if let Some(o) = &self.outcome
+            && o.target.is(p)
+            && let Status::Waiting { parent } = &o.status
+        {
+            return Some(format!("It has exited and is waiting for {parent} to collect it."));
         }
+        signal::refusal(p, self.me, &|pid| self.process(pid).map(|p| p.ppid))
     }
 
-    /// Whether a Quit for `pid` was sent and hasn't settled yet, so asking again adds nothing.
+    /// Whether a Quit for `pid` was sent (or may have been) and hasn't settled yet, so asking
+    /// again adds nothing.
     pub fn quit_pending(&self, pid: u32) -> bool {
         self.outcome.as_ref().is_some_and(|o| {
-            o.target.pid == pid && o.signal == Signal::Term && matches!(o.status, Status::Asked { .. })
+            o.target.pid == pid
+                && o.signal == Signal::Term
+                && matches!(o.status, Status::Asked { .. } | Status::MaybeSent { .. })
         })
     }
 
-    /// Opens the confirmation for `signal` to `pid`. It never sends anything itself.
+    /// Whether a confirmed Quit or Force quit is still being checked and sent. Nothing else
+    /// may be asked meanwhile.
+    pub fn checking(&self) -> bool {
+        self.outcome.as_ref().is_some_and(|o| o.status == Status::Checking)
+    }
+
+    /// Opens the confirmation for `signal` to `pid` as it is now. It never sends anything itself.
     pub fn ask(&mut self, pid: u32, signal: Signal) {
-        if self.confirm.is_some() || self.refusal(pid).is_some() {
-            return;
-        }
-        if signal == Signal::Term && self.quit_pending(pid) {
-            return;
-        }
         if let Some(p) = self.process(pid) {
+            self.ask_target(Target::of(p), signal);
+        }
+    }
+
+    /// Opens the confirmation for `signal` to `t`, a process as it was on screen, only while the
+    /// current reading still lists that process (the same pid and start). A pid that changed
+    /// hands since the screen was drawn gets no confirmation.
+    pub fn ask_target(&mut self, t: Target, signal: Signal) {
+        if self.confirm.is_some() || self.checking() || self.refusal(t.pid).is_some() {
+            return;
+        }
+        if signal == Signal::Term && self.quit_pending(t.pid) {
+            return;
+        }
+        if let Some(p) = self.process(t.pid).filter(|p| t.is(p)) {
             self.confirm = Some(Confirm { target: Target::of(p), signal });
         }
     }
@@ -683,38 +752,155 @@ impl App {
         self.confirm = None;
     }
 
-    /// The confirmation's button: checks the pid is still the process confirmed, then sends.
-    /// The confirmation is used up on the first press, so a second sends nothing.
+    /// The confirmation's button: hands the check and the send to the worker and says it's
+    /// checking. The confirmation is used up on the first press, so a second sends nothing.
     pub fn confirm(&mut self) {
         let Some(Confirm { target, signal }) = self.confirm.take() else {
             return;
         };
-        let status = match signal::quit(self.signals.as_ref(), &target, signal) {
-            Attempt::Sent => Status::Asked { at: self.now },
+        self.job += 1;
+        let job = self.job;
+        let signals = Arc::clone(&self.signals);
+        let t = target.clone();
+        self.outcome = Some(Outcome { target, signal, status: Status::Checking });
+        self.submit(Box::new(move || Done::Quit { job, attempt: signal::quit(signals.as_ref(), &t, signal) }));
+    }
+
+    fn submit(&self, job: Job) {
+        match &self.runner {
+            Runner::Thread => {
+                let tx = self.done_tx.clone();
+                let wake = self.wake.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(job());
+                    if let Some(wake) = wake {
+                        wake();
+                    }
+                });
+            }
+            Runner::Held(q) => q.lock().expect("the held jobs").push(job),
+        }
+    }
+
+    /// Runs the jobs a test's `Runner::Held` is holding, on this thread, and lands them.
+    #[cfg(test)]
+    pub fn run_held(&mut self) {
+        let jobs = match &self.runner {
+            Runner::Held(q) => std::mem::take(&mut *q.lock().unwrap()),
+            Runner::Thread => Vec::new(),
+        };
+        for job in jobs {
+            self.land_done(job());
+        }
+    }
+
+    /// Lands what the worker finished. True when anything landed.
+    pub fn land_work(&mut self) -> bool {
+        let mut landed = false;
+        while let Ok(done) = self.done_rx.try_recv() {
+            self.land_done(done);
+            landed = true;
+        }
+        landed
+    }
+
+    fn land_done(&mut self, done: Done) {
+        match done {
+            Done::Quit { job, attempt } => self.land_attempt(job, attempt),
+            Done::Probe { job, now } => self.land_probe(job, now),
+        }
+    }
+
+    fn land_attempt(&mut self, job: u64, attempt: Attempt) {
+        let now = self.now;
+        if job != self.job {
+            return;
+        }
+        let Some(o) = self.outcome.as_mut().filter(|o| o.status == Status::Checking) else {
+            return;
+        };
+        o.status = match attempt {
+            Attempt::Sent => Status::Asked { at: now },
+            Attempt::Unsure(why) => Status::MaybeSent { at: now, why },
             Attempt::Refused(why) => Status::Refused(why),
             Attempt::Failed(why) => Status::Failed(why),
         };
-        let sent = matches!(status, Status::Asked { .. });
-        self.outcome = Some(Outcome { target, signal, status });
-        if sent && let Some(poke) = &self.poke {
+        let sent = matches!(o.status, Status::Asked { .. } | Status::MaybeSent { .. });
+        if sent {
+            self.poke_feed();
+        }
+    }
+
+    fn land_probe(&mut self, job: u64, now: Result<Option<Identity>, String>) {
+        if job != self.job {
+            return;
+        }
+        let Some(o) = self.outcome.as_ref().filter(|o| o.status == Status::StillRunning) else {
+            return;
+        };
+        match now {
+            Ok(Some(id)) if signal::waits_for_parent(&o.target, Some(&id)) => {
+                let ppid = self.process(o.target.pid).filter(|p| o.target.is(p)).map_or(o.target.process.ppid, |p| p.ppid);
+                let parent = match self.process(ppid) {
+                    Some(p) => format!("{} (pid {ppid})", signal::display_name(p)),
+                    None => format!("its parent (pid {ppid})"),
+                };
+                if let Some(o) = &mut self.outcome {
+                    o.status = Status::Waiting { parent };
+                }
+            }
+            // Gone already: the next reading will say so.
+            Ok(None) => self.poke_feed(),
+            Ok(Some(_)) | Err(_) => {}
+        }
+    }
+
+    fn poke_feed(&self) {
+        if let Some(poke) = &self.poke {
             let _ = poke.send(());
         }
     }
 
-    pub fn dismiss_outcome(&mut self) {
-        self.outcome = None;
+    /// Asks `ps`, off the UI thread, whether a process still listed after its signal has in fact
+    /// exited and waits for its parent.
+    fn probe(&mut self) {
+        let Some(o) = &self.outcome else { return };
+        let (job, pid) = (self.job, o.target.pid);
+        let signals = Arc::clone(&self.signals);
+        self.submit(Box::new(move || Done::Probe { job, now: signals.identify(pid) }));
     }
 
-    /// After a reading: a process that was sent a signal and is gone has ended; one still
-    /// there `STILL_AFTER` seconds on is still running.
+    /// Dismisses the outcome, except while it's being checked: the answer has to land somewhere.
+    pub fn dismiss_outcome(&mut self) {
+        if self.checking() {
+            return;
+        }
+        self.outcome = None;
+        self.job += 1;
+    }
+
+    /// After a reading: a process that was sent a signal and is gone (or whose pid now has
+    /// another start) has ended; one still there `STILL_AFTER` seconds on is still running, and
+    /// `ps` is asked whether it's a zombie.
     fn track_outcome(&mut self) {
         let Some(o) = &mut self.outcome else { return };
-        let Status::Asked { at } = o.status else { return };
         let listed = self.proc_index.get(&o.target.pid).and_then(|&i| self.procs.get(i));
-        if !listed.is_some_and(|p| o.target.is(p)) {
-            o.status = Status::Ended;
-        } else if self.now - at >= STILL_AFTER {
-            o.status = Status::StillRunning;
+        let gone = !listed.is_some_and(|p| o.target.is(p));
+        let mut probe = false;
+        match o.status {
+            Status::Asked { at } | Status::MaybeSent { at, .. } => {
+                if gone {
+                    o.status = Status::Ended;
+                } else if self.now - at >= STILL_AFTER {
+                    o.status = Status::StillRunning;
+                    probe = true;
+                }
+            }
+            Status::StillRunning | Status::Waiting { .. } if gone => o.status = Status::Ended,
+            _ => {}
+        }
+        if probe {
+            self.probe();
         }
     }
 

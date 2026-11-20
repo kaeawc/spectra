@@ -42,6 +42,7 @@ fn setup(s: &mut App, wake: rune::Waker) {
             }
         });
     }
+    s.wake = Some(wake.clone());
     if s.me.uid.is_none() {
         s.me.uid = signal::my_uid();
     }
@@ -77,6 +78,8 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
         s.land_procs(feed);
         landed = true;
     }
+    // A Quit's check and send, and the look at a process that didn't end, run on threads.
+    landed |= s.land_work();
     // A hung Spectra sends nothing, so look again on a timer to say the numbers are getting old.
     if s.has_processes() {
         tx.wake_after(STATUS_TICK);
@@ -109,6 +112,9 @@ fn main() {
             ("quit-root", sample::quit_root_scene),
             ("quit-still", sample::quit_still_scene),
             ("quit-ended", sample::quit_ended_scene),
+            ("quit-checking", sample::quit_checking_scene),
+            ("quit-maybe", sample::quit_maybe_scene),
+            ("quit-zombie", sample::quit_zombie_scene),
         ],
         setup: Some(setup),
         poll: Some(poll),

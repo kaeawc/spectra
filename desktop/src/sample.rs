@@ -470,7 +470,7 @@ pub fn land_sample_procs(s: &mut App) {
     s.wall = sample_now;
     s.me = SAMPLE_ME;
     // The sample's pids are made up; they may be real processes on this machine.
-    s.signals = Box::new(signal::Inert);
+    s.signals = std::sync::Arc::new(signal::Inert);
     for i in 0..PROC_READINGS {
         s.land_procs(Ok(all.iter().map(|x| process(x, i)).collect()));
     }
@@ -587,6 +587,27 @@ pub fn quit_ended_scene(s: &mut App) {
     s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status: Status::Asked { at: s.now } });
     let procs: Vec<Process> = s.procs.iter().filter(|p| p.pid != 900).cloned().collect();
     s.land_procs(Ok(procs));
+}
+
+fn quit_with(s: &mut App, status: Status) {
+    quit_scene(s);
+    let p = s.process(900).expect("Slack");
+    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status });
+}
+
+/// Slack's page just after Quit was confirmed, while `ps` and `kill` run.
+pub fn quit_checking_scene(s: &mut App) {
+    quit_with(s, Status::Checking);
+}
+
+/// Slack's page after a `kill` that timed out: the Quit may have been sent.
+pub fn quit_maybe_scene(s: &mut App) {
+    quit_with(s, Status::MaybeSent { at: s.now, why: "kill took longer than 5 s".into() });
+}
+
+/// Slack's page after Slack exited but its parent hasn't collected it: no Force quit.
+pub fn quit_zombie_scene(s: &mut App) {
+    quit_with(s, Status::Waiting { parent: "launchd (pid 1)".into() });
 }
 
 /// The JVMs only, as with a Spectra too old to list processes.

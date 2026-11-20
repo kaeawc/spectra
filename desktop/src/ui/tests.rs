@@ -447,12 +447,13 @@ fn one_reading_says_its_still_collecting() {
 
 // Quit and Force quit. A recorder stands in for `ps` and `kill`: nothing here signals anything.
 
-use crate::app::Status;
+use crate::app::{Runner, Status};
 use crate::sample::{force_confirm_scene, quit_list_scene, quit_root_scene, quit_scene};
-use crate::signal::Signal;
 use crate::signal::tests::Recorder;
+use crate::signal::{SendError, Signal, Target};
 
-/// `f`'s scene with a recorder that says every sample process is alive as listed.
+/// `f`'s scene with a recorder that says every sample process is alive as listed, and a worker
+/// that holds its jobs until [`release`].
 fn recorded(f: fn(&mut App)) -> (Runtime<App>, Recorder) {
     let mut s = init();
     f(&mut s);
@@ -460,8 +461,21 @@ fn recorded(f: fn(&mut App)) -> (Runtime<App>, Recorder) {
     for p in &s.procs {
         r.alive(p.pid, &p.started_at, &p.executable_path);
     }
-    s.signals = Box::new(r.clone());
+    s.signals = std::sync::Arc::new(r.clone());
+    s.runner = Runner::Held(Default::default());
     (runtime(s), r)
+}
+
+/// Lets the worker run what it holds (the `ps` and `kill`), then lands it.
+fn release(rt: &mut Runtime<App>) {
+    rt.update(|s, _| s.run_held());
+    settle(rt);
+}
+
+/// Presses the confirmation's button and lets the worker finish.
+fn send(rt: &mut Runtime<App>) {
+    press(rt, "confirm-send");
+    release(rt);
 }
 
 fn opt_cmd_q() -> KeyEvent {
@@ -477,9 +491,22 @@ fn confirming_quit_sends_one_term_to_that_pid_and_polls_again() {
     assert!(shows_text(&rt, "Quit Slack?"));
     assert!(shows_text(&rt, "Slack (pid 900) will be asked to close. Unsaved changes may be lost."));
     press(&mut rt, "confirm-send");
-    assert_eq!(r.sent(), [(900, Signal::Term)]);
-    assert_eq!(*r.asked.borrow(), [900], "checked who has the pid first");
     assert!(rt.find("confirm-dialog").is_none());
+    assert!(r.asked().is_empty() && r.sent().is_empty(), "ps and kill wait for the worker");
+    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Checking that pid 900 is still Slack…"));
+    assert!(rt.find("quit-outcome-dismiss").is_none(), "the answer has to land somewhere");
+    // Nothing more can be asked meanwhile, by any route.
+    rt.update(|s, _| {
+        s.ask(900, Signal::Kill);
+        s.ask(1300, Signal::Term);
+        s.dismiss_outcome();
+    });
+    rt.key(opt_cmd_q());
+    settle(&mut rt);
+    assert!(rt.state.confirm.is_none() && rt.state.checking());
+    release(&mut rt);
+    assert_eq!(r.sent(), [(900, Signal::Term)]);
+    assert_eq!(r.asked(), [900], "checked who has the pid first");
     assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"));
     assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(), "the feed is asked for a reading now");
 }
@@ -493,7 +520,7 @@ fn confirming_force_quit_sends_one_kill_and_warns_about_macos() {
         text_of(&rt, "confirm-line-1").as_deref(),
         Some("This is part of macOS and may restart or disrupt your session.")
     );
-    press(&mut rt, "confirm-send");
+    send(&mut rt);
     assert_eq!(r.sent(), [(340, Signal::Kill)]);
     assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Stopping trustd"));
 }
@@ -533,12 +560,12 @@ fn a_pid_that_changed_hands_or_ended_gets_nothing() {
         (None, "That process has already ended. Nothing was sent."),
     ];
     for (now, says) in cases {
-        r.alive.borrow_mut().retain(|(pid, _)| *pid != 900);
+        r.forget(900);
         if let Some((at, comm)) = now {
             r.alive(900, at, comm);
         }
         press(&mut rt, "pd-force");
-        press(&mut rt, "confirm-send");
+        send(&mut rt);
         let line = text_of(&rt, "quit-outcome-text").unwrap();
         assert!(line.contains(says), "{line}");
         assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Refused(_)));
@@ -546,8 +573,22 @@ fn a_pid_that_changed_hands_or_ended_gets_nothing() {
     assert!(r.sent().is_empty(), "nothing was sent to a pid that isn't Slack's");
 }
 
+/// Every way to ask for `pid`, straight to the guard: Rune ignores a press on a disabled
+/// button, so pressing one would prove nothing about `ask`.
+fn ask_every_way(rt: &mut Runtime<App>, pid: u32) {
+    rt.update(move |s, _| {
+        let t = Target::of(s.process(pid).expect("listed"));
+        for signal in [Signal::Term, Signal::Kill] {
+            s.ask(pid, signal);
+            s.ask_target(t.clone(), signal);
+        }
+    });
+    rt.key(opt_cmd_q());
+    settle(rt);
+}
+
 #[test]
-fn the_kernel_launchd_and_the_app_itself_are_refused() {
+fn the_kernel_launchd_the_app_itself_and_what_its_readings_started_are_refused() {
     let (mut rt, r) = recorded(quit_scene);
     rt.update(|s, _| {
         let mut procs = s.procs.clone();
@@ -558,22 +599,32 @@ fn the_kernel_launchd_and_the_app_itself_are_refused() {
         reading.pid = 5001;
         reading.ppid = s.me.pid;
         reading.command = "spectra".into();
+        // What the reading started, and what that started.
+        let mut ps = reading.clone();
+        ps.pid = 5002;
+        ps.ppid = 5001;
+        ps.command = "ps".into();
+        let mut grandchild = ps.clone();
+        grandchild.pid = 5003;
+        grandchild.ppid = 5002;
         let mut kernel = me.clone();
         kernel.pid = 0;
-        procs.extend([me, reading, kernel]);
+        procs.extend([me, reading, ps, grandchild, kernel]);
         procs.sort_by_key(|p| p.pid);
         s.land_procs(Ok(procs));
     });
-    for pid in [0, 1, 5000, 5001] {
+    // The guard lets an ordinary process through, so the refusals below are the guard's.
+    rt.update(|s, _| s.ask(900, Signal::Term));
+    assert!(rt.state.confirm.is_some());
+    key(&mut rt, Key::Escape);
+    for pid in [0, 1, 5000, 5001, 5002, 5003] {
         rt.update(move |s, _| s.open(pid));
         settle(&mut rt);
         assert!(rt.find("pd-refusal").is_some(), "pid {pid} says why");
-        press(&mut rt, "pd-quit");
-        press(&mut rt, "pd-force");
-        rt.key(opt_cmd_q());
-        settle(&mut rt);
+        ask_every_way(&mut rt, pid);
         assert!(rt.state.confirm.is_none(), "pid {pid} can't be asked");
     }
+    assert_eq!(text_of(&rt, "pd-refusal").as_deref(), Some("Spectra Desktop started it to take a reading; it ends on its own."));
     rt.update(|s, _| s.open(1));
     settle(&mut rt);
     assert_eq!(
@@ -587,11 +638,7 @@ fn the_kernel_launchd_and_the_app_itself_are_refused() {
 fn another_users_process_is_off_with_the_reason_shown() {
     let (mut rt, r) = recorded(quit_root_scene);
     assert_eq!(text_of(&rt, "pd-refusal").as_deref(), Some("Owned by root; Spectra Desktop can't stop it"));
-    press(&mut rt, "pd-force");
-    press(&mut rt, "pd-quit");
-    assert!(rt.state.confirm.is_none());
-    // Even asked directly, it won't open.
-    rt.update(|s, _| s.ask(301, Signal::Kill));
+    ask_every_way(&mut rt, 301);
     assert!(rt.state.confirm.is_none());
     assert!(r.sent().is_empty());
 }
@@ -634,13 +681,18 @@ fn a_double_press_on_the_confirm_button_sends_once() {
     let (mut rt, r) = recorded(quit_scene);
     press(&mut rt, "pd-force");
     double_press(&mut rt, "confirm-send");
+    release(&mut rt);
     assert_eq!(r.sent(), [(900, Signal::Kill)]);
-    // Twice in one go, as a key repeat might.
+    // Twice in one go, as a key repeat might, and again while the first is being checked.
     rt.update(|s, _| s.ask(900, Signal::Kill));
     rt.update(|s, _| {
         s.confirm();
         s.confirm();
+        s.ask(900, Signal::Kill);
+        s.confirm();
     });
+    release(&mut rt);
+    release(&mut rt);
     assert_eq!(r.sent().len(), 2, "one per confirmation");
 }
 
@@ -697,7 +749,7 @@ fn reading(rt: &mut Runtime<App>, secs: f64, slack: bool) {
 fn a_quit_that_isnt_taken_offers_force_quit() {
     let (mut rt, r) = recorded(quit_scene);
     press(&mut rt, "pd-quit");
-    press(&mut rt, "confirm-send");
+    send(&mut rt);
     reading(&mut rt, 2.0, true);
     assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"), "two seconds is patience");
     assert!(rt.find("quit-outcome-force").is_none());
@@ -708,10 +760,13 @@ fn a_quit_that_isnt_taken_offers_force_quit() {
         text_of(&rt, "quit-outcome-text").as_deref(),
         Some("Slack is still running 5 s after being asked to quit")
     );
+    // `ps` is asked, off the UI thread, whether it's a zombie; it isn't.
+    release(&mut rt);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
     press(&mut rt, "quit-outcome-force");
     assert_eq!(rt.state.confirm.as_ref().map(|c| c.signal), Some(Signal::Kill), "it only opens the confirmation");
     assert_eq!(r.sent(), [(900, Signal::Term)]);
-    press(&mut rt, "confirm-send");
+    send(&mut rt);
     assert_eq!(r.sent(), [(900, Signal::Term), (900, Signal::Kill)]);
 }
 
@@ -719,7 +774,7 @@ fn a_quit_that_isnt_taken_offers_force_quit() {
 fn a_quit_process_is_said_to_have_quit_and_its_page_offers_back() {
     let (mut rt, _) = recorded(quit_scene);
     press(&mut rt, "pd-quit");
-    press(&mut rt, "confirm-send");
+    send(&mut rt);
     reading(&mut rt, 2.0, false);
     assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
     assert_eq!(rt.state.selected, Some(900), "the page stays to say so");
@@ -737,9 +792,9 @@ fn a_quit_process_is_said_to_have_quit_and_its_page_offers_back() {
 #[test]
 fn a_failed_kill_says_why() {
     let (mut rt, r) = recorded(quit_scene);
-    *r.fail_kill.borrow_mut() = Some("kill failed: Operation not permitted".into());
+    r.fail_kill(SendError::NotSent("kill failed: Operation not permitted".into()));
     press(&mut rt, "pd-quit");
-    press(&mut rt, "confirm-send");
+    send(&mut rt);
     assert_eq!(
         text_of(&rt, "quit-outcome-text").as_deref(),
         Some("Couldn't quit Slack: kill failed: Operation not permitted.")
@@ -757,4 +812,172 @@ fn an_invalid_signature_points_to_force_quit_on_its_page() {
     assert_eq!(rt.state.selected, Some(941), "it opens the page");
     assert!(rt.state.confirm.is_none(), "and does nothing more");
     assert!(r.sent().is_empty());
+}
+
+/// Quit Slack and let the send go through.
+fn quit_slack(rt: &mut Runtime<App>) {
+    press(rt, "pd-quit");
+    send(rt);
+    assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Asked { .. }));
+}
+
+#[test]
+fn a_failed_reading_leaves_a_quit_as_asked() {
+    let (mut rt, _) = recorded(quit_scene);
+    quit_slack(&mut rt);
+    let asked = rt.state.outcome.as_ref().unwrap().status.clone();
+    rt.update(|s, _| {
+        s.now += 10.0;
+        s.land_procs(Err(ProcError::Failed("spectra process failed".into())));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, asked, "a failure says nothing about Slack");
+    rt.update(|s, _| s.land_procs(Ok(vec![])));
+    settle(&mut rt);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, asked, "nor does an empty reading");
+    // The next good reading does.
+    reading(&mut rt, 0.0, true);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+}
+
+#[test]
+fn the_same_pid_with_a_new_start_has_ended() {
+    let (mut rt, _) = recorded(quit_scene);
+    quit_slack(&mut rt);
+    rt.update(|s, _| {
+        let mut procs = s.procs.clone();
+        let p = procs.iter_mut().find(|p| p.pid == 900).unwrap();
+        p.started_at = "2026-11-20T11:59:00-05:00".into();
+        s.land_procs(Ok(procs));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
+    assert_eq!(text_of(&rt, "ended-said").as_deref(), Some("Slack quit"));
+}
+
+/// Slack still listed `STILL_AFTER` seconds after Quit, with `ps`'s answer landed.
+fn still_running(rt: &mut Runtime<App>) {
+    quit_slack(rt);
+    reading(rt, 6.0, true);
+    release(rt);
+}
+
+#[test]
+fn the_banners_force_quit_opens_nothing_once_the_pid_changed_hands() {
+    let (mut rt, r) = recorded(quit_scene);
+    still_running(&mut rt);
+    let drawn = rt.state.outcome.as_ref().unwrap().target.clone();
+    let (x, y) = locate(&mut rt, "quit-outcome-force");
+    // A reading lands between the draw and the press: pid 900 is now someone else's.
+    rt.state.land_procs(Ok({
+        let mut procs = rt.state.procs.clone();
+        let p = procs.iter_mut().find(|p| p.pid == 900).unwrap();
+        p.started_at = "2026-11-20T11:59:00-05:00".into();
+        p.command = "node".into();
+        p.app = None;
+        procs
+    }));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!(rt.state.confirm.is_none(), "no confirmation naming the new process");
+    // The guard itself, whether or not the press reached the old button.
+    rt.update(move |s, _| s.ask_target(drawn.clone(), Signal::Kill));
+    assert!(rt.state.confirm.is_none());
+    // Asked about the new process by pid, it names the new process.
+    rt.update(|s, _| s.ask(900, Signal::Kill));
+    assert_eq!(rt.state.confirm.as_ref().map(|c| c.target.name.as_str()), Some("node"));
+    assert_eq!(r.sent(), [(900, Signal::Term)]);
+}
+
+#[test]
+fn the_banners_force_quit_opens_the_confirmation_while_it_still_matches() {
+    let (mut rt, _) = recorded(quit_scene);
+    still_running(&mut rt);
+    let drawn = rt.state.outcome.as_ref().unwrap().target.clone();
+    rt.update(move |s, _| s.ask_target(drawn.clone(), Signal::Kill));
+    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Kill)));
+}
+
+#[test]
+fn a_kill_that_times_out_may_have_been_sent_and_is_watched() {
+    let (mut rt, r) = recorded(quit_scene);
+    r.fail_kill(SendError::Unsure("kill took longer than 5 s".into()));
+    press(&mut rt, "pd-quit");
+    send(&mut rt);
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Quit may have been sent to Slack (kill took longer than 5 s); watching whether it ends")
+    );
+    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(), "the feed is asked for a reading now");
+    rt.update(|s, _| s.ask(900, Signal::Term));
+    assert!(rt.state.confirm.is_none(), "a second Quit could be a second signal");
+    reading(&mut rt, 2.0, false);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
+    assert_eq!(text_of(&rt, "ended-said").as_deref(), Some("Slack quit"));
+}
+
+#[test]
+fn a_kill_that_times_out_and_leaves_it_running_says_so_later() {
+    let (mut rt, r) = recorded(quit_scene);
+    r.fail_kill(SendError::Unsure("kill took longer than 5 s".into()));
+    press(&mut rt, "pd-quit");
+    send(&mut rt);
+    reading(&mut rt, 6.0, true);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+}
+
+#[test]
+fn a_zombie_waits_for_its_parent_and_gets_no_force_quit() {
+    let (mut rt, r) = recorded(quit_scene);
+    quit_slack(&mut rt);
+    let started = rt.state.process(900).unwrap().started_at.clone();
+    let ppid = rt.state.process(900).unwrap().ppid;
+    r.zombie(900, &started);
+    reading(&mut rt, 6.0, true);
+    release(&mut rt);
+    let parent = rt.state.process(ppid).map(|p| format!("{} (pid {ppid})", crate::signal::display_name(p)));
+    let parent = parent.unwrap_or_else(|| format!("its parent (pid {ppid})"));
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Waiting { parent: parent.clone() });
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text"),
+        Some(format!("Slack has exited and is waiting for {parent} to collect it; Force quit can't help"))
+    );
+    assert!(rt.find("quit-outcome-force").is_none(), "Force quit can't help");
+    assert!(text_of(&rt, "pd-refusal").unwrap().contains("waiting for"));
+    ask_every_way(&mut rt, 900);
+    assert!(rt.state.confirm.is_none());
+    // Once collected, it's gone.
+    reading(&mut rt, 2.0, false);
+    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
+    assert_eq!(r.sent(), [(900, Signal::Term)]);
+}
+
+#[test]
+fn a_zombie_found_at_confirmation_gets_nothing() {
+    let (mut rt, r) = recorded(quit_scene);
+    let started = rt.state.process(900).unwrap().started_at.clone();
+    r.zombie(900, &started);
+    press(&mut rt, "pd-force");
+    send(&mut rt);
+    assert!(text_of(&rt, "quit-outcome-text").unwrap().contains("waiting for its parent"));
+    assert!(r.sent().is_empty());
+}
+
+#[test]
+fn an_answer_for_a_dismissed_outcome_is_dropped() {
+    let (mut rt, r) = recorded(quit_scene);
+    still_running(&mut rt);
+    let started = rt.state.process(900).unwrap().started_at.clone();
+    r.zombie(900, &started);
+    // Another reading queues another look; dismissing the outcome first makes it stale.
+    rt.update(|s, _| {
+        if let Some(o) = &mut s.outcome {
+            o.status = Status::Asked { at: s.now };
+        }
+    });
+    reading(&mut rt, 6.0, true);
+    rt.update(|s, _| s.dismiss_outcome());
+    release(&mut rt);
+    assert!(rt.state.outcome.is_none());
 }

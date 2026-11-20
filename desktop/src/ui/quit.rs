@@ -18,13 +18,20 @@ pub fn actions(s: &App, p: &Process, key: &str, k: &Kit) -> El {
     let c = &k.c;
     let pid = p.pid;
     let refusal = s.refusal(pid);
-    let off = refusal.is_some();
+    let checking = s.checking();
+    let off = refusal.is_some() || checking;
     let name = signal::display_name(p);
     let pending = s.quit_pending(pid);
     let quit = Button::new("Quit")
         .variant(ButtonVariant::Outline)
         .disabled(off || pending)
-        .help(if pending { format!("Already asked {name} to quit") } else { format!("Quit {name} (pid {pid})") })
+        .help(if checking {
+            "Checking…".to_owned()
+        } else if pending {
+            format!("Already asked {name} to quit")
+        } else {
+            format!("Quit {name} (pid {pid})")
+        })
         .shortcut("⌥⌘Q")
         .on_press(move |s: &mut App| s.ask(pid, Signal::Term))
         .build(k)
@@ -34,7 +41,7 @@ pub fn actions(s: &App, p: &Process, key: &str, k: &Kit) -> El {
         .variant(ButtonVariant::Danger)
         .icon(k.glyph.circle_x)
         .disabled(off)
-        .help(format!("Stop {name} (pid {pid}) immediately"))
+        .help(if checking { "Checking…".to_owned() } else { format!("Stop {name} (pid {pid}) immediately") })
         .on_press(move |s: &mut App| s.ask(pid, Signal::Kill))
         .build(k)
         .key(format!("{key}-force"));
@@ -164,9 +171,11 @@ pub fn outcome(s: &App, pid: Option<u32>, k: &Kit) -> Option<El> {
         return None;
     }
     let (mark, ink, border) = match &o.status {
-        Status::Asked { .. } => (None, c.text_base, c.border_base),
+        Status::Checking | Status::Asked { .. } => (None, c.text_base, c.border_base),
         Status::Ended => (Some(k.glyph.check_small), c.text_base, c.border_base),
-        Status::StillRunning => (Some(k.glyph.dash), c.text_base, c.warning.fg),
+        Status::StillRunning | Status::MaybeSent { .. } | Status::Waiting { .. } => {
+            (Some(k.glyph.dash), c.text_base, c.warning.fg)
+        }
         Status::Refused(_) | Status::Failed(_) => (Some(k.glyph.circle_x), c.text_base, c.danger.fg),
     };
     let line = o.line();
@@ -185,17 +194,22 @@ pub fn outcome(s: &App, pid: Option<u32>, k: &Kit) -> Option<El> {
         r = r.child(icon(m, 12.0).color(c.icon_base));
     }
     r = r.child(text(line).key("quit-outcome-text").font(k.ty.small).color(ink).wrap().grow(1.0).min_w(0.0));
-    let target = o.target.pid;
-    let alive = s.process(target).is_some_and(|p| o.target.is(p));
-    if o.status == Status::StillRunning && o.signal == Signal::Term && alive && s.refusal(target).is_none() {
+    let alive = s.process(o.target.pid).is_some_and(|p| o.target.is(p));
+    if o.status == Status::StillRunning && o.signal == Signal::Term && alive && s.refusal(o.target.pid).is_none() {
+        // The process as drawn: if its pid changes hands before the press, the press opens nothing.
+        let target = o.target.clone();
         r = r.child(
             Button::new("Force quit")
                 .variant(ButtonVariant::Danger)
                 .icon(k.glyph.circle_x)
-                .on_press(move |s: &mut App| s.ask(target, Signal::Kill))
+                .on_press(move |s: &mut App| s.ask_target(target.clone(), Signal::Kill))
                 .build(k)
                 .key("quit-outcome-force"),
         );
+    }
+    if o.status == Status::Checking {
+        // Its answer has to land somewhere.
+        return Some(r);
     }
     Some(
         r.child(
