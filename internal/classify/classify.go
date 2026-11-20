@@ -132,11 +132,21 @@ type exeKey struct {
 	size  int64
 	mtime int64
 	id    fileID
+	// seal is the identity of the enclosing bundle's CodeResources.
+	// codesign --verify --strict checks the bundle's sealed resources, so a
+	// signing verdict goes stale when they change though the executable
+	// does not. The zero value means not in a bundle or no seal file.
+	seal sealID
+}
+
+type sealID struct {
+	size, mtime int64
+	id          fileID
 }
 
 // cacheVersion prefixes every disk key; bump it whenever exeEntry (or
 // anything it contains) changes shape or meaning.
-const cacheVersion = "classify/v3"
+const cacheVersion = "classify/v5"
 
 // exeEntry is the cached per-executable work. A nil field was not needed yet.
 type exeEntry struct {
@@ -271,7 +281,30 @@ func (c *Classifier) prepare(p *plan) {
 		return
 	}
 	p.key = exeKey{path: p.exe, size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: identity(fi)}
+	p.key.seal = c.sealIdentity(p.exe)
 	p.keyed = true
+}
+
+// sealIdentity stats the CodeResources file of the nearest .app or
+// .framework enclosing exe; zero when there is none.
+func (c *Classifier) sealIdentity(exe string) sealID {
+	for dir := filepath.Dir(exe); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+		var rel string
+		switch filepath.Ext(dir) {
+		case ".app":
+			rel = "Contents/_CodeSignature/CodeResources"
+		case ".framework":
+			rel = "Versions/Current/_CodeSignature/CodeResources"
+		default:
+			continue
+		}
+		fi, err := c.files.Stat(filepath.Join(dir, rel))
+		if err != nil {
+			return sealID{}
+		}
+		return sealID{size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: identity(fi)}
+	}
+	return sealID{}
 }
 
 // nameRuntime applies the cheap, path-only runtime rules in order; an empty
@@ -426,7 +459,8 @@ func (c *Classifier) diskKey(k exeKey) []byte {
 	num := func(n int64) []byte { return []byte(strconv.FormatInt(n, 10) + "\x00") }
 	unum := func(n uint64) []byte { return []byte(strconv.FormatUint(n, 10) + "\x00") }
 	return cache.Key([]byte(cacheVersion+"\x00"), []byte(c.os.String()+"\x00"), []byte(k.path+"\x00"),
-		num(k.size), num(k.mtime), unum(k.id.dev), unum(k.id.ino), num(k.id.ctime))
+		num(k.size), num(k.mtime), unum(k.id.dev), unum(k.id.ino), num(k.id.ctime),
+		num(k.seal.size), num(k.seal.mtime), unum(k.seal.id.dev), unum(k.seal.id.ino), num(k.seal.id.ctime))
 }
 
 func (c *Classifier) finish(p plan) Result {

@@ -35,7 +35,7 @@ func TestProcessJSONWithClassifyAddsFields(t *testing.T) {
 	procs[0].Role = classify.RoleAppHelper
 	procs[0].Runtime = classify.RuntimeElectron
 	procs[0].App = &classify.App{Name: "Slack", BundlePath: "/Applications/Slack.app", BundleID: "com.tinyspeck.slackmacgap"}
-	procs[0].Signing = &classify.Signing{Status: classify.SigningDeveloperID, TeamID: "BQR82RBBHL", HardenedRuntime: true}
+	procs[0].Signing = &classify.Signing{Status: classify.SigningDeveloperID, TeamID: "BQR82RBBHL", HardenedRuntime: true, Validated: true}
 	procs[0].Evidence = []string{"role: x", "runtime: y"}
 	data, err := json.Marshal(procs[0])
 	if err != nil {
@@ -44,7 +44,7 @@ func TestProcessJSONWithClassifyAddsFields(t *testing.T) {
 	for _, want := range []string{
 		`"role":"app_helper"`, `"runtime":"electron"`,
 		`"app":{"name":"Slack","bundle_path":"/Applications/Slack.app","bundle_id":"com.tinyspeck.slackmacgap"}`,
-		`"signing":{"status":"developer_id","team_id":"BQR82RBBHL","hardened_runtime":true}`,
+		`"signing":{"status":"developer_id","team_id":"BQR82RBBHL","hardened_runtime":true,"validated":true}`,
 		`"evidence":["role: x","runtime: y"]`,
 	} {
 		if !strings.Contains(string(data), want) {

@@ -1,5 +1,7 @@
 package cache
 
+import "time"
+
 // Well-known cache kind names. Each must match the subdirectory name under
 // the versioned root. Using constants avoids typos across callers.
 const (
@@ -46,6 +48,12 @@ func NewStores(versionedRoot string, reg *Registry) *Stores {
 		Netcap:    mk(KindNetcap),
 		Toolchain: mk(KindToolchain),
 		Storage:   mk(KindStorage),
-		Classify:  mk(KindClassify),
+		Classify:  mk(KindClassify).WithMaxAge(ClassifyMaxAge),
 	}
 }
+
+// ClassifyMaxAge is how long a classify entry survives after it was written.
+// Entries are keyed by executable identity, so every rebuilt or updated
+// binary orphans its old entry; pruning on write bounds the store, and an
+// entry for an unchanged binary costs one recomputation per period.
+const ClassifyMaxAge = 30 * 24 * time.Hour

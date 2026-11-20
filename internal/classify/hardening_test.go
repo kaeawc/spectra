@@ -64,7 +64,7 @@ func TestAppleClaimNeedsVerification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := verifyFake(tc.display, tc.exit)
 			r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), in)
-			if r.Signing == nil || r.Signing.Status != tc.status || r.Role != tc.role {
+			if r.Signing == nil || r.Signing.Status != tc.status || r.Role != tc.role || r.Signing.Validated != (tc.status == SigningApple) {
 				t.Fatalf("signing=%+v role=%s, want %s/%s (evidence %v)", r.Signing, r.Role, tc.status, tc.role, r.Evidence)
 			}
 			if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, tc.ev) || !strings.Contains(ev, "file on disk") {
@@ -74,17 +74,86 @@ func TestAppleClaimNeedsVerification(t *testing.T) {
 	}
 }
 
-func TestVerifyRunsOnlyForAppleClaims(t *testing.T) {
+func TestVerifyRunsOnlyForAppleClaimsAndAppleIssuedCerts(t *testing.T) {
 	files := newFakeFS()
-	files.add("/opt/evil", buildMachO(macho.CpuArm64))
-	fake := codesignFake(devIDCodesign)
-	r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), Input{UID: 501, Command: "evil", ExecutablePath: "/opt/evil"})
-	if fake.CallCount() != 1 {
-		t.Fatalf("codesign ran %d times for a Developer ID binary: %v", fake.CallCount(), fake.Calls())
+	files.add("/opt/x", buildMachO(macho.CpuArm64))
+	for _, display := range []string{adhocCodesign, unsignedCodesign} {
+		fake := codesignFake(display)
+		r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), Input{UID: 501, Command: "x", ExecutablePath: "/opt/x"})
+		if fake.CallCount() != 1 || r.Signing == nil || r.Signing.Validated {
+			t.Fatalf("codesign ran %d times, signing=%+v: %v", fake.CallCount(), r.Signing, fake.Calls())
+		}
+		if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, "as displayed by codesign -dv, not validated; verdict is for the file on disk") {
+			t.Fatalf("evidence = %q", ev)
+		}
 	}
-	ev := strings.Join(r.Evidence, "\n")
-	if !strings.Contains(ev, "signing: developer_id, team ABCDE12345 as displayed by codesign -dv, not validated; verdict is for the file on disk") {
-		t.Fatalf("evidence = %q", ev)
+}
+
+func thirdPartyVerifyFake(display string, verify proc.Response) *proc.Fake {
+	return proc.NewFake().
+		On(proc.MatchPrefix("codesign", "-dv"), proc.Response{Result: proc.Result{Stderr: []byte(display)}}).
+		On(proc.MatchExact("codesign", "--verify", "--strict", "/opt/x"), verify)
+}
+
+func TestThirdPartySignatureVerification(t *testing.T) {
+	files := newFakeFS()
+	files.add("/opt/x", buildMachO(macho.CpuArm64))
+	fail := func(stderr string) proc.Response {
+		return proc.Response{Result: proc.Result{ExitCode: 1, Stderr: []byte(stderr)}}
+	}
+	fail2 := func(stderr string) proc.Response {
+		return proc.Response{Result: proc.Result{ExitCode: 2, Stderr: []byte(stderr)}}
+	}
+	cases := []struct {
+		name      string
+		display   string
+		verify    proc.Response
+		status    SigningStatus
+		validated bool
+		persisted bool
+		ev        string
+	}{
+		{"intact Developer ID", devIDCodesign, proc.Response{}, SigningDeveloperID, true, true,
+			"signing: developer_id, team ABCDE12345 validated by codesign --verify --strict; verdict is for the file on disk"},
+		{"intact Mac App Store", masCodesign, proc.Response{}, SigningDeveloperID, true, true, "team BQR82RBBHL validated by"},
+		{"tampered Developer ID", devIDCodesign, fail("/opt/x: invalid signature (code or signature have been modified)\nIn architecture: arm64\n"),
+			SigningInvalid, false, true, "displays an Apple-issued certificate but codesign --verify --strict failed"},
+		{"only --strict detritus", devIDCodesign, fail("/opt/x: resource fork, Finder information, or similar detritus not allowed\n"),
+			SigningDeveloperID, false, true, "rejected extended attributes or resource forks"},
+		{"executable vanished", devIDCodesign, fail("/opt/x: No such file or directory\n"), SigningDeveloperID, false, false, "could not run"},
+		{"verify killed by a signal", devIDCodesign, proc.Response{Result: proc.Result{ExitCode: -1}}, SigningDeveloperID, false, false, "could not run"},
+		{"verify usage error", devIDCodesign, fail2("codesign: internal error\n"), SigningDeveloperID, false, false, "could not run"},
+		{"verify timed out", devIDCodesign, proc.Response{Err: context.DeadlineExceeded}, SigningDeveloperID, false, false, "could not run"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := thirdPartyVerifyFake(tc.display, tc.verify)
+			store := newMemStore()
+			r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), Input{UID: 501, Command: "x", ExecutablePath: "/opt/x"})
+			if r.Signing == nil || r.Signing.Status != tc.status || r.Signing.Validated != tc.validated {
+				t.Fatalf("signing=%+v, want %s validated=%v (calls %v)", r.Signing, tc.status, tc.validated, fake.Calls())
+			}
+			if (store.puts > 0) != tc.persisted {
+				t.Fatalf("puts=%d, want persisted=%v", store.puts, tc.persisted)
+			}
+			if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, tc.ev) {
+				t.Fatalf("evidence %q lacks %q", ev, tc.ev)
+			}
+		})
+	}
+}
+
+func TestOnlyDetritus(t *testing.T) {
+	for out, want := range map[string]bool{
+		"/a: resource fork, Finder information, or similar detritus not allowed\n":                                   true,
+		"/a: resource fork, Finder information, or similar detritus not allowed\nIn subcomponent: /a/b\n":            true,
+		"/a: resource fork, Finder information, or similar detritus not allowed\n/a: a sealed resource is missing\n": false,
+		"/a: invalid signature (code or signature have been modified)\n":                                             false,
+		"": false,
+	} {
+		if got := onlyDetritus(out); got != want {
+			t.Errorf("onlyDetritus(%q) = %v, want %v", out, got, want)
+		}
 	}
 }
 
@@ -285,8 +354,8 @@ func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 // struct with fields silently zeroed. Bump cacheVersion, then update both pins.
 func TestCacheVersionPinsEntryShape(t *testing.T) {
 	const (
-		pinnedVersion = "classify/v3"
-		pinnedShape   = "e590c1d66c2237ef"
+		pinnedVersion = "classify/v5"
+		pinnedShape   = "5e05118381521607"
 	)
 	var b strings.Builder
 	describeType(&b, reflect.TypeOf(exeEntry{}), map[reflect.Type]bool{})
@@ -407,9 +476,16 @@ func TestRustVerdict(t *testing.T) {
 		ev   string
 	}{
 		{"rust main symbol", 5, symbolFacts{rustEntry: true, locals: true}, nil, RuntimeRust, "lang_start"},
-		{"C++ main with Rust linked, unstripped", 5, symbolFacts{locals: true}, nil, RuntimeNative, "links Rust std"},
+		{"C++ main with Rust linked, unstripped", 5, symbolFacts{locals: true, cxx: true}, nil, RuntimeNative, "links Rust std"},
+		{"unstripped, links libc++, no lang_start", 5, symbolFacts{locals: true}, []string{"/usr/lib/libc++.1.dylib"}, RuntimeNative, "links Rust std"},
+		{"unstripped LTO Rust, no lang_start", 5, symbolFacts{locals: true}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "link-time optimization"},
 		{"stripped C++ (adb)", 5, symbolFacts{cxx: true}, nil, RuntimeNative, "links Rust std"},
 		{"stripped, links libc++ (netsimd)", 5, symbolFacts{}, []string{"/usr/lib/libc++.1.dylib"}, RuntimeNative, "links Rust std"},
+		{"stripped ObjC main linking Rust", 5, symbolFacts{}, []string{"/usr/lib/libobjc.A.dylib"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"unstripped Swift main linking Rust", 5, symbolFacts{locals: true}, []string{"/usr/lib/swift/libswiftCore.dylib"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"Foundation C main linking Rust", 5, symbolFacts{locals: true}, []string{"/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"CoreFoundation stripped", 5, symbolFacts{}, []string{"/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"Rust main with lang_start still wins over ObjC libs", 5, symbolFacts{rustEntry: true}, []string{"/usr/lib/libobjc.A.dylib"}, RuntimeRust, "lang_start"},
 		{"stripped Rust (fd)", 5, symbolFacts{}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "stripped"},
 		{"no markers", 0, symbolFacts{cxx: true}, nil, RuntimeNative, "no Go, Bun or Rust"},
 	}
@@ -439,6 +515,62 @@ func TestRustVerdict(t *testing.T) {
 	for _, name := range []string{"__ZNSt3__112basic_stringIcEE", "___gxx_personality_v0", "__Znwm", "___cxa_throw"} {
 		if !cxxSymbol(name) {
 			t.Errorf("%s not recognised as C++ runtime", name)
+		}
+	}
+}
+
+func TestAppleVerifyWithoutVerdictIsNotInvalidOrCached(t *testing.T) {
+	files := newFakeFS()
+	files.add("/opt/evil", buildMachO(macho.CpuArm64))
+	for _, exit := range []int{-1, 2} {
+		store := newMemStore()
+		fake := verifyFake(spoofPlatformCodesign, exit)
+		r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), Input{UID: 0, Command: "evil", ExecutablePath: "/opt/evil"})
+		if r.Signing == nil || r.Signing.Status == SigningInvalid || store.puts != 0 {
+			t.Fatalf("exit %d: signing=%+v puts=%d, want not invalid and not cached", exit, r.Signing, store.puts)
+		}
+	}
+}
+
+func TestCacheMissesWhenBundleSealChanges(t *testing.T) {
+	files := newFakeFS()
+	exe := "/Applications/Tool.app/Contents/MacOS/tool"
+	seal := "Applications/Tool.app/Contents/_CodeSignature/CodeResources"
+	files.add(exe, buildMachO(macho.CpuArm64))
+	files.files[seal] = &fstest.MapFile{Data: []byte("seal-a"), Mode: 0o644, ModTime: fixtureTime}
+	store := newMemStore()
+	in := Input{UID: 501, Command: "tool", ExecutablePath: exe}
+	run := func() int {
+		fake := codesignFake(adhocCodesign)
+		classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), in)
+		return fake.CallCount()
+	}
+	if run() == 0 {
+		t.Fatal("cold run did not call codesign")
+	}
+	if n := run(); n != 0 {
+		t.Fatalf("unchanged bundle re-ran codesign %d times", n)
+	}
+	files.files[seal] = &fstest.MapFile{Data: []byte("seal-bb"), Mode: 0o644, ModTime: fixtureTime.Add(time.Hour)}
+	if run() == 0 {
+		t.Fatal("changed CodeResources did not invalidate the cached signing verdict")
+	}
+}
+
+func TestOnlyDetritusWithNestedSubcomponents(t *testing.T) {
+	d := detritusComplaint
+	cases := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{"nested bundle detritus only", "/opt/X.app: " + d + "\nIn subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n/opt/X.app/Contents/Frameworks/Y.framework/Y: " + d + "\nIn architecture: arm64\n", true},
+		{"nested bundle also invalid", "/opt/X.app: " + d + "\nIn subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n/opt/X.app/Contents/Frameworks/Y.framework: invalid signature (code or signature have been modified)\n", false},
+		{"subcomponent header alone", "In subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n", false},
+	}
+	for _, tc := range cases {
+		if got := onlyDetritus(tc.out); got != tc.want {
+			t.Errorf("%s: onlyDetritus = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

@@ -416,10 +416,11 @@ func elfSymbols(f *elf.File) symbolFacts {
 }
 
 // rustVerdict decides rust versus native once Rust std markers are counted.
-// A Rust main always calls std::rt::lang_start, so with an unstripped symbol
-// table its absence means Rust is only linked in. A stripped table loses that
-// symbol; there a C++ runtime (always present when C++ owns main) marks the
-// program as C++ that links Rust, and its absence leaves Rust as the owner.
+// A defined std::rt::lang_start proves a Rust main. Its absence proves
+// nothing: stripping drops it, and link-time optimization can inline it into
+// main while other local symbols survive. Either way a C++ runtime (always
+// present when C++ owns main) marks the program as C++ that links Rust, and
+// its absence leaves Rust as the owner.
 func rustVerdict(format string, hits int, syms symbolFacts, libs []string) binaryVerdict {
 	v := rustVerdictOf(format, hits, syms, libs)
 	if syms.skipped {
@@ -430,17 +431,35 @@ func rustVerdict(format string, hits int, syms symbolFacts, libs []string) binar
 
 func rustVerdictOf(format string, hits int, syms symbolFacts, libs []string) binaryVerdict {
 	cxx := syms.cxx || linksCxx(libs)
+	if !cxx && !syms.rustEntry && hits > 0 && linksNativeRuntime(libs) {
+		return binaryVerdict{Runtime: RuntimeNative, Evidence: fmt.Sprintf("links Rust std (%d rustc markers) with a Swift, Objective-C or Foundation runtime and no std::rt::lang_start", hits)}
+	}
 	switch {
 	case syms.rustEntry:
 		return binaryVerdict{Runtime: RuntimeRust, Evidence: format + " defines std::rt::lang_start (Rust main)"}
 	case hits == 0:
 		return binaryVerdict{Runtime: RuntimeNative, Evidence: format + " with no Go, Bun or Rust markers"}
-	case syms.locals:
-		return binaryVerdict{Runtime: RuntimeNative, Evidence: fmt.Sprintf("links Rust std (%d rustc markers) but the symbol table has no std::rt::lang_start", hits)}
+	case cxx && syms.locals:
+		return binaryVerdict{Runtime: RuntimeNative, Evidence: fmt.Sprintf("links Rust std (%d rustc markers) with a C++ runtime and no std::rt::lang_start", hits)}
 	case cxx:
 		return binaryVerdict{Runtime: RuntimeNative, Evidence: fmt.Sprintf("links Rust std (%d rustc markers) into a stripped binary with a C++ runtime", hits)}
+	case syms.locals:
+		return binaryVerdict{Runtime: RuntimeRust, Evidence: fmt.Sprintf("%s with %d rustc std markers and no C++ runtime; std::rt::lang_start is absent (link-time optimization can inline it)", format, hits)}
 	}
 	return binaryVerdict{Runtime: RuntimeRust, Evidence: fmt.Sprintf("stripped %s with %d rustc std markers and no C++ runtime", format, hits)}
+}
+
+// linksNativeRuntime reports a Swift, Objective-C or Foundation runtime
+// dependency: a C-family main that statically links a Rust library links
+// these, and a Rust main has no reason to.
+func linksNativeRuntime(libs []string) bool {
+	for _, l := range libs {
+		if strings.Contains(l, "libswiftCore") || strings.Contains(l, "libobjc") ||
+			strings.Contains(l, "/Foundation.framework/") || strings.Contains(l, "/CoreFoundation.framework/") {
+			return true
+		}
+	}
+	return false
 }
 
 func linksCxx(libs []string) bool {

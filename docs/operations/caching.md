@@ -47,11 +47,22 @@ The cache layout follows the patterns proven out in
 | `threads` | hash of `(pid, timestamp)` | Thread dump text |
 | `samples` | hash of `(pid, timestamp)` | `sample <pid>` output |
 | `netcap` | hash of capture metadata | pcap recordings and summaries |
-| `classify` | hash of `(os, executable path, size, mtime, device, inode, ctime)` | `spectra process --classify` per-executable runtime and code-signing result; a rebuilt or replaced binary misses, even with size and mtime preserved |
+| `classify` | hash of `(os, executable path, size, mtime, device, inode, ctime)` | `spectra process --classify` per-executable runtime and code-signing result; a rebuilt or replaced binary misses, even with size and mtime preserved; pruned 30 days after write |
 
 ## Eviction
 
-No automatic eviction in v1. Cache directories grow until the user
+Only `classify` evicts automatically. Its keys include executable
+identity, so every rebuilt or updated binary orphans its old entry. Each
+write sweeps the one shard directory it wrote to (at most 256 entries)
+and removes files last written more than 30 days ago
+(`cache.ClassifyMaxAge`), including temp files a crashed writer left.
+Keys hash uniformly across the 256 shards, so the store stays bounded by
+what was written in the last 30 days with no separate GC pass; entries
+from an older `classify/vN` key version age out the same way. Reads do
+not refresh an entry, so an unchanged binary is reclassified (one cold
+codesign and binary read) about once a month.
+
+Every other kind has no automatic eviction in v1 and grows until the user
 runs:
 
 ```bash

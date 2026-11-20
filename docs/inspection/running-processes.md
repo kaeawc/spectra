@@ -181,7 +181,7 @@ with or without `--classify`.
 | `role` | `app`, `app_helper`, `system`, `shell`, `terminal`, `ai_agent`, `cli` |
 | `runtime` | `electron`, `native`, `rust`, `go`, `jvm`, `node`, `bun`, `deno`, `python`, `ruby`, `shell`, `unknown` |
 | `app` | `{name, bundle_path, bundle_id}` for the outermost owning `.app` (macOS); present only when an owning app is found |
-| `signing` | macOS only: `{status, team_id, hardened_runtime}`, status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown` |
+| `signing` | macOS only: `{status, team_id, hardened_runtime, validated}`, status `apple`, `developer_id`, `adhoc`, `unsigned`, `invalid` or `unknown`; `validated` is true only when a `codesign --verify` step passed |
 | `evidence` | `["role: …", "runtime: …", "signing: …"]`, why each was chosen (the `signing` line on macOS only) |
 
 Every path rule uses the kernel-reported executable: libproc on macOS,
@@ -213,12 +213,13 @@ worker pool so cancelling returns promptly.
    (legacy or v0 mangling), which only a Rust `main` calls, is `rust`.
    Otherwise `/rustc/` or `RUST_BACKTRACE` in read-only data (at most
    32 MiB scanned per file) shows Rust std is linked, which C++ programs
-   with Rust libraries (`adb`, `netsimd`) also have: it is `rust` only for
-   a stripped binary with no C++ runtime (no `std::` or `operator new`
-   symbols, no `__gxx_personality_v0`, no libc++/libstdc++ link), and
-   `native` with evidence "links Rust std" when the symbol table survives
-   without `lang_start` or a C++ runtime is present. Anything else is
-   `native`; an unreadable or unknown file is `unknown`.
+   with Rust libraries (`adb`, `netsimd`) also have: it is `rust` when no
+   C++ runtime is present (no `std::` or `operator new` symbols, no
+   `__gxx_personality_v0`, no libc++/libstdc++ link), and `native` with
+   evidence "links Rust std" when one is. A missing `lang_start` is not
+   conclusive even when the symbol table survives: link-time optimization
+   (`-C lto=fat`) can inline it into `main`. Anything else is `native`; an
+   unreadable or unknown file is `unknown`.
 
 **Role** precedence (documented in `internal/classify/role.go`):
 
@@ -267,20 +268,35 @@ failing is `invalid`, and a codesign failure (timeout, cancel) is `unknown`
 and not cached. The verify still checks the code pages and CodeDirectory
 (a patched byte in either fails it) but not bundle resource seals, which
 genuine Apple code such as Simulator runtimes, Safari's cryptex XPC
-services and XProtect fails with "resource envelope is obsolete". Other statuses are taken from the display: a Developer ID, Mac App
-Store or Apple Development leaf is `developer_id` with its displayed
-`team_id`, `Signature=adhoc` is `adhoc`, "not signed at all" is
-`unsigned`. The `signing:` evidence line says whether the verdict was
-validated and that it describes the file on disk, which may no longer be
-what a long-running process loaded. Linux never runs codesign and omits
-`signing`.
+services and XProtect fails with "resource envelope is obsolete".
+
+A Developer ID, Mac App Store or Apple Development leaf is `developer_id`
+with its displayed `team_id`, and is checked with
+`codesign --verify --strict <exe>` against its own designated
+requirement. Resource seals are checked here, because an Electron or JVM
+app's running code lives in its bundle resources. Passing sets
+`validated`; failing (a modified code page, resource or signature) is
+`invalid`. Two failures keep `developer_id` with `validated: false`: a
+`--strict` rejection of only extended attributes or resource forks
+("detritus", a packaging defect rather than altered code; cached), and a
+verify that could not run (timeout, cancel, the file vanished; not cached,
+retried next run). `Signature=adhoc` is `adhoc` and "not signed at all" is
+`unsigned`, both as displayed and never `validated`. The `signing:`
+evidence line says which verify ran and that the verdict describes the
+file on disk, which may no longer be what a long-running process loaded.
+Linux never runs codesign and omits `signing`.
 
 The per-executable work is cached by (path, size, mtime, device, inode,
 ctime) in memory and in the `classify` cache kind, so a second run skips
 codesign and binary reads entirely, while a replacement that keeps size and
 mtime (`cp -p`, `rsync`, `tar`) still misses. Cold classification runs on a
-bounded worker pool. On a Mac with about 1,000 processes the first run
-takes a few seconds and later runs add well under 100 ms. The table adds
+bounded worker pool (8 workers), and the Developer ID verify runs on the
+same pool: on a Mac with about 1,300 processes, 50 of them distinct
+Developer ID executables, the verify adds roughly 4.5 s of codesign time
+spread across the workers, which stayed within run-to-run noise of a cold
+run (about 18-24 s on a loaded machine). A warm run, served from the
+cache, takes about a second. Cache entries are pruned 30 days after they
+were written (see [caching](../operations/caching.md#eviction)). The table adds
 `ROLE` and `RUNTIME` columns, plus `SIGN` on macOS.
 
 ## Implementation reference
