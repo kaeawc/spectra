@@ -137,6 +137,25 @@ func TestDisableRereadsStateAfterFailure(t *testing.T) {
 	}
 }
 
+func TestChangeRefusesWhenLaunchdStateIsUnreadable(t *testing.T) {
+	for _, verb := range []string{"print", "print-disabled"} {
+		t.Run(verb, func(t *testing.T) {
+			tr, f, _ := changeFixture(t)
+			f.fail[verb] = true
+			f.loaded["gui/501"]["com.example.agent"] = serviceState{PID: 12}
+			_, err := Disable(context.Background(), tr.opts(f), "com.example.agent", "user")
+			if err == nil || !strings.Contains(err.Error(), "can't read launchd state") {
+				t.Fatalf("err = %v", err)
+			}
+			for _, c := range f.Calls() {
+				if len(c.Args) > 0 && (c.Args[0] == "disable" || c.Args[0] == "bootout") {
+					t.Fatalf("ran %v without launchd state", c.Args)
+				}
+			}
+		})
+	}
+}
+
 func TestDisableBootoutRace(t *testing.T) {
 	cases := []struct {
 		name    string

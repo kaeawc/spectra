@@ -86,6 +86,11 @@ func change(ctx context.Context, opts Options, action, label, scope string) (Cha
 	if err != nil {
 		return res, err
 	}
+	// Without launchd's own view every job reads as not loaded and enabled, so
+	// a change would skip steps and then report success it can't see.
+	if err := launchdReadable(rep); err != nil {
+		return res, fmt.Errorf("%s %s: %w", action, label, err)
+	}
 	item := find(rep.Items, label, e.guiDomain())
 	if item != nil {
 		res.Domain = item.Domain
@@ -99,9 +104,21 @@ func change(ctx context.Context, opts Options, action, label, scope string) (Cha
 	if err != nil {
 		return res, errors.Join(mutErr, fmt.Errorf("re-read after %s: %w", action, err))
 	}
+	if err := launchdReadable(after); err != nil {
+		return res, errors.Join(mutErr, fmt.Errorf("re-read after %s: %w", action, err))
+	}
 	res.After = find(after.Items, label, item.Domain)
 	res.Mismatch = res.verify()
 	return res, mutErr
+}
+
+func launchdReadable(rep Report) error {
+	for _, s := range rep.Sources {
+		if (s.Name == SourceLaunchctl || s.Name == SourcePrintDisabled) && s.Status != StatusOK {
+			return fmt.Errorf("can't read launchd state (%s: %s %s)", s.Name, s.Status, s.Detail)
+		}
+	}
+	return nil
 }
 
 // find prefers the user's GUI-domain row when a label exists in several.
