@@ -1197,14 +1197,12 @@ func (s *Server) toolJVMHeapLeakSuspects(_ context.Context, p jvmParams) ToolRes
 	return toolText(env)
 }
 
-func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
-	if p.AsprofPath != "" {
-		return toolError(asprofPathRejection)
-	}
-
 // checkFlamegraphArgs is the flamegraph's argument check, shared with
 // job_start's validator.
 func checkFlamegraphArgs(p jvmParams) error {
+	if p.AsprofPath != "" {
+		return errors.New(asprofPathRejection)
+	}
 	if !p.ConfirmSensitive {
 		return errors.New("jvm flamegraph requires confirm_sensitive=true")
 	}
@@ -1214,11 +1212,6 @@ func checkFlamegraphArgs(p jvmParams) error {
 	if p.DurationSeconds < 0 || p.DurationSeconds > maxCaptureSeconds {
 		return fmt.Errorf("duration_seconds must be 1..%d", maxCaptureSeconds)
 	}
-	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
-	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
-	stop()
-	if err != nil {
-
 	if p.Event != "" && !flamegraphEvents[p.Event] {
 		return fmt.Errorf("event must be one of %s", strings.Join(flamegraphEventNames(), ", "))
 	}
