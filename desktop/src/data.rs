@@ -115,13 +115,15 @@ pub fn parse(json: &str) -> Result<Vec<Jvm>, String> {
     Ok(jvms)
 }
 
-/// Runs `spectra jvm -json`. Blocks for as long as Spectra takes; call it off the UI thread.
+/// How long a JVM reading may take before it's stopped; one usually takes about 17 s.
+const JVM_DEADLINE: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Runs `spectra jvm -json`, stopping it after `JVM_DEADLINE`. Call it off the UI thread.
 pub fn fetch() -> Result<Vec<Jvm>, String> {
     let bin = std::env::var("SPECTRA_BIN").unwrap_or_else(|_| "spectra".into());
-    let out = Command::new(&bin)
-        .args(["jvm", "-json"])
-        .output()
-        .map_err(|e| format!("Couldn't run {bin}: {e}. Install Spectra or set SPECTRA_BIN."))?;
+    let mut cmd = Command::new(&bin);
+    cmd.args(["jvm", "-json"]);
+    let out = crate::run::run(cmd, JVM_DEADLINE, crate::procs::MAX_OUTPUT).map_err(|e| crate::procs::run_failure(&bin, e))?;
     if !out.status.success() {
         return Err(format!("{bin} jvm failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
@@ -129,7 +131,8 @@ pub fn fetch() -> Result<Vec<Jvm>, String> {
 }
 
 pub fn fmt_kib(kib: f64) -> String {
-    if kib >= 1024.0 * 1024.0 {
+    // Where the rounded MB figure would reach 1024.
+    if kib >= 1023.5 * 1024.0 {
         format!("{:.1} GB", kib / 1024.0 / 1024.0)
     } else {
         format!("{:.0} MB", kib / 1024.0)
@@ -146,6 +149,12 @@ mod tests {
         assert_eq!(flag_size_kib("-XX:MaxMetaspaceSize=256m", "-XX:MaxMetaspaceSize"), Some(256.0 * 1024.0));
         assert_eq!(flag_size_kib("-Xmx1g -Xmx2g", "-Xmx"), Some(2.0 * 1024.0 * 1024.0));
         assert_eq!(flag_size_kib("-Dfoo=bar", "-Xmx"), None);
+    }
+
+    #[test]
+    fn a_size_just_under_a_gb_reads_as_one() {
+        assert_eq!(fmt_kib(1023.96 * 1024.0), "1.0 GB");
+        assert_eq!(fmt_kib(512.0 * 1024.0), "512 MB");
     }
 
     #[test]

@@ -16,7 +16,17 @@ pub enum Severity {
 pub enum Chart {
     HeapUsed,
     OldGen,
+    Cpu,
+    Memory,
     None,
+}
+
+/// Where a finding's subject link goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    Process(u32),
+    /// The list of unsigned and ad hoc signed processes.
+    Unidentified,
 }
 
 #[derive(Clone, Debug)]
@@ -29,6 +39,7 @@ pub struct Finding {
     pub detail: String,
     pub fix: String,
     pub chart: Chart,
+    pub link: Link,
 }
 
 impl Finding {
@@ -43,7 +54,17 @@ pub fn diagnose(jvm: &Jvm, history: &[Sample]) -> Vec<Finding> {
     let added = std::cell::Cell::new(0);
     let mut add = |rule, severity, title: String, detail: String, fix: &str, chart| {
         added.set(added.get() + 1);
-        out.push(Finding { rule, pid: jvm.pid, subject: jvm.name(), severity, title, detail, fix: fix.into(), chart });
+        out.push(Finding {
+            rule,
+            pid: jvm.pid,
+            subject: jvm.name(),
+            severity,
+            title,
+            detail,
+            fix: fix.into(),
+            chart,
+            link: Link::Process(jvm.pid),
+        });
     };
     let Some(gc) = &jvm.gc else {
         add(

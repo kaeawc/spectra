@@ -98,45 +98,70 @@ fn count(n: f64) -> String {
     format!("{n:.0}")
 }
 
-enum Mark {
+pub enum Mark {
     Line,
     Bars,
 }
 
-struct Lane {
-    key: &'static str,
-    label: &'static str,
-    values: Vec<f64>,
-    unit: fn(f64) -> String,
-    mark: Mark,
+pub struct Lane {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub values: Vec<f64>,
+    pub unit: fn(f64) -> String,
+    pub mark: Mark,
 }
 
-/// The timeline for one JVM's `history`, with a marker at `baseline` (an index into it).
-pub fn timeline(history: &[Sample], baseline: Option<usize>, color: Color, k: &Kit) -> El {
+/// Lanes over `n` readings on one shared axis, keyed `{prefix}-timeline`, under a caption, or a
+/// line saying readings are still coming in. `baseline` marks a reading.
+pub fn lanes(
+    prefix: &str,
+    n: usize,
+    lanes: &[Lane],
+    baseline: Option<usize>,
+    color: Color,
+    k: &Kit,
+) -> El {
     let c = &k.c;
-    let mut body = col().key("jd-timeline").w_full().gap(8.0);
-    if history.len() < 2 {
+    let body = col().key(format!("{prefix}-timeline")).w_full().gap(8.0);
+    if n < 2 {
         return body.child(
             text("Collecting readings — the timeline starts after the next one.")
-                .key("jd-timeline-collecting")
+                .key(format!("{prefix}-timeline-collecting"))
                 .font(k.ty.small)
                 .color(c.text_muted),
         );
     }
     let caption = match baseline {
-        Some(_) => format!(
-            "Last {} readings · the rule marks the baseline",
-            history.len()
-        ),
-        None => format!("Last {} readings", history.len()),
+        Some(_) => format!("Last {n} readings · the rule marks the baseline"),
+        None => format!("Last {n} readings"),
     };
-    body = body.child(
+    let mut rows = col()
+        .w_full()
+        .radius(k.radius.md)
+        .border(1.0, c.border_weak)
+        .fill(c.layer_01);
+    for (i, lane) in lanes.iter().enumerate() {
+        let mut r = lane_row(lane, n, baseline, color, k);
+        if i > 0 {
+            r = col()
+                .w_full()
+                .child(el().w_full().h(1.0).fill(c.border_weak))
+                .child(r);
+        }
+        rows = rows.child(r);
+    }
+    body.child(
         text(caption)
-            .key("jd-timeline-caption")
+            .key(format!("{prefix}-timeline-caption"))
             .font(k.ty.small)
             .color(c.text_faint),
-    );
-    let lanes = [
+    )
+    .child(rows)
+}
+
+/// The timeline for one JVM's `history`, with a marker at `baseline` (an index into it).
+pub fn timeline(history: &[Sample], baseline: Option<usize>, color: Color, k: &Kit) -> El {
+    let all = [
         Lane {
             key: "jd-lane-heap",
             label: "Heap used",
@@ -166,23 +191,7 @@ pub fn timeline(history: &[Sample], baseline: Option<usize>, color: Color, k: &K
             mark: Mark::Line,
         },
     ];
-    let n = history.len();
-    let mut rows = col()
-        .w_full()
-        .radius(k.radius.md)
-        .border(1.0, c.border_weak)
-        .fill(c.layer_01);
-    for (i, lane) in lanes.iter().enumerate() {
-        let mut r = lane_row(lane, n, baseline, color, k);
-        if i > 0 {
-            r = col()
-                .w_full()
-                .child(el().w_full().h(1.0).fill(c.border_weak))
-                .child(r);
-        }
-        rows = rows.child(r);
-    }
-    body.child(rows)
+    lanes("jd", history.len(), &all, baseline, color, k)
 }
 
 fn lane_row(lane: &Lane, n: usize, baseline: Option<usize>, color: Color, k: &Kit) -> El {

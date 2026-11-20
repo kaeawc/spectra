@@ -6,7 +6,7 @@ use rune_kit::Kit;
 
 use crate::app::App;
 use crate::data::fmt_kib;
-use crate::findings::{Chart, Finding, Severity};
+use crate::findings::{Chart, Finding, Link, Severity};
 
 pub fn ink(severity: Severity, k: &Kit) -> Color {
     match severity {
@@ -57,16 +57,20 @@ fn evidence(s: &App, f: &Finding, k: &Kit) -> El {
     let c = &k.c;
     let history = s.history(f.pid);
     let mut body = col().w_full().gap(10.0).pt(12.0);
+    let readings = s.proc_history(f.pid);
     let series: Vec<f64> = match f.chart {
         Chart::HeapUsed => history.iter().map(|x| x.heap_used_kib).collect(),
         Chart::OldGen => history.iter().map(|x| x.old_used_kib).collect(),
+        Chart::Cpu => readings.iter().map(|x| x.cpu).collect(),
+        Chart::Memory => readings.iter().map(|x| x.rss_kib).collect(),
         Chart::None => Vec::new(),
     };
     if series.len() >= 2 {
-        let label = if f.chart == Chart::OldGen {
-            "Old generation"
-        } else {
-            "Heap used"
+        let label = match f.chart {
+            Chart::OldGen => "Old generation",
+            Chart::Cpu => "CPU",
+            Chart::Memory => "Memory",
+            _ => "Heap used",
         };
         body = body
             .child(
@@ -76,7 +80,12 @@ fn evidence(s: &App, f: &Finding, k: &Kit) -> El {
             )
             .child(sparkline(&series, ink(f.severity, k)));
     }
-    if let (Some(base), Some(now)) = (s.baseline.get(&f.pid).map(|b| b.sample), history.last()) {
+    let jvm_rule = f.rule.starts_with("jvm-");
+    if let (true, Some(base), Some(now)) = (
+        jvm_rule,
+        s.baseline.get(&f.pid).map(|b| b.sample),
+        history.last(),
+    ) {
         let count = |n: f64| format!("{n:.0}");
         let line = format!(
             "Since baseline: heap {}, old gen {}, classes {}, threads {}, GCs {}",
@@ -110,16 +119,20 @@ pub fn card(s: &App, f: &Finding, k: &Kit) -> El {
     let c = &k.c;
     let id = f.id();
     let open = s.expanded.as_deref() == Some(id.as_str());
-    let pid = f.pid;
-    // Its own handler, so pressing it opens the JVM rather than the card.
-    let subject = text(format!("{} · {}", f.subject, f.pid))
+    let (pid, link) = (f.pid, f.link);
+    let (subject, label) = match link {
+        Link::Process(pid) => (format!("{} · {pid}", f.subject), format!("Open {}", f.subject)),
+        Link::Unidentified => (f.subject.clone(), "Show unsigned and ad hoc processes".to_owned()),
+    };
+    // Its own handler, so pressing it opens the process rather than the card.
+    let subject = text(subject)
         .key(format!("subject-{pid}-{}", f.rule))
         .role("link")
-        .label(format!("Open {}", f.subject))
+        .label(label)
         .cursor(Cursor::Pointer)
         .font(k.ty.small)
         .color(c.text_faint)
-        .on_press(move |s: &mut App| s.select(Some(pid)));
+        .on_press(move |s: &mut App| s.follow(link));
     let head = row()
         .w_full()
         .gap(10.0)
