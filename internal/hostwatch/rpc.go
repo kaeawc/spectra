@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/daemon"
+	"github.com/kaeawc/spectra/internal/spawnorigin"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -17,6 +18,7 @@ func RegisterMethods(server *daemon.Server, svc *Service) {
 	server.Register("alerts.ack", svc.ackRPC)
 	server.Register("alerts.subscribe", svc.subscribeRPC)
 	server.Register("process.history", svc.historyRPC)
+	server.Register(MethodProcessOrigins, svc.originsRPC)
 }
 func (s *Service) currentRPC(_ context.Context, _ *daemon.Request) (any, error) {
 	sample, alerts := s.Current()
@@ -112,4 +114,17 @@ func decodeParams(req *daemon.Request, dst any) error {
 		return daemon.InvalidParams("invalid params: %v", err)
 	}
 	return nil
+}
+
+func (s *Service) originsRPC(_ context.Context, req *daemon.Request) (any, error) {
+	var p struct {
+		Processes []spawnorigin.Query `json:"processes"`
+	}
+	if err := decodeParams(req, &p); err != nil {
+		return nil, err
+	}
+	if len(p.Processes) > spawnorigin.MaxQueries {
+		return nil, daemon.InvalidParams("at most %d processes per call", spawnorigin.MaxQueries)
+	}
+	return s.Origins(p.Processes), nil
 }

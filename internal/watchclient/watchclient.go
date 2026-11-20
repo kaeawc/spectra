@@ -12,6 +12,7 @@ import (
 	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/spawnorigin"
 )
 
 type Client struct{ c *daemonclient.Client }
@@ -79,6 +80,14 @@ func (w *Client) Ack(ctx context.Context, id string) (hostwatch.Alert, error) {
 func (w *Client) ProcessHistory(ctx context.Context, pid, limit int) ([]metrics.Sample, error) {
 	var result []metrics.Sample
 	err := w.c.Call(ctx, "process.history", map[string]int{"pid": pid, "limit": limit}, &result)
+	return result, err
+}
+
+// Origins looks up the daemon's recorded spawn origins. A daemon that
+// predates the method answers with a method-not-found RPC error.
+func (w *Client) Origins(ctx context.Context, queries []spawnorigin.Query) (spawnorigin.Response, error) {
+	var result spawnorigin.Response
+	err := w.c.Call(ctx, hostwatch.MethodProcessOrigins, map[string]any{"processes": queries}, &result)
 	return result, err
 }
 

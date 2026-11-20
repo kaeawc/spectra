@@ -1,11 +1,17 @@
 package hostwatch
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/kaeawc/spectra/internal/hostload"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 type platformSpawnBackend struct{}
@@ -21,7 +27,8 @@ func (platformSpawnBackend) List() ([]SpawnProcess, error) {
 	for _, row := range rows {
 		comm := string(row.Proc.P_comm[:])
 		comm, _, _ = strings.Cut(comm, "\x00")
-		out = append(out, SpawnProcess{PID: int(row.Proc.P_pid), PPID: int(row.Eproc.Ppid), UID: int(row.Eproc.Pcred.P_ruid), Comm: comm})
+		start := time.Unix(row.Proc.P_starttime.Sec, int64(row.Proc.P_starttime.Usec)*1000)
+		out = append(out, SpawnProcess{PID: int(row.Proc.P_pid), PPID: int(row.Eproc.Ppid), UID: int(row.Eproc.Pcred.P_ruid), Comm: comm, Start: start})
 	}
 	return out, nil
 }
@@ -63,4 +70,23 @@ func (platformSpawnBackend) Limits() (int, int) {
 	uid, _ := unix.SysctlUint32("kern.maxprocperuid")
 	total, _ := unix.SysctlUint32("kern.maxproc")
 	return int(uid), int(total)
+}
+
+// Cwds runs one lsof for the given pids. lsof exits 1 when some pids are
+// gone or unreadable but still prints the rest.
+func (platformSpawnBackend) Cwds(ctx context.Context, pids []int) map[int]string {
+	if len(pids) == 0 {
+		return map[int]string{}
+	}
+	list := make([]string, len(pids))
+	for i, pid := range pids {
+		list[i] = strconv.Itoa(pid)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	res, err := proc.OS{}.Run(ctx, proc.Cmd{Name: "lsof", Args: []string{"-a", "-d", "cwd", "-p", strings.Join(list, ","), "-Fpn"}})
+	if err != nil && len(res.Stdout) == 0 {
+		return map[int]string{}
+	}
+	return hostload.ParseLsofCwd(string(res.Stdout))
 }

@@ -41,6 +41,8 @@ type Process struct {
 	Descendants    int     `json:"descendants"`
 	SubtreeRSSKiB  int64   `json:"subtree_rss_kib"`
 	DaemonByDesign bool    `json:"daemon_by_design"`
+	// Origin is set by AttachOrigins.
+	Origin *Origin `json:"origin,omitempty"`
 }
 
 // Group is the candidates of one worktree. RSSKiB sums the subtree RSS of the

@@ -86,7 +86,7 @@ func TestRunOrphansFindsAndGroups(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 			t.Fatal(err)
 		}
-		if rep.Total != 2 || len(rep.Groups) != 2 || len(rep.Limitations) != 3 || rep.Roots[0] != root {
+		if rep.Total != 2 || len(rep.Groups) != 2 || len(rep.Limitations) != 4 || rep.Roots[0] != root {
 			t.Fatalf("root %s: %+v", root, rep)
 		}
 		if g := rep.Groups[0]; g.Worktree != "/private/tmp/work/gone" || g.RSSKiB != 4096 || !g.Processes[0].CwdMissing {
