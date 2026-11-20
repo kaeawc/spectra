@@ -87,6 +87,8 @@ func startupTestOpts(t *testing.T) (startup.Options, *testLaunchd) {
 		LookupUser: func(uint32) string { return "tester" },
 		PlistDirs:  []startup.PlistDir{{Path: dir, Scope: startup.ScopeUser, Kind: startup.KindLaunchAgent}},
 		AppDirs:    []string{},
+		// An empty store directory, so tests never read the host's BTM store.
+		BTMStoreDir: t.TempDir(),
 	}, f
 }
 

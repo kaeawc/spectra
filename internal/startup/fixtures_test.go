@@ -180,6 +180,9 @@ func (tr tree) opts(r proc.Runner) Options {
 			{Path: tr.libDaemons, Scope: ScopeSystem, Kind: KindLaunchDaemon},
 		},
 		AppDirs: []string{tr.apps},
+		// No store unless a test writes one, so tests never read the host's.
+		BTMStoreDir:    filepath.Join(tr.root, "btm"),
+		LookupUserUUID: func(int) (string, error) { return testUserUUID, nil },
 	}
 }
 

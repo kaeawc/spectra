@@ -78,6 +78,12 @@ type Options struct {
 	// AppDirs are searched for apps whose bundle id matches a label
 	// (default /Applications, /Applications/Utilities, ~/Applications).
 	AppDirs []string
+	// BTMStoreDir holds the Background Task Management store read without
+	// root (default /private/var/db/com.apple.backgroundtaskmanagement).
+	BTMStoreDir string
+	// LookupUserUUID returns a uid's Open Directory GeneratedUID, which keys
+	// the user's records in the BTM store (default `dscl . -read`).
+	LookupUserUUID func(uid int) (string, error)
 }
 
 type env struct {
@@ -90,6 +96,9 @@ type env struct {
 	// ownersFor limits owner attribution to one label: a change reads every
 	// plist directory, /System included, but reports only its own item.
 	ownersFor string
+	// btmListed is set by a change once BTM items were read, so a label not
+	// in the report is not a Login Item either.
+	btmListed bool
 }
 
 func newEnv(opts Options) env {
@@ -164,7 +173,8 @@ func (e env) run(ctx context.Context, name string, args ...string) ([]byte, erro
 
 // List reports what launches at login or boot. Only read-only commands run:
 // launchctl print-disabled, launchctl print, codesign -dv/--verify and, as
-// root, sfltool dumpbtm. Unreadable sources are reported in Report.Sources.
+// root, sfltool dumpbtm (otherwise the BTM store file is read). Unreadable
+// sources are reported in Report.Sources.
 func List(ctx context.Context, opts Options) (Report, error) {
 	if hostos.Resolve(opts.OS) != hostos.Darwin {
 		return Report{}, hostos.Unsupported("startup items")
@@ -186,13 +196,12 @@ func (e env) list(ctx context.Context, b btmRead) (Report, error) {
 	rep.Sources = append(rep.Sources, SourceStatus{Name: SourcePlist, Status: StatusOK,
 		Detail: fmt.Sprintf("%d plists read, %d unreadable", len(m.rows), len(rep.Errors))})
 
-	btmStatus, btm := b.status, b.items
-	m.mergeBTM(btm, e, e.opts.IncludeApple)
+	m.mergeBTM(b, e, e.opts.IncludeApple)
 
 	disabled, st := e.readDisabled(ctx)
 	rep.Sources = append(rep.Sources, st)
 	loaded, st := e.readLoaded(ctx)
-	rep.Sources = append(rep.Sources, st, btmStatus)
+	rep.Sources = append(rep.Sources, st, b.status)
 	for _, r := range m.rows {
 		applyState(r, disabled[r.Domain], loaded[r.Domain])
 	}
@@ -211,7 +220,7 @@ func (e env) readPlists(m *merger) []PlistError {
 		entries, err := e.files.ReadDir(dir.Path)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				errs = append(errs, PlistError{Path: dir.Path, Error: err.Error()})
+				errs = append(errs, PlistError{Path: dir.Path, Error: err.Error(), gui: dir.Kind == KindLaunchAgent})
 			}
 			continue
 		}
@@ -222,7 +231,7 @@ func (e env) readPlists(m *merger) []PlistError {
 			path := filepath.Join(dir.Path, ent.Name())
 			it, err := e.readPlist(path, dir)
 			if err != nil {
-				errs = append(errs, PlistError{Path: path, Error: err.Error()})
+				errs = append(errs, e.unreadable(path, dir, err))
 				continue
 			}
 			m.add(it)
@@ -245,7 +254,7 @@ func (e env) readPlist(path string, dir PlistDir) (*Item, error) {
 		return nil, err
 	}
 	if job.Label == "" {
-		return nil, errors.New("plist has no Label")
+		return nil, errNoLabel
 	}
 	program := job.Program
 	if program == "" && len(job.ProgramArguments) > 0 {
@@ -347,25 +356,39 @@ func status(name string, failed []string) SourceStatus {
 	return SourceStatus{Name: name, Status: StatusError, Detail: strings.Join(failed, "; ")}
 }
 
-// btmRead is one `sfltool dumpbtm` result.
+// btmRead is one read of Background Task Management, from `sfltool dumpbtm`
+// or the store file.
 type btmRead struct {
 	status SourceStatus
 	items  []btmItem
+	// source is SourceBTM or SourceBTMStore, for Item.Sources.
+	source string
 }
+
+// listed reports whether BTM items were read, so a label missing from the
+// report is not a Login Item either.
+func (b btmRead) listed() bool { return b.status.Status == StatusOK }
 
 // readBTM runs `sfltool dumpbtm` only as root: for any other user it asks
 // for administrator authorization in a dialog and blocks until answered.
+// Without root it decodes the world-readable store instead, and reports
+// needs_root when the store is missing, of an unverified version, or does
+// not decode.
 func (e env) readBTM(ctx context.Context) btmRead {
 	if !e.root {
+		b, err := e.readBTMStore(ctx)
+		if err == nil {
+			return b
+		}
 		return btmRead{status: SourceStatus{Name: SourceBTM, Status: StatusNeedsRoot,
-			Detail: "sfltool dumpbtm asks for administrator authorization unless run as root; run `sudo spectra startup list` to include Login Items and SMAppService jobs"}}
+			Detail: fmt.Sprintf("BTM store not used (%v); sfltool dumpbtm asks for administrator authorization unless run as root; run `sudo spectra startup list` to include Login Items and SMAppService jobs", err)}}
 	}
 	out, err := e.run(ctx, sfltoolPath, "dumpbtm")
 	if err != nil {
 		return btmRead{status: SourceStatus{Name: SourceBTM, Status: StatusError, Detail: err.Error()}}
 	}
 	items := parseDumpBTM(out)
-	return btmRead{status: SourceStatus{Name: SourceBTM, Status: StatusOK, Detail: fmt.Sprintf("%d items", len(items))}, items: items}
+	return btmRead{status: SourceStatus{Name: SourceBTM, Status: StatusOK, Detail: fmt.Sprintf("%d items", len(items))}, items: items, source: SourceBTM}
 }
 
 // applyState sets disabled and loaded state from launchctl. A BTM-only item
@@ -424,20 +447,20 @@ func (m *merger) add(it *Item) {
 	}
 }
 
-func (m *merger) mergeBTM(items []btmItem, e env, includeApple bool) {
+func (m *merger) mergeBTM(read btmRead, e env, includeApple bool) {
 	byID := map[string]btmItem{}
-	for _, b := range items {
+	for _, b := range read.items {
 		if prev, ok := byID[b.Identifier]; !ok || prev.URL == "" || b.UID == e.uid {
 			byID[b.Identifier] = b
 		}
 	}
-	for _, b := range items {
+	for _, b := range read.items {
 		if (b.UID > 0 && b.UID != e.uid) || !b.startsAtLogin() {
 			continue
 		}
 		b.resolve(byID)
 		if row := m.rowFor(b, e, includeApple); row != nil {
-			attachBTM(row, b, byID)
+			attachBTM(row, b, byID, read.source)
 		}
 	}
 }
@@ -460,7 +483,7 @@ func (m *merger) rowFor(b btmItem, e env, includeApple bool) *Item {
 	return row
 }
 
-func attachBTM(row *Item, b btmItem, byID map[string]btmItem) {
+func attachBTM(row *Item, b btmItem, byID map[string]btmItem, source string) {
 	bi := b.BTM
 	row.BTM = &bi
 	if row.Name == "" {
@@ -472,7 +495,7 @@ func attachBTM(row *Item, b btmItem, byID map[string]btmItem) {
 	if b.disabled() && row.DisabledBy == "" {
 		row.Disabled, row.DisabledBy = true, "btm disposition"
 	}
-	addSource(row, SourceBTM)
+	addSource(row, source)
 	if row.Owner == nil {
 		row.Owner = btmOwner(b, byID)
 	}
