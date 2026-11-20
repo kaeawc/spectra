@@ -64,7 +64,7 @@ func scanPlistLabel(r io.Reader) (string, error) {
 		return "", errors.New("binary plist: the label scan reads XML plists only")
 	}
 	d := xml.NewDecoder(br)
-	depth, isLabel := 0, false
+	depth, isLabel, label := 0, false, ""
 	for {
 		tok, err := d.Token()
 		if err != nil {
@@ -80,13 +80,16 @@ func scanPlistLabel(r io.Reader) (string, error) {
 				continue
 			}
 			depth--
-			if label, done, err := scanEntry(d, &t, &isLabel); done || err != nil {
-				return label, err
+			if err := scanEntry(d, &t, &isLabel, &label); err != nil {
+				return "", err
 			}
 		case xml.EndElement:
 			depth--
 			if depth == 1 {
-				return "", errNoLabel
+				if label == "" {
+					return "", errNoLabel
+				}
+				return label, nil
 			}
 		}
 	}
@@ -104,30 +107,29 @@ func checkPlistFrame(depth int, name string) error {
 }
 
 // scanEntry consumes one element of the top-level dict: a key, or the value
-// after one. done is set once the Label value has been read.
-func scanEntry(d *xml.Decoder, t *xml.StartElement, isLabel *bool) (label string, done bool, err error) {
+// after one. A Label value is stored in *label, replacing an earlier one: the
+// last duplicate key wins, as it does when the plist is parsed.
+func scanEntry(d *xml.Decoder, t *xml.StartElement, isLabel *bool, label *string) error {
 	switch {
 	case *isLabel:
+		*isLabel = false
 		if t.Name.Local != "string" {
-			return "", true, fmt.Errorf("the Label value is a <%s>, not a string", t.Name.Local)
+			return fmt.Errorf("the Label value is a <%s>, not a string", t.Name.Local)
 		}
-		if err := d.DecodeElement(&label, t); err != nil {
-			return "", true, fmt.Errorf("label value: %w", err)
+		*label = ""
+		if err := d.DecodeElement(label, t); err != nil {
+			return fmt.Errorf("label value: %w", err)
 		}
-		if label == "" {
-			return "", true, errNoLabel
-		}
-		return label, true, nil
 	case t.Name.Local == "key":
 		var k string
 		if err := d.DecodeElement(&k, t); err != nil {
-			return "", true, fmt.Errorf("key: %w", err)
+			return fmt.Errorf("key: %w", err)
 		}
 		*isLabel = k == "Label"
 	default:
 		if err := d.Skip(); err != nil {
-			return "", true, fmt.Errorf("scan: %w", err)
+			return fmt.Errorf("scan: %w", err)
 		}
 	}
-	return "", false, nil
+	return nil
 }

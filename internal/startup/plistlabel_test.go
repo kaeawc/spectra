@@ -27,6 +27,8 @@ func TestScanPlistLabel(t *testing.T) {
 		{name: "label after big value", body: `<plist version="1.0"><dict>` + padding + `<key>Label</key><string>com.example.b</string></dict></plist>`, want: "com.example.b"},
 		{name: "nested label ignored", body: `<plist><dict><key>Sub</key><dict><key>Label</key><string>inner</string></dict>` +
 			`<key>Arr</key><array><string>Label</string></array><key>Label</key><string>outer</string></dict></plist>`, want: "outer"},
+		{name: "duplicate label last wins", body: `<plist><dict><key>Label</key><string>com.example.first</string>` + padding +
+			`<key>Label</key><string>com.example.last</string></dict></plist>`, want: "com.example.last"},
 		{name: "label key as a value", body: `<plist><dict><key>K</key><string>Label</string></dict></plist>`, noLabel: true},
 		{name: "empty dict", body: `<plist version="1.0"><dict/></plist>`, noLabel: true},
 		{name: "empty label", body: `<plist><dict><key>Label</key><string></string></dict></plist>`, noLabel: true},

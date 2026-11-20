@@ -1,7 +1,9 @@
 package startup
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os/user"
@@ -9,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"howett.net/plist"
 )
@@ -39,7 +42,11 @@ const wellKnownUUIDPrefix = "FFFFEEEE-DDDD-CCCC-BBBB-AAAA"
 // BTM record type bits, as `sfltool dumpbtm` names them. Only bits seen in
 // both sfltool output and a real store are named; anything else is printed
 // as its hex value and never counts as something that launches.
-const btmTypeLegacy = 0x10000
+const (
+	btmTypeLegacy  = 0x10000
+	btmTypeCurated = 0x80000
+	btmTypeUser    = 0x1
+)
 
 var btmTypeNames = map[int64]string{
 	0x2:   "app",
@@ -47,6 +54,8 @@ var btmTypeNames = map[int64]string{
 	0x8:   "agent",
 	0x10:  "daemon",
 	0x20:  "developer",
+	0x40:  "spotlight",
+	0x80:  "dock tile",
 	0x800: "quicklook",
 }
 
@@ -74,7 +83,7 @@ func (e env) readBTMStore(ctx context.Context) (btmRead, error) {
 	if err != nil {
 		return btmRead{}, fmt.Errorf("read %s: %w", filepath.Base(path), err)
 	}
-	items, err := decodeBTMStore(data, version, func(key string) (int, bool) { return e.btmUID(key, me) })
+	items, err := decodeBTMStore(ctx, data, version, func(key string) (int, bool) { return e.btmUID(key, me) })
 	if err != nil {
 		return btmRead{}, fmt.Errorf("decode %s: %w", filepath.Base(path), err)
 	}
@@ -159,8 +168,8 @@ func parseGeneratedUID(out []byte) (string, error) {
 // $top.store is a Storage whose itemsByUserIdentifier maps a user UUID to
 // an array of ItemRecord. Records are mapped to the rows `sfltool dumpbtm`
 // prints, minus developer group headers, as parseDumpBTM does.
-func decodeBTMStore(data []byte, version int, uidFor func(string) (int, bool)) ([]btmItem, error) {
-	a, store, err := openBTMArchive(data, version)
+func decodeBTMStore(ctx context.Context, data []byte, version int, uidFor func(string) (int, bool)) ([]btmItem, error) {
+	a, store, err := openBTMArchive(ctx, data, version)
 	if err != nil {
 		return nil, err
 	}
@@ -195,9 +204,9 @@ func decodeBTMStore(data []byte, version int, uidFor func(string) (int, bool)) (
 	return items, nil
 }
 
-func openBTMArchive(data []byte, version int) (keyedArchive, map[string]any, error) {
-	var root map[string]any
-	if _, err := plist.Unmarshal(data, &root); err != nil {
+func openBTMArchive(ctx context.Context, data []byte, version int) (keyedArchive, map[string]any, error) {
+	root, err := unmarshalBTM(ctx, data)
+	if err != nil {
 		return keyedArchive{}, nil, err
 	}
 	if root["$archiver"] != "NSKeyedArchiver" {
@@ -217,6 +226,72 @@ func openBTMArchive(data []byte, version int) (keyedArchive, map[string]any, err
 	}
 	store, err := a.object(top["store"], "Storage")
 	return a, store, err
+}
+
+// Limits on what is handed to the plist decoder. The decoder recurses without
+// a depth limit and is superlinear on deeply nested binary plists, so the
+// input is vetted first and the decode is time-bounded.
+const (
+	maxBTMObjects   = 16384
+	btmDecodeBudget = 10 * time.Second
+	bplistTrailer   = 32
+)
+
+// checkBplist requires the bplist00 magic and a sane trailer: offset int
+// size, object ref size, object count, top object and offset table offset.
+func checkBplist(data []byte) error {
+	if !bytes.HasPrefix(data, []byte("bplist00")) {
+		return errors.New("not a binary plist")
+	}
+	if len(data) < 8+bplistTrailer {
+		return errors.New("binary plist trailer is truncated")
+	}
+	t := data[len(data)-bplistTrailer:]
+	offSize, refSize := t[6], t[7]
+	n := binary.BigEndian.Uint64(t[8:16])
+	top := binary.BigEndian.Uint64(t[16:24])
+	end := uint64(len(data) - bplistTrailer) // #nosec G115 -- len is non-negative
+	tab := binary.BigEndian.Uint64(t[24:32])
+	switch {
+	case offSize < 1 || offSize > 8 || refSize < 1 || refSize > 8:
+		return errors.New("binary plist trailer has an invalid integer size")
+	case n == 0 || n > maxBTMObjects:
+		return fmt.Errorf("binary plist has %d objects (limit %d)", n, maxBTMObjects)
+	case top >= n:
+		return errors.New("binary plist top object is out of range")
+	case tab < 8 || tab > end || n*uint64(offSize) > end-tab:
+		return errors.New("binary plist offset table is out of range")
+	}
+	return nil
+}
+
+// unmarshalBTM decodes the store in a goroutine so a slow decode, which
+// cannot be interrupted, does not hold up the listing.
+func unmarshalBTM(ctx context.Context, data []byte) (map[string]any, error) {
+	if err := checkBplist(data); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, btmDecodeBudget)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	type result struct {
+		root map[string]any
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		var root map[string]any
+		_, err := plist.Unmarshal(data, &root)
+		ch <- result{root, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.root, r.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("decode abandoned: %w", ctx.Err())
+	}
 }
 
 // keyedArchive resolves NSKeyedArchiver UID references into $objects.
@@ -365,13 +440,19 @@ func (a keyedArchive) record(v any, uid int) (btmItem, error) {
 	return it, nil
 }
 
+// btmTypeName names the kind bits of a record type. Legacy, curated and
+// user-item bits are modifiers: a curated legacy agent (0x90008) is still an
+// agent.
 func btmTypeName(t int64) string {
-	name, ok := btmTypeNames[t&^btmTypeLegacy]
+	name, ok := btmTypeNames[t&^(btmTypeLegacy|btmTypeCurated|btmTypeUser)]
 	if !ok {
 		return fmt.Sprintf("0x%x", t)
 	}
 	if t&btmTypeLegacy != 0 {
-		return "legacy " + name
+		name = "legacy " + name
+	}
+	if t&btmTypeCurated != 0 {
+		name = "curated " + name
 	}
 	return name
 }

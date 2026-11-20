@@ -2,6 +2,7 @@ package startup
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -182,9 +183,9 @@ func fixtureStore(t *testing.T) []byte {
 			{name: "Example Studio", team: "FGHIJ67890", typ: 0x2, disp: 0xa, id: "2.com.example.studio", url: std, bundle: "com.example.studio"},
 			{name: "ExampleStudioQuickLook.appex", team: "FGHIJ67890", typ: 0x800, disp: 0x3, id: "2048.com.example.studio.QuickLook",
 				url: "Contents/PlugIns/ExampleStudioQuickLook.appex", base: std, bundle: "com.example.studio.QuickLook", parent: "2.com.example.studio"},
-			{name: "ExampleStudioSpotlight.appex", team: "FGHIJ67890", typ: 0x1000, disp: 0x3, id: "4096.com.example.studio.Spotlight",
+			{name: "ExampleStudioSpotlight.appex", team: "FGHIJ67890", typ: 0x40, disp: 0x3, id: "4096.com.example.studio.Spotlight",
 				url: "Contents/Library/Spotlight/ExampleStudioSpotlight.appex", base: std, bundle: "com.example.studio.Spotlight", parent: "2.com.example.studio"},
-			{name: "ExampleStudioDockTile.plugin", team: "FGHIJ67890", typ: 0x2000, disp: 0x3, id: "8192.com.example.studio.DockTile",
+			{name: "ExampleStudioDockTile.plugin", team: "FGHIJ67890", typ: 0x80, disp: 0x3, id: "8192.com.example.studio.DockTile",
 				url: "Contents/PlugIns/ExampleStudioDockTile.plugin", base: std, bundle: "com.example.studio.DockTile", parent: "2.com.example.studio"},
 			{name: "Example Tools s.r.o.", dev: "Example Tools s.r.o.", id: "Example Tools s.r.o.", typ: 0x20, disp: 0x2},
 			{name: "Example Toolbox", dev: "Example Tools s.r.o.", team: "GHIJK78901", typ: 0x10008, disp: 0xb, id: "8.com.example.toolbox",
@@ -223,7 +224,7 @@ func testUIDFor(key string) (int, bool) {
 }
 
 func TestDecodeBTMStoreMatchesDumpBTM(t *testing.T) {
-	got, err := decodeBTMStore(fixtureStore(t), 16, testUIDFor)
+	got, err := decodeBTMStore(context.Background(), fixtureStore(t), 16, testUIDFor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,13 +246,8 @@ func TestDecodeBTMStoreMatchesDumpBTM(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected item %+v", g)
 		}
-		// The fixture's spotlight and dock tile bits are not ones the store
-		// decoder names; they must still never count as launching.
-		if w.Type == "spotlight" || w.Type == "dock tile" {
-			if !strings.HasPrefix(g.Type, "0x") || g.startsAtLogin() {
-				t.Fatalf("%s: type %q", g.Identifier, g.Type)
-			}
-			g.Type = w.Type
+		if (w.Type == "spotlight" || w.Type == "dock tile") && g.startsAtLogin() {
+			t.Fatalf("%s: type %q launches", g.Identifier, g.Type)
 		}
 		if !reflect.DeepEqual(g, w) {
 			t.Fatalf("store item\n%+v\nsfltool item\n%+v", g, w)
@@ -380,7 +376,7 @@ func TestDecodeBTMStoreRejectsMalformedArchives(t *testing.T) {
 		}),
 	}
 	for name, data := range cases {
-		if _, err := decodeBTMStore(data, 16, testUIDFor); err == nil {
+		if _, err := decodeBTMStore(context.Background(), data, 16, testUIDFor); err == nil {
 			t.Errorf("%s: decoded without error", name)
 		}
 	}
@@ -407,7 +403,7 @@ func TestBTMUID(t *testing.T) {
 }
 
 func TestBTMTypeAndDisposition(t *testing.T) {
-	for typ, want := range map[int64]string{0x2: "app", 0x4: "login item", 0x10008: "legacy agent", 0x10010: "legacy daemon", 0x40: "0x40", 0x10080: "0x10080"} {
+	for typ, want := range map[int64]string{0x2: "app", 0x4: "login item", 0x10008: "legacy agent", 0x10010: "legacy daemon", 0x40: "spotlight", 0x80: "dock tile", 0x10080: "legacy dock tile", 0x90008: "curated legacy agent", 0x5: "login item", 0x1000: "0x1000"} {
 		if got := btmTypeName(typ); got != want {
 			t.Errorf("type %#x = %q, want %q", typ, got, want)
 		}
@@ -446,5 +442,56 @@ func TestChangeWithStoreKnowsLoginItems(t *testing.T) {
 	}
 	if m := mutatingCalls(f.Calls()); len(m) != 0 {
 		t.Fatalf("ran %v", m)
+	}
+}
+
+func TestDecodeBTMStoreRejectsHostileInput(t *testing.T) {
+	deepXML := []byte(`<?xml version="1.0"?><plist>` + strings.Repeat("<array>", 100000) + strings.Repeat("</array>", 100000) + `</plist>`)
+	ints := make([]int64, maxBTMObjects+10) // distinct, as equal values share one object
+	for i := range ints {
+		ints[i] = int64(i)
+	}
+	manyObjects, err := plist.Marshal(ints, plist.BinaryFormat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	small, err := plist.Marshal([]any{int64(1), int64(2)}, plist.BinaryFormat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := func(off, v int) []byte {
+		d := append([]byte(nil), small...)
+		d[len(d)-32+off] = byte(v)
+		return d
+	}
+	cases := map[string]struct {
+		data []byte
+		want string
+	}{
+		"xml store":           {deepXML, "not a binary plist"},
+		"too many objects":    {manyObjects, "objects (limit"},
+		"truncated trailer":   {small[:20], "trailer"},
+		"zero ref size":       {patch(7, 0), "integer size"},
+		"huge offset size":    {patch(6, 99), "integer size"},
+		"top object past end": {patch(23, 200), "top object"},
+		"offset table at 0":   {patch(31, 0), "offset table"},
+	}
+	for name, c := range cases {
+		_, err := decodeBTMStore(context.Background(), c.data, 16, testUIDFor)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := decodeBTMStore(ctx, fixtureStore(t), 16, testUIDFor); !errors.Is(err, context.Canceled) {
+		t.Errorf("canceled context: err = %v", err)
+	}
+}
+
+func TestCuratedLegacyAgentStartsAtLogin(t *testing.T) {
+	it := btmItem{BTM: BTM{Type: btmTypeName(0x90008), Disposition: btmDisposition(0xb)}}
+	if !it.startsAtLogin() {
+		t.Errorf("type %q does not start at login", it.Type)
 	}
 }
