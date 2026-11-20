@@ -66,22 +66,6 @@ func runUninstallWithIO(args []string, stdout, stderr io.Writer, opts func() uni
 	return 2
 }
 
-// parseInterspersed lets flags follow the positional argument.
-func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
-	var pos []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			return pos, nil
-		}
-		pos = append(pos, args[0])
-		args = args[1:]
-	}
-}
-
 func runUninstallPlan(args []string, stdout, stderr io.Writer, opts uninstall.Options) int {
 	fs := flag.NewFlagSet("spectra uninstall plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
