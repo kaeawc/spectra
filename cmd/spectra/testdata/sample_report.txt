@@ -1,0 +1,14 @@
+Analysis of sampling Finder (pid 412) every 10 milliseconds
+Process:         Finder [412]
+Path:            /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+
+Call graph:
+    100 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)
+      100 start  (in dyld) + 10  [0x1]
+        100 main  (in Finder) + 20  [0x2]
+          70 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x3]
+          20 CFRunLoopRun  (in CoreFoundation) + 4  [0x4]
+    30 Thread_2
+      30 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x5]
+
+Total number in stack (recursive counted multiple, when >=5):
