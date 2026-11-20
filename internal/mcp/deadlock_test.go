@@ -82,7 +82,7 @@ func TestTriageJVMPIDThreadDumpsForDeadlock(t *testing.T) {
 	var opts snapshot.Options
 	s := newDeadlockTestServer(&opts, 4242)
 
-	result := s.toolTriage(json.RawMessage(`{"pid":4242}`))
+	result := s.toolTriage(context.Background(), json.RawMessage(`{"pid":4242}`))
 	if result.IsError {
 		t.Fatalf("triage error: %+v", result.Content)
 	}
@@ -97,7 +97,7 @@ func TestTriageJVMPIDThreadDumpsForDeadlock(t *testing.T) {
 func TestTriageNonJVMPIDSkipsThreadDump(t *testing.T) {
 	var opts snapshot.Options
 	s := newDeadlockTestServer(&opts)
-	if result := s.toolTriage(json.RawMessage(`{"pid":4242}`)); result.IsError {
+	if result := s.toolTriage(context.Background(), json.RawMessage(`{"pid":4242}`)); result.IsError {
 		t.Fatalf("triage error: %+v", result.Content)
 	}
 	if len(opts.ThreadDumpPIDs) != 0 {
@@ -108,7 +108,7 @@ func TestTriageNonJVMPIDSkipsThreadDump(t *testing.T) {
 func TestDiagnoseThreadDumpPIDs(t *testing.T) {
 	var opts snapshot.Options
 	s := newDeadlockTestServer(&opts)
-	result := s.toolDiagnose(json.RawMessage(`{"thread_dump_pids":[7,8],"include_raw":true}`))
+	result := s.toolDiagnose(context.Background(), json.RawMessage(`{"thread_dump_pids":[7,8],"include_raw":true}`))
 	if result.IsError {
 		t.Fatalf("diagnose error: %+v", result.Content)
 	}
@@ -120,7 +120,7 @@ func TestDiagnoseThreadDumpPIDs(t *testing.T) {
 		t.Fatalf("diagnose should report the deadlock naming its threads:\n%s", text)
 	}
 
-	if r := s.toolDiagnose(json.RawMessage(`{"snapshot_id":"snap-x","thread_dump_pids":[7]}`)); !r.IsError {
+	if r := s.toolDiagnose(context.Background(), json.RawMessage(`{"snapshot_id":"snap-x","thread_dump_pids":[7]}`)); !r.IsError {
 		t.Fatal("thread_dump_pids with snapshot_id should be rejected")
 	}
 }

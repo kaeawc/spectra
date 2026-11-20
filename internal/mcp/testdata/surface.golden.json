@@ -1,7 +1,6 @@
 {
   "tools": [
     {
-      "name": "alerts",
       "description": "List or acknowledge daemon alerts.",
       "inputSchema": {
         "properties": {
@@ -32,10 +31,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "alerts",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "cache",
       "description": "Local blob cache. Ops: stats, clear. Ask: \"How big is the cache?\"",
       "inputSchema": {
         "properties": {
@@ -53,10 +87,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "cache",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "core",
       "description": "Inspect a crashed-process core file and suggest offline analyzers. Ask: \"What crashed in this core dump?\"",
       "inputSchema": {
         "properties": {
@@ -73,10 +142,45 @@
           "path"
         ],
         "type": "object"
+      },
+      "name": "core",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "db",
       "description": "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"",
       "inputSchema": {
         "properties": {
@@ -243,10 +347,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "db",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "diagnose",
       "description": "Run rules. Finds risky app, JVM, network, storage, and toolchain state. Ask: \"What needs attention?\"",
       "inputSchema": {
         "properties": {
@@ -275,10 +414,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "diagnose",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "host_health",
       "description": "Current daemon host health and optional recent samples.",
       "inputSchema": {
         "properties": {
@@ -288,10 +462,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "host_health",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "idle",
       "description": "Long-idle holders: processes under roots (or named by pids) alive longer than min_age whose tree used under max_cpu percent of one CPU over a window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
       "inputSchema": {
         "properties": {
@@ -323,10 +532,264 @@
           }
         },
         "type": "object"
+      },
+      "name": "idle",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_basis": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "incomplete": {
+            "type": "boolean"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "max_cpu_pct": {
+            "type": "number"
+          },
+          "min_age_seconds": {
+            "type": "integer"
+          },
+          "pids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "result": {
+            "additionalProperties": false,
+            "properties": {
+              "checked": {
+                "type": "integer"
+              },
+              "holders": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "age_seconds": {
+                      "type": "integer"
+                    },
+                    "chain": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "command": {
+                            "type": "string"
+                          },
+                          "pid": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "pid",
+                          "command"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "command_line": {
+                      "type": "string"
+                    },
+                    "cpu_pct": {
+                      "type": "number"
+                    },
+                    "cwd": {
+                      "type": "string"
+                    },
+                    "descendants": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "command": {
+                            "type": "string"
+                          },
+                          "cpu_pct": {
+                            "type": "number"
+                          },
+                          "pid": {
+                            "type": "integer"
+                          },
+                          "ppid": {
+                            "type": "integer"
+                          },
+                          "started": {
+                            "type": "string"
+                          },
+                          "wait": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "lock_files": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": [
+                                  "null",
+                                  "array"
+                                ]
+                              },
+                              "wchan": {
+                                "type": "string"
+                              }
+                            },
+                            "type": [
+                              "null",
+                              "object"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "pid",
+                          "ppid",
+                          "command",
+                          "cpu_pct"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "descendants_total": {
+                      "type": "integer"
+                    },
+                    "matched": {
+                      "type": "string"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    },
+                    "ppid": {
+                      "type": "integer"
+                    },
+                    "started": {
+                      "type": "string"
+                    },
+                    "tree_cpu_pct": {
+                      "type": "number"
+                    },
+                    "user": {
+                      "type": "string"
+                    },
+                    "wait": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "lock_files": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": [
+                            "null",
+                            "array"
+                          ]
+                        },
+                        "wchan": {
+                          "type": "string"
+                        }
+                      },
+                      "type": [
+                        "null",
+                        "object"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pid",
+                    "ppid",
+                    "command",
+                    "matched",
+                    "started",
+                    "age_seconds",
+                    "cpu_pct",
+                    "tree_cpu_pct",
+                    "descendants",
+                    "descendants_total"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "missing_pids": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "nested": {
+                "type": "integer"
+              },
+              "skipped_busy": {
+                "type": "integer"
+              },
+              "skipped_unmeasured": {
+                "type": "integer"
+              },
+              "skipped_young": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "holders",
+              "checked",
+              "skipped_young",
+              "skipped_busy",
+              "skipped_unmeasured",
+              "nested"
+            ],
+            "type": "object"
+          },
+          "roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "window_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_age_seconds",
+          "max_cpu_pct",
+          "window_ms",
+          "cpu_basis",
+          "result",
+          "limitations"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "inspect_app",
       "description": "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
       "inputSchema": {
         "properties": {
@@ -355,10 +818,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "inspect_app",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "issues",
       "description": "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"",
       "inputSchema": {
         "properties": {
@@ -525,10 +1023,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "issues",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "jvm",
       "description": "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"",
       "inputSchema": {
         "properties": {
@@ -704,10 +1237,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "jvm",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "lineage",
       "description": "Ancestors and descendant tree of one pid, with subtree RSS and CPU. Same JSON as `spectra lineage --json`. Ask: \"What started PID 123 and what is under it?\"",
       "inputSchema": {
         "properties": {
@@ -720,10 +1288,13 @@
           "pid"
         ],
         "type": "object"
+      },
+      "name": "lineage",
+      "outputSchema": {
+        "type": "object"
       }
     },
     {
-      "name": "load",
       "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. Ask: \"Should I start another lane?\"",
       "inputSchema": {
         "properties": {
@@ -752,10 +1323,520 @@
           }
         },
         "type": "object"
+      },
+      "name": "load",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "available_gb": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "backoff_free_gb": {
+            "type": "number"
+          },
+          "cause": {
+            "additionalProperties": false,
+            "properties": {
+              "cpu_pct": {
+                "type": "number"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              },
+              "runner": {
+                "type": "string"
+              },
+              "worktree": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "detail",
+              "cpu_pct"
+            ],
+            "type": "object"
+          },
+          "cpu_basis": {
+            "type": "string"
+          },
+          "cpu_window_ms": {
+            "type": "integer"
+          },
+          "cpus": {
+            "type": "integer"
+          },
+          "devices": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_window_seconds": {
+                "type": "integer"
+              },
+              "booted": {
+                "type": "integer"
+              },
+              "booted_recently": {
+                "type": "integer"
+              },
+              "by_root": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "booted": {
+                      "type": "integer"
+                    },
+                    "booted_recently": {
+                      "type": "integer"
+                    },
+                    "root": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "root",
+                    "booted",
+                    "booted_recently"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "emulators": {
+                "type": "integer"
+              },
+              "list": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "age_seconds": {
+                      "type": "integer"
+                    },
+                    "avd": {
+                      "type": "string"
+                    },
+                    "booted_recently": {
+                      "type": "boolean"
+                    },
+                    "cpu_pct": {
+                      "type": "number"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "members": {
+                      "type": "integer"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    },
+                    "root": {
+                      "type": "string"
+                    },
+                    "rss_kib": {
+                      "type": "integer"
+                    },
+                    "started_at": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "udid": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "pid",
+                    "members",
+                    "cpu_pct",
+                    "rss_kib",
+                    "age_seconds",
+                    "booted_recently"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "simulators": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "simulators",
+              "emulators",
+              "booted",
+              "booted_recently",
+              "boot_window_seconds",
+              "by_root",
+              "list"
+            ],
+            "type": "object"
+          },
+          "dirs": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cpu_pct": {
+                  "type": "number"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "procs": {
+                  "type": "integer"
+                },
+                "rss_kib": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "dir",
+                "procs",
+                "cpu_pct",
+                "rss_kib"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "elapsed_ms": {
+            "type": "integer"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "families": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cpu_pct": {
+                  "type": "number"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "rss_kib": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "members",
+                "cpu_pct",
+                "rss_kib"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "load1": {
+            "type": "number"
+          },
+          "load_limit": {
+            "type": "number"
+          },
+          "min_free_gb": {
+            "type": "number"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "process_count": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "spotlight": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "excluded": {
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "marker": {
+                  "type": "string"
+                },
+                "noindex_dir": {
+                  "type": "string"
+                },
+                "privacy_entry": {
+                  "type": "string"
+                },
+                "privacy_list": {
+                  "type": "string"
+                },
+                "root": {
+                  "type": "string"
+                },
+                "size": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "files": {
+                      "type": "integer"
+                    },
+                    "partial": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "files",
+                    "bytes",
+                    "partial"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "size_error": {
+                  "type": "string"
+                },
+                "unsupported": {
+                  "type": "string"
+                },
+                "volume": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "mount_point": {
+                      "type": "string"
+                    },
+                    "progress": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "percent": {
+                          "type": "number"
+                        },
+                        "phase": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "phase"
+                      ],
+                      "type": [
+                        "null",
+                        "object"
+                      ]
+                    },
+                    "status": {
+                      "type": [
+                        "null",
+                        "boolean",
+                        "number",
+                        "string",
+                        "array",
+                        "object"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mount_point",
+                    "status"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "volume_error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "root",
+                "excluded"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "top_cpu": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "cpu_pct": {
+                  "type": "number"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "rss_kib": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pid",
+                "command",
+                "cpu_pct",
+                "rss_kib",
+                "dir"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "top_rss": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "cpu_pct": {
+                  "type": "number"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "rss_kib": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pid",
+                "command",
+                "cpu_pct",
+                "rss_kib",
+                "dir"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "unknown": {
+            "additionalProperties": false,
+            "properties": {
+              "cpu_pct": {
+                "type": "number"
+              },
+              "dir": {
+                "type": "string"
+              },
+              "procs": {
+                "type": "integer"
+              },
+              "rss_kib": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "dir",
+              "procs",
+              "cpu_pct",
+              "rss_kib"
+            ],
+            "type": "object"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "reason",
+          "exit_code",
+          "load1",
+          "load_limit",
+          "cpus",
+          "available_gb",
+          "min_free_gb",
+          "backoff_free_gb",
+          "cause",
+          "top_cpu",
+          "top_rss",
+          "families",
+          "dirs",
+          "unknown",
+          "devices",
+          "cpu_window_ms",
+          "cpu_basis",
+          "elapsed_ms",
+          "process_count"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "logs",
       "description": "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
       "inputSchema": {
         "properties": {
@@ -793,18 +1874,88 @@
           }
         },
         "type": "object"
-      }
-    },
-    {
-      "name": "memory",
-      "description": "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
-      "inputSchema": {
-        "properties": {},
+      },
+      "name": "logs",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
         "type": "object"
       }
     },
     {
-      "name": "metrics",
+      "description": "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "memory",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "description": "Locally stored process metrics and app churn. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
       "inputSchema": {
         "properties": {
@@ -830,10 +1981,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "metrics",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "network",
       "description": "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"",
       "inputSchema": {
         "properties": {
@@ -1001,10 +2187,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "network",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "orphans",
       "description": "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`: groups (candidates plus daemon_by_design processes), totals, limitations. Ask: \"What did finished lanes leave running?\"",
       "inputSchema": {
         "properties": {
@@ -1028,10 +2249,312 @@
           "roots"
         ],
         "type": "object"
+      },
+      "name": "orphans",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "daemon_by_design_total": {
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "processes": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "age_seconds": {
+                        "type": "integer"
+                      },
+                      "command": {
+                        "type": "string"
+                      },
+                      "command_line": {
+                        "type": "string"
+                      },
+                      "cpu_pct": {
+                        "type": "number"
+                      },
+                      "cwd": {
+                        "type": "string"
+                      },
+                      "cwd_missing": {
+                        "type": "boolean"
+                      },
+                      "cwd_unreadable": {
+                        "type": "boolean"
+                      },
+                      "daemon_by_design": {
+                        "type": "boolean"
+                      },
+                      "descendants": {
+                        "type": "integer"
+                      },
+                      "origin": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "agent": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "alive": {
+                                "type": "boolean"
+                              },
+                              "command": {
+                                "type": "string"
+                              },
+                              "command_line": {
+                                "type": "string"
+                              },
+                              "cwd": {
+                                "type": "string"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              },
+                              "exited_at": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "pid": {
+                                "type": "integer"
+                              },
+                              "role": {
+                                "type": "string"
+                              },
+                              "start_time": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "pid",
+                              "command",
+                              "alive",
+                              "depth"
+                            ],
+                            "type": [
+                              "null",
+                              "object"
+                            ]
+                          },
+                          "first_seen": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "known": {
+                            "type": "boolean"
+                          },
+                          "parent": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "alive": {
+                                "type": "boolean"
+                              },
+                              "command": {
+                                "type": "string"
+                              },
+                              "command_line": {
+                                "type": "string"
+                              },
+                              "cwd": {
+                                "type": "string"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              },
+                              "exited_at": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "pid": {
+                                "type": "integer"
+                              },
+                              "role": {
+                                "type": "string"
+                              },
+                              "start_time": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "pid",
+                              "command",
+                              "alive",
+                              "depth"
+                            ],
+                            "type": [
+                              "null",
+                              "object"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "recording_since": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "session": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "alive": {
+                                "type": "boolean"
+                              },
+                              "command": {
+                                "type": "string"
+                              },
+                              "command_line": {
+                                "type": "string"
+                              },
+                              "cwd": {
+                                "type": "string"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              },
+                              "exited_at": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "pid": {
+                                "type": "integer"
+                              },
+                              "role": {
+                                "type": "string"
+                              },
+                              "start_time": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "pid",
+                              "command",
+                              "alive",
+                              "depth"
+                            ],
+                            "type": [
+                              "null",
+                              "object"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "known"
+                        ],
+                        "type": [
+                          "null",
+                          "object"
+                        ]
+                      },
+                      "pid": {
+                        "type": "integer"
+                      },
+                      "rss_kib": {
+                        "type": "integer"
+                      },
+                      "subtree_rss_kib": {
+                        "type": "integer"
+                      },
+                      "user": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pid",
+                      "age_seconds",
+                      "rss_kib",
+                      "cpu_pct",
+                      "cwd",
+                      "cwd_missing",
+                      "cwd_unreadable",
+                      "command",
+                      "command_line",
+                      "descendants",
+                      "subtree_rss_kib",
+                      "daemon_by_design"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "root": {
+                  "type": "string"
+                },
+                "rss_kib": {
+                  "type": "integer"
+                },
+                "worktree": {
+                  "type": "string"
+                },
+                "worktree_removed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "root",
+                "worktree",
+                "worktree_removed",
+                "processes",
+                "rss_kib"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "skipped_unreadable_cwd": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "roots",
+          "groups",
+          "total",
+          "daemon_by_design_total",
+          "skipped_unreadable_cwd",
+          "limitations"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "owner",
       "description": "Who has this? Pass target (:PORT, tcp:PORT, udp:PORT, an absolute path, or a pid) for `spectra owner --json`, or under (absolute directories) for `spectra owner --under --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
       "inputSchema": {
         "properties": {
@@ -1048,10 +2571,13 @@
           }
         },
         "type": "object"
+      },
+      "name": "owner",
+      "outputSchema": {
+        "type": "object"
       }
     },
     {
-      "name": "playbook",
       "description": "Built-in diagnostic playbooks and command plans. Ops: list, get. Ask: \"How do I triage an fseventsd leak?\"",
       "inputSchema": {
         "properties": {
@@ -1069,10 +2595,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "playbook",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "power",
       "description": "Battery, thermal, and energy impact. Ops: state, impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
       "inputSchema": {
         "properties": {
@@ -1101,10 +2662,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "power",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "process",
       "description": "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"",
       "inputSchema": {
         "properties": {
@@ -1270,18 +2866,88 @@
           "operation"
         ],
         "type": "object"
-      }
-    },
-    {
-      "name": "services",
-      "description": "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
-      "inputSchema": {
-        "properties": {},
+      },
+      "name": "process",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
         "type": "object"
       }
     },
     {
-      "name": "snapshot",
+      "description": "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "services",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "description": "Capture or compare host state. Ops: create, list, get, diff, baseline. Ask: \"What changed since baseline?\"",
       "inputSchema": {
         "properties": {
@@ -1341,10 +3007,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "snapshot",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "spawns",
       "description": "Bounded live trace of process starts and exits by polling (blocks for the duration, at most 30s). Returns {events: [...], summary: {...}}: events are the objects `spectra spawns --json` streams one per line, summary is its final line. Ask: \"What keeps spawning under PID 123?\"",
       "inputSchema": {
         "properties": {
@@ -1362,10 +3063,58 @@
           }
         },
         "type": "object"
+      },
+      "name": "spawns",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "type": [
+                "null",
+                "boolean",
+                "number",
+                "string",
+                "array",
+                "object"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "events_dropped": {
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "boolean",
+              "number",
+              "string",
+              "array",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "events",
+          "summary"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "storage",
       "description": "Disk volumes and ~/Library storage footprint. Ask: \"What is using all my disk?\"",
       "inputSchema": {
         "properties": {
@@ -1382,10 +3131,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "storage",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "system",
       "description": "Kernel resource limits and saturation. Ops: limits, top. Ask: \"Are we running out of file descriptors or PTYs?\"",
       "inputSchema": {
         "properties": {
@@ -1403,18 +3187,88 @@
           }
         },
         "type": "object"
-      }
-    },
-    {
-      "name": "timemachine",
-      "description": "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
-      "inputSchema": {
-        "properties": {},
+      },
+      "name": "system",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
         "type": "object"
       }
     },
     {
-      "name": "toolchain",
+      "description": "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "timemachine",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "description": "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"",
       "inputSchema": {
         "properties": {
@@ -1581,10 +3435,45 @@
           "operation"
         ],
         "type": "object"
+      },
+      "name": "toolchain",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "triage",
       "description": "Best first tool. Give app_path, pid, bundle_id, or symptom. Returns summary, evidence, next steps. Ask: \"What looks wrong with Slack?\"",
       "inputSchema": {
         "properties": {
@@ -1622,10 +3511,45 @@
           }
         },
         "type": "object"
+      },
+      "name": "triage",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     },
     {
-      "name": "updates",
       "description": "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
       "inputSchema": {
         "properties": {
@@ -1651,73 +3575,109 @@
           }
         },
         "type": "object"
+      },
+      "name": "updates",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "raw": true,
+          "summary": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "timestamp"
+        ],
+        "type": "object"
       }
     }
   ],
   "resources": [
     {
-      "uri": "spectra://alerts/firing",
-      "name": "Firing Alerts",
       "description": "Current daemon alerts in JSON.",
-      "mimeType": "application/json"
+      "mimeType": "application/json",
+      "name": "Firing Alerts",
+      "uri": "spectra://alerts/firing"
     },
     {
-      "uri": "spectra://capabilities",
-      "name": "Capabilities",
       "description": "Tool list and when to use each one.",
-      "mimeType": "text/markdown"
+      "mimeType": "text/markdown",
+      "name": "Capabilities",
+      "uri": "spectra://capabilities"
     },
     {
-      "uri": "spectra://host/health",
-      "name": "Host Health",
       "description": "Compact host load, memory pressure and thermal state in JSON.",
-      "mimeType": "application/json"
+      "mimeType": "application/json",
+      "name": "Host Health",
+      "uri": "spectra://host/health"
     },
     {
-      "uri": "spectra://workflows/debugging",
-      "name": "Debug Workflows",
       "description": "Short app, JVM, network, and baseline workflows.",
-      "mimeType": "text/markdown"
+      "mimeType": "text/markdown",
+      "name": "Debug Workflows",
+      "uri": "spectra://workflows/debugging"
     }
   ],
   "prompts": [
     {
-      "name": "baseline-diff-review",
-      "description": "Review changes between two snapshots.",
       "arguments": [
         {
-          "name": "id_a",
           "description": "Baseline snapshot ID.",
+          "name": "id_a",
           "required": true
         },
         {
-          "name": "id_b",
           "description": "New snapshot ID.",
+          "name": "id_b",
           "required": true
         }
-      ]
+      ],
+      "description": "Review changes between two snapshots.",
+      "name": "baseline-diff-review"
     },
     {
-      "name": "incident-triage",
-      "description": "Triage an app, PID, host, or symptom.",
       "arguments": [
         {
-          "name": "target",
           "description": "App path, PID, bundle ID, host, or symptom.",
+          "name": "target",
           "required": true
         }
-      ]
+      ],
+      "description": "Triage an app, PID, host, or symptom.",
+      "name": "incident-triage"
     },
     {
-      "name": "jvm-memory-debug",
-      "description": "Debug JVM heap, GC, and native memory.",
       "arguments": [
         {
-          "name": "pid",
           "description": "JVM PID.",
+          "name": "pid",
           "required": true
         }
-      ]
+      ],
+      "description": "Debug JVM heap, GC, and native memory.",
+      "name": "jvm-memory-debug"
     }
   ]
 }

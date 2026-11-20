@@ -21,7 +21,7 @@ func (f *fakeDBInspector) DiscoverDBEnv() []dbinspect.EnvHint {
 	return []dbinspect.EnvHint{{Name: "DATABASE_URL", Value: "postgres://app:[redacted]@db/orders", Engine: dbinspect.EnginePostgres}}
 }
 
-func (f *fakeDBInspector) DiscoverSQLiteFiles() []dbinspect.FileCandidate {
+func (f *fakeDBInspector) DiscoverSQLiteFiles(context.Context) []dbinspect.FileCandidate {
 	return []dbinspect.FileCandidate{{Engine: dbinspect.EngineSQLite, PID: 200, Command: "notes-app", Path: "/Users/x/Library/notes.sqlite"}}
 }
 
@@ -60,7 +60,7 @@ func newDBTestServer(db *fakeDBInspector) *Server {
 
 func TestToolDBDiscover(t *testing.T) {
 	s := newDBTestServer(&fakeDBInspector{})
-	result := s.toolDB(json.RawMessage(`{"operation": "discover"}`))
+	result := s.toolDB(context.Background(), json.RawMessage(`{"operation": "discover"}`))
 	if result.IsError {
 		t.Fatalf("discover failed: %+v", result.Content)
 	}
@@ -80,7 +80,7 @@ func TestToolDBOverview(t *testing.T) {
 		Database:      "orders",
 		Schemas:       []dbinspect.SchemaSummary{{Name: "public", TableCount: 12}},
 	}})
-	result := s.toolDB(json.RawMessage(`{"operation": "overview"}`))
+	result := s.toolDB(context.Background(), json.RawMessage(`{"operation": "overview"}`))
 	if result.IsError {
 		t.Fatalf("overview failed: %+v", result.Content)
 	}
@@ -94,7 +94,7 @@ func TestToolDBSampleRequiresConfirmation(t *testing.T) {
 	db := &fakeDBInspector{sample: &dbinspect.SampleReport{Schema: "public", Table: "orders"}}
 	s := newDBTestServer(db)
 
-	result := s.toolDB(json.RawMessage(`{"operation": "sample", "table": "orders"}`))
+	result := s.toolDB(context.Background(), json.RawMessage(`{"operation": "sample", "table": "orders"}`))
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "confirm_sensitive") {
 		t.Fatalf("expected confirm_sensitive refusal, got: %+v", result.Content)
 	}
@@ -102,7 +102,7 @@ func TestToolDBSampleRequiresConfirmation(t *testing.T) {
 		t.Fatal("sample ran without confirmation")
 	}
 
-	result = s.toolDB(json.RawMessage(`{"operation": "sample", "table": "orders", "confirm_sensitive": true, "dsn": "postgres://x"}`))
+	result = s.toolDB(context.Background(), json.RawMessage(`{"operation": "sample", "table": "orders", "confirm_sensitive": true, "dsn": "postgres://x"}`))
 	if result.IsError {
 		t.Fatalf("confirmed sample failed: %+v", result.Content)
 	}
@@ -113,7 +113,7 @@ func TestToolDBSampleRequiresConfirmation(t *testing.T) {
 
 func TestToolDBUnknownOperation(t *testing.T) {
 	s := newDBTestServer(&fakeDBInspector{})
-	result := s.toolDB(json.RawMessage(`{"operation": "drop_tables"}`))
+	result := s.toolDB(context.Background(), json.RawMessage(`{"operation": "drop_tables"}`))
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "unknown db operation") {
 		t.Fatalf("expected unknown-operation error, got: %+v", result.Content)
 	}

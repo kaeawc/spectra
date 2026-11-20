@@ -21,10 +21,23 @@ import (
 type Server struct {
 	reader io.Reader
 	writer io.Writer
-	// callMu serializes tool calls and resource reads. The SDK dispatches
+	// callSlot serializes tool calls and resource reads. The SDK dispatches
 	// requests concurrently; the handlers and the lazily connected daemon
-	// client were written for one call at a time.
-	callMu        sync.Mutex
+	// client were written for one call at a time. It is a 1-slot channel
+	// rather than a mutex so a call cancelled while queued gives up its turn.
+	callSlot chan struct{}
+	slotOnce sync.Once
+	// onQueued, when set, runs as a call starts waiting for a busy slot
+	// (tests use it to cancel a queued call deterministically).
+	onQueued func()
+	// onQueuedCancelled, when set, runs when a queued call gives up because
+	// its context ended. Tests use it to order a cancel before the slot frees.
+	onQueuedCancelled func()
+	// eofWait bounds how long Run keeps the session open after its input
+	// closes so in-flight calls can still reply.
+	eofWait time.Duration
+	// progressEvery is the period of time-based progress notifications.
+	progressEvery time.Duration
 	Version       string
 	Verbose       bool
 	log           logger.Logger
@@ -46,6 +59,7 @@ func NewServer(reader io.Reader, writer io.Writer) *Server {
 		Version: "dev",
 		log:     logger.New(logger.Config{Format: logger.FormatText, Level: slog.LevelInfo}),
 		collect: defaultCollectors(),
+		eofWait: defaultEOFWait,
 	}
 }
 
@@ -128,14 +142,22 @@ func mergeHostStateCollectors(c, defaults Collectors) Collectors {
 	return c
 }
 
+// defaultEOFWait bounds how long a session whose input has closed waits for
+// in-flight calls to reply.
+const defaultEOFWait = 30 * time.Second
+
 // Run serves one MCP session over the reader and writer until the client
-// closes its end or ctx is cancelled.
+// closes its end or ctx is cancelled. When the input closes with calls still
+// running, Run waits (up to eofWait) for their replies before returning, so
+// piped sessions get every answer. Replies to cancelled requests are never
+// written.
 func (s *Server) Run(ctx context.Context) error {
 	srv := s.sdkServer()
 	defer s.live.close()
+	tracker := newReplyTracker()
 	err := srv.Run(ctx, &sdk.IOTransport{
-		Reader: io.NopCloser(s.reader),
-		Writer: nopWriteCloser{s.writer},
+		Reader: io.NopCloser(newTrackingReader(ctx, s.reader, tracker, s.eofWait)),
+		Writer: nopWriteCloser{&replyWriter{w: s.writer, t: tracker}},
 	})
 	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 		return nil
@@ -202,31 +224,76 @@ var stateChangingTools = map[string]bool{
 }
 
 func sdkTool(def ToolDefinition) *sdk.Tool {
-	t := &sdk.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}
+	t := &sdk.Tool{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema, OutputSchema: outputSchema(def.Name)}
 	if !stateChangingTools[def.Name] {
 		t.Annotations = &sdk.ToolAnnotations{ReadOnlyHint: true}
 	}
 	return t
 }
 
-func (s *Server) sdkToolHandler(h func(json.RawMessage) ToolResult) sdk.ToolHandler {
-	return func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-		s.callMu.Lock()
-		res := h(req.Params.Arguments)
-		s.callMu.Unlock()
+// toolHandler runs one tool. ctx is the request's context: it is cancelled
+// when the client cancels the call, and carries the call's progress reporter.
+type toolHandler func(ctx context.Context, raw json.RawMessage) ToolResult
+
+func (s *Server) sdkToolHandler(h toolHandler) sdk.ToolHandler {
+	return func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		release, err := s.acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		res := h(withProgress(ctx, s.newProgress(req)), req.Params.Arguments)
+		release()
+		if err := ctx.Err(); err != nil {
+			// The client cancelled; the transport drops this reply.
+			return nil, err
+		}
 		out := &sdk.CallToolResult{IsError: res.IsError, Content: make([]sdk.Content, 0, len(res.Content))}
 		for _, c := range res.Content {
 			out.Content = append(out.Content, &sdk.TextContent{Text: c.Text})
+		}
+		if !res.IsError && res.Structured != nil {
+			out.StructuredContent = res.Structured
 		}
 		return out, nil
 	}
 }
 
+func (s *Server) slot() chan struct{} {
+	s.slotOnce.Do(func() { s.callSlot = make(chan struct{}, 1) })
+	return s.callSlot
+}
+
+// acquire waits for the call slot or for ctx to end, and returns the release
+// function. A call cancelled while queued never runs.
+func (s *Server) acquire(ctx context.Context) (func(), error) {
+	slot := s.slot()
+	select {
+	case slot <- struct{}{}:
+	default:
+		if s.onQueued != nil {
+			s.onQueued()
+		}
+		select {
+		case slot <- struct{}{}:
+		case <-ctx.Done():
+			if s.onQueuedCancelled != nil {
+				s.onQueuedCancelled()
+			}
+			return nil, ctx.Err()
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		<-slot
+		return nil, err
+	}
+	return func() { <-slot }, nil
+}
+
 // toolHandlers maps each tool name to its handler. The table keeps
 // handleToolsCall flat and makes the exposed surface easy to audit against
 // toolDefinitions.
-func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
-	handlers := map[string]func(json.RawMessage) ToolResult{
+func (s *Server) toolHandlers() map[string]toolHandler {
+	handlers := map[string]toolHandler{
 		"triage":      s.toolTriage,
 		"inspect_app": s.toolInspectApp,
 		"snapshot":    s.toolSnapshot,

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -344,13 +345,13 @@ func enumProp(values []string, def string) map[string]interface{} {
 	return map[string]interface{}{"type": "string", "enum": values, "default": def}
 }
 
-func (s *Server) toolTriage(raw json.RawMessage) ToolResult {
+func (s *Server) toolTriage(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p triageParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
 
-	evidence, next, rawOut := s.collectTriage(p)
+	evidence, next, rawOut := s.collectTriage(ctx, p)
 	env := toolEnvelope{
 		Summary:     triageSummary(evidence),
 		Evidence:    evidence,
@@ -373,7 +374,7 @@ type triageParams struct {
 	IncludeRaw bool   `json:"include_raw"`
 }
 
-func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]interface{}) {
+func (s *Server) collectTriage(ctx context.Context, p triageParams) ([]string, []string, map[string]interface{}) {
 	var evidence []string
 	var next []string
 	rawOut := map[string]interface{}{}
@@ -383,22 +384,22 @@ func (s *Server) collectTriage(p triageParams) ([]string, []string, map[string]i
 	hasTarget := p.AppPath != "" || p.PID > 0 || p.BundleID != ""
 	var pidProc *process.Info
 	if p.AppPath != "" {
-		evidence, next = s.collectTriageApp(p, evidence, next, rawOut)
+		evidence, next = s.collectTriageApp(ctx, p, evidence, next, rawOut)
 	}
 	if p.PID > 0 {
-		evidence, next, pidProc = s.collectTriagePID(p.PID, evidence, next, rawOut)
+		evidence, next, pidProc = s.collectTriagePID(ctx, p.PID, evidence, next, rawOut)
 	}
 	if p.BundleID != "" {
-		evidence = s.collectTriageBundle(p, evidence, rawOut)
+		evidence = s.collectTriageBundle(ctx, p, evidence, rawOut)
 	}
-	evidence, next = s.appendTriageFindings(p, hasTarget, pidProc, evidence, next, rawOut)
+	evidence, next = s.appendTriageFindings(ctx, p, hasTarget, pidProc, evidence, next, rawOut)
 	if len(next) == 0 {
 		next = append(next, "Use snapshot operation=create store=true to preserve current state for later diffing.")
 	}
 	return evidence, next, rawOut
 }
 
-func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *process.Info, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+func (s *Server) appendTriageFindings(ctx context.Context, p triageParams, hasTarget bool, pidProc *process.Info, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
 	scope := strings.ToLower(strings.TrimSpace(p.Scope))
 	if scope == "" {
 		scope = "global"
@@ -406,7 +407,7 @@ func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *p
 			scope = "target"
 		}
 	}
-	findings, err := s.evaluateLiveRules("", triageThreadDumpPIDs(p, rawOut)...)
+	findings, err := s.evaluateLiveRules(ctx, "", triageThreadDumpPIDs(p, rawOut)...)
 	if err != nil {
 		return evidence, next
 	}
@@ -431,7 +432,8 @@ func (s *Server) appendTriageFindings(p triageParams, hasTarget bool, pidProc *p
 	return evidence, next
 }
 
-func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+func (s *Server) collectTriageApp(ctx context.Context, p triageParams, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
+	progressFrom(ctx).step(ctx, "inspecting "+p.AppPath)
 	app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(p.Network))
 	if err != nil {
 		evidence = append(evidence, fmt.Sprintf("app inspection failed: %v", err))
@@ -445,7 +447,7 @@ func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOu
 			next = append(next, "Use network operation=diagnose with host/port when a specific endpoint is failing.")
 		}
 	}
-	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
+	procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: []string{p.AppPath}, Deep: true})
 	appProcs := filterAppProcesses(procs, p.AppPath)
 	if len(appProcs) > 0 {
 		evidence = append(evidence, summarizeProcesses(appProcs, 5)...)
@@ -454,8 +456,9 @@ func (s *Server) collectTriageApp(p triageParams, evidence, next []string, rawOu
 	return evidence, next
 }
 
-func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[string]interface{}) ([]string, []string, *process.Info) {
-	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{Deep: true})
+func (s *Server) collectTriagePID(ctx context.Context, pid int, evidence, next []string, rawOut map[string]interface{}) ([]string, []string, *process.Info) {
+	progressFrom(ctx).step(ctx, fmt.Sprintf("inspecting pid %d", pid))
+	procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{Deep: true})
 	var matched *process.Info
 	if proc, ok := findProcess(procs, pid); ok {
 		evidence = append(evidence, summarizeProcesses([]process.Info{proc}, 1)...)
@@ -465,7 +468,7 @@ func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[s
 	} else {
 		evidence = append(evidence, fmt.Sprintf("pid %d not found in process list", pid))
 	}
-	if info := s.inspectJVM(pid); info != nil {
+	if info := s.inspectJVM(ctx, pid); info != nil {
 		evidence = append(evidence, summarizeJVM(*info)...)
 		rawOut["jvm"] = info
 		next = append(next, "Use jvm operation=explain for GC/thread/memory interpretation.")
@@ -473,8 +476,9 @@ func (s *Server) collectTriagePID(pid int, evidence, next []string, rawOut map[s
 	return evidence, next, matched
 }
 
-func (s *Server) collectTriageBundle(p triageParams, evidence []string, rawOut map[string]interface{}) []string {
-	snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
+func (s *Server) collectTriageBundle(ctx context.Context, p triageParams, evidence []string, rawOut map[string]interface{}) []string {
+	progressFrom(ctx).step(ctx, "building snapshot for "+p.BundleID)
+	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
 	for _, app := range snap.Apps {
 		if app.BundleID == p.BundleID {
 			evidence = append(evidence, summarizeApp(app)...)
@@ -580,7 +584,7 @@ func subjectHasPIDToken(subject, token string) bool {
 	return rest == "" || rest[0] < '0' || rest[0] > '9'
 }
 
-func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
+func (s *Server) toolInspectApp(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Paths      []string `json:"paths"`
 		ScanAll    bool     `json:"scan_all"`
@@ -614,7 +618,7 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 			item.Result = r
 			evidence = append(evidence, summarizeApp(r)...)
 			if p.Deep {
-				deep := s.deepInspectApp(path, r)
+				deep := s.deepInspectApp(ctx, path, r)
 				item.Deep = &deep
 				evidence = append(evidence, summarizeDeepInspect(path, deep)...)
 			}
@@ -633,7 +637,7 @@ func (s *Server) toolInspectApp(raw json.RawMessage) ToolResult {
 	return toolText(env)
 }
 
-func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
+func (s *Server) toolSnapshot(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p snapshotParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
@@ -643,7 +647,7 @@ func (s *Server) toolSnapshot(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "create", "baseline":
-		return s.toolSnapshotCreate(p)
+		return s.toolSnapshotCreate(ctx, p)
 	case "list":
 		return s.toolSnapshotList(p)
 	case "get":
@@ -669,8 +673,9 @@ type snapshotParams struct {
 	LimitSummary int    `json:"limit_summary"`
 }
 
-func (s *Server) toolSnapshotCreate(p snapshotParams) ToolResult {
-	snap := s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
+func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolResult {
+	progressFrom(ctx).step(ctx, "building snapshot")
+	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{
 		SpectraVersion: s.Version,
 		DetectOpts:     s.detectOptions(p.Network),
 		SkipApps:       p.SkipApps,
@@ -679,6 +684,7 @@ func (s *Server) toolSnapshotCreate(p snapshotParams) ToolResult {
 		snap.Kind = snapshot.KindBaseline
 	}
 	if p.Store {
+		progressFrom(ctx).step(ctx, "saving snapshot")
 		if err := saveSnapshot(snap); err != nil {
 			return toolError(err.Error())
 		}
@@ -743,7 +749,7 @@ func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: s.now()})
 }
 
-func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
+func (s *Server) toolDiagnose(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		SnapshotID     string `json:"snapshot_id"`
 		RulesConfig    string `json:"rules_config"`
@@ -757,13 +763,14 @@ func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 	if p.SnapshotID != "" && len(p.ThreadDumpPIDs) > 0 {
 		return toolError("thread_dump_pids requires a live snapshot; omit snapshot_id")
 	}
-	snap, findings, err := s.evaluateRules(p.SnapshotID, p.RulesConfig, p.ThreadDumpPIDs...)
+	snap, findings, err := s.evaluateRules(ctx, p.SnapshotID, p.RulesConfig, p.ThreadDumpPIDs...)
 	if err != nil {
 		return toolError(err.Error())
 	}
 	evidence := summarizeFindings(findings, 10)
 	next := []string{"Use issues operation=check to persist these findings if they should be tracked."}
 	if p.Persist {
+		progressFrom(ctx).step(ctx, "persisting findings")
 		ids, err := persistFindings(snap, findings)
 		if err != nil {
 			return toolError(err.Error())
@@ -778,7 +785,7 @@ func (s *Server) toolDiagnose(raw json.RawMessage) ToolResult {
 	return toolText(env)
 }
 
-func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
+func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation       string   `json:"operation"`
 		PID             int      `json:"pid"`
@@ -797,21 +804,21 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 	bundles = append(bundles, p.Paths...)
 	switch p.Operation {
 	case "list", "":
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
+		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
 		sortProcesses(procs)
 		if p.Limit > 0 && p.Limit < len(procs) {
 			procs = procs[:p.Limit]
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %d process(es)", len(procs)), Evidence: summarizeProcesses(procs, 10), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: s.now()})
 	case "tree":
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles})
+		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles})
 		tree := process.BuildTree(procs)
 		return toolText(toolEnvelope{Summary: "built process tree", Raw: tree, Timestamp: s.now()})
 	case "by_app":
 		if len(bundles) == 0 {
 			return toolError("process by_app requires paths or bundles")
 		}
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
+		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected processes for %d app bundle(s)", len(bundles)), Evidence: summarizeProcesses(procs, 20), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: s.now()})
 	case "sample":
 		if p.PID == 0 {
@@ -825,19 +832,21 @@ func (s *Server) toolProcess(raw json.RawMessage) ToolResult {
 		if interval <= 0 {
 			interval = 10
 		}
-		out, err := s.collect.Processes.SampleProcess(p.PID, duration, interval)
+		stop := progressFrom(ctx).elapsed(ctx, time.Duration(duration)*time.Second, fmt.Sprintf("sampling pid %d", p.PID))
+		out, err := s.collect.Processes.SampleProcess(ctx, p.PID, duration, interval)
+		stop()
 		if err != nil {
 			return toolError(err.Error())
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
 	case "history":
-		return s.toolProcessHistory(p.PID, p.Limit)
+		return s.toolProcessHistory(ctx, p.PID, p.Limit)
 	default:
 		return toolError("unknown process operation: " + p.Operation)
 	}
 }
 
-func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
+func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p jvmParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
@@ -846,14 +855,18 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 	if op == "" {
 		op = "list"
 	}
-	handlers := map[string]func(jvmParams) ToolResult{
-		"list":               s.toolJVMList,
-		"inspect":            s.toolJVMInspect,
-		"explain":            s.toolJVMExplain,
-		"thread_dump":        func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "thread dump", s.collect.JVMs.ThreadDump) },
-		"gc_stats":           s.toolJVMGCStats,
-		"vm_memory":          s.toolJVMVMMemory,
-		"heap_histogram":     func(p jvmParams) ToolResult { return s.jcmdText(p.PID, "heap histogram", s.collect.JVMs.HeapHistogram) },
+	handlers := map[string]func(context.Context, jvmParams) ToolResult{
+		"list":    s.toolJVMList,
+		"inspect": s.toolJVMInspect,
+		"explain": s.toolJVMExplain,
+		"thread_dump": func(ctx context.Context, p jvmParams) ToolResult {
+			return s.jcmdText(ctx, p.PID, "thread dump", s.collect.JVMs.ThreadDump)
+		},
+		"gc_stats":  s.toolJVMGCStats,
+		"vm_memory": s.toolJVMVMMemory,
+		"heap_histogram": func(ctx context.Context, p jvmParams) ToolResult {
+			return s.jcmdText(ctx, p.PID, "heap histogram", s.collect.JVMs.HeapHistogram)
+		},
 		"attach":             s.toolJVMAttach,
 		"mbeans":             s.toolJVMMBeans,
 		"mbean_read":         s.toolJVMMBeanRead,
@@ -867,7 +880,7 @@ func (s *Server) toolJVM(raw json.RawMessage) ToolResult {
 	if !ok {
 		return toolError("unknown jvm operation: " + p.Operation)
 	}
-	return handler(p)
+	return handler(ctx, p)
 }
 
 type jvmParams struct {
@@ -892,7 +905,7 @@ type jvmParams struct {
 // withAgentAttached invokes op; if the agent isn't attached and auto-attach is
 // enabled (default), it attempts a one-time attach and retries. On persistent
 // failure it returns a structured agent_not_attached tool error.
-func (s *Server) withAgentAttached(p jvmParams, op func() error) (ToolResult, bool) {
+func (s *Server) withAgentAttached(ctx context.Context, p jvmParams, op func() error) (ToolResult, bool) {
 	err := op()
 	if err == nil {
 		return ToolResult{}, true
@@ -903,7 +916,7 @@ func (s *Server) withAgentAttached(p jvmParams, op func() error) (ToolResult, bo
 	}
 	autoAttach := p.AutoAttach == nil || *p.AutoAttach
 	if autoAttach {
-		if _, attachErr := jvm.AttachAgent(p.PID, p.Agent, nil); attachErr == nil {
+		if _, attachErr := jvm.AttachAgent(p.PID, p.Agent, jvm.ContextRunner(ctx)); attachErr == nil {
 			if retryErr := op(); retryErr == nil {
 				return ToolResult{}, true
 			} else if !errors.As(retryErr, &notAttached) {
@@ -938,70 +951,70 @@ func agentNotAttachedResult(pid int, autoAttachAttempted bool) ToolResult {
 	return ToolResult{IsError: true, Content: []ContentBlock{{Type: "text", Text: string(body)}}}
 }
 
-func (s *Server) toolJVMList(p jvmParams) ToolResult {
-	jvms := s.collect.JVMs.CollectJVMs(context.Background(), s.jvmOptions())
+func (s *Server) toolJVMList(ctx context.Context, p jvmParams) ToolResult {
+	jvms := s.collect.JVMs.CollectJVMs(ctx, s.jvmOptions(ctx))
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d JVM process(es)", len(jvms)), Evidence: summarizeJVMs(jvms), Raw: optionalRaw(p.IncludeRaw, jvms), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMInspect(p jvmParams) ToolResult {
+func (s *Server) toolJVMInspect(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm inspect requires pid")
 	}
-	info := s.inspectJVM(p.PID)
+	info := s.inspectJVM(ctx, p.PID)
 	if info == nil {
 		return toolError(fmt.Sprintf("JVM pid %d not found", p.PID))
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("inspected JVM pid %d", p.PID), Evidence: summarizeJVM(*info), Raw: optionalRaw(p.IncludeRaw, info), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMExplain(p jvmParams) ToolResult {
+func (s *Server) toolJVMExplain(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm explain requires pid")
 	}
-	explanation, err := s.collect.JVMs.CollectExplanation(context.Background(), p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
+	explanation, err := s.collect.JVMs.CollectExplanation(ctx, p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMGCStats(p jvmParams) ToolResult {
+func (s *Server) toolJVMGCStats(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm gc_stats requires pid")
 	}
-	stats, err := s.collect.JVMs.CollectGCStats(p.PID)
+	stats, err := s.collect.JVMs.CollectGCStats(ctx, p.PID)
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMVMMemory(p jvmParams) ToolResult {
+func (s *Server) toolJVMVMMemory(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm vm_memory requires pid")
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(p.PID), Timestamp: s.now()})
+	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected VM memory diagnostics for pid %d", p.PID), Raw: s.collect.JVMs.CollectVMMemoryDiagnostics(ctx, p.PID), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMAttach(p jvmParams) ToolResult {
+func (s *Server) toolJVMAttach(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm attach requires pid")
 	}
-	status, err := jvm.AttachAgent(p.PID, p.Agent, nil)
+	status, err := jvm.AttachAgent(p.PID, p.Agent, jvm.ContextRunner(ctx))
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeans(p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeans(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm mbeans requires pid")
 	}
 	var mbeans jvm.MBeansResult
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		mbeans, err = jvm.FetchMBeans(p.PID, nil)
+		mbeans, err = jvm.FetchMBeans(p.PID, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1010,14 +1023,14 @@ func (s *Server) toolJVMMBeans(p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("listed %d MBean(s) for pid %d", len(mbeans.MBeans), p.PID), Raw: optionalRaw(p.IncludeRaw, mbeans), Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeanRead(p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeanRead(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.Attribute == "" {
 		return toolError("jvm mbean_read requires pid, mbean_name, and attribute")
 	}
 	var value jvm.MBeanAttributeValue
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		value, err = jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, nil)
+		value, err = jvm.ReadMBeanAttribute(p.PID, p.MBeanName, p.Attribute, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1026,14 +1039,14 @@ func (s *Server) toolJVMMBeanRead(p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("read MBean attribute %s on pid %d", p.Attribute, p.PID), Raw: value, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMMBeanInvoke(p jvmParams) ToolResult {
+func (s *Server) toolJVMMBeanInvoke(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 || p.MBeanName == "" || p.MBeanOperation == "" {
 		return toolError("jvm mbean_invoke requires pid, mbean_name, and mbean_operation")
 	}
 	var value jvm.MBeanInvocation
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		value, err = jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, nil)
+		value, err = jvm.InvokeMBeanOperation(p.PID, p.MBeanName, p.MBeanOperation, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1042,14 +1055,14 @@ func (s *Server) toolJVMMBeanInvoke(p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("invoked MBean operation %s on pid %d", p.MBeanOperation, p.PID), Raw: value, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMProbe(p jvmParams) ToolResult {
+func (s *Server) toolJVMProbe(ctx context.Context, p jvmParams) ToolResult {
 	if p.PID == 0 {
 		return toolError("jvm probe requires pid")
 	}
 	var probes jvm.AgentProbes
-	res, ok := s.withAgentAttached(p, func() error {
+	res, ok := s.withAgentAttached(ctx, p, func() error {
 		var err error
-		probes, err = jvm.FetchAgentProbes(p.PID, nil)
+		probes, err = jvm.FetchAgentProbes(p.PID, jvm.ContextRunner(ctx))
 		return err
 	})
 	if !ok {
@@ -1058,7 +1071,7 @@ func (s *Server) toolJVMProbe(p jvmParams) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected in-process probes for pid %d", p.PID), Raw: probes, Timestamp: s.now()})
 }
 
-func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
+func (s *Server) toolJVMHeapDump(ctx context.Context, p jvmParams) ToolResult {
 	if !p.ConfirmSensitive {
 		return toolError("jvm heap_dump requires confirm_sensitive=true")
 	}
@@ -1068,7 +1081,7 @@ func (s *Server) toolJVMHeapDump(p jvmParams) ToolResult {
 	if p.Dest == "" {
 		p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 	}
-	if err := s.collect.JVMs.HeapDump(p.PID, p.Dest); err != nil {
+	if err := s.collect.JVMs.HeapDump(ctx, p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{
@@ -1102,7 +1115,7 @@ func validateHPROFPath(path string) error {
 // toolJVMHeapLeakSuspects analyzes a saved .hprof (typically the dest of a
 // prior heap_dump) and reports retained-size leak suspects with their
 // accumulation points and shortest paths from GC roots.
-func (s *Server) toolJVMHeapLeakSuspects(p jvmParams) ToolResult {
+func (s *Server) toolJVMHeapLeakSuspects(_ context.Context, p jvmParams) ToolResult {
 	if !p.ConfirmSensitive {
 		return toolError("jvm heap_leak_suspects requires confirm_sensitive=true")
 	}
@@ -1133,7 +1146,7 @@ func (s *Server) toolJVMHeapLeakSuspects(p jvmParams) ToolResult {
 	return toolText(env)
 }
 
-func (s *Server) toolJVMFlamegraph(p jvmParams) ToolResult {
+func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
 	if !p.ConfirmSensitive {
 		return toolError("jvm flamegraph requires confirm_sensitive=true")
 	}
@@ -1143,14 +1156,16 @@ func (s *Server) toolJVMFlamegraph(p jvmParams) ToolResult {
 	if p.Dest == "" {
 		p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
 	}
-	err := s.collect.JVMs.CaptureFlamegraph(p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
+	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+	stop()
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
 }
 
-func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
+func (s *Server) toolNetwork(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation  string   `json:"operation"`
 		Bundles    []string `json:"bundles"`
@@ -1164,21 +1179,21 @@ func (s *Server) toolNetwork(raw json.RawMessage) ToolResult {
 	}
 	switch p.Operation {
 	case "state", "":
-		state := s.collect.Network.CollectNetworkState()
+		state := s.collect.Network.CollectNetworkState(ctx)
 		return toolText(toolEnvelope{Summary: summarizeNetworkState(state), Evidence: networkEvidence(state), Raw: optionalRaw(p.IncludeRaw, state), Timestamp: s.now()})
 	case "connections":
-		conns := s.collect.Network.CollectConnections()
+		conns := s.collect.Network.CollectConnections(ctx)
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d active connection(s)", len(conns)), Raw: optionalRaw(true, conns), Timestamp: s.now()})
 	case "by_app":
 		bundles := append([]string{}, p.Bundles...)
 		bundles = append(bundles, p.Paths...)
-		conns := s.collect.Network.CollectConnections()
-		procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: bundles})
+		conns := s.collect.Network.CollectConnections(ctx)
+		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles})
 		grouped := netstate.GroupConnectionsByApp(conns, procs)
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("grouped %d connection(s) by app", len(conns)), Raw: grouped, Timestamp: s.now()})
 	case "diagnose":
-		state := s.collect.Network.CollectNetworkState()
-		conns := s.collect.Network.CollectConnections()
+		state := s.collect.Network.CollectNetworkState(ctx)
+		conns := s.collect.Network.CollectConnections(ctx)
 		evidence := networkEvidence(state)
 		if p.Host != "" {
 			evidence = append(evidence, connectionEvidenceForHost(conns, p.Host)...)
@@ -1203,17 +1218,16 @@ type dbToolParams struct {
 	ConfirmSensitive bool   `json:"confirm_sensitive"`
 }
 
-func (s *Server) toolDB(raw json.RawMessage) ToolResult {
+func (s *Server) toolDB(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p dbToolParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	ctx := context.Background()
 	switch p.Operation {
 	case "discover", "":
-		conns := dbinspect.DiscoverConnections(s.collect.Network.CollectConnections())
+		conns := dbinspect.DiscoverConnections(s.collect.Network.CollectConnections(ctx))
 		env := s.collect.DB.DiscoverDBEnv()
-		files := s.collect.DB.DiscoverSQLiteFiles()
+		files := s.collect.DB.DiscoverSQLiteFiles(ctx)
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("found %d live database connection(s), %d connection env var(s), and %d open sqlite file(s)", len(conns), len(env), len(files)),
 			Raw:       dbinspect.Discovery{Connections: conns, Env: env, SQLiteFiles: files},
@@ -1270,7 +1284,7 @@ func (s *Server) toolDBSample(ctx context.Context, p dbToolParams) ToolResult {
 	})
 }
 
-func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {
+func (s *Server) toolToolchain(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Operation  string `json:"operation"`
 		IncludeRaw bool   `json:"include_raw"`
@@ -1278,7 +1292,7 @@ func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
-	tc := s.collect.Toolchain.CollectToolchains(context.Background(), toolchain.CollectOptions{})
+	tc := s.collect.Toolchain.CollectToolchains(ctx, toolchain.CollectOptions{})
 	switch p.Operation {
 	case "scan", "":
 		return toolText(toolEnvelope{Summary: summarizeToolchains(tc), Raw: optionalRaw(p.IncludeRaw, tc), Timestamp: s.now()})
@@ -1298,7 +1312,7 @@ func (s *Server) toolToolchain(raw json.RawMessage) ToolResult {
 	}
 }
 
-func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
+func (s *Server) toolIssues(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p issuesParams
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
@@ -1310,7 +1324,7 @@ func (s *Server) toolIssues(raw json.RawMessage) ToolResult {
 	defer db.Close()
 	switch p.Operation {
 	case "check", "":
-		return s.toolIssuesCheck(db, p)
+		return s.toolIssuesCheck(ctx, db, p)
 	case "list":
 		return s.toolIssuesList(db, p)
 	case "acknowledge", "dismiss":
@@ -1337,8 +1351,8 @@ type issuesParams struct {
 	ExitCode    int    `json:"exit_code"`
 }
 
-func (s *Server) toolIssuesCheck(db *store.DB, p issuesParams) ToolResult {
-	snap, findings, err := s.evaluateRules(p.SnapshotID, "")
+func (s *Server) toolIssuesCheck(ctx context.Context, db *store.DB, p issuesParams) ToolResult {
+	snap, findings, err := s.evaluateRules(ctx, p.SnapshotID, "")
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -1434,12 +1448,12 @@ type deepSecuritySummary struct {
 	GatekeeperStatus   string   `json:"gatekeeper_status,omitempty"`
 }
 
-func (s *Server) deepInspectApp(appPath string, app detect.Result) deepInspectResult {
-	procs := s.collect.Processes.CollectProcesses(context.Background(), process.CollectOptions{BundlePaths: []string{appPath}, Deep: true})
+func (s *Server) deepInspectApp(ctx context.Context, appPath string, app detect.Result) deepInspectResult {
+	procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: []string{appPath}, Deep: true})
 	appProcs := filterAppProcesses(procs, appPath)
 	sortProcesses(appProcs)
 
-	conns := s.collect.Network.CollectConnections()
+	conns := s.collect.Network.CollectConnections(ctx)
 	grouped := netstate.GroupConnectionsByApp(conns, appProcs)
 	attributed := append([]netstate.AttributedConnection{}, grouped[appPath]...)
 	sort.SliceStable(attributed, func(i, j int) bool {
@@ -1449,7 +1463,7 @@ func (s *Server) deepInspectApp(appPath string, app detect.Result) deepInspectRe
 		return attributed[i].RemoteAddr < attributed[j].RemoteAddr
 	})
 
-	state := s.collect.Network.CollectNetworkState()
+	state := s.collect.Network.CollectNetworkState(ctx)
 	listening := listeningPortsForProcesses(state.ListeningPorts, appPath, appProcs)
 
 	out := deepInspectResult{
@@ -1555,7 +1569,11 @@ func toolText(value interface{}) ToolResult {
 	if err != nil {
 		return toolError(fmt.Sprintf("marshal tool result: %v", err))
 	}
-	return ToolResult{Content: []ContentBlock{{Type: "text", Text: string(payload)}}}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, payload); err != nil {
+		return toolError(fmt.Sprintf("compact tool result: %v", err))
+	}
+	return ToolResult{Content: []ContentBlock{{Type: "text", Text: string(payload)}}, Structured: compact.Bytes()}
 }
 
 func toolError(msg string) ToolResult {
@@ -1646,15 +1664,15 @@ func saveSnapshot(snap snapshot.Snapshot) error {
 	return nil
 }
 
-func (s *Server) evaluateLiveRules(config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
-	_, findings, err := s.evaluateRules("", config, threadDumpPIDs...)
+func (s *Server) evaluateLiveRules(ctx context.Context, config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
+	_, findings, err := s.evaluateRules(ctx, "", config, threadDumpPIDs...)
 	return findings, err
 }
 
 // evaluateRules runs the catalog against a stored snapshot or a fresh live
 // one. threadDumpPIDs only applies to live snapshots: it names the JVMs to
 // thread-dump for the jvm-deadlock rule.
-func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int) (snapshot.Snapshot, []rules.Finding, error) {
+func (s *Server) evaluateRules(ctx context.Context, snapshotID, config string, threadDumpPIDs ...int) (snapshot.Snapshot, []rules.Finding, error) {
 	var snap snapshot.Snapshot
 	var err error
 	if snapshotID != "" {
@@ -1663,7 +1681,8 @@ func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int)
 			return snap, nil, err
 		}
 	} else {
-		snap = s.collect.Snapshots.BuildSnapshot(context.Background(), snapshot.Options{
+		progressFrom(ctx).step(ctx, "building snapshot")
+		snap = s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{
 			SpectraVersion: s.Version,
 			ThreadDumpPIDs: threadDumpPIDs,
 			// attachJVMHistory below records these JVMs as history samples.
@@ -1677,6 +1696,7 @@ func (s *Server) evaluateRules(snapshotID, config string, threadDumpPIDs ...int)
 	// Best-effort: persist current JVMs as samples and read recent history
 	// back into the snapshot so trend-aware rules see a multi-sample window.
 	// Failure here is non-fatal; rules degrade to point-in-time checks.
+	progressFrom(ctx).step(ctx, "evaluating rules")
 	attachJVMHistory(&snap)
 	return snap, rules.Evaluate(snap, catalog), nil
 }
@@ -1735,34 +1755,37 @@ func persistFindingsWithDB(db *store.DB, snap snapshot.Snapshot, findings []rule
 	return db.UpsertIssues(context.Background(), machineUUID, snap.ID, inputs)
 }
 
-func (s *Server) jvmOptions() jvm.CollectOptions {
-	tc := s.collect.Toolchain.CollectToolchains(context.Background(), toolchain.CollectOptions{})
+func (s *Server) jvmOptions(ctx context.Context) jvm.CollectOptions {
+	tc := s.collect.Toolchain.CollectToolchains(ctx, toolchain.CollectOptions{})
 	return jvm.CollectOptions{JDKs: tc.JDKs}
 }
 
-func (s *Server) inspectJVM(pid int) *jvm.Info {
-	return s.collect.JVMs.InspectJVM(context.Background(), pid, s.jvmOptions())
+func (s *Server) inspectJVM(ctx context.Context, pid int) *jvm.Info {
+	return s.collect.JVMs.InspectJVM(ctx, pid, s.jvmOptions(ctx))
 }
 
-func (s *Server) jcmdText(pid int, label string, fn func(int) ([]byte, error)) ToolResult {
+func (s *Server) jcmdText(ctx context.Context, pid int, label string, fn func(context.Context, int) ([]byte, error)) ToolResult {
 	if pid == 0 {
 		return toolError("jvm " + label + " requires pid")
 	}
-	out, err := fn(pid)
+	out, err := fn(ctx, pid)
 	if err != nil {
 		return toolError(err.Error())
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %s for pid %d", label, pid), Raw: map[string]interface{}{"pid": pid, "output": string(out)}, Timestamp: s.now()})
 }
 
-func sampleProcess(pid, durationSec, intervalMS int) (string, error) {
+func sampleProcess(parent context.Context, pid, durationSec, intervalMS int) (string, error) {
 	if hostos.Current() != hostos.Darwin {
 		return "", hostos.Unsupported("process sampling (sample(1))")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
+	ctx, cancel := context.WithTimeout(parent, time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+		// #nosec G204 -- fixed tool name; pid and timings are integers
+		c := exec.CommandContext(ctx, name, args...)
+		c.WaitDelay = 2 * time.Second
+		return c.CombinedOutput()
 	}
 	report, out, err := process.RunSampleReport(ctx, nil, run, fmt.Sprint(pid), fmt.Sprint(durationSec), fmt.Sprint(intervalMS))
 	if err != nil {

@@ -30,8 +30,8 @@ type fakePowerCollector struct {
 	sawPids    []int
 }
 
-func (f *fakePowerCollector) CollectPower() sysinfo.PowerState { return f.state }
-func (f *fakePowerCollector) CollectAssertions() []sysinfo.PowerAssertion {
+func (f *fakePowerCollector) CollectPower(context.Context) sysinfo.PowerState { return f.state }
+func (f *fakePowerCollector) CollectAssertions(context.Context) []sysinfo.PowerAssertion {
 	return f.assertions
 }
 func (f *fakePowerCollector) SampleEnergy(_ context.Context, _ time.Duration, pids []int) ([]sysinfo.EnergyDelta, error) {
@@ -62,7 +62,9 @@ type fakeSystemCollector struct {
 	sawLimit int
 }
 
-func (f *fakeSystemCollector) Collect(_ syslimits.Options) syslimits.SystemLimits { return f.limits }
+func (f *fakeSystemCollector) Collect(context.Context, syslimits.Options) syslimits.SystemLimits {
+	return f.limits
+}
 func (f *fakeSystemCollector) CollectTopHolders(_ context.Context, limit int, _ process.CollectOptions) syslimits.TopHolders {
 	f.sawLimit = limit
 	return f.holders
@@ -138,7 +140,7 @@ func newHostServer(t *testing.T, c Collectors) *Server {
 
 func TestPowerStateUsesInjectedCollector(t *testing.T) {
 	s := newHostServer(t, Collectors{Power: &fakePowerCollector{}})
-	res := s.toolPower(json.RawMessage(`{"operation":"state"}`))
+	res := s.toolPower(context.Background(), json.RawMessage(`{"operation":"state"}`))
 	if res.IsError {
 		t.Fatalf("power state errored: %+v", res.Content)
 	}
@@ -153,7 +155,7 @@ func TestPowerImpactScoresSampledProcesses(t *testing.T) {
 		{PID: 22, Command: "cool", EnergyNJ: 1000},
 	}}
 	s := newHostServer(t, Collectors{Power: power})
-	res := s.toolPower(json.RawMessage(`{"operation":"impact","pids":[11,22],"limit":5}`))
+	res := s.toolPower(context.Background(), json.RawMessage(`{"operation":"impact","pids":[11,22],"limit":5}`))
 	if res.IsError {
 		t.Fatalf("power impact errored: %+v", res.Content)
 	}
@@ -167,7 +169,7 @@ func TestPowerImpactScoresSampledProcesses(t *testing.T) {
 
 func TestMemoryReportsCollectorError(t *testing.T) {
 	s := newHostServer(t, Collectors{Memory: fakeMemoryCollector{err: errors.New("vm_stat failed")}})
-	res := s.toolMemory(json.RawMessage(`{}`))
+	res := s.toolMemory(context.Background(), json.RawMessage(`{}`))
 	if !res.IsError || !strings.Contains(res.Content[0].Text, "vm_stat failed") {
 		t.Fatalf("expected memory collector error, got %+v", res)
 	}
@@ -176,7 +178,7 @@ func TestMemoryReportsCollectorError(t *testing.T) {
 func TestStoragePassesLimitAndPaths(t *testing.T) {
 	storage := &fakeStorageCollector{}
 	s := newHostServer(t, Collectors{Storage: storage})
-	res := s.toolStorage(json.RawMessage(`{"paths":["/Applications/Slack.app"],"limit":3}`))
+	res := s.toolStorage(context.Background(), json.RawMessage(`{"paths":["/Applications/Slack.app"],"limit":3}`))
 	if res.IsError {
 		t.Fatalf("storage errored: %+v", res.Content)
 	}
@@ -191,7 +193,7 @@ func TestStoragePassesLimitAndPaths(t *testing.T) {
 func TestStorageDefaultsLimit(t *testing.T) {
 	storage := &fakeStorageCollector{}
 	s := newHostServer(t, Collectors{Storage: storage})
-	if res := s.toolStorage(json.RawMessage(`{}`)); res.IsError {
+	if res := s.toolStorage(context.Background(), json.RawMessage(`{}`)); res.IsError {
 		t.Fatalf("storage errored: %+v", res.Content)
 	}
 	if storage.sawOpts.LargestAppsN != 10 {
@@ -202,7 +204,7 @@ func TestStorageDefaultsLimit(t *testing.T) {
 func TestSystemTopPassesLimit(t *testing.T) {
 	sys := &fakeSystemCollector{}
 	s := newHostServer(t, Collectors{System: sys})
-	if res := s.toolSystem(json.RawMessage(`{"operation":"top","limit":7}`)); res.IsError {
+	if res := s.toolSystem(context.Background(), json.RawMessage(`{"operation":"top","limit":7}`)); res.IsError {
 		t.Fatalf("system top errored: %+v", res.Content)
 	}
 	if sys.sawLimit != 7 {
@@ -213,7 +215,7 @@ func TestSystemTopPassesLimit(t *testing.T) {
 func TestLogsForwardsQueryFields(t *testing.T) {
 	logs := &fakeLogCollector{}
 	s := newHostServer(t, Collectors{Logs: logs})
-	res := s.toolLogs(json.RawMessage(`{"process":"backupd","last_seconds":120,"max_rows":50}`))
+	res := s.toolLogs(context.Background(), json.RawMessage(`{"process":"backupd","last_seconds":120,"max_rows":50}`))
 	if res.IsError {
 		t.Fatalf("logs errored: %+v", res.Content)
 	}
@@ -224,10 +226,10 @@ func TestLogsForwardsQueryFields(t *testing.T) {
 
 func TestUpdatesHistoryAndLogOps(t *testing.T) {
 	s := newHostServer(t, Collectors{Updates: fakeUpdatesCollector{}})
-	if res := s.toolUpdates(json.RawMessage(`{"operation":"history"}`)); res.IsError {
+	if res := s.toolUpdates(context.Background(), json.RawMessage(`{"operation":"history"}`)); res.IsError {
 		t.Fatalf("updates history errored: %+v", res.Content)
 	}
-	if res := s.toolUpdates(json.RawMessage(`{"operation":"log","grep":"macOS"}`)); res.IsError {
+	if res := s.toolUpdates(context.Background(), json.RawMessage(`{"operation":"log","grep":"macOS"}`)); res.IsError {
 		t.Fatalf("updates log errored: %+v", res.Content)
 	}
 }
@@ -237,10 +239,10 @@ func TestServicesAndTimeMachineHappyPath(t *testing.T) {
 		Services:    fakeServicesCollector{},
 		TimeMachine: fakeTimeMachineCollector{},
 	})
-	if res := s.toolServices(json.RawMessage(`{}`)); res.IsError {
+	if res := s.toolServices(context.Background(), json.RawMessage(`{}`)); res.IsError {
 		t.Fatalf("services errored: %+v", res.Content)
 	}
-	if res := s.toolTimeMachine(json.RawMessage(`{}`)); res.IsError {
+	if res := s.toolTimeMachine(context.Background(), json.RawMessage(`{}`)); res.IsError {
 		t.Fatalf("timemachine errored: %+v", res.Content)
 	}
 }
@@ -252,12 +254,12 @@ func TestPlaybookListAndGet(t *testing.T) {
 	}}
 	s := newHostServer(t, Collectors{Playbooks: cat})
 
-	res := s.toolPlaybook(json.RawMessage(`{"operation":"list"}`))
+	res := s.toolPlaybook(context.Background(), json.RawMessage(`{"operation":"list"}`))
 	if res.IsError || !strings.Contains(res.Content[0].Text, "found 2 diagnostic playbook") {
 		t.Fatalf("unexpected playbook list: %+v", res)
 	}
 
-	res = s.toolPlaybook(json.RawMessage(`{"operation":"get","id":"jvm-memory"}`))
+	res = s.toolPlaybook(context.Background(), json.RawMessage(`{"operation":"get","id":"jvm-memory"}`))
 	if res.IsError || !strings.Contains(res.Content[0].Text, "jvm-memory") {
 		t.Fatalf("unexpected playbook get: %+v", res)
 	}
@@ -267,7 +269,7 @@ func TestPlaybookListAndGet(t *testing.T) {
 
 func TestPlaybookGetRequiresID(t *testing.T) {
 	s := newHostServer(t, Collectors{Playbooks: fakePlaybookCatalog{}})
-	if res := s.toolPlaybook(json.RawMessage(`{"operation":"get"}`)); !res.IsError ||
+	if res := s.toolPlaybook(context.Background(), json.RawMessage(`{"operation":"get"}`)); !res.IsError ||
 		!strings.Contains(res.Content[0].Text, "requires id") {
 		t.Fatalf("expected playbook get id error, got %+v", res)
 	}
@@ -275,7 +277,7 @@ func TestPlaybookGetRequiresID(t *testing.T) {
 
 func TestPlaybookGetUnknownID(t *testing.T) {
 	s := newHostServer(t, Collectors{Playbooks: fakePlaybookCatalog{}})
-	if res := s.toolPlaybook(json.RawMessage(`{"operation":"get","id":"nope"}`)); !res.IsError ||
+	if res := s.toolPlaybook(context.Background(), json.RawMessage(`{"operation":"get","id":"nope"}`)); !res.IsError ||
 		!strings.Contains(res.Content[0].Text, "unknown playbook id") {
 		t.Fatalf("expected unknown playbook error, got %+v", res)
 	}
@@ -283,7 +285,7 @@ func TestPlaybookGetUnknownID(t *testing.T) {
 
 func TestCoreRequiresPath(t *testing.T) {
 	s := newHostServer(t, Collectors{})
-	if res := s.toolCore(json.RawMessage(`{}`)); !res.IsError ||
+	if res := s.toolCore(context.Background(), json.RawMessage(`{}`)); !res.IsError ||
 		!strings.Contains(res.Content[0].Text, "requires path") {
 		t.Fatalf("expected core path error, got %+v", res)
 	}
@@ -299,10 +301,14 @@ func TestUnknownOperationsAreRejected(t *testing.T) {
 		name string
 		call func() ToolResult
 	}{
-		{"power", func() ToolResult { return s.toolPower(json.RawMessage(`{"operation":"bogus"}`)) }},
-		{"system", func() ToolResult { return s.toolSystem(json.RawMessage(`{"operation":"bogus"}`)) }},
-		{"updates", func() ToolResult { return s.toolUpdates(json.RawMessage(`{"operation":"bogus"}`)) }},
-		{"playbook", func() ToolResult { return s.toolPlaybook(json.RawMessage(`{"operation":"bogus"}`)) }},
+		{"power", func() ToolResult { return s.toolPower(context.Background(), json.RawMessage(`{"operation":"bogus"}`)) }},
+		{"system", func() ToolResult { return s.toolSystem(context.Background(), json.RawMessage(`{"operation":"bogus"}`)) }},
+		{"updates", func() ToolResult {
+			return s.toolUpdates(context.Background(), json.RawMessage(`{"operation":"bogus"}`))
+		}},
+		{"playbook", func() ToolResult {
+			return s.toolPlaybook(context.Background(), json.RawMessage(`{"operation":"bogus"}`))
+		}},
 	}
 	for _, tc := range cases {
 		res := tc.call()

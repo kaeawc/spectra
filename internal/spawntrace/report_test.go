@@ -62,3 +62,28 @@ func TestOptionsValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestTraceReportsProgressAfterEachPoll(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var elapsed []time.Duration
+	var events []int
+	opts := Options{Interval: time.Second, Duration: 3 * time.Second, Progress: func(e time.Duration, n int) {
+		elapsed = append(elapsed, e)
+		events = append(events, n)
+	}}
+	rep, err := Trace(context.Background(), opts, traceDeps(t0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(elapsed) != rep.Summary.Polls {
+		t.Fatalf("progress ran %d times for %d polls", len(elapsed), rep.Summary.Polls)
+	}
+	for i := 1; i < len(elapsed); i++ {
+		if elapsed[i] < elapsed[i-1] || events[i] < events[i-1] {
+			t.Fatalf("progress went backwards: elapsed %v events %v", elapsed, events)
+		}
+	}
+	if last := events[len(events)-1]; last != rep.Summary.Starts+rep.Summary.Exits {
+		t.Fatalf("final events %d, summary has %d", last, rep.Summary.Starts+rep.Summary.Exits)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/playbook"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/services"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -56,12 +57,12 @@ type AppInspector interface {
 
 type ProcessCollector interface {
 	CollectProcesses(ctx context.Context, opts process.CollectOptions) []process.Info
-	SampleProcess(pid, durationSec, intervalMS int) (string, error)
+	SampleProcess(ctx context.Context, pid, durationSec, intervalMS int) (string, error)
 }
 
 type NetworkCollector interface {
-	CollectNetworkState() netstate.State
-	CollectConnections() []netstate.Connection
+	CollectNetworkState(ctx context.Context) netstate.State
+	CollectConnections(ctx context.Context) []netstate.Connection
 }
 
 type SnapshotCollector interface {
@@ -72,12 +73,12 @@ type JVMCollector interface {
 	CollectJVMs(ctx context.Context, opts jvm.CollectOptions) []jvm.Info
 	InspectJVM(ctx context.Context, pid int, opts jvm.CollectOptions) *jvm.Info
 	CollectExplanation(ctx context.Context, pid int, opts jvm.ExplainOptions) (*jvm.Explanation, error)
-	CollectGCStats(pid int) (*jvm.GCStats, error)
-	CollectVMMemoryDiagnostics(pid int) jvm.VMMemoryDiagnostics
-	ThreadDump(pid int) ([]byte, error)
-	HeapHistogram(pid int) ([]byte, error)
-	HeapDump(pid int, dest string) error
-	CaptureFlamegraph(pid int, opts jvm.FlamegraphOptions) error
+	CollectGCStats(ctx context.Context, pid int) (*jvm.GCStats, error)
+	CollectVMMemoryDiagnostics(ctx context.Context, pid int) jvm.VMMemoryDiagnostics
+	ThreadDump(ctx context.Context, pid int) ([]byte, error)
+	HeapHistogram(ctx context.Context, pid int) ([]byte, error)
+	HeapDump(ctx context.Context, pid int, dest string) error
+	CaptureFlamegraph(ctx context.Context, pid int, opts jvm.FlamegraphOptions) error
 }
 
 type ToolchainCollector interface {
@@ -89,7 +90,7 @@ type ToolchainCollector interface {
 // this interface covers env and open-file discovery plus the catalog reads.
 type DBInspector interface {
 	DiscoverDBEnv() []dbinspect.EnvHint
-	DiscoverSQLiteFiles() []dbinspect.FileCandidate
+	DiscoverSQLiteFiles(ctx context.Context) []dbinspect.FileCandidate
 	Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error)
 	Schema(ctx context.Context, dsn, schema string) (*dbinspect.SchemaReport, error)
 	Relations(ctx context.Context, dsn, schema string) (*dbinspect.RelationsReport, error)
@@ -99,8 +100,8 @@ type DBInspector interface {
 
 // PowerCollector reports battery/thermal state and per-pid energy sampling.
 type PowerCollector interface {
-	CollectPower() sysinfo.PowerState
-	CollectAssertions() []sysinfo.PowerAssertion
+	CollectPower(ctx context.Context) sysinfo.PowerState
+	CollectAssertions(ctx context.Context) []sysinfo.PowerAssertion
 	SampleEnergy(ctx context.Context, interval time.Duration, pids []int) ([]sysinfo.EnergyDelta, error)
 }
 
@@ -116,7 +117,7 @@ type StorageCollector interface {
 
 // SystemCollector reports kernel resource limits and top holders.
 type SystemCollector interface {
-	Collect(opts syslimits.Options) syslimits.SystemLimits
+	Collect(ctx context.Context, opts syslimits.Options) syslimits.SystemLimits
 	CollectTopHolders(ctx context.Context, limit int, opts process.CollectOptions) syslimits.TopHolders
 }
 
@@ -186,8 +187,8 @@ func (defaultDBInspector) DiscoverDBEnv() []dbinspect.EnvHint {
 	return dbinspect.DiscoverEnv(os.Getenv)
 }
 
-func (defaultDBInspector) DiscoverSQLiteFiles() []dbinspect.FileCandidate {
-	return dbinspect.DiscoverSQLiteFiles(dbinspect.DefaultRunner)
+func (defaultDBInspector) DiscoverSQLiteFiles(ctx context.Context) []dbinspect.FileCandidate {
+	return dbinspect.DiscoverSQLiteFiles(proc.BoundedRunner(ctx))
 }
 
 func (defaultDBInspector) Overview(ctx context.Context, dsn string) (*dbinspect.Overview, error) {
@@ -222,18 +223,18 @@ func (defaultProcessCollector) CollectProcesses(ctx context.Context, opts proces
 	return process.CollectAll(ctx, opts)
 }
 
-func (defaultProcessCollector) SampleProcess(pid, durationSec, intervalMS int) (string, error) {
-	return sampleProcess(pid, durationSec, intervalMS)
+func (defaultProcessCollector) SampleProcess(ctx context.Context, pid, durationSec, intervalMS int) (string, error) {
+	return sampleProcess(ctx, pid, durationSec, intervalMS)
 }
 
 type defaultNetworkCollector struct{}
 
-func (defaultNetworkCollector) CollectNetworkState() netstate.State {
-	return netstate.Collect(netstate.DefaultRunner)
+func (defaultNetworkCollector) CollectNetworkState(ctx context.Context) netstate.State {
+	return netstate.Collect(netstate.ContextRunner(ctx))
 }
 
-func (defaultNetworkCollector) CollectConnections() []netstate.Connection {
-	return netstate.CollectConnections(netstate.DefaultRunner)
+func (defaultNetworkCollector) CollectConnections(ctx context.Context) []netstate.Connection {
+	return netstate.CollectConnections(netstate.ContextRunner(ctx))
 }
 
 type defaultSnapshotCollector struct{}
@@ -245,38 +246,54 @@ func (defaultSnapshotCollector) BuildSnapshot(ctx context.Context, opts snapshot
 type defaultJVMCollector struct{}
 
 func (defaultJVMCollector) CollectJVMs(ctx context.Context, opts jvm.CollectOptions) []jvm.Info {
-	return jvm.CollectAll(ctx, opts)
+	return jvm.CollectAll(ctx, killableJVMOptions(ctx, opts))
 }
 
 func (defaultJVMCollector) InspectJVM(ctx context.Context, pid int, opts jvm.CollectOptions) *jvm.Info {
-	return jvm.InspectPID(ctx, pid, opts)
+	return jvm.InspectPID(ctx, pid, killableJVMOptions(ctx, opts))
+}
+
+// killableJVMOptions fills in runners that kill their child when the tool
+// call's ctx ends; the jvm package's plain default ignores ctx.
+func killableJVMOptions(ctx context.Context, opts jvm.CollectOptions) jvm.CollectOptions {
+	if opts.CmdRunner == nil && opts.CmdRunnerContext == nil {
+		opts.CmdRunner = jvm.ContextRunner(ctx)
+		opts.CmdRunnerContext = jvm.DefaultCtxRunner
+	}
+	return opts
 }
 
 func (defaultJVMCollector) CollectExplanation(ctx context.Context, pid int, opts jvm.ExplainOptions) (*jvm.Explanation, error) {
+	if opts.CmdRunner == nil {
+		opts.CmdRunner = jvm.ContextRunner(ctx)
+	}
 	return jvm.CollectExplanation(ctx, pid, opts)
 }
 
-func (defaultJVMCollector) CollectGCStats(pid int) (*jvm.GCStats, error) {
-	return jvm.CollectGCStats(pid, nil)
+func (defaultJVMCollector) CollectGCStats(ctx context.Context, pid int) (*jvm.GCStats, error) {
+	return jvm.CollectGCStats(pid, jvm.ContextRunner(ctx))
 }
 
-func (defaultJVMCollector) CollectVMMemoryDiagnostics(pid int) jvm.VMMemoryDiagnostics {
-	return jvm.CollectVMMemoryDiagnostics(pid, nil)
+func (defaultJVMCollector) CollectVMMemoryDiagnostics(ctx context.Context, pid int) jvm.VMMemoryDiagnostics {
+	return jvm.CollectVMMemoryDiagnostics(pid, jvm.ContextRunner(ctx))
 }
 
-func (defaultJVMCollector) ThreadDump(pid int) ([]byte, error) {
-	return jvm.ThreadDump(pid, nil)
+func (defaultJVMCollector) ThreadDump(ctx context.Context, pid int) ([]byte, error) {
+	return jvm.ThreadDump(pid, jvm.ContextRunner(ctx))
 }
 
-func (defaultJVMCollector) HeapHistogram(pid int) ([]byte, error) {
-	return jvm.HeapHistogram(pid, nil)
+func (defaultJVMCollector) HeapHistogram(ctx context.Context, pid int) ([]byte, error) {
+	return jvm.HeapHistogram(pid, jvm.ContextRunner(ctx))
 }
 
-func (defaultJVMCollector) HeapDump(pid int, dest string) error {
-	return jvm.HeapDump(pid, dest, nil)
+func (defaultJVMCollector) HeapDump(ctx context.Context, pid int, dest string) error {
+	return jvm.HeapDump(pid, dest, jvm.ContextRunner(ctx))
 }
 
-func (defaultJVMCollector) CaptureFlamegraph(pid int, opts jvm.FlamegraphOptions) error {
+func (defaultJVMCollector) CaptureFlamegraph(ctx context.Context, pid int, opts jvm.FlamegraphOptions) error {
+	if opts.CmdRunner == nil {
+		opts.CmdRunner = jvm.ContextRunner(ctx)
+	}
 	return jvm.CaptureFlamegraph(pid, opts)
 }
 
@@ -288,12 +305,12 @@ func (defaultToolchainCollector) CollectToolchains(ctx context.Context, opts too
 
 type defaultPowerCollector struct{}
 
-func (defaultPowerCollector) CollectPower() sysinfo.PowerState {
-	return sysinfo.CollectPower(sysinfo.DefaultRunner)
+func (defaultPowerCollector) CollectPower(ctx context.Context) sysinfo.PowerState {
+	return sysinfo.CollectPower(proc.BoundedRunner(ctx))
 }
 
-func (defaultPowerCollector) CollectAssertions() []sysinfo.PowerAssertion {
-	return sysinfo.CollectAssertions(sysinfo.DefaultRunner)
+func (defaultPowerCollector) CollectAssertions(ctx context.Context) []sysinfo.PowerAssertion {
+	return sysinfo.CollectAssertions(proc.BoundedRunner(ctx))
 }
 
 func (defaultPowerCollector) SampleEnergy(ctx context.Context, interval time.Duration, pids []int) ([]sysinfo.EnergyDelta, error) {
@@ -314,7 +331,10 @@ func (defaultStorageCollector) Collect(opts storagestate.CollectOptions) storage
 
 type defaultSystemCollector struct{}
 
-func (defaultSystemCollector) Collect(opts syslimits.Options) syslimits.SystemLimits {
+func (defaultSystemCollector) Collect(ctx context.Context, opts syslimits.Options) syslimits.SystemLimits {
+	if opts.Run == nil {
+		opts.Run = proc.BoundedRunner(ctx)
+	}
 	return syslimits.Collect(opts)
 }
 

@@ -1,9 +1,12 @@
 package jvm
 
 import (
+	"context"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultRunner runs the real command. Unlike the passive collectors'
@@ -12,6 +15,21 @@ import (
 // large heaps, JFR analysis), which legitimately outlasts a fixed deadline.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
+}
+
+// ContextRunner is DefaultRunner with the child killed when ctx ends, for
+// callers (such as an MCP tool call) whose caller can give up on the work.
+func ContextRunner(ctx context.Context) CmdRunner {
+	return func(name string, args ...string) ([]byte, error) {
+		// #nosec G204 -- callers pass fixed JDK tool names
+		c := exec.CommandContext(ctx, name, args...)
+		c.WaitDelay = 2 * time.Second
+		out, err := c.Output()
+		if ctx.Err() != nil {
+			return out, fmt.Errorf("%s: %w", name, ctx.Err())
+		}
+		return out, err
+	}
 }
 
 // discoverPIDs runs `jps -l` and returns a map of PID → main class, plus

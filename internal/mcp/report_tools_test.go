@@ -163,7 +163,7 @@ func callReportTool(t *testing.T, s *Server, name, args string) ToolResult {
 	if !ok {
 		t.Fatalf("no handler for %q", name)
 	}
-	return h(json.RawMessage(args))
+	return h(context.Background(), json.RawMessage(args))
 }
 
 func TestReportToolSchemas(t *testing.T) {

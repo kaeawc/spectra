@@ -311,6 +311,9 @@ type Config struct {
 	Emit func(Event)
 	// Notify receives one-off notices, such as the scoped root exiting.
 	Notify func(string)
+	// Progress, when set, runs after each collection with the time since the
+	// trace began and the number of events so far.
+	Progress func(elapsed time.Duration, events int)
 }
 
 // Run polls until Duration elapses on cfg.Clock or ctx is cancelled and
@@ -377,6 +380,9 @@ func (r *runner) poll(ctx context.Context) {
 		r.sum.Add(ev)
 		r.cfg.Emit(ev)
 		r.noteRootExit(ev)
+	}
+	if r.cfg.Progress != nil {
+		r.cfg.Progress(now.Sub(r.began), r.sum.Starts+r.sum.Exits)
 	}
 	if !r.rootChecked && r.tracker.baseline {
 		r.rootChecked = true

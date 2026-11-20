@@ -23,7 +23,7 @@ func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	disabled := false
 	calls := 0
-	res, ok := s.withAgentAttached(jvmParams{PID: 4321, AutoAttach: &disabled}, func() error {
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 4321, AutoAttach: &disabled}, func() error {
 		calls++
 		return &jvm.NotAttachedError{PID: 4321}
 	})
@@ -63,7 +63,7 @@ func TestWithAgentAttachedSkipsAutoAttachWhenDisabled(t *testing.T) {
 func TestWithAgentAttachedPassesThroughOtherErrors(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	disabled := false
-	res, ok := s.withAgentAttached(jvmParams{PID: 1, AutoAttach: &disabled}, func() error {
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 1, AutoAttach: &disabled}, func() error {
 		return errors.New("boom")
 	})
 	if ok {
@@ -76,7 +76,7 @@ func TestWithAgentAttachedPassesThroughOtherErrors(t *testing.T) {
 
 func TestWithAgentAttachedReturnsSuccess(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
-	res, ok := s.withAgentAttached(jvmParams{PID: 1}, func() error { return nil })
+	res, ok := s.withAgentAttached(context.Background(), jvmParams{PID: 1}, func() error { return nil })
 	if !ok {
 		t.Fatalf("expected success, got %+v", res)
 	}
@@ -122,7 +122,7 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 
 func TestInspectAppRequiresPaths(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
-	result := s.toolInspectApp(json.RawMessage(`{}`))
+	result := s.toolInspectApp(context.Background(), json.RawMessage(`{}`))
 	if !result.IsError {
 		t.Fatal("expected inspect_app without paths to fail")
 	}
@@ -202,7 +202,7 @@ func TestInspectAppDeepUsesInjectedCollectors(t *testing.T) {
 		Clock:     fixedClock{t: time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)},
 	})
 
-	result := s.toolInspectApp(json.RawMessage(`{"paths":["/Applications/Codex.app"],"network":true,"deep":true}`))
+	result := s.toolInspectApp(context.Background(), json.RawMessage(`{"paths":["/Applications/Codex.app"],"network":true,"deep":true}`))
 	if result.IsError {
 		t.Fatalf("inspect_app returned error: %+v", result.Content)
 	}
@@ -249,7 +249,7 @@ func TestTriageScopedToTargetFiltersFindings(t *testing.T) {
 		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
 	})
 
-	result := s.toolTriage(json.RawMessage(`{"pid":96454,"include_raw":true}`))
+	result := s.toolTriage(context.Background(), json.RawMessage(`{"pid":96454,"include_raw":true}`))
 	if result.IsError {
 		t.Fatalf("triage returned error: %+v", result.Content)
 	}
@@ -277,7 +277,7 @@ func TestTriageScopedKeepsMatchingFindings(t *testing.T) {
 		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
 	})
 
-	result := s.toolTriage(json.RawMessage(`{"app_path":"/Applications/Slack.app","include_raw":true}`))
+	result := s.toolTriage(context.Background(), json.RawMessage(`{"app_path":"/Applications/Slack.app","include_raw":true}`))
 	if result.IsError {
 		t.Fatalf("triage returned error: %+v", result.Content)
 	}
@@ -304,7 +304,7 @@ func TestTriageScopeGlobalRestoresHostWideFindings(t *testing.T) {
 		Clock:     fixedClock{t: time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)},
 	})
 
-	result := s.toolTriage(json.RawMessage(`{"pid":1,"scope":"global","include_raw":true}`))
+	result := s.toolTriage(context.Background(), json.RawMessage(`{"pid":1,"scope":"global","include_raw":true}`))
 	if result.IsError {
 		t.Fatalf("triage returned error: %+v", result.Content)
 	}
@@ -344,7 +344,7 @@ func (f *fakeProcessCollector) CollectProcesses(_ context.Context, opts process.
 	return append([]process.Info{}, f.procs...)
 }
 
-func (f *fakeProcessCollector) SampleProcess(_, _, _ int) (string, error) {
+func (f *fakeProcessCollector) SampleProcess(_ context.Context, _, _, _ int) (string, error) {
 	return "sample", nil
 }
 
@@ -353,11 +353,11 @@ type fakeNetworkCollector struct {
 	conns []netstate.Connection
 }
 
-func (f fakeNetworkCollector) CollectNetworkState() netstate.State {
+func (f fakeNetworkCollector) CollectNetworkState(context.Context) netstate.State {
 	return f.state
 }
 
-func (f fakeNetworkCollector) CollectConnections() []netstate.Connection {
+func (f fakeNetworkCollector) CollectConnections(context.Context) []netstate.Connection {
 	return append([]netstate.Connection{}, f.conns...)
 }
 
@@ -381,7 +381,7 @@ func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
 		{jvmParams{ConfirmSensitive: true, Dest: t.TempDir()}, ".hprof extension"},
 		{jvmParams{ConfirmSensitive: true, Dest: filepath.Join(t.TempDir(), "dir.hprof")}, "does not exist"},
 	} {
-		res := s.toolJVMHeapLeakSuspects(tc.params)
+		res := s.toolJVMHeapLeakSuspects(context.Background(), tc.params)
 		if !res.IsError || !strings.Contains(res.Content[0].Text, tc.want) {
 			t.Errorf("params %+v: result = %+v, want error containing %q", tc.params, res, tc.want)
 		}
@@ -395,7 +395,7 @@ func TestJVMHeapLeakSuspectsOperation(t *testing.T) {
 	if err := os.WriteFile(path, dump.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: path})
+	res := s.toolJVMHeapLeakSuspects(context.Background(), jvmParams{ConfirmSensitive: true, Dest: path})
 	if res.IsError || !strings.Contains(res.Content[0].Text, "0 leak suspect(s)") {
 		t.Fatalf("empty dump result = %+v", res)
 	}
@@ -409,7 +409,7 @@ func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("TOP-SECRET-CONTENT"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res := s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: secret})
+	res := s.toolJVMHeapLeakSuspects(context.Background(), jvmParams{ConfirmSensitive: true, Dest: secret})
 	if !res.IsError || !strings.Contains(res.Content[0].Text, ".hprof extension") {
 		t.Errorf("non-.hprof path result = %+v, want extension error", res)
 	}
@@ -418,7 +418,7 @@ func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
 	if err := os.Mkdir(asDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: asDir})
+	res = s.toolJVMHeapLeakSuspects(context.Background(), jvmParams{ConfirmSensitive: true, Dest: asDir})
 	if !res.IsError || !strings.Contains(res.Content[0].Text, "regular file") {
 		t.Errorf("directory result = %+v, want regular-file error", res)
 	}
@@ -428,7 +428,7 @@ func TestJVMHeapLeakSuspectsRejectsNonHPROF(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("TOP-SECRET-CONTENT"+strings.Repeat("x", 4096)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res = s.toolJVMHeapLeakSuspects(jvmParams{ConfirmSensitive: true, Dest: fake})
+	res = s.toolJVMHeapLeakSuspects(context.Background(), jvmParams{ConfirmSensitive: true, Dest: fake})
 	if !res.IsError || strings.Contains(res.Content[0].Text, "TOP-SECRET") {
 		t.Errorf("fake hprof result = %+v, want an error without file content", res)
 	}

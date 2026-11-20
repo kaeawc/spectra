@@ -65,7 +65,7 @@ func TestDaemonTools(t *testing.T) {
 		{"alerts", `{"action":"ack","id":"a1"}`, "a1"},
 		{"process", `{"operation":"history","pid":42}`, `"pid"`},
 	} {
-		result := s.toolHandlers()[tc.name](json.RawMessage(tc.args))
+		result := s.toolHandlers()[tc.name](context.Background(), json.RawMessage(tc.args))
 		if result.IsError || !strings.Contains(result.Content[0].Text, tc.want) {
 			t.Errorf("%s: %+v", tc.name, result)
 		}
@@ -76,12 +76,12 @@ func TestDaemonToolsUnavailable(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	s.SetDaemonConnector(func(context.Context) (daemonWatchClient, bool) { return nil, false })
 	for _, name := range []string{"host_health", "alerts"} {
-		result := s.toolHandlers()[name](json.RawMessage(`{}`))
+		result := s.toolHandlers()[name](context.Background(), json.RawMessage(`{}`))
 		if !result.IsError || !strings.Contains(result.Content[0].Text, `"error":"daemon_unavailable"`) || !strings.Contains(result.Content[0].Text, "spectra daemon start") {
 			t.Errorf("%s: %+v", name, result)
 		}
 	}
-	result := s.toolProcess(json.RawMessage(`{"operation":"history","pid":42}`))
+	result := s.toolProcess(context.Background(), json.RawMessage(`{"operation":"history","pid":42}`))
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "spectra daemon start") {
 		t.Errorf("history: %+v", result)
 	}
@@ -156,7 +156,7 @@ func TestDaemonReconnectsAfterRestart(t *testing.T) {
 		connects.Add(1)
 		return watchclient.Connect(ctx, nil, p)
 	})
-	call := func() ToolResult { return s.toolHostHealth(json.RawMessage(`{"samples":0}`)) }
+	call := func() ToolResult { return s.toolHostHealth(context.Background(), json.RawMessage(`{"samples":0}`)) }
 	if result := call(); result.IsError {
 		t.Fatalf("initial call: %+v", result)
 	}
@@ -194,7 +194,7 @@ func TestDaemonTimeoutDropsConnectionAndReconnectsNextCall(t *testing.T) {
 		connects.Add(1)
 		return watchclient.Connect(ctx, nil, p)
 	})
-	call := func() ToolResult { return s.toolHostHealth(json.RawMessage(`{"samples":0}`)) }
+	call := func() ToolResult { return s.toolHostHealth(context.Background(), json.RawMessage(`{"samples":0}`)) }
 	result := call()
 	if !result.IsError || !strings.Contains(result.Content[0].Text, `"error":"daemon_timeout"`) || !strings.Contains(result.Content[0].Text, "spectra daemon logs") {
 		t.Fatalf("timed out call: %+v", result)

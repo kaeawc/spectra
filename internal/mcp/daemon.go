@@ -58,9 +58,9 @@ func (s *Server) SetDaemonConnector(fn func(context.Context) (daemonWatchClient,
 }
 
 // The lazily connected daemon client is not safe for concurrent use; callers
-// hold s.callMu, which serializes every tool call and resource read.
-func (s *Server) withDaemon(fn func(context.Context, daemonWatchClient) error) error {
-	parentCtx := context.Background()
+// hold the call slot (s.acquire), which serializes every tool call and
+// resource read.
+func (s *Server) withDaemon(parentCtx context.Context, fn func(context.Context, daemonWatchClient) error) error {
 	ctx, cancel := context.WithTimeout(parentCtx, s.daemonCallTimeout())
 	defer cancel()
 	for attempt := 0; attempt < 2; attempt++ {
@@ -111,7 +111,7 @@ func toolTextError(value any) ToolResult {
 	return ToolResult{IsError: true, Content: []ContentBlock{{Type: "text", Text: string(data)}}}
 }
 
-func (s *Server) toolHostHealth(raw json.RawMessage) ToolResult {
+func (s *Server) toolHostHealth(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Samples int `json:"samples"`
 	}
@@ -124,7 +124,7 @@ func (s *Server) toolHostHealth(raw json.RawMessage) ToolResult {
 	var sample hostwatch.Sample
 	var alerts []hostwatch.Alert
 	var recent []hostwatch.Sample
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err := s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		var callErr error
 		sample, alerts, callErr = client.Current(ctx)
 		if callErr != nil || p.Samples == 0 {
@@ -139,7 +139,7 @@ func (s *Server) toolHostHealth(raw json.RawMessage) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("host load %.2f across %d cores; memory pressure %s; %d active alerts", sample.Load1, sample.NCPU, sample.MemoryPressure, len(alerts)), Raw: map[string]any{"sample": sample, "active_alerts": alerts, "recent_samples": recent}, Timestamp: s.now()})
 }
 
-func (s *Server) toolAlerts(raw json.RawMessage) ToolResult {
+func (s *Server) toolAlerts(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Action string `json:"action"`
 		State  string `json:"state"`
@@ -168,7 +168,7 @@ func (s *Server) toolAlerts(raw json.RawMessage) ToolResult {
 		return toolError("id is required for ack")
 	}
 	var value any
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err := s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		if p.Action == "ack" {
 			a, err := client.Ack(ctx, p.ID)
 			value = a
@@ -184,12 +184,12 @@ func (s *Server) toolAlerts(raw json.RawMessage) ToolResult {
 	return toolText(toolEnvelope{Summary: "daemon alerts " + p.Action, Raw: value, Timestamp: s.now()})
 }
 
-func (s *Server) toolProcessHistory(pid, limit int) ToolResult {
+func (s *Server) toolProcessHistory(ctx context.Context, pid, limit int) ToolResult {
 	if pid <= 0 {
 		return toolError("process history requires pid")
 	}
 	var history any
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err := s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		rows, callErr := client.ProcessHistory(ctx, pid, limit)
 		history = rows
 		return callErr
@@ -206,11 +206,14 @@ func (s *Server) toolProcessHistory(pid, limit int) ToolResult {
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("process history for pid %d", pid), Raw: history, Timestamp: s.now()})
 }
 
-func (s *Server) readFiringAlerts(_ context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
-	s.callMu.Lock()
-	defer s.callMu.Unlock()
+func (s *Server) readFiringAlerts(ctx context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var alerts []hostwatch.Alert
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err = s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		var callErr error
 		alerts, callErr = client.Alerts(ctx, "firing", 2000)
 		return callErr
@@ -288,11 +291,14 @@ func newHostHealthDoc(s hostwatch.Sample, daemonUp bool, activeAlerts []hostwatc
 // readHostHealth serves the daemon's current sample, or samples the host
 // locally when the daemon is not running.
 func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
-	s.callMu.Lock()
-	defer s.callMu.Unlock()
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var sample hostwatch.Sample
 	var alerts []hostwatch.Alert
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err = s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		var callErr error
 		sample, alerts, callErr = client.Current(ctx)
 		return callErr

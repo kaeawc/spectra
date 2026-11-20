@@ -168,12 +168,33 @@ func BoundedOutput(name string, args ...string) ([]byte, error) {
 
 // BoundedOutputTimeout is BoundedOutput with an explicit timeout.
 func BoundedOutputTimeout(timeout time.Duration, name string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return boundedOutput(context.Background(), timeout, name, args...)
+}
+
+// BoundedOutputContext is BoundedOutput that also kills the child when ctx
+// ends.
+func BoundedOutputContext(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return boundedOutput(ctx, DefaultTimeout, name, args...)
+}
+
+// BoundedRunner returns a collector-shaped runner (the CmdRunner func type
+// most collector packages declare) that runs through BoundedOutputContext.
+func BoundedRunner(ctx context.Context) func(name string, args ...string) ([]byte, error) {
+	return func(name string, args ...string) ([]byte, error) {
+		return BoundedOutputContext(ctx, name, args...)
+	}
+}
+
+func boundedOutput(parent context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	// #nosec G204 -- callers are collector default runners passing fixed tool names
 	c := exec.CommandContext(ctx, name, args...)
 	c.WaitDelay = waitDelay
 	out, err := c.Output()
+	if perr := parent.Err(); perr != nil {
+		return out, fmt.Errorf("%s: %w", name, perr)
+	}
 	if ctx.Err() != nil {
 		return out, fmt.Errorf("%s timed out after %s: %w", name, timeout, ctx.Err())
 	}

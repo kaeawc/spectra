@@ -142,8 +142,8 @@ func reportToolDefinitions() []ToolDefinition {
 	}
 }
 
-func (s *Server) reportToolHandlers() map[string]func(json.RawMessage) ToolResult {
-	return map[string]func(json.RawMessage) ToolResult{
+func (s *Server) reportToolHandlers() map[string]toolHandler {
+	return map[string]toolHandler{
 		"load":    s.toolLoad,
 		"orphans": s.toolOrphans,
 		"lineage": s.toolLineage,
@@ -180,7 +180,7 @@ func durationArg(name, v string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-func (s *Server) toolLoad(raw json.RawMessage) ToolResult {
+func (s *Server) toolLoad(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Roots         []string `json:"roots"`
 		MaxLoadPerCPU *float64 `json:"max_load_per_cpu"`
@@ -206,13 +206,36 @@ func (s *Server) toolLoad(raw json.RawMessage) ToolResult {
 	if err := absRoots("roots", opts.Roots); err != nil {
 		return toolError(err.Error())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), loadToolTimeout)
+	ctx, cancel := context.WithTimeout(ctx, loadToolTimeout)
 	defer cancel()
-	rep, err := hostload.BuildReport(ctx, opts, s.collect.Reports.Load())
+	progressFrom(ctx).step(ctx, "reading load and memory")
+	rep, err := hostload.BuildReport(ctx, opts, loadProgress(ctx, s.collect.Reports.Load()))
 	if err != nil {
 		return toolError("load: " + err.Error())
 	}
 	return toolText(rep)
+}
+
+// loadProgress reports the load report's slow phases (process collection
+// and the CPU window) as they start.
+func loadProgress(ctx context.Context, deps hostload.ReportDeps) hostload.ReportDeps {
+	pr := progressFrom(ctx)
+	if pr == nil {
+		return deps
+	}
+	if procs := deps.Procs; procs != nil {
+		deps.Procs = func(ctx context.Context) []process.Info {
+			pr.step(ctx, "collecting processes")
+			return procs(ctx)
+		}
+	}
+	if sleep := deps.Sleep; sleep != nil {
+		deps.Sleep = func(ctx context.Context, d time.Duration) {
+			pr.step(ctx, fmt.Sprintf("sampling CPU for %s", d))
+			sleep(ctx, d)
+		}
+	}
+	return deps
 }
 
 func setIf[T any](dst *T, v *T) {
@@ -221,7 +244,7 @@ func setIf[T any](dst *T, v *T) {
 	}
 }
 
-func (s *Server) toolOrphans(raw json.RawMessage) ToolResult {
+func (s *Server) toolOrphans(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Roots    []string `json:"roots"`
 		MinAge   string   `json:"min_age"`
@@ -245,7 +268,7 @@ func (s *Server) toolOrphans(raw json.RawMessage) ToolResult {
 	if minAge < 0 {
 		return toolError("min_age must not be negative")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), orphansToolTimeout)
+	ctx, cancel := context.WithTimeout(ctx, orphansToolTimeout)
 	defer cancel()
 	rep, err := orphans.BuildReport(ctx, orphans.ReportOptions{Roots: p.Roots, MinAge: minAge, NoDaemon: p.NoDaemon}, s.collect.Reports.Orphans())
 	if err != nil {
@@ -254,7 +277,7 @@ func (s *Server) toolOrphans(raw json.RawMessage) ToolResult {
 	return toolText(rep)
 }
 
-func (s *Server) toolLineage(raw json.RawMessage) ToolResult {
+func (s *Server) toolLineage(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		PID int `json:"pid"`
 	}
@@ -264,7 +287,7 @@ func (s *Server) toolLineage(raw json.RawMessage) ToolResult {
 	if p.PID <= 0 {
 		return toolError("pid must be a positive integer")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), lineageToolTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lineageToolTimeout)
 	defer cancel()
 	res, err := lineage.Build(s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{}), p.PID)
 	if err != nil {
@@ -273,7 +296,7 @@ func (s *Server) toolLineage(raw json.RawMessage) ToolResult {
 	return toolText(res)
 }
 
-func (s *Server) toolOwner(raw json.RawMessage) ToolResult {
+func (s *Server) toolOwner(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Target string   `json:"target"`
 		Under  []string `json:"under"`
@@ -284,7 +307,7 @@ func (s *Server) toolOwner(raw json.RawMessage) ToolResult {
 	if (p.Target == "") == (len(p.Under) == 0) {
 		return toolError("pass exactly one of target or under")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), owner.DefaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, owner.DefaultTimeout)
 	defer cancel()
 	if len(p.Under) > 0 {
 		if err := absRoots("under", p.Under); err != nil {
@@ -310,7 +333,7 @@ func (s *Server) toolOwner(raw json.RawMessage) ToolResult {
 	return toolText(res)
 }
 
-func (s *Server) toolSpawns(raw json.RawMessage) ToolResult {
+func (s *Server) toolSpawns(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		PID             int  `json:"pid"`
 		DurationSeconds *int `json:"duration_seconds"`
@@ -337,8 +360,15 @@ func (s *Server) toolSpawns(raw json.RawMessage) ToolResult {
 	if err := opts.Validate(); err != nil {
 		return toolError("spawns: " + err.Error())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), opts.Duration+spawnsTimeoutSlack)
+	ctx, cancel := context.WithTimeout(ctx, opts.Duration+spawnsTimeoutSlack)
 	defer cancel()
+	if pr := progressFrom(ctx); pr != nil {
+		total := opts.Duration
+		opts.Progress = func(elapsed time.Duration, events int) {
+			elapsed = min(elapsed, total)
+			pr.report(ctx, elapsed.Seconds(), total.Seconds(), fmt.Sprintf("traced %s of %s; %d event(s)", elapsed.Round(100*time.Millisecond), total, events))
+		}
+	}
 	rep, err := spawntrace.Trace(ctx, opts, s.collect.Reports.Spawns(), spawnsMaxEvents)
 	if err != nil {
 		return toolError("spawns: " + err.Error())
@@ -346,7 +376,7 @@ func (s *Server) toolSpawns(raw json.RawMessage) ToolResult {
 	return toolText(rep)
 }
 
-func (s *Server) toolIdle(raw json.RawMessage) ToolResult {
+func (s *Server) toolIdle(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
 		Roots  []string `json:"roots"`
 		PIDs   []int    `json:"pids"`
@@ -361,7 +391,9 @@ func (s *Server) toolIdle(raw json.RawMessage) ToolResult {
 	if err != nil {
 		return toolError(err.Error())
 	}
-	rep, err := idle.BuildReport(context.Background(), opts, s.collect.Reports.Idle())
+	stop := progressFrom(ctx).elapsed(ctx, opts.Window, "sampling CPU")
+	rep, err := idle.BuildReport(ctx, opts, s.collect.Reports.Idle())
+	stop()
 	if err != nil {
 		return toolError("idle: " + err.Error())
 	}
