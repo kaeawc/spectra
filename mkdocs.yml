@@ -112,6 +112,7 @@ nav:
       - Toolchain drift: playbooks/toolchain-drift.md
   - Operations:
       - CLI: operations/cli.md
+      - App uninstall: operations/uninstall.md
       - Issues: operations/issues.md
       - Install services: operations/install-services.md
       - Startup items: operations/startup-items.md
