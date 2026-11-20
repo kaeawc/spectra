@@ -132,6 +132,15 @@ The watcher stops when the last subscription ends or its session closes, so an
 idle server neither samples the host nor holds a daemon connection.
 `SPECTRA_NO_DAEMON=1` keeps the server on the local path.
 
+## Profiler selection
+
+`jvm` `flamegraph` always runs the `asprof` found on the server's `PATH`.
+The tool does not accept an `asprof_path` argument, and a call that passes one
+is refused: an MCP client is usually an AI agent, so a client-chosen
+executable would turn a prompt injection into arbitrary code execution as the
+user. Put async-profiler's `bin` directory on `PATH` to use a non-standard
+install; the CLI keeps its explicit `--asprof` override.
+
 ## Host report tools
 
 These tools answer with exactly the JSON document the matching CLI command
