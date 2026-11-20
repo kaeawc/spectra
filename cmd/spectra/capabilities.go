@@ -32,13 +32,13 @@ func runCapabilities(args []string) int {
 	}
 	fmt.Printf("Spectra %s (%s/%s)\n", manifest.SpectraVersion, manifest.OS, manifest.Arch)
 	fmt.Printf("Capabilities schema: %s v%d\n", manifest.Schema.Name, manifest.Schema.Version)
-	fmt.Println("NAME          OUTPUT  RESULT SCHEMA           ARGV")
+	fmt.Printf("%-16s %-7s %-27s %s\n", "NAME", "OUTPUT", "RESULT SCHEMA", "ARGV")
 	for _, iface := range manifest.Interfaces {
 		schema := "-"
 		if iface.ResultSchema != nil {
 			schema = fmt.Sprintf("%s v%d", iface.ResultSchema.Name, iface.ResultSchema.Version)
 		}
-		fmt.Printf("%-13s %-7s %-23s %s\n", iface.Name, iface.Output, schema, strings.Join(iface.Argv, " "))
+		fmt.Printf("%-16s %-7s %-27s %s\n", iface.Name, iface.Output, schema, strings.Join(iface.Argv, " "))
 	}
 	return 0
 }

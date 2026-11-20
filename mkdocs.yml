@@ -127,6 +127,7 @@ nav:
       - Releasing: operations/releasing.md
   - Reference:
       - Capabilities: reference/capabilities.md
+      - Command result schemas: reference/command-schemas.md
       - Result schema: reference/result-schema.md
       - Glossary: reference/glossary.md
   - Development:
