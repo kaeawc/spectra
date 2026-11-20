@@ -73,6 +73,7 @@ type surfaceTool struct {
 type surface struct {
 	Tools     []any `json:"tools"`
 	Resources []any `json:"resources"`
+	Templates []any `json:"resourceTemplates"`
 	Prompts   []any `json:"prompts"`
 }
 
@@ -89,6 +90,10 @@ func listSurface(t *testing.T, cs *sdk.ClientSession) surface {
 	if err != nil {
 		t.Fatalf("resources/list: %v", err)
 	}
+	templates, err := cs.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		t.Fatalf("resources/templates/list: %v", err)
+	}
 	prompts, err := cs.ListPrompts(ctx, nil)
 	if err != nil {
 		t.Fatalf("prompts/list: %v", err)
@@ -96,7 +101,13 @@ func listSurface(t *testing.T, cs *sdk.ClientSession) surface {
 	sort.Slice(tools.Tools, func(i, j int) bool { return tools.Tools[i].Name < tools.Tools[j].Name })
 	sort.Slice(resources.Resources, func(i, j int) bool { return resources.Resources[i].URI < resources.Resources[j].URI })
 	sort.Slice(prompts.Prompts, func(i, j int) bool { return prompts.Prompts[i].Name < prompts.Prompts[j].Name })
+	sort.Slice(templates.ResourceTemplates, func(i, j int) bool {
+		return templates.ResourceTemplates[i].URITemplate < templates.ResourceTemplates[j].URITemplate
+	})
 	var out surface
+	for _, tpl := range templates.ResourceTemplates {
+		out.Templates = append(out.Templates, toGeneric(t, tpl))
+	}
 	for _, tool := range tools.Tools {
 		out.Tools = append(out.Tools, toGeneric(t, surfaceTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema, OutputSchema: tool.OutputSchema}))
 	}
@@ -162,8 +173,12 @@ func TestToolAnnotationsMarkReadOnlyTools(t *testing.T) {
 	}
 	for _, tool := range tools.Tools {
 		readOnly := tool.Annotations != nil && tool.Annotations.ReadOnlyHint
-		if readOnly == stateChangingTools[tool.Name] {
-			t.Errorf("%s: readOnlyHint = %v, state-changing = %v", tool.Name, readOnly, stateChangingTools[tool.Name])
+		want := !stateChangingTools[tool.Name]
+		if jobReadOnly, ok := jobToolReadOnly[tool.Name]; ok {
+			want = jobReadOnly
+		}
+		if readOnly != want {
+			t.Errorf("%s: readOnlyHint = %v, want %v", tool.Name, readOnly, want)
 		}
 	}
 	for name := range stateChangingTools {
@@ -187,7 +202,7 @@ func TestStdioEndToEnd(t *testing.T) {
 				t.Fatalf("server info = %+v", init.ServerInfo)
 			}
 			tools, err := cs.ListTools(context.Background(), nil)
-			if err != nil || len(tools.Tools) != len(toolDefinitions()) {
+			if err != nil || len(tools.Tools) != len(toolDefinitions())+len(jobToolDefinitions()) {
 				t.Fatalf("tools/list: %d tools, err %v", len(tools.Tools), err)
 			}
 			pid := os.Getpid()

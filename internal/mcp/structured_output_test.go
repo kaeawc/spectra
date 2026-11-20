@@ -136,10 +136,13 @@ func TestStructuredContentValidatesForEveryTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Tools) != len(structuredCalls) {
-		t.Errorf("%d tools listed, %d covered here", len(list.Tools), len(structuredCalls))
+	if want := len(structuredCalls) + len(jobToolDefinitions()); len(list.Tools) != want {
+		t.Errorf("%d tools listed, want %d (%d covered here, job tools in jobs_test.go)", len(list.Tools), want, len(structuredCalls))
 	}
 	for _, tool := range list.Tools {
+		if _, isJobTool := jobToolReadOnly[tool.Name]; isJobTool {
+			continue
+		}
 		t.Run(tool.Name, func(t *testing.T) {
 			args, ok := structuredCalls[tool.Name]
 			if !ok {

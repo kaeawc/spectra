@@ -283,9 +283,9 @@ func operationToolDef(name, description string, operations []string) ToolDefinit
 			"status":            stringProp("Issue status."),
 			"id":                stringProp("ID."),
 			"issue_id":          stringProp("Issue ID."),
-			"duration_seconds":  integerProp("Duration."),
+			"duration_seconds":  integerProp("Duration (process sample and jvm flamegraph: 1..60)."),
 			"interval_millis":   integerProp("Interval."),
-			"event":             stringProp("Profiler event."),
+			"event":             stringProp("Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer."),
 			"dest":              stringProp("Output path."),
 			"confirm_sensitive": boolProp("Allow sensitive artifact."),
 			"deep":              boolProp("More process detail."),
@@ -683,8 +683,13 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 		snap.Kind = snapshot.KindBaseline
 	}
 	if p.Store {
+		// BuildSnapshot returns a partial snapshot when cancelled; a
+		// cancelled call never persists it.
+		if err := ctx.Err(); err != nil {
+			return toolError("snapshot cancelled before it was stored")
+		}
 		progressFrom(ctx).step(ctx, "saving snapshot")
-		if err := saveSnapshot(snap); err != nil {
+		if err := saveSnapshot(ctx, snap); err != nil {
 			return toolError(err.Error())
 		}
 	}
@@ -701,7 +706,11 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 	if p.IncludeRaw {
 		env.Raw = snap
 	}
-	return toolText(env)
+	res := toolText(env)
+	if p.Store && validArtifactID(snap.ID) {
+		res = withLinks(res, artifactLink{URI: artifactURI(kindSnapshot, snap.ID), Name: snap.ID, Description: "Stored snapshot " + snap.ID, MIMEType: "application/json"})
+	}
+	return res
 }
 
 func (s *Server) toolSnapshotList(p snapshotParams) ToolResult {
@@ -729,7 +738,11 @@ func (s *Server) toolSnapshotGet(p snapshotParams) ToolResult {
 	if p.IncludeRaw {
 		env.Raw = snap
 	}
-	return toolText(env)
+	res := toolText(env)
+	if validArtifactID(p.ID) {
+		res = withLinks(res, artifactLink{URI: artifactURI(kindSnapshot, p.ID), Name: p.ID, Description: "Stored snapshot " + p.ID, MIMEType: "application/json"})
+	}
+	return res
 }
 
 func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
@@ -769,8 +782,11 @@ func (s *Server) toolDiagnose(ctx context.Context, raw json.RawMessage) ToolResu
 	evidence := summarizeFindings(findings, 10)
 	next := []string{"Use issues operation=check to persist these findings if they should be tracked."}
 	if p.Persist {
+		if err := ctx.Err(); err != nil {
+			return toolError("diagnose cancelled before findings were persisted")
+		}
 		progressFrom(ctx).step(ctx, "persisting findings")
-		ids, err := persistFindings(snap, findings)
+		ids, err := persistFindings(ctx, snap, findings)
 		if err != nil {
 			return toolError(err.Error())
 		}
@@ -820,29 +836,40 @@ func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResul
 		procs := s.collect.Processes.CollectProcesses(ctx, process.CollectOptions{BundlePaths: bundles, Deep: p.Deep})
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected processes for %d app bundle(s)", len(bundles)), Evidence: summarizeProcesses(procs, 20), Raw: optionalRaw(p.IncludeRaw, procs), Timestamp: s.now()})
 	case "sample":
-		if p.PID == 0 {
-			return toolError("process sample requires pid")
-		}
-		duration := p.DurationSeconds
-		if duration <= 0 {
-			duration = 1
-		}
-		interval := p.IntervalMillis
-		if interval <= 0 {
-			interval = 10
-		}
-		stop := progressFrom(ctx).elapsed(ctx, time.Duration(duration)*time.Second, fmt.Sprintf("sampling pid %d", p.PID))
-		out, err := s.collect.Processes.SampleProcess(ctx, p.PID, duration, interval)
-		stop()
-		if err != nil {
-			return toolError(err.Error())
-		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
+		return s.toolProcessSample(ctx, p.PID, p.DurationSeconds, p.IntervalMillis)
 	case "history":
 		return s.toolProcessHistory(ctx, p.PID, p.Limit)
 	default:
 		return toolError("unknown process operation: " + p.Operation)
 	}
+}
+
+func (s *Server) toolProcessSample(ctx context.Context, pid, durationSeconds, intervalMillis int) ToolResult {
+	if pid == 0 {
+		return toolError("process sample requires pid")
+	}
+	if durationSeconds < 0 || durationSeconds > maxCaptureSeconds {
+		return toolError(fmt.Sprintf("duration_seconds must be 1..%d", maxCaptureSeconds))
+	}
+	duration := durationSeconds
+	if duration == 0 {
+		duration = 1
+	}
+	interval := intervalMillis
+	if interval <= 0 {
+		interval = 10
+	}
+	stop := progressFrom(ctx).elapsed(ctx, time.Duration(duration)*time.Second, fmt.Sprintf("sampling pid %d", pid))
+	out, err := s.collect.Processes.SampleProcess(ctx, pid, duration, interval)
+	stop()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	res := toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", pid, duration), Raw: map[string]interface{}{"pid": pid, "output": out}, Timestamp: s.now()})
+	if link, ok := s.saveArtifact(kindSample, fmt.Sprintf("sample-%d", pid), ".txt", fmt.Sprintf("Sample report for pid %d", pid), []byte(out)); ok {
+		res = withLinks(res, link)
+	}
+	return res
 }
 
 func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
@@ -887,6 +914,21 @@ func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
 // choose the executable would make prompt injection arbitrary code execution.
 // The CLI keeps its --asprof flag.
 const asprofPathRejection = "asprof_path is not accepted over MCP: the profiler is always the `asprof` found on the server's PATH (the CLI still offers an override); put async-profiler's bin directory on PATH instead"
+
+// maxCaptureSeconds bounds process sample and jvm flamegraph captures.
+const maxCaptureSeconds = 60
+
+// flamegraphEvents are the async-profiler events jvm flamegraph accepts.
+var flamegraphEvents = map[string]bool{"cpu": true, "wall": true, "alloc": true, "lock": true, "itimer": true, "ctimer": true}
+
+func flamegraphEventNames() []string {
+	names := make([]string, 0, len(flamegraphEvents))
+	for e := range flamegraphEvents {
+		names = append(names, e)
+	}
+	sort.Strings(names)
+	return names
+}
 
 type jvmParams struct {
 	Operation        string `json:"operation"`
@@ -1089,12 +1131,16 @@ func (s *Server) toolJVMHeapDump(ctx context.Context, p jvmParams) ToolResult {
 	if err := s.collect.JVMs.HeapDump(ctx, p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{
+	res := toolText(toolEnvelope{
 		Summary:     fmt.Sprintf("wrote heap dump for pid %d", p.PID),
 		NextActions: []string{fmt.Sprintf("jvm heap_leak_suspects with dest=%s and confirm_sensitive=true", p.Dest)},
 		Raw:         map[string]interface{}{"pid": p.PID, "dest": p.Dest},
 		Timestamp:   s.now(),
 	})
+	if link, ok := s.registerHeapDump(p.PID, p.Dest); ok {
+		res = withLinks(res, link)
+	}
+	return res
 }
 
 // validateHPROFPath requires path to be an absolute path to an existing
@@ -1151,26 +1197,83 @@ func (s *Server) toolJVMHeapLeakSuspects(_ context.Context, p jvmParams) ToolRes
 	return toolText(env)
 }
 
-func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
+// checkFlamegraphArgs is the flamegraph's argument check, shared with
+// job_start's validator.
+func checkFlamegraphArgs(p jvmParams) error {
 	if p.AsprofPath != "" {
-		return toolError(asprofPathRejection)
+		return errors.New(asprofPathRejection)
 	}
 	if !p.ConfirmSensitive {
-		return toolError("jvm flamegraph requires confirm_sensitive=true")
+		return errors.New("jvm flamegraph requires confirm_sensitive=true")
 	}
 	if p.PID == 0 {
-		return toolError("jvm flamegraph requires pid")
+		return errors.New("jvm flamegraph requires pid")
 	}
-	if p.Dest == "" {
-		p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
+	if p.DurationSeconds < 0 || p.DurationSeconds > maxCaptureSeconds {
+		return fmt.Errorf("duration_seconds must be 1..%d", maxCaptureSeconds)
 	}
-	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
-	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
-	stop()
-	if err != nil {
+	if p.Event != "" && !flamegraphEvents[p.Event] {
+		return fmt.Errorf("event must be one of %s", strings.Join(flamegraphEventNames(), ", "))
+	}
+	if flamegraphExt(p.Dest) == "" {
+		return fmt.Errorf("dest must end in %s (asprof picks the output format from it)", strings.Join(flamegraphFormats, ", "))
+	}
+	return nil
+}
+
+// toolJVMFlamegraph captures into a fresh file it creates in the artifacts
+// staging directory, in the format dest's extension names, and links only
+// that file once it is published into the flamegraph directory; dest, when
+// given, gets a copy. The capture never reads back a file it did not create,
+// so dest cannot make the server serve an arbitrary file, and a capture is
+// out of the retention sweep's reach until it is published.
+func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
+	if err := checkFlamegraphArgs(p); err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+	staging, out, id, err := s.newStagedArtifact(fmt.Sprintf("flamegraph-%d", p.PID), flamegraphExt(p.Dest))
+	linked := err == nil
+	if !linked {
+		// No safe artifacts directory: capture straight to dest, unlinked.
+		out = p.Dest
+		if out == "" {
+			out = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
+		}
+	}
+	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
+	err = s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: out})
+	stop()
+	if err != nil {
+		if linked {
+			_ = os.Remove(out)
+		}
+		return toolError(err.Error())
+	}
+	if !linked {
+		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": out}, Timestamp: s.now()})
+	}
+	size, ok := stagedSize(staging, id)
+	if !ok {
+		return toolError(fmt.Sprintf("flamegraph capture for pid %d produced no output", p.PID))
+	}
+	if p.Dest != "" {
+		if err := s.copyArtifactTo(staging, id, p.Dest); err != nil {
+			_ = os.Remove(out)
+			return toolError(fmt.Sprintf("copy flamegraph to dest: %v", err))
+		}
+	}
+	link, ok := s.publishStaged(kindFlamegraph, staging, id, fmt.Sprintf("Flamegraph of pid %d", p.PID), size)
+	if !ok {
+		_ = os.Remove(out)
+		return toolError(fmt.Sprintf("flamegraph capture for pid %d could not be published", p.PID))
+	}
+	dest := p.Dest
+	if dest == "" {
+		root, _, _ := s.artifactsRoot()
+		dest = filepath.Join(root, kindFlamegraph, id)
+	}
+	res := toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": dest}, Timestamp: s.now()})
+	return withLinks(res, link)
 }
 
 func (s *Server) toolNetwork(ctx context.Context, raw json.RawMessage) ToolResult {
@@ -1364,7 +1467,10 @@ func (s *Server) toolIssuesCheck(ctx context.Context, db *store.DB, p issuesPara
 	if err != nil {
 		return toolError(err.Error())
 	}
-	ids, err := persistFindingsWithDB(db, snap, findings)
+	if err := ctx.Err(); err != nil {
+		return toolError("issues check cancelled before findings were persisted")
+	}
+	ids, err := persistFindingsWithDB(ctx, db, snap, findings)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -1657,19 +1763,19 @@ func loadStoredSnapshot(id string) (snapshot.Snapshot, error) {
 	return empty, nil
 }
 
-func saveSnapshot(snap snapshot.Snapshot) error {
+func saveSnapshot(ctx context.Context, snap snapshot.Snapshot) error {
 	db, err := openStore()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	if err := db.SaveSnapshot(context.Background(), store.FromSnapshot(snap)); err != nil {
-		return err
-	}
-	_ = db.SaveSnapshotProcesses(context.Background(), snap.ID, store.ProcessesFromSnapshot(snap))
-	_ = db.SaveLoginItems(context.Background(), snap.ID, store.LoginItemsFromSnapshot(snap))
-	_ = db.SaveGrantedPerms(context.Background(), snap.ID, store.GrantedPermsFromSnapshot(snap))
-	return nil
+	// One transaction: a cancel before the commit stores neither the snapshot
+	// nor its indexed rows, so a stored snapshot always has them.
+	return db.SaveSnapshotWithRows(ctx, store.FromSnapshot(snap), store.SnapshotRows{
+		Processes:    store.ProcessesFromSnapshot(snap),
+		LoginItems:   store.LoginItemsFromSnapshot(snap),
+		GrantedPerms: store.GrantedPermsFromSnapshot(snap),
+	})
 }
 
 func (s *Server) evaluateLiveRules(ctx context.Context, config string, threadDumpPIDs ...int) ([]rules.Finding, error) {
@@ -1705,15 +1811,15 @@ func (s *Server) evaluateRules(ctx context.Context, snapshotID, config string, t
 	// back into the snapshot so trend-aware rules see a multi-sample window.
 	// Failure here is non-fatal; rules degrade to point-in-time checks.
 	progressFrom(ctx).step(ctx, "evaluating rules")
-	attachJVMHistory(&snap)
+	attachJVMHistory(ctx, &snap)
 	return snap, rules.Evaluate(snap, catalog), nil
 }
 
 // attachJVMHistory opens the local samples store, calls AttachJVMHistory and
 // AttachFDHistory, and closes the connection. Failure is silent — history is
 // an enhancement, not a contract.
-func attachJVMHistory(snap *snapshot.Snapshot) {
-	if len(snap.JVMs) == 0 && !snapHasOpenFDs(snap) {
+func attachJVMHistory(ctx context.Context, snap *snapshot.Snapshot) {
+	if ctx.Err() != nil || (len(snap.JVMs) == 0 && !snapHasOpenFDs(snap)) {
 		return
 	}
 	db, err := openStore()
@@ -1721,8 +1827,8 @@ func attachJVMHistory(snap *snapshot.Snapshot) {
 		return
 	}
 	defer db.Close()
-	_ = db.AttachJVMHistory(context.Background(), snap)
-	_ = db.AttachFDHistory(context.Background(), snap)
+	_ = db.AttachJVMHistory(ctx, snap)
+	_ = db.AttachFDHistory(ctx, snap)
 }
 
 // snapHasOpenFDs reports whether any process in the snapshot has a positive
@@ -1736,19 +1842,18 @@ func snapHasOpenFDs(snap *snapshot.Snapshot) bool {
 	return false
 }
 
-func persistFindings(snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
+func persistFindings(ctx context.Context, snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
 	db, err := openStore()
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
-	return persistFindingsWithDB(db, snap, findings)
+	return persistFindingsWithDB(ctx, db, snap, findings)
 }
 
-func persistFindingsWithDB(db *store.DB, snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
-	if err := db.SaveSnapshot(context.Background(), store.FromSnapshot(snap)); err != nil {
-		return nil, err
-	}
+// persistFindingsWithDB stores snap and its issue updates in one transaction:
+// a cancel before the commit leaves neither.
+func persistFindingsWithDB(ctx context.Context, db *store.DB, snap snapshot.Snapshot, findings []rules.Finding) ([]string, error) {
 	inputs := make([]store.FindingInput, 0, len(findings))
 	for _, f := range findings {
 		inputs = append(inputs, store.FindingInput{RuleID: f.RuleID, Subject: f.Subject, Severity: string(f.Severity), Message: f.Message, Fix: f.Fix})
@@ -1760,7 +1865,7 @@ func persistFindingsWithDB(db *store.DB, snap snapshot.Snapshot, findings []rule
 	if machineUUID == "" {
 		machineUUID = "local"
 	}
-	return db.UpsertIssues(context.Background(), machineUUID, snap.ID, inputs)
+	return db.SaveSnapshotAndUpsertIssues(ctx, store.FromSnapshot(snap), machineUUID, inputs)
 }
 
 func (s *Server) jvmOptions(ctx context.Context) jvm.CollectOptions {

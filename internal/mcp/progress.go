@@ -63,7 +63,7 @@ func (s *Server) newProgress(req *sdk.CallToolRequest) *progressReporter {
 
 // progressClock times progress. It is wall time even when tests fix the result
 // clock, so rate limiting and elapsed reports see time pass.
-func (s *Server) progressClock() time.Time { return time.Now() }
+func (s *Server) progressClock() time.Time { return s.wall().Now() }
 
 // report sends progress (out of total, 0 when unknown) unless the last
 // notification was under progressMinGap ago or progress has not advanced.
