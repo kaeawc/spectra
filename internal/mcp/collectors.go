@@ -44,7 +44,10 @@ type Collectors struct {
 	TimeMachine TimeMachineCollector
 	CoreFiles   CoreFileInspector
 	Playbooks   PlaybookCatalog
-	Clock       Clock
+	// Reports supplies the host seams of the CLI-shaped report tools (load,
+	// orphans, idle, owner, spawns); nil fields use the real host.
+	Reports ReportDeps
+	Clock   Clock
 }
 
 type AppInspector interface {
@@ -172,6 +175,7 @@ func defaultCollectors() Collectors {
 		TimeMachine: defaultTimeMachineCollector{},
 		CoreFiles:   defaultCoreFileInspector{},
 		Playbooks:   defaultPlaybookCatalog{},
+		Reports:     defaultReportDeps(),
 		Clock:       systemClock{},
 	}
 }

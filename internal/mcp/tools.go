@@ -36,7 +36,7 @@ type toolEnvelope struct {
 }
 
 func toolDefinitions() []ToolDefinition {
-	return []ToolDefinition{
+	defs := []ToolDefinition{
 		triageToolDef(),
 		inspectAppToolDef(),
 		snapshotToolDef(),
@@ -62,6 +62,7 @@ func toolDefinitions() []ToolDefinition {
 		{Name: "host_health", Description: "Current daemon host health and optional recent samples.", InputSchema: objectSchema(map[string]interface{}{"samples": integerProp("Recent samples to include (0..240).")}, nil)},
 		{Name: "alerts", Description: "List or acknowledge daemon alerts.", InputSchema: objectSchema(map[string]interface{}{"action": enumProp([]string{"list", "ack"}, "list"), "state": enumProp([]string{"firing", "resolved", "all"}, "firing"), "limit": integerProp("Maximum alerts (1..2000)."), "id": stringProp("Alert ID for ack.")}, nil)},
 	}
+	return append(defs, reportToolDefinitions()...)
 }
 
 func powerToolDef() ToolDefinition {

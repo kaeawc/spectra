@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +21,7 @@ const (
 	// ownerExitUnderIncomplete: --under saw nobody, but some processes could
 	// not be read, so the tree may still be in use.
 	ownerExitUnderIncomplete = 4
-	ownerTimeout             = 30 * time.Second
+	ownerTimeout             = owner.DefaultTimeout
 )
 
 const ownerUsage = `usage: spectra owner [--json] [--timeout 30s] <target>
@@ -50,10 +49,10 @@ some processes could not be read (re-run with sudo before removing the tree).
 `
 
 // ownerFind resolves a target; tests substitute it.
-type ownerFind func(ctx context.Context, t owner.Target) (owner.Result, error)
+type ownerFind = owner.FindFunc
 
 // ownerUnder lists processes working under directories; tests substitute it.
-type ownerUnder func(ctx context.Context, dirs []string) (owner.UnderResult, error)
+type ownerUnder = owner.UnderFunc
 
 func runOwner(args []string) int {
 	cwd, _ := os.Getwd()
@@ -89,13 +88,10 @@ func runOwnerWithIO(args []string, stdout, stderr io.Writer, cwd string, find ow
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	res, err := find(ctx, t)
+	res, err := owner.BuildReport(ctx, t, find)
 	if err != nil {
 		fmt.Fprintf(stderr, "owner: %v\n", err)
 		return ownerExitError
-	}
-	if res.Holders == nil {
-		res.Holders = []owner.Holder{}
 	}
 	if *asJSON {
 		if err := writeOwnerJSON(stdout, res); err != nil {
@@ -138,25 +134,12 @@ func runOwnerUnder(args []string, stdout, stderr io.Writer, cwd string, asJSON b
 		fmt.Fprint(stderr, ownerUsage)
 		return ownerExitUsage
 	}
-	dirs := make([]string, len(args))
-	for i, a := range args {
-		if !filepath.IsAbs(a) {
-			a = filepath.Join(cwd, a)
-		}
-		dirs[i] = filepath.Clean(a)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	res, err := under(ctx, dirs)
+	res, err := owner.BuildUnderReport(ctx, owner.AbsDirs(args, cwd), under)
 	if err != nil {
 		fmt.Fprintf(stderr, "owner: %v\n", err)
 		return ownerExitError
-	}
-	if res.Holders == nil {
-		res.Holders = []owner.Holder{}
-	}
-	if res.Dirs == nil {
-		res.Dirs = dirs
 	}
 	if asJSON {
 		if err := writeOwnerJSON(stdout, res); err != nil {

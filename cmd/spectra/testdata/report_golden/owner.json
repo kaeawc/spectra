@@ -1,0 +1,23 @@
+{
+  "target": {
+    "kind": "port",
+    "raw": ":8080",
+    "port": 8080
+  },
+  "holders": [
+    {
+      "pid": 20,
+      "user": "jason",
+      "command": "app",
+      "started": "2026-11-20T11:00:00Z",
+      "hold": "listen",
+      "detail": "tcp *:8080",
+      "chain": [
+        {
+          "pid": 1,
+          "command": "launchd"
+        }
+      ]
+    }
+  ]
+}

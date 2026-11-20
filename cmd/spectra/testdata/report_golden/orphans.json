@@ -1,0 +1,70 @@
+{
+  "roots": [
+    "/tmp/work"
+  ],
+  "groups": [
+    {
+      "root": "/tmp/work",
+      "worktree": "/private/tmp/work/gone",
+      "worktree_removed": false,
+      "processes": [
+        {
+          "pid": 11,
+          "user": "me",
+          "age_seconds": 3600,
+          "rss_kib": 4096,
+          "cpu_pct": 0,
+          "cwd": "/private/tmp/work/gone",
+          "cwd_missing": true,
+          "cwd_unreadable": false,
+          "command": "gradle",
+          "command_line": "gradle",
+          "descendants": 0,
+          "subtree_rss_kib": 4096,
+          "daemon_by_design": false,
+          "origin": {
+            "known": false,
+            "reason": "spectra daemon is not running, so no spawn origins were recorded"
+          }
+        }
+      ],
+      "rss_kib": 4096
+    },
+    {
+      "root": "/tmp/work",
+      "worktree": "/private/tmp/work/wt1",
+      "worktree_removed": false,
+      "processes": [
+        {
+          "pid": 10,
+          "user": "me",
+          "age_seconds": 3600,
+          "rss_kib": 2048,
+          "cpu_pct": 0,
+          "cwd": "/private/tmp/work/wt1/sub",
+          "cwd_missing": false,
+          "cwd_unreadable": false,
+          "command": "node",
+          "command_line": "node",
+          "descendants": 0,
+          "subtree_rss_kib": 2048,
+          "daemon_by_design": false,
+          "origin": {
+            "known": false,
+            "reason": "spectra daemon is not running, so no spawn origins were recorded"
+          }
+        }
+      ],
+      "rss_kib": 2048
+    }
+  ],
+  "total": 2,
+  "daemon_by_design_total": 0,
+  "skipped_unreadable_cwd": 1,
+  "limitations": [
+    "PPID 1 is a heuristic: per-user launchd/systemd services, tools that daemonize on purpose, and anything started with nohup/disown also have PPID 1.",
+    "This list is evidence, not a kill list: a candidate with descendants may be the parent of live work.",
+    "Processes whose working directory cannot be read (other users) are skipped and counted.",
+    "Origins come from the running daemon's spawn probe (every 5s by default, held in memory only): a process whose parent exited within one probe, or that started before the daemon, has an unknown origin."
+  ]
+}

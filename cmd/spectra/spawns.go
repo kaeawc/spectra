@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,42 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaeawc/spectra/internal/clock"
-	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/spawntrace"
 )
 
 // spawnsDeps are the seams runSpawnsWithIO needs; tests replace them.
-type spawnsDeps struct {
-	collect  func(ctx context.Context) []process.Info
-	ticker   func(time.Duration) (<-chan time.Time, func())
-	deadline func(time.Duration) (<-chan time.Time, func())
-	clock    clock.Clock
-	selfPID  int
-}
+type spawnsDeps = spawntrace.Deps
 
-func defaultSpawnsDeps() spawnsDeps {
-	return spawnsDeps{
-		collect: func(ctx context.Context) []process.Info {
-			// Skip per-process libproc detail and the physical-memory
-			// lookup: spawn tracing only needs pid, ppid, command and start.
-			return process.CollectAll(ctx, process.CollectOptions{
-				DetailCollector: func([]process.Info) map[int]process.Details { return nil },
-				MemoryBytes:     func() uint64 { return 0 },
-			})
-		},
-		ticker: func(d time.Duration) (<-chan time.Time, func()) {
-			t := time.NewTicker(d)
-			return t.C, t.Stop
-		},
-		deadline: func(d time.Duration) (<-chan time.Time, func()) {
-			t := time.NewTimer(d)
-			return t.C, func() { t.Stop() }
-		},
-		clock:   clock.Default,
-		selfPID: os.Getpid(),
-	}
-}
+func defaultSpawnsDeps() spawnsDeps { return spawntrace.DefaultDeps() }
 
 func runSpawns(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -65,18 +37,21 @@ func runSpawnsWithIO(ctx context.Context, args []string, stdout, stderr io.Write
 			"if that process exits mid-trace its tracked descendants are still followed.\n\n", spawntrace.PollingNote)
 		fs.PrintDefaults()
 	}
-	interval := fs.Duration("interval", 250*time.Millisecond, "Polling interval (processes shorter than this can be missed)")
-	duration := fs.Duration("duration", 10*time.Second, "How long to trace (Ctrl-C stops early)")
+	def := spawntrace.DefaultOptions()
+	interval := fs.Duration("interval", def.Interval, "Polling interval (processes shorter than this can be missed)")
+	duration := fs.Duration("duration", def.Duration, "How long to trace (Ctrl-C stops early)")
 	pid := fs.Int("pid", 0, "Only trace this process and its descendants")
 	asJSON := fs.Bool("json", false, "Emit one JSON object per event line and a final summary object")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || *interval <= 0 || *duration <= 0 || *pid < 0 {
+	opts := spawntrace.Options{Interval: *interval, Duration: *duration, PID: *pid}
+	verr := opts.Validate()
+	if fs.NArg() != 0 || errors.Is(verr, spawntrace.ErrInvalidOptions) {
 		fmt.Fprintln(stderr, "spawns: --interval and --duration must be positive, --pid must not be negative, and no arguments are accepted")
 		return 2
 	}
-	if *interval > *duration {
+	if verr != nil {
 		fmt.Fprintln(stderr, "spawns: --interval must not exceed --duration")
 		return 2
 	}
@@ -100,25 +75,14 @@ func runSpawnsWithIO(ctx context.Context, args []string, stdout, stderr io.Write
 		write("%s\n", formatSpawnEvent(e))
 	}
 
-	sum := spawntrace.Run(ctx, spawntrace.Config{
-		Collect:  deps.collect,
-		Ticker:   deps.ticker,
-		Deadline: deps.deadline,
-		Clock:    deps.clock,
-		Interval: *interval,
-		Duration: *duration,
-		Root:     *pid,
-		Emit:     emit,
-		Notify: func(msg string) {
-			if *asJSON {
-				fmt.Fprintf(stderr, "spawns: %s\n", msg)
-				return
-			}
-			write("NOTE: %s\n", msg)
-		},
-
-		IgnoreChildrenOf: deps.selfPID,
-	})
+	notify := func(msg string) {
+		if *asJSON {
+			fmt.Fprintf(stderr, "spawns: %s\n", msg)
+			return
+		}
+		write("NOTE: %s\n", msg)
+	}
+	sum := spawntrace.Run(ctx, opts.Config(deps, emit, notify))
 
 	if sum.RootNotFound {
 		fmt.Fprintf(stderr, "spawns: pid %d not found in the process table\n", *pid)

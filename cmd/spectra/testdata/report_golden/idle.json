@@ -1,0 +1,66 @@
+{
+  "roots": [
+    "/work/lane"
+  ],
+  "pids": [
+    21,
+    555
+  ],
+  "min_age_seconds": 600,
+  "max_cpu_pct": 1,
+  "window_ms": 5000,
+  "cpu_basis": "window",
+  "incomplete": true,
+  "hint": "some processes' working directories could not be read (other users); re-run with sudo",
+  "result": {
+    "holders": [
+      {
+        "pid": 20,
+        "ppid": 1,
+        "command": "slot",
+        "cwd": "/work/lane",
+        "matched": "/work/lane",
+        "started": "2026-11-20T11:00:00Z",
+        "age_seconds": 3600,
+        "cpu_pct": 0,
+        "tree_cpu_pct": 0.1,
+        "descendants": [
+          {
+            "pid": 21,
+            "ppid": 20,
+            "command": "slot",
+            "cpu_pct": 0.1,
+            "started": "2026-11-20T11:00:00Z",
+            "wait": {
+              "wchan": "futex_wait_queue",
+              "lock_files": [
+                "/work/lane/slot.lock"
+              ]
+            }
+          }
+        ],
+        "descendants_total": 1,
+        "chain": [
+          {
+            "pid": 1,
+            "command": "init"
+          }
+        ]
+      }
+    ],
+    "checked": 2,
+    "skipped_young": 0,
+    "skipped_busy": 0,
+    "skipped_unmeasured": 0,
+    "nested": 1,
+    "missing_pids": [
+      555
+    ]
+  },
+  "limitations": [
+    "Evidence only: nothing is signalled. A process that is legitimately waiting (a server between requests, an editor, a shell) also looks idle.",
+    "CPU is summed over the process and all its descendants for one window; a descendant started during the window counts as activity.",
+    "A process whose CPU could not be measured, or whose working directory could not be read, is never reported.",
+    "Spectra, its ancestors and its descendants are excluded."
+  ]
+}

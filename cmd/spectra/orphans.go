@@ -3,124 +3,27 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/kaeawc/spectra/internal/classify"
-	"github.com/kaeawc/spectra/internal/daemon"
-	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/orphans"
-	"github.com/kaeawc/spectra/internal/process"
-	"github.com/kaeawc/spectra/internal/spawnorigin"
-	"github.com/kaeawc/spectra/internal/watchclient"
 )
 
 // orphansDeps are the seams runOrphansWithIO uses so tests need no real host.
-type orphansDeps struct {
-	Procs func(ctx context.Context) []process.Info
-	// Cwds must keep the Linux " (deleted)" suffix so orphans can see removed directories.
-	Cwds         func(ctx context.Context, pids []int) map[int]string
-	Stat         func(string) error
-	Now          func() time.Time
-	Getwd        func() (string, error)
-	Pid          func() int
-	Abs          func(string) (string, error)
-	EvalSymlinks func(string) (string, error)
-	// Origins asks the running daemon for recorded spawn origins; nil
-	// means no daemon, so every origin is unknown.
-	Origins func(ctx context.Context, queries []spawnorigin.Query) orphans.OriginSource
-	// Roles classifies recorded ancestors; nil leaves roles empty.
-	Roles orphans.RoleFunc
-}
+type orphansDeps = orphans.ReportDeps
 
-func lstat(p string) error {
-	_, err := os.Lstat(p)
-	return err
-}
+type orphansReport = orphans.Report
 
-func defaultOrphansDeps() orphansDeps {
-	d := defaultLoadDeps()
-	return orphansDeps{
-		Procs: d.Procs, Cwds: d.Host.CwdsRaw, Stat: lstat, Now: d.Now,
-		Getwd: os.Getwd, Pid: os.Getpid, Abs: filepath.Abs, EvalSymlinks: filepath.EvalSymlinks,
-		Origins: queryDaemonOrigins, Roles: argvRoles,
-	}
-}
+func defaultOrphansDeps() orphansDeps { return orphans.DefaultReportDeps() }
 
-const originNoDaemon = "spectra daemon is not running, so no spawn origins were recorded"
+const originNoDaemon = orphans.OriginNoDaemon
 
-// queryDaemonOrigins asks an already-running daemon; it never starts one.
-func queryDaemonOrigins(ctx context.Context, queries []spawnorigin.Query) orphans.OriginSource {
-	if watchclient.Disabled(os.Getenv) {
-		return orphans.OriginSource{Unavailable: "daemon access is disabled (SPECTRA_NO_DAEMON)"}
-	}
-	paths, err := daemon.DefaultPaths(os.Getenv, os.UserHomeDir, runtime.GOOS)
-	if err != nil {
-		return orphans.OriginSource{Unavailable: originNoDaemon}
-	}
-	c, ok := watchclient.Connect(ctx, os.Getenv, paths)
-	if !ok {
-		return orphans.OriginSource{Unavailable: originNoDaemon}
-	}
-	defer c.Close()
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	var all spawnorigin.Response
-	for len(queries) > 0 {
-		n := min(len(queries), spawnorigin.MaxQueries)
-		resp, err := c.Origins(ctx, queries[:n])
-		if err != nil {
-			return orphans.OriginSource{Unavailable: originLookupError(err)}
-		}
-		answers := append(all.Answers, resp.Answers...)
-		all, all.Answers = resp, answers
-		queries = queries[n:]
-	}
-	return orphans.OriginSource{Response: all}
-}
-
-func originLookupError(err error) string {
-	var rpcErr *daemonclient.RPCError
-	if errors.As(err, &rpcErr) && rpcErr.Code == daemon.CodeMethodNotFound {
-		return "the running daemon predates spawn-origin recording; restart it to record origins"
-	}
-	return fmt.Sprintf("daemon origin lookup failed: %v", err)
-}
-
-// argvRoles classifies from the recorded name and argv only: dead ancestors
-// have no executable to inspect, and skipping it keeps codesign out.
-func argvRoles(inputs []classify.Input) []classify.Role {
-	res, _ := classify.New(classify.Options{}).Classify(context.Background(), inputs)
-	out := make([]classify.Role, len(res))
-	for i, r := range res {
-		out[i] = r.Role
-	}
-	return out
-}
-
-var orphansLimitations = []string{
-	"PPID 1 is a heuristic: per-user launchd/systemd services, tools that daemonize on purpose, and anything started with nohup/disown also have PPID 1.",
-	"This list is evidence, not a kill list: a candidate with descendants may be the parent of live work.",
-	"Processes whose working directory cannot be read (other users) are skipped and counted.",
-	"Origins come from the running daemon's spawn probe (every 5s by default, held in memory only): a process whose parent exited within one probe, or that started before the daemon, has an unknown origin.",
-}
-
-type orphansReport struct {
-	Roots       []string        `json:"roots"`
-	Groups      []orphans.Group `json:"groups"`
-	Total       int             `json:"total"`
-	DaemonTotal int             `json:"daemon_by_design_total"`
-	Skipped     int             `json:"skipped_unreadable_cwd"`
-	Limitations []string        `json:"limitations"`
-}
+func originLookupError(err error) string { return orphans.OriginLookupError(err) }
 
 func runOrphans(args []string) int {
 	return runOrphansWithIO(args, os.Stdout, os.Stderr, defaultOrphansDeps())
@@ -151,7 +54,7 @@ Exit codes:
 `)
 	}
 	asJSON := fs.Bool("json", false, "Emit JSON instead of text")
-	minAge := fs.Duration("min-age", time.Minute, "Ignore processes younger than this")
+	minAge := fs.Duration("min-age", orphans.DefaultMinAge, "Ignore processes younger than this")
 	showPIDs := fs.Bool("pids", false, "Print a space-separated pid line for non-daemon candidates (review before use)")
 	noDaemon := fs.Bool("no-daemon", false, "Do not ask the running daemon for recorded spawn origins")
 	var roots stringList
@@ -163,42 +66,16 @@ Exit codes:
 		fmt.Fprintln(stderr, "spectra orphans: invalid arguments (see --help)")
 		return 2
 	}
-	if len(roots) == 0 {
-		wd, err := deps.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "spectra orphans: current directory: %v\n", err)
-			return 1
-		}
-		roots = stringList{wd}
+	rep, err := orphans.BuildReport(context.Background(), orphans.ReportOptions{Roots: roots, MinAge: *minAge, NoDaemon: *noDaemon}, deps)
+	if err != nil {
+		fmt.Fprintf(stderr, "spectra orphans: %v\n", err)
+		return 1
 	}
-
-	ctx := context.Background()
-	procs := deps.Procs(ctx)
-	pids := make([]int, len(procs))
-	for i, p := range procs {
-		pids[i] = p.PID
-	}
-	resolved := resolveRoots(roots, deps.Abs, deps.EvalSymlinks)
-	res := orphans.Find(procs, deps.Cwds(ctx, pids), orphans.Options{
-		Roots: resolved, MinAge: *minAge, Now: deps.Now(), SelfPID: deps.Pid(), Stat: deps.Stat,
-	})
-	origins := orphans.OriginSource{Unavailable: originNoDaemon}
-	switch {
-	case *noDaemon:
-		origins.Unavailable = "daemon access is disabled (--no-daemon)"
-	case deps.Origins != nil && res.Total+res.DaemonTotal > 0:
-		origins = deps.Origins(ctx, orphans.Queries(res, procs))
-	}
-	orphans.AttachOrigins(&res, procs, origins, deps.Roles)
-	rep := orphansReport{Roots: []string(roots), Groups: res.Groups, Total: res.Total, DaemonTotal: res.DaemonTotal, Skipped: res.Skipped, Limitations: orphansLimitations}
-	if rep.Groups == nil {
-		rep.Groups = []orphans.Group{}
-	}
-	if err := writeOrphans(stdout, rep, res.PIDs(), *asJSON, *showPIDs); err != nil {
+	if err := writeOrphans(stdout, rep, rep.PIDs(), *asJSON, *showPIDs); err != nil {
 		fmt.Fprintf(stderr, "spectra orphans: write output: %v\n", err)
 		return 1
 	}
-	if res.Total > 0 {
+	if rep.Total > 0 {
 		return 3
 	}
 	return 0

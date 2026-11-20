@@ -1,0 +1,15 @@
+{
+  "roots": [
+    "/nowhere"
+  ],
+  "groups": [],
+  "total": 0,
+  "daemon_by_design_total": 0,
+  "skipped_unreadable_cwd": 1,
+  "limitations": [
+    "PPID 1 is a heuristic: per-user launchd/systemd services, tools that daemonize on purpose, and anything started with nohup/disown also have PPID 1.",
+    "This list is evidence, not a kill list: a candidate with descendants may be the parent of live work.",
+    "Processes whose working directory cannot be read (other users) are skipped and counted.",
+    "Origins come from the running daemon's spawn probe (every 5s by default, held in memory only): a process whose parent exited within one probe, or that started before the daemon, has an unknown origin."
+  ]
+}

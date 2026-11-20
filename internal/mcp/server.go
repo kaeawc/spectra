@@ -51,6 +51,7 @@ func (s *Server) SetCollectors(c Collectors) {
 	defaults := defaultCollectors()
 	c = mergeInspectionCollectors(c, defaults)
 	c = mergeHostStateCollectors(c, defaults)
+	c.Reports = mergeReportDeps(c.Reports, defaults.Reports)
 	if c.Clock == nil {
 		c.Clock = defaults.Clock
 	}
@@ -264,7 +265,7 @@ func (s *Server) handleToolsCall(req Request) {
 // handleToolsCall flat and makes the exposed surface easy to audit against
 // toolDefinitions.
 func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
-	return map[string]func(json.RawMessage) ToolResult{
+	handlers := map[string]func(json.RawMessage) ToolResult{
 		"triage":      s.toolTriage,
 		"inspect_app": s.toolInspectApp,
 		"snapshot":    s.toolSnapshot,
@@ -290,6 +291,10 @@ func (s *Server) toolHandlers() map[string]func(json.RawMessage) ToolResult {
 		"host_health": s.toolHostHealth,
 		"alerts":      s.toolAlerts,
 	}
+	for name, h := range s.reportToolHandlers() {
+		handlers[name] = h
+	}
+	return handlers
 }
 
 func (s *Server) handleResourcesList(req Request) {

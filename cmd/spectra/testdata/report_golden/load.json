@@ -1,0 +1,95 @@
+{
+  "verdict": "admit",
+  "reason": "1-minute load 1.00 is below the limit 6.00 and available memory 16.0 GiB is at least 8.0 GiB",
+  "exit_code": 0,
+  "load1": 1,
+  "load_limit": 6,
+  "cpus": 4,
+  "available_gb": 16,
+  "min_free_gb": 8,
+  "backoff_free_gb": 4,
+  "cause": {
+    "kind": "roots",
+    "detail": "worktree wt1 under /r leads the CPU table",
+    "cpu_pct": 90,
+    "root": "/r",
+    "worktree": "wt1"
+  },
+  "top_cpu": [
+    {
+      "pid": 10,
+      "command": "go",
+      "cpu_pct": 90,
+      "rss_kib": 1024,
+      "cwd": "/r/wt1/sub",
+      "dir": "/r/wt1"
+    },
+    {
+      "pid": 11,
+      "command": "mystery",
+      "cpu_pct": 5,
+      "rss_kib": 2048,
+      "dir": "unknown"
+    }
+  ],
+  "top_rss": [
+    {
+      "pid": 11,
+      "command": "mystery",
+      "cpu_pct": 5,
+      "rss_kib": 2048,
+      "dir": "unknown"
+    },
+    {
+      "pid": 10,
+      "command": "go",
+      "cpu_pct": 90,
+      "rss_kib": 1024,
+      "cwd": "/r/wt1/sub",
+      "dir": "/r/wt1"
+    }
+  ],
+  "families": [
+    {
+      "name": "go",
+      "kind": "other",
+      "members": 1,
+      "cpu_pct": 90,
+      "rss_kib": 1024
+    },
+    {
+      "name": "mystery",
+      "kind": "other",
+      "members": 1,
+      "cpu_pct": 5,
+      "rss_kib": 2048
+    }
+  ],
+  "dirs": [
+    {
+      "dir": "/r/wt1",
+      "procs": 1,
+      "cpu_pct": 90,
+      "rss_kib": 1024
+    }
+  ],
+  "unknown": {
+    "dir": "unknown",
+    "procs": 1,
+    "cpu_pct": 5,
+    "rss_kib": 2048
+  },
+  "devices": {
+    "simulators": 0,
+    "emulators": 0,
+    "booted": 0,
+    "booted_recently": 0,
+    "boot_window_seconds": 300,
+    "by_root": [],
+    "list": []
+  },
+  "cpu_window_ms": 0,
+  "cpu_basis": "lifetime",
+  "elapsed_ms": 0,
+  "process_count": 2
+}

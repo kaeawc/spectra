@@ -33,14 +33,14 @@ func TestRunSpawnsTextAndJSON(t *testing.T) {
 		tables := [][]process.Info{mk(false), mk(true), mk(false)}
 		n := 0
 		return spawnsDeps{
-			collect: func(context.Context) []process.Info {
+			Collect: func(context.Context) []process.Info {
 				clk.Advance(time.Second)
 				i := n
 				n++
 				return tables[i%len(tables)]
 			},
-			ticker: func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} },
-			clock:  clk,
+			Ticker: func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} },
+			Clock:  clk,
 		}
 	}
 
@@ -79,11 +79,11 @@ func TestRunSpawnsTextAndJSON(t *testing.T) {
 func TestRunSpawnsUnknownPID(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	deps := spawnsDeps{
-		collect: func(context.Context) []process.Info {
+		Collect: func(context.Context) []process.Info {
 			return []process.Info{{PID: 1, Command: "launchd", StartTime: t0}}
 		},
-		ticker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} },
-		clock:  clock.NewFake(t0),
+		Ticker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} },
+		Clock:  clock.NewFake(t0),
 	}
 	var out, errBuf bytes.Buffer
 	code := runSpawnsWithIO(context.Background(), []string{"--pid", "4242", "--duration", "1h"}, &out, &errBuf, deps)

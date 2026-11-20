@@ -3,21 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idle"
-	"github.com/kaeawc/spectra/internal/owner"
-	"github.com/kaeawc/spectra/internal/proc"
-	"github.com/kaeawc/spectra/internal/process"
 )
 
 const (
@@ -28,73 +22,11 @@ const (
 )
 
 // idleDeps are the seams runIdleWithIO uses so tests need no real host.
-type idleDeps struct {
-	Sample func(ctx context.Context, window time.Duration) (idle.Sample, error)
-	// Cwds returns working directories and whether some could not be read.
-	Cwds  func(ctx context.Context, procs []process.Info) (map[int]string, bool, error)
-	Waits func(ctx context.Context, pids []int) map[int]*idle.Wait
-	// Under matches a cwd against a root's spellings; nil is path-only.
-	Under        func(cwd string, roots []string) bool
-	Stat         func(string) (os.FileInfo, error)
-	Now          func() time.Time
-	Pid          func() int
-	Getwd        func() (string, error)
-	Abs          func(string) (string, error)
-	EvalSymlinks func(string) (string, error)
-}
+type idleDeps = idle.ReportDeps
 
-func defaultIdleDeps() idleDeps {
-	osk := hostos.Resolve(hostos.Unknown)
-	collect := func(ctx context.Context) []process.Info {
-		return process.CollectAll(ctx, process.CollectOptions{
-			OS: osk, Runner: proc.Default,
-			DetailCollector: func([]process.Info) map[int]process.Details { return map[int]process.Details{} },
-		})
-	}
-	sampler := idle.HostSampler{OS: osk, Runner: proc.Default, Collect: collect, Now: time.Now, Sleep: sleepCtx}
-	finder := owner.Finder{OS: osk}
-	return idleDeps{
-		Sample:       sampler.Sample,
-		Cwds:         finder.Cwds,
-		Waits:        idle.WaitReader{OS: osk}.Read,
-		Under:        finder.NewCwdMatcher().Under,
-		Stat:         os.Stat,
-		Now:          time.Now,
-		Pid:          os.Getpid,
-		Getwd:        os.Getwd,
-		Abs:          filepath.Abs,
-		EvalSymlinks: filepath.EvalSymlinks,
-	}
-}
+type idleReport = idle.Report
 
-func sleepCtx(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-	case <-ctx.Done():
-	}
-}
-
-var idleLimitations = []string{
-	"Evidence only: nothing is signalled. A process that is legitimately waiting (a server between requests, an editor, a shell) also looks idle.",
-	"CPU is summed over the process and all its descendants for one window; a descendant started during the window counts as activity.",
-	"A process whose CPU could not be measured, or whose working directory could not be read, is never reported.",
-	"Spectra, its ancestors and its descendants are excluded.",
-}
-
-type idleReport struct {
-	Roots         []string    `json:"roots,omitempty"`
-	PIDs          []int       `json:"pids,omitempty"`
-	MinAgeSeconds int64       `json:"min_age_seconds"`
-	MaxCPUPct     float64     `json:"max_cpu_pct"`
-	WindowMS      int64       `json:"window_ms"`
-	CPUBasis      string      `json:"cpu_basis"`
-	Incomplete    bool        `json:"incomplete,omitempty"`
-	Hint          string      `json:"hint,omitempty"`
-	Result        idle.Result `json:"result"`
-	Limitations   []string    `json:"limitations"`
-}
+func defaultIdleDeps() idleDeps { return idle.DefaultReportDeps() }
 
 type idleFlags struct {
 	asJSON  bool
@@ -137,16 +69,17 @@ Exit codes:
 `)
 	}
 	fs.BoolVar(&f.asJSON, "json", false, "Emit JSON instead of text")
-	fs.DurationVar(&f.minAge, "min-age", 10*time.Minute, "Only processes alive at least this long")
-	fs.Float64Var(&f.maxCPU, "max-cpu", 1, "Idle means the process plus descendants used under this percent of one CPU")
-	fs.DurationVar(&f.window, "window", 5*time.Second, "CPU sample window")
-	fs.DurationVar(&f.timeout, "timeout", time.Minute, "Give up (exit 1) after this long")
+	def := idle.DefaultReportOptions()
+	fs.DurationVar(&f.minAge, "min-age", def.MinAge, "Only processes alive at least this long")
+	fs.Float64Var(&f.maxCPU, "max-cpu", def.MaxCPU, "Idle means the process plus descendants used under this percent of one CPU")
+	fs.DurationVar(&f.window, "window", def.Window, "CPU sample window")
+	fs.DurationVar(&f.timeout, "timeout", def.Timeout, "Give up (exit 1) after this long")
 	fs.StringVar(&f.pids, "pids", "", "Comma-separated pids to check (with or instead of --root)")
 	fs.Var(&f.roots, "root", "Directory whose processes are checked (repeatable; default: the current directory unless --pids)")
 	if err := fs.Parse(args); err != nil {
 		return f, false
 	}
-	if fs.NArg() > 0 || f.minAge < 0 || f.maxCPU <= 0 || f.window < 100*time.Millisecond || f.timeout <= f.window {
+	if fs.NArg() > 0 || f.options(nil).Validate() != nil {
 		fmt.Fprintln(stderr, "spectra idle: invalid arguments (need --max-cpu > 0, --window >= 100ms, --timeout > --window; see --help)")
 		return f, false
 	}
@@ -163,19 +96,7 @@ func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
 		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
 		return idleExitUsage
 	}
-	if len(f.roots) == 0 && len(pids) == 0 {
-		wd, err := deps.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "spectra idle: current directory: %v\n", err)
-			return idleExitError
-		}
-		f.roots = stringList{wd}
-	}
-	if err := checkIdleRoots(f.roots, deps); err != nil {
-		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
-		return idleExitError
-	}
-	rep, err := collectIdle(f, pids, deps)
+	rep, err := idle.BuildReport(context.Background(), f.options(pids), deps)
 	if err != nil {
 		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
 		return idleExitError
@@ -196,76 +117,8 @@ func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
 	return idleExitNone
 }
 
-// checkIdleRoots rejects a root that is not an existing directory: matching
-// nothing under it would read as "no idle holders".
-func checkIdleRoots(roots []string, deps idleDeps) error {
-	if deps.Stat == nil {
-		return nil
-	}
-	for _, r := range roots {
-		fi, err := deps.Stat(r)
-		if err != nil {
-			return fmt.Errorf("--root %s: %w", r, err)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("--root %s is not a directory", r)
-		}
-	}
-	return nil
-}
-
-func collectIdle(f idleFlags, pids []int, deps idleDeps) (idleReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
-	defer cancel()
-	s, err := deps.Sample(ctx, f.window)
-	if err != nil {
-		return idleReport{}, err
-	}
-	if s.Basis != idle.BasisWindow || s.Window <= 0 {
-		return idleReport{}, fmt.Errorf("CPU could not be measured over a window (basis %q), so idleness is unknown", s.Basis)
-	}
-	if len(s.Procs) == 0 {
-		return idleReport{}, errors.New("the process list is empty (ps or /proc could not be read)")
-	}
-	rep := idleReport{
-		Roots: []string(f.roots), PIDs: pids, MinAgeSeconds: int64(f.minAge / time.Second), MaxCPUPct: f.maxCPU,
-		WindowMS: s.Window.Milliseconds(), CPUBasis: s.Basis, Limitations: idleLimitations,
-	}
-	var cwds map[int]string
-	if len(f.roots) > 0 {
-		var denied bool
-		cwds, denied, err = deps.Cwds(ctx, s.Procs)
-		if err != nil {
-			return idleReport{}, err
-		}
-		if denied {
-			rep.Incomplete = true
-			rep.Hint = "some processes' working directories could not be read (other users); re-run with sudo"
-		}
-	}
-	rep.Result = idle.Find(s, cwds, idle.Options{
-		Roots: idleRoots(f.roots, deps), PIDs: pids, MinAge: f.minAge, MaxCPUPct: f.maxCPU,
-		Now: deps.Now(), SelfPID: deps.Pid(), Under: deps.Under,
-	})
-	if len(rep.Result.Holders) > 0 {
-		rep.Result.AttachWaits(deps.Waits(ctx, rep.Result.Pids()))
-	}
-	if err := ctx.Err(); err != nil {
-		return idleReport{}, fmt.Errorf("gave up after --timeout %s: %w", f.timeout, err)
-	}
-	return rep, nil
-}
-
-func idleRoots(roots []string, deps idleDeps) []idle.Root {
-	var out []idle.Root
-	for _, r := range resolveRoots(roots, deps.Abs, deps.EvalSymlinks) {
-		path := r.Path
-		if a, err := deps.Abs(path); err == nil {
-			path = filepath.Clean(a)
-		}
-		out = append(out, idle.Root{Path: path, Resolved: r.Resolved})
-	}
-	return out
+func (f idleFlags) options(pids []int) idle.ReportOptions {
+	return idle.ReportOptions{Roots: f.roots, PIDs: pids, MinAge: f.minAge, MaxCPU: f.maxCPU, Window: f.window, Timeout: f.timeout}
 }
 
 func printIdle(w io.Writer, rep idleReport) {
