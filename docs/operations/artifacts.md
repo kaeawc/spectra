@@ -40,7 +40,7 @@ spectra jvm heap-dump [--out <path>] <pid>
 spectra jvm jfr start <pid> [--name spectra]
 spectra jvm jfr dump <pid> [--name spectra] [--out <path>]
 spectra jvm jfr stop <pid> [--name spectra] [--out <path>]
-spectra sample [--no-cache] [--duration <s>] [--interval <ms>] <pid>
+spectra sample [--no-cache] [--json] [--duration <s>] [--interval <ms>] <pid>
 spectra network capture start ...
 spectra network capture stop ...
 ```
