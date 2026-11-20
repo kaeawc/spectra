@@ -116,18 +116,33 @@ Notably absent:
   path. Each method has a fixed source.
 - **No arbitrary command execution.** Each method invokes exactly one
   pre-defined system command with structured arguments.
-- **Mutation methods only per the reviewed designs listed here.** Today
-  the helper observes and changes no system state. A mutating method is
-  added only after its own design, threat-model update, security review and
-  owner approval (issue #600), one method per step:
-    - *Proposed, not approved:*
-      [helper launchd mutation](helper-launchd-mutation.md) —
+- **System configuration mutation only per the reviewed designs listed
+  here.** Today the helper changes no system configuration: it does not
+  change launchd jobs or overrides, preferences, privacy databases, or
+  installed software. It does write files of its own: `net_capture`
+  creates the capture directories under `/var/tmp/spectra-netcap`, then a
+  root-owned `0600` pcap in the caller's subdirectory, and chowns the pcap
+  to the caller when the capture completes. A method that
+  changes system configuration is added only after its own design,
+  threat-model update, security review and owner approval (issue #600).
+  Each step is **one reviewed method family**, the methods that apply one
+  change and its exact inverse to one kind of target, and it ships as a
+  single step:
+    - *Step 1, proposed, not implemented:*
+      [helper launchd mutation](helper-launchd-mutation.md). The family is
+      disable/enable of a system launch daemon:
       `helper.launchd.system.prepare`, `.disable` and `.enable` for a
       `/Library/LaunchDaemons` job owned by a verified third-party bundle.
-      It takes a label only, re-derives and verifies every path itself,
-      never deletes, needs a single-use confirmation token and an
-      `admin`-group caller, `enable` also bootstraps an unloaded daemon, and
-      it always refuses labels and team ids in a root-owned denylist
+      `disable` and `enable` count as one step because they are inverses on
+      the same target. They share every check, the token, the denylist and
+      the audit format, so the review covers both at once. Shipping
+      `disable` alone would leave users no supported way to undo it except
+      `sudo launchctl`. It takes a label only, re-derives and verifies every
+      path itself, never deletes, needs a single-use confirmation token bound
+      to the planned commands and an `admin`-group caller. `enable` also
+      bootstraps an unloaded daemon. It refuses configuration-profile
+      managed daemons it can detect, and it always refuses labels and team
+      ids in a root-owned denylist
       (`/Library/Application Support/Spectra/helper-denylist.plist`).
 
 ## Wire protocol
