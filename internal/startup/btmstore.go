@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -135,7 +136,15 @@ func (e env) btmUID(key, me string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return int(int32(uint32(n))), true // #nosec G115 -- uids are 32-bit; FFFFFFFE is nobody (-2)
+	// uids are 32-bit two's complement: FFFFFFFE is nobody (-2).
+	v := int64(n)
+	if v > math.MaxInt32 {
+		v -= 1 << 32
+	}
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return 0, false
+	}
+	return int(v), true
 }
 
 func (e env) userUUID(ctx context.Context) (string, error) {
