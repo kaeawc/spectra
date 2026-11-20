@@ -14,6 +14,7 @@ import (
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
 	"github.com/kaeawc/spectra/internal/proc"
+	"github.com/kaeawc/spectra/internal/spawnorigin"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -58,6 +59,9 @@ type ServiceOptions struct {
 	// JVMHistory defaults to Store when it implements JVMHistoryStore.
 	JVMSource  JVMSource
 	JVMHistory JVMHistoryStore
+	// OriginMaxRecords bounds the in-memory spawn-origin store; zero picks
+	// spawnorigin.DefaultMaxRecords.
+	OriginMaxRecords int
 }
 type subscriber struct {
 	ch      chan notification
@@ -88,6 +92,7 @@ type Service struct {
 	spawnPersistDropped  uint64
 	spawnPersistWarnAt   time.Time
 	spawnPersisted       map[string]spawnPersistRecord
+	origins              *spawnorigin.Store
 	window               []Sample
 	current              Sample
 	subscribers          map[*subscriber]struct{}
@@ -122,12 +127,13 @@ func NewService(opts ServiceOptions) *Service {
 		opts.Notifier = NoopNotifier{}
 	}
 	if opts.SpawnBackend == nil {
-		opts.SpawnBackend = newSpawnBackend()
+		opts.SpawnBackend = newSpawnBackend(opts.Logger)
 	}
 	if opts.UID == nil {
 		opts.UID = currentUID
 	}
 	svc := &Service{opts: opts, engine: NewEngine(opts.IDs), subscribers: map[*subscriber]struct{}{}, interval: opts.Interval, spawnPersisted: map[string]spawnPersistRecord{}}
+	svc.origins = spawnorigin.NewStore(spawnorigin.Options{MaxRecords: opts.OriginMaxRecords, UID: opts.UID()})
 	svc.initSustained()
 	svc.initJVMSampler()
 	if collector, ok := opts.Collector.(*Collector); ok && collector.Spawn == nil {

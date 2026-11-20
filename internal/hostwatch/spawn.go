@@ -15,6 +15,9 @@ type SpawnProcess struct {
 	PPID int
 	UID  int
 	Comm string
+	// Start is the process start time; zero when the backend cannot read it,
+	// which leaves the process out of origin recording.
+	Start time.Time
 }
 
 type SpawnBackend interface {
@@ -214,7 +217,7 @@ func spawnDetail(s SpawnState) string {
 
 func currentUID() int { return os.Getuid() }
 
-func (s *Service) TickSpawn(_ context.Context) error {
+func (s *Service) TickSpawn(ctx context.Context) error {
 	if s.opts.SpawnBackend == nil {
 		return nil
 	}
@@ -223,6 +226,7 @@ func (s *Service) TickSpawn(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("spawn process list: %w", err)
 	}
+	s.recordOrigins(ctx, started, processes)
 	state, conditions := s.sampleSpawn(started, processes)
 	events, item, previous := s.publishSpawn(state, conditions)
 	for _, event := range events {

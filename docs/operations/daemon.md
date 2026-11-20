@@ -55,7 +55,7 @@ below 0.5%.
 
 An independent process-spawn probe runs every five seconds, including while a
 regular sample is blocked or backed off. On macOS it reads `kern.proc.all` and
-on Linux it reads `/proc`; neither backend forks. It counts new PIDs since the
+on Linux it reads `/proc`; neither backend forks to list processes. It counts new PIDs since the
 previous probe and the current user's processes. It keeps the latest 120 probes
 in memory. When a process condition fires or escalates, it queues one sample
 for background storage and includes the five busiest parents and commands in the
@@ -66,6 +66,21 @@ notification failures are logged without retrying the probe.
 The fast probe logs an overrun and skips a probe if collection exceeds its
 interval; a minute of probe work over 1% daemon CPU is logged without changing
 the fast interval.
+
+The same probe records spawn origins for `spectra orphans`. For each of the
+daemon user's processes it keeps, keyed by (pid, start time) so a reused pid
+never inherits another process's record: the parent it had when first seen
+(kept after reparenting), that parent's name, and the first probe that no
+longer saw it (the exit was at most one probe earlier). For processes that are
+some recorded process's parent it also reads argv and cwd while they live, at
+most 32 per probe; on Linux by reading `/proc`, on macOS with one batched
+`lsof -p` call per probe that finds new parents (the only fork the probe
+makes). The store is memory only and bounded to 4,096 records (argv and cwd
+truncated): exited records no live process descends from are dropped after 24
+hours or evicted first when full, then exited ancestors of live processes,
+then the oldest live records. Records are lost when the daemon restarts, and a
+process whose parent exited within one probe of its start is seen already
+reparented, so its origin is unknown.
 
 `spawn.rate` warns at 40 new PIDs/s for two consecutive probes and is critical
 at 120/s for one. `procs.uid` warns at 40% and is critical at 70% of
@@ -204,7 +219,8 @@ in the Spectra SQLite database. `SPECTRA_WATCH_DB` overrides the database path
 for isolated runs. Process metrics are aggregated each minute. The RPC methods
 are `watch.current`, `watch.samples` (`since`, `limit`), `alerts.list` (`state`,
 `limit`), `alerts.ack` (`id`), `alerts.subscribe` (`samples`), and
-`process.history` (`pid`, `limit`). A subscription sends `alerts.event`
+`process.history` (`pid`, `limit`), and `process.origins` (`processes`: up to
+4,096 `{pid, start_time}` pairs; a start time matches within two seconds). A subscription sends `alerts.event`
 notifications and optionally `watch.sample` notifications until its connection
 closes. Slow subscribers can miss events; clients can recover from the stored
 history. Desktop notifications are best effort, capped at six per hour and
@@ -217,7 +233,7 @@ The CLI and stdio MCP server discover the running local daemon through its Unix
 socket. They never start it automatically. Run `spectra daemon start` or install
 the per-user service before using alert and host-health commands.
 `SPECTRA_NO_DAEMON=1` and `--no-daemon` apply to daemon-consuming commands:
-`spectra alerts`, `spectra whatswrong` enrichment, and the MCP `host_health`,
+`spectra alerts`, `spectra whatswrong` enrichment, `spectra orphans` origins, and the MCP `host_health`,
 `alerts`, and process-history tools. The `spectra daemon start|stop|status|logs`
 subcommands ignore this flag and environment variable because they manage the
 daemon itself rather than acting as its clients. The CLI warns about a daemon

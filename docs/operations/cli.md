@@ -315,12 +315,12 @@ when it hit the bound) and a `hint` naming the action: exclude the root, or
 shrink it. Nothing is written or changed. On Linux each entry carries only
 `unsupported`.
 
-`spectra storage --spotlight` runs only `mdutil -s <mount>`, a read. It no longer
+`spectra storage --spotlight` runs only `mdutil -sa` and `mdutil -s <mount>`, both reads. It no longer
 runs `mdutil -p` (which flushes network caches), so the per-volume `progress`
 field is never set and is omitted from the JSON; the field is kept in the schema
 for compatibility.
 
-`spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--json]` finds
+`spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--no-daemon] [--json]` finds
 leftover processes from worktrees and finished jobs: parent pid 1, a readable
 working directory under a root (default: the current directory), and older than
 `--min-age`. Spectra itself and its ancestors are excluded. PPID 1 is a
@@ -344,6 +344,20 @@ are flagged `daemon_by_design: true`, shown in a trailing "Probably intentional
 to review; the command never kills anything. Processes with an unreadable
 working directory are skipped and counted. Exit codes: `0` none found, `3`
 non-daemon orphans found, `1` runtime or output error, `2` usage error.
+
+Each candidate also carries an `origin` from the running daemon's spawn
+records (see [Daemon](daemon.md)); the command never starts the daemon.
+`known: true` means the daemon saw the process with its original parent:
+`parent` has that parent's pid, start time, name, `command_line`, `cwd`, whether
+it is `alive`, and `exited_at` (the first probe that no longer saw it). The
+recorded ancestors are classified by role from their name and argv only (dead
+processes have no executable to inspect): `session` is the nearest ancestor
+that is an `ai_agent`, `terminal` or `shell`, and `agent` the nearest
+`ai_agent`, live or dead. Without the daemon (or with `--no-daemon` or
+`SPECTRA_NO_DAEMON=1`), without a start time, without a matching record, or
+when the daemon first saw the process already reparented, `known` is false and
+`reason` says why. Text output adds an `origin:` line under candidates with a
+known origin.
 
 `spectra startup [list] [--json] [--scope user|system|all] [--include-apple]`
 lists what launches at login or boot on macOS, one row per item: launchd

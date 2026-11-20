@@ -1,20 +1,37 @@
 package hostwatch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/kaeawc/spectra/internal/logger"
 )
 
-type platformSpawnBackend struct{}
+// platformSpawnBackend reads btime until a read succeeds, then keeps it: btime
+// can drift by about a second between reads, which would shift every start
+// time and split lifetimes. A failed read is retried on the next call and
+// warned about once.
+type platformSpawnBackend struct {
+	boot *bootTimer
+}
 
-func newSpawnBackend() SpawnBackend { return platformSpawnBackend{} }
+func newSpawnBackend(log logger.Logger) SpawnBackend {
+	if log == nil {
+		log = logger.Discard()
+	}
+	return platformSpawnBackend{boot: &bootTimer{read: func() ([]byte, error) { return os.ReadFile("/proc/stat") }, log: log}}
+}
 
-func (platformSpawnBackend) List() ([]SpawnProcess, error) {
+func (b platformSpawnBackend) bootTime() time.Time { return b.boot.get() }
+
+func (b platformSpawnBackend) List() ([]SpawnProcess, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("read /proc: %w", err)
@@ -25,7 +42,7 @@ func (platformSpawnBackend) List() ([]SpawnProcess, error) {
 		if err != nil || pid <= 0 || !entry.IsDir() {
 			continue
 		}
-		p, err := readLinuxSpawnProcess(pid)
+		p, err := readLinuxSpawnProcess(pid, b.bootTime())
 		if err == nil {
 			out = append(out, p)
 		}
@@ -33,7 +50,7 @@ func (platformSpawnBackend) List() ([]SpawnProcess, error) {
 	return out, nil
 }
 
-func readLinuxSpawnProcess(pid int) (SpawnProcess, error) {
+func readLinuxSpawnProcess(pid int, btime time.Time) (SpawnProcess, error) {
 	base := filepath.Join("/proc", strconv.Itoa(pid))
 	stat, err := os.ReadFile(filepath.Join(base, "stat"))
 	if err != nil {
@@ -69,7 +86,18 @@ func readLinuxSpawnProcess(pid int) (SpawnProcess, error) {
 	if uid < 0 || err != nil {
 		return SpawnProcess{}, fmt.Errorf("invalid uid pid %d", pid)
 	}
-	return SpawnProcess{PID: pid, PPID: ppid, UID: uid, Comm: text[left+1 : right]}, nil
+	return SpawnProcess{PID: pid, PPID: ppid, UID: uid, Comm: text[left+1 : right], Start: linuxStart(fields, btime)}, nil
+}
+
+// Cwds readlinks /proc/<pid>/cwd, keeping a " (deleted)" suffix.
+func (platformSpawnBackend) Cwds(_ context.Context, pids []int) map[int]string {
+	out := make(map[int]string, len(pids))
+	for _, pid := range pids {
+		if d, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "cwd")); err == nil && d != "" {
+			out[pid] = d
+		}
+	}
+	return out
 }
 
 func (platformSpawnBackend) Argv(pid int) (string, error) {

@@ -2,4 +2,6 @@
 
 package hostwatch
 
-func newSpawnBackend() SpawnBackend { return nil }
+import "github.com/kaeawc/spectra/internal/logger"
+
+func newSpawnBackend(_ logger.Logger) SpawnBackend { return nil }
