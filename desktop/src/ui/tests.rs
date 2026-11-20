@@ -1206,14 +1206,15 @@ fn live_readings_feed_the_charts_while_the_page_is_open() {
         ("network", Ok(crate::live::tests::NET)),
         ("impact", Err("impact: not available here")),
     ]));
-    for i in 0..3 {
+    // Past the rest and the backoff each time; the energy reading fails four times and stops.
+    for i in 0..4 {
         rt.update(move |s, _| {
-            s.now = 100.0 + 10.0 * i as f64;
+            s.now = 100.0 + 100.0 * i as f64;
             s.tick_inspector();
         });
         run_held(&mut rt);
     }
-    assert_eq!(rt.state.inspect.net.points.len(), 3);
+    assert_eq!(rt.state.inspect.net.points.len(), 4);
     assert!(rt.find("live-lane-in").is_some() && rt.find("live-lane-out").is_some());
     assert_eq!(text_of(&rt, "live-lane-in-now").as_deref(), Some("2.7 MB/s"));
     assert_eq!(text_of(&rt, "pd-energy-off").as_deref(), Some("Energy impact: impact: not available here"));

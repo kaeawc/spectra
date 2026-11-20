@@ -70,6 +70,13 @@ fn setup(s: &mut App, wake: rune::Waker) {
     }
 }
 
+/// Quitting stops every Spectra job the pages started (a memtrace can run 20 s), and waits a
+/// moment for them to be killed, since the process ends right after.
+fn on_quit(s: &mut App, _: &mut Tx) {
+    s.inspect.cancel_all();
+    run::wait_idle(Duration::from_secs(2));
+}
+
 fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     let status = s.feed_status();
     s.now = clock;
@@ -142,5 +149,5 @@ fn main() {
         on_key: Some(ui::on_key),
         ..AppSpec::new("Spectra", (1100.0, 700.0), app::init, ui::view)
     };
-    rune::App::new(spec).chrome(chrome).run();
+    rune::App::new(spec).chrome(chrome).on_quit(on_quit).run();
 }

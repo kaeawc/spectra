@@ -9,8 +9,19 @@ use serde::Deserialize;
 
 /// Points kept per series: a few minutes at one every few seconds.
 pub const POINTS: usize = 60;
-/// How long the page rests after a round lands before the next.
-pub const REST: f64 = 2.0;
+/// How long the page rests after a round lands before the next. A round costs about half a
+/// core while Spectra samples (network top alone measured 131% CPU over 2.3 s), so this stays at
+/// 10 s or more.
+pub const REST: f64 = 10.0;
+/// How many times in a row a series may fail and be tried again before it's turned off.
+pub const RETRIES: u32 = 3;
+/// The extra wait after a first failure; it doubles with each failure after.
+pub const BACKOFF: f64 = 5.0;
+
+/// The extra rest after `fails` failures in a row: none after a success.
+pub fn backoff(fails: u32) -> f64 {
+    if fails == 0 { 0.0 } else { BACKOFF * f64::from(1u32 << (fails - 1).min(6)) }
+}
 /// How long network top watches, in seconds.
 pub const NET_SECS: u64 = 2;
 pub const NET_DEADLINE: Duration = Duration::from_secs(15);
@@ -90,16 +101,30 @@ pub fn parse_impact(json: &str, pids: &[u32]) -> Result<Option<f64>, String> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Series<T> {
     pub points: VecDeque<T>,
-    /// Set once a reading failed; the page stops asking for this series until it's opened again.
+    /// Set once a reading failed more than [`RETRIES`] times in a row; the page stops asking for
+    /// this series until it's opened again.
     pub off: Option<String>,
+    /// Failures in a row, reset by a reading.
+    pub fails: u32,
 }
 
 impl<T> Series<T> {
     pub fn push(&mut self, v: T) {
+        self.fails = 0;
         self.points.push_back(v);
         if self.points.len() > POINTS {
             self.points.pop_front();
         }
+    }
+
+    /// Notes a failed reading: the series is turned off, with `why`, once it has failed
+    /// [`RETRIES`] times after the first. Returns the extra rest before the next try.
+    pub fn fail(&mut self, why: String) -> f64 {
+        self.fails += 1;
+        if self.fails > RETRIES {
+            self.off = Some(why);
+        }
+        backoff(self.fails)
     }
 }
 
@@ -163,6 +188,28 @@ pub(crate) mod tests {
         assert!(parse_impact("{}", &[5]).is_err());
         assert_eq!(fmt_score(7.75), "7.8");
         assert_eq!(fmt_score(20.1), "20");
+    }
+
+    #[test]
+    fn the_rest_between_rounds_is_at_least_ten_seconds() {
+        const { assert!(REST >= 10.0) };
+    }
+
+    #[test]
+    fn a_series_retries_with_backoff_before_it_gives_up() {
+        let mut s: Series<u8> = Series::default();
+        assert_eq!(s.fail("x".into()), 5.0);
+        assert_eq!(s.fail("x".into()), 10.0);
+        assert_eq!(s.fail("x".into()), 20.0);
+        assert_eq!(s.off, None, "three failures are still retried");
+        s.push(1);
+        assert_eq!(s.fails, 0, "a reading starts the count over");
+        for _ in 0..RETRIES {
+            s.fail("x".into());
+        }
+        assert_eq!(s.off, None);
+        s.fail("gone".into());
+        assert_eq!(s.off.as_deref(), Some("gone"));
     }
 
     #[test]

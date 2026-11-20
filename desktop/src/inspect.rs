@@ -194,14 +194,19 @@ impl Inspector {
         self.runs.insert(tool, ToolRun { state, job: 0, cancel: Arc::new(AtomicBool::new(false)) });
     }
 
-    /// Forgets the last page's work, stopping whatever of it still runs.
-    fn reset(&mut self, subject: Option<Subject>) {
+    /// Asks every job in flight (tools, live round, bundle) to stop.
+    pub fn cancel_all(&mut self) {
         for r in self.runs.values() {
             r.cancel.store(true, Ordering::Relaxed);
         }
         for f in [self.live.take(), self.bundle_job.take()].into_iter().flatten() {
             f.cancel.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// Forgets the last page's work, stopping whatever of it still runs.
+    fn reset(&mut self, subject: Option<Subject>) {
+        self.cancel_all();
         self.runs.clear();
         self.net = Series::default();
         self.energy = Series::default();
@@ -213,6 +218,13 @@ impl Inspector {
     fn next_job(&mut self) -> (u64, Arc<AtomicBool>) {
         self.job += 1;
         (self.job, Arc::new(AtomicBool::new(false)))
+    }
+}
+
+impl Drop for Inspector {
+    /// The app state going away stops its jobs, if nothing asked sooner.
+    fn drop(&mut self) {
+        self.cancel_all();
     }
 }
 
@@ -372,18 +384,34 @@ impl App {
         );
     }
 
+    /// `pids` and everything they started, so energy covers what network does.
+    fn with_descendants(&self, pids: &[u32]) -> Vec<u32> {
+        let mut all: Vec<u32> = pids.to_vec();
+        let mut i = 0;
+        while i < all.len() {
+            let parent = all[i];
+            for c in self.children(parent) {
+                if !all.contains(&c.pid) {
+                    all.push(c.pid);
+                }
+            }
+            i += 1;
+        }
+        all
+    }
+
     /// The pids a live round reads energy for, and the pid whose network (with its
     /// descendants') it reads. `None` when there's nothing running to read.
     fn live_targets(&self) -> Option<(Vec<u32>, u32)> {
         match self.inspect.subject.as_ref()? {
             Subject::Process { pid, .. } => {
                 let listed = self.process(*pid).is_some() && self.ended_page().is_none();
-                (listed || self.jvm(*pid).is_some()).then(|| (vec![*pid], *pid))
+                (listed || self.jvm(*pid).is_some()).then(|| (self.with_descendants(&[*pid]), *pid))
             }
             Subject::App(path) => {
-                let pids: Vec<u32> = self.app_procs(path).iter().map(|p| p.pid).collect();
+                let own: Vec<u32> = self.app_procs(path).iter().map(|p| p.pid).collect();
                 let lead = self.app_lead(path)?;
-                Some((pids, lead))
+                Some((self.with_descendants(&own), lead))
             }
         }
     }
@@ -493,17 +521,18 @@ impl App {
                     return;
                 }
                 i.live = None;
-                i.next_live = now + live::REST;
+                let mut extra = 0f64;
                 match round.net {
                     Some(Ok(p)) => i.net.push(p),
-                    Some(Err(why)) => i.net.off = Some(why),
+                    Some(Err(why)) => extra = extra.max(i.net.fail(why)),
                     None => {}
                 }
                 match round.energy {
                     Some(Ok(Some(v))) => i.energy.push(v),
-                    Some(Err(why)) => i.energy.off = Some(why),
+                    Some(Err(why)) => extra = extra.max(i.energy.fail(why)),
                     Some(Ok(None)) | None => {}
                 }
+                i.next_live = now + live::REST + extra;
             }
             Landed::Bundle { job, result } => {
                 if i.bundle_job.as_ref().is_none_or(|f| f.job != job) {
@@ -687,6 +716,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_late_answer_does_not_land_on_the_same_tool_run_again_on_the_returned_page() {
+        let (mut s, _) = faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::Sample);
+        s.open(900);
+        s.open(7);
+        s.run_tool(Tool::Sample);
+        let work = match &s.inspect.exec {
+            Exec::Held(q) => std::mem::take(&mut *q.lock().unwrap()),
+            Exec::Thread => unreachable!(),
+        };
+        assert_eq!(work.len(), 2, "the old sample and the new one");
+        let mut work = work.into_iter();
+        // The old job's answer arrives while the new one is still running: only the job number
+        // tells them apart.
+        s.land_inspected((work.next().unwrap())());
+        assert!(matches!(s.inspect.state(Tool::Sample), Some(RunState::Running { .. })), "the old answer was dropped");
+        s.land_inspected((work.next().unwrap())());
+        assert!(matches!(s.inspect.state(Tool::Sample), Some(RunState::Done(_))));
+    }
+
+    #[test]
     fn live_rounds_run_one_at_a_time_while_the_page_is_open() {
         let (mut s, fake) = faked(Fake::all());
         s.open(7);
@@ -714,17 +765,51 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_failed_live_series_stops_and_says_why() {
+    fn a_failed_live_series_is_retried_with_backoff_before_it_stops() {
         let (mut s, fake) = faked(Fake::with(&[("network", Ok(crate::live::tests::NET)), ("impact", Err("impact: not supported on linux"))]));
+        s.open(900);
+        let impacts = |f: &Fake| f.calls().iter().filter(|c| c[0] == "impact").count();
+        let mut waits = Vec::new();
+        for _ in 0..=live::RETRIES {
+            s.tick_inspector();
+            s.run_held_inspect();
+            waits.push(s.inspect.next_live - s.now);
+            s.now = s.inspect.next_live;
+        }
+        assert_eq!(impacts(&fake), 4, "the first try and three retries");
+        assert_eq!(waits, [15.0, 20.0, 30.0, 50.0]);
+        assert_eq!(s.inspect.energy.off.as_deref(), Some("impact: not supported on linux"));
+        s.tick_inspector();
+        s.run_held_inspect();
+        assert_eq!(s.inspect.net.points.len(), 5, "network kept going");
+        assert_eq!(impacts(&fake), 4, "not asked again");
+    }
+
+    #[test]
+    fn energy_sums_the_process_and_its_descendants() {
+        let (mut s, _) = faked(Fake::all());
+        let mine = |p: Process| Process { uid: 501, ..p };
+        let child = |pid, ppid| mine(Process { ppid, ..proc(pid, "x", 0.0, 1.0) });
+        s.land_procs(Ok(vec![mine(proc(900, "Chat", 2.0, 1000.0)), child(901, 900), child(77, 901), child(5, 1)]));
         s.open(900);
         s.tick_inspector();
         s.run_held_inspect();
-        assert_eq!(s.inspect.energy.off.as_deref(), Some("impact: not supported on linux"));
-        s.now += live::REST;
+        assert_eq!(s.inspect.energy.points.back(), Some(&27.85), "900 + child 901 + grandchild 77, not the unrelated pid");
+    }
+
+    #[test]
+    fn cancel_all_stops_every_job_in_flight() {
+        let (mut s, _) = faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::Memtrace);
+        s.now = 5.0;
         s.tick_inspector();
-        s.run_held_inspect();
-        assert_eq!(s.inspect.net.points.len(), 2);
-        assert_eq!(fake.calls().iter().filter(|c| c[0] == "impact").count(), 1, "not asked again");
+        let mut flags: Vec<_> = s.inspect.runs.values().map(|r| Arc::clone(&r.cancel)).collect();
+        flags.push(Arc::clone(&s.inspect.live.as_ref().expect("a live round").cancel));
+        assert_eq!(flags.len(), 2);
+        assert!(flags.iter().all(|f| !f.load(Ordering::Relaxed)));
+        s.inspect.cancel_all();
+        assert!(flags.iter().all(|f| f.load(Ordering::Relaxed)));
     }
 
     #[test]

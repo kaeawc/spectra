@@ -2,13 +2,65 @@
 //! or floods its pipe can't freeze the numbers.
 
 use std::io::Read;
-use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 /// How often a running command is checked on.
 const CHECK: Duration = Duration::from_millis(25);
+
+/// Commands started here that haven't finished stopping or exiting.
+static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts one run in [`RUNNING`] for as long as it lives.
+struct Running;
+
+impl Running {
+    fn new() -> Running {
+        RUNNING.fetch_add(1, Ordering::SeqCst);
+        Running
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Waits until every run has finished (a cancelled one finishes within a check or two), or
+/// `limit` passes. True when none is left. Used at quit, so cancelled jobs are killed before the
+/// process exits.
+pub fn wait_idle(limit: Duration) -> bool {
+    let start = Instant::now();
+    while RUNNING.load(Ordering::SeqCst) > 0 {
+        if start.elapsed() >= limit {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+/// Kills the process group `child` leads, then `child` itself. The group exists only because
+/// [`run_until`] made the child its leader (`process_group(0)`), so its id is the child's pid and
+/// holds only what the child started. Must run before the child is reaped, while the pid can't
+/// belong to anyone else.
+fn kill_group(child: &mut Child) {
+    let pgid = child.id();
+    // Never a group-wide kill for pid 0 or 1, which would reach our own group or everything.
+    if pgid > 1 && i32::try_from(pgid).is_ok() {
+        let _ = Command::new("/bin/kill")
+            .args(["-KILL", "--", &format!("-{pgid}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
 
 #[derive(Debug)]
 pub struct Output {
@@ -81,9 +133,12 @@ pub fn run(cmd: Command, deadline: Duration, cap: usize) -> Result<Output, RunEr
     })
 }
 
-/// [`run`], also killing it once `cancel` is set. Only the command it started is stopped.
+/// [`run`], also killing it once `cancel` is set. The command runs in a process group of its
+/// own, and stopping it stops that group: its children go too, and nothing else.
 pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<Output, Ended> {
+    let _running = Running::new();
     let mut child = cmd
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -94,7 +149,7 @@ pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &Atom
     let start = Instant::now();
     let (mut stdout, mut stderr) = (None, None);
     let stop = |child: &mut std::process::Child, why: Ended| {
-        let _ = child.kill();
+        kill_group(child);
         let _ = child.wait();
         Err(why)
     };
@@ -177,6 +232,66 @@ pub(crate) mod tests {
         let start = Instant::now();
         assert_eq!(run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(), Ended::Cancelled);
         assert!(start.elapsed() < Duration::from_secs(20), "it didn't wait for the sleep");
+    }
+
+    /// Whether `pid` is alive and not a zombie. Only ever asked about pids this test started.
+    fn alive(pid: u32) -> bool {
+        let out = Command::new("/bin/ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout);
+        let stat = stat.trim();
+        !stat.is_empty() && !stat.starts_with('Z')
+    }
+
+    fn wait_gone(pid: u32) -> bool {
+        let start = Instant::now();
+        while alive(pid) && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        !alive(pid)
+    }
+
+    /// A shell that starts a `sleep` grandchild and prints its pid, then waits on it.
+    fn grandparent(name: &str) -> (PathBuf, PathBuf) {
+        let pidfile = std::env::temp_dir().join(format!("spectra-desktop-{}-{name}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        let body = format!("sleep 60 &\necho $! > {}\nwait", pidfile.display());
+        (script(name, &body), pidfile)
+    }
+
+    fn grandchild_pid(pidfile: &std::path::Path) -> u32 {
+        let start = Instant::now();
+        loop {
+            if let Some(pid) = std::fs::read_to_string(pidfile).ok().and_then(|t| t.trim().parse().ok()) {
+                return pid;
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "the shell never started its sleep");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn cancelling_kills_the_grandchildren_too() {
+        let (bin, pidfile) = grandparent("group-cancel");
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&cancel);
+        let file = pidfile.clone();
+        let waiter = std::thread::spawn(move || {
+            let gc = grandchild_pid(&file);
+            assert!(alive(gc));
+            flag.store(true, Ordering::Relaxed);
+            gc
+        });
+        assert_eq!(run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(), Ended::Cancelled);
+        let gc = waiter.join().unwrap();
+        assert!(wait_gone(gc), "the sleep started by the shell outlived the cancel");
+    }
+
+    #[test]
+    fn a_deadline_kills_the_grandchildren_too() {
+        let (bin, pidfile) = grandparent("group-deadline");
+        let deadline = Duration::from_millis(400);
+        assert_eq!(run(Command::new(&bin), deadline, 1024).unwrap_err(), RunError::Timeout(deadline));
+        assert!(wait_gone(grandchild_pid(&pidfile)), "the sleep started by the shell outlived the deadline");
     }
 
     #[test]
