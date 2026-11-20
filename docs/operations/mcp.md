@@ -17,9 +17,10 @@ version in each request's `_meta`.
 The server advertises the `tools`, `resources` and `prompts` capabilities. The
 set never changes while it runs, so it sends no list-changed notifications.
 Tools that only read carry the `readOnlyHint` annotation. `snapshot`,
-`diagnose`, `jvm`, `network`, `issues`, `cache` and `alerts` do not, because
-some of their operations store snapshots or issues, acknowledge alerts, clear
-the cache, attach to a JVM, invoke an MBean or start a packet capture.
+`diagnose`, `jvm`, `network`, `issues`, `cache`, `alerts` and `triage` do not,
+because some of their operations store snapshots or issues, acknowledge alerts,
+clear the cache, attach to a JVM, invoke an MBean, start a packet capture, or
+save JVM and file-descriptor samples to the local store.
 
 Tool calls and resource reads run one at a time. `ping` and the list methods
 are still answered while a long call such as `spawns` runs.

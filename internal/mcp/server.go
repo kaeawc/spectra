@@ -175,8 +175,9 @@ func (s *Server) sdkServer() *sdk.Server {
 
 // stateChangingTools may change host or Spectra state for some operation
 // (snapshot store, issue status, alert ack, cache clear, JVM attach or MBean
-// invoke, packet capture), so they carry no readOnlyHint. Every other tool
-// only reads.
+// invoke, packet capture, and triage's JVM and file-descriptor samples saved
+// to the local store), so they carry no readOnlyHint. Every other tool only
+// reads.
 var stateChangingTools = map[string]bool{
 	"snapshot": true,
 	"diagnose": true,
@@ -185,6 +186,7 @@ var stateChangingTools = map[string]bool{
 	"issues":   true,
 	"cache":    true,
 	"alerts":   true,
+	"triage":   true,
 }
 
 func sdkTool(def ToolDefinition) *sdk.Tool {
