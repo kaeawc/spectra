@@ -3628,6 +3628,12 @@
       "uri": "spectra://capabilities"
     },
     {
+      "description": "Compact host load, memory pressure and thermal state in JSON.",
+      "mimeType": "application/json",
+      "name": "Host Health",
+      "uri": "spectra://host/health"
+    },
+    {
       "description": "Short app, JVM, network, and baseline workflows.",
       "mimeType": "text/markdown",
       "name": "Debug Workflows",

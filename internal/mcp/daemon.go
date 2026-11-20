@@ -291,11 +291,14 @@ func newHostHealthDoc(s hostwatch.Sample, daemonUp bool, activeAlerts []hostwatc
 // readHostHealth serves the daemon's current sample, or samples the host
 // locally when the daemon is not running.
 func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
-	s.callMu.Lock()
-	defer s.callMu.Unlock()
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var sample hostwatch.Sample
 	var alerts []hostwatch.Alert
-	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+	err = s.withDaemon(ctx, func(ctx context.Context, client daemonWatchClient) error {
 		var callErr error
 		sample, alerts, callErr = client.Current(ctx)
 		return callErr
