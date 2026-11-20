@@ -253,8 +253,6 @@ func signingEvidence(v signingVerdict) string {
 	switch {
 	case v.Signing.Validated && v.FinderMetadata:
 		return fmt.Sprintf("signing: %s validated by codesign --verify; %s; %s", shown, codesignout.FinderMetadataEvidence, disk)
-	case v.Signing.Validated && v.FinderMetadata:
-		return fmt.Sprintf("signing: %s validated by codesign --verify; %s; %s", shown, codesignout.FinderMetadataEvidence, disk)
 	case v.Signing.Validated:
 		return fmt.Sprintf("signing: %s validated by %s; %s", shown, strictVerify, disk)
 	case v.Signing.Status == SigningInvalid:
