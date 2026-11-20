@@ -96,7 +96,8 @@ type liveHub struct {
 
 	daemonKnown      bool
 	daemonUp         bool
-	level            healthLevel
+	level            healthLevel // hysteresis state, advanced on every sample
+	notified         healthLevel // the level last sent in a notification
 	haveLevel        bool
 	lastHealthNotify time.Time
 	localSample      hostwatch.Sample
@@ -217,6 +218,10 @@ func (h *liveHub) dropSession(ss *sdk.ServerSession) {
 func (h *liveHub) decLocked(uri string) {
 	if h.counts[uri]--; h.counts[uri] <= 0 {
 		delete(h.counts, uri)
+		if uri == hostHealthURI {
+			// No sample updates the level without a host-health subscriber.
+			h.haveLevel = false
+		}
 	}
 }
 
@@ -241,8 +246,16 @@ func (h *liveHub) stopIfIdleLocked() {
 	}
 	h.cancel()
 	h.cancel = nil
-	h.stopAlertTimerLocked()
+	h.retireLocked()
 	// A later start waits for this watcher to exit, so at most one runs.
+}
+
+// retireLocked forgets the stopped watcher's state and moves to a new
+// generation, so late updates from the cancelled watcher are ignored.
+func (h *liveHub) retireLocked() {
+	h.gen++
+	h.streamErr = ""
+	h.stopAlertTimerLocked()
 }
 
 func (h *liveHub) stopAlertTimerLocked() {
@@ -260,7 +273,7 @@ func (h *liveHub) close() {
 		h.cancel()
 		h.cancel = nil
 	}
-	h.stopAlertTimerLocked()
+	h.retireLocked()
 	done := h.done
 	h.mu.Unlock()
 	if done != nil {
@@ -325,16 +338,21 @@ func (h *liveHub) followDaemon(ctx context.Context, gen uint64) bool {
 	if ctx.Err() != nil {
 		return true
 	}
-	if err != nil && !got.Load() {
-		// The daemon accepted the connection but cannot stream (an older or
-		// broken daemon): sample locally and retry at the poll pace.
+	if err != nil {
+		// The daemon accepted the connection but its stream failed (an older
+		// or broken daemon, or a stream that broke mid-way): sample locally
+		// and retry at the poll pace.
 		h.setStreamErr(gen, err.Error())
-		return false
+		if !got.Load() {
+			return false
+		}
 	}
+	// Reachability is probed separately: a failed stream says nothing about
+	// whether the daemon still answers requests.
 	probe, ok := h.connect(ctx)
 	if ok {
 		_ = probe.Close()
-		return true
+		return err == nil
 	}
 	h.setDaemon(gen, false)
 	return false
@@ -384,12 +402,21 @@ func (h *liveHub) setDaemon(gen uint64, up bool) {
 	}
 }
 
+// setStreamErr records why the daemon's stream is unusable ("" once it
+// delivers again). The reason changes the firing-alerts content, so a change
+// notifies its subscribers.
 func (h *liveHub) setStreamErr(gen uint64, reason string) {
 	h.mu.Lock()
-	if gen == h.gen {
-		h.streamErr = reason
+	if gen != h.gen || h.streamErr == reason {
+		h.mu.Unlock()
+		return
 	}
+	h.streamErr = reason
+	send := h.counts[firingAlertsURI] > 0
 	h.mu.Unlock()
+	if send {
+		h.notify(firingAlertsURI)
+	}
 }
 
 // alertsUnavailable returns why the daemon's alert stream cannot be used.
@@ -404,7 +431,7 @@ func (h *liveHub) alertsUnavailable() string {
 func (h *liveHub) levelVerdict(daemon bool) (string, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.haveLevel || h.level.daemon != daemon {
+	if !h.haveLevel || h.counts[hostHealthURI] == 0 || h.level.daemon != daemon {
 		return "", false
 	}
 	return h.level.loadVerdict, true
@@ -429,10 +456,10 @@ func (h *liveHub) alertEvent(gen uint64) {
 	h.mu.Unlock()
 }
 
-// observe compares a sample's health level with the last one notified and
-// sends at most one host-health notification per healthMinInterval. A change
-// held back by the interval is sent with the first later sample that still
-// differs.
+// observe advances the health level with every sample and compares it with
+// the last one notified, sending at most one host-health notification per
+// healthMinInterval. A change held back by the interval is sent with the
+// first later sample that still differs.
 func (h *liveHub) observe(gen uint64, sample hostwatch.Sample, daemon bool) {
 	now := h.now()
 	h.mu.Lock()
@@ -451,10 +478,11 @@ func (h *liveHub) observe(gen uint64, sample hostwatch.Sample, daemon bool) {
 	send := false
 	switch {
 	case !h.haveLevel:
-		h.level, h.haveLevel = lvl, true
-	case lvl != h.level && now.Sub(h.lastHealthNotify) >= h.cfg.healthMinInterval:
-		h.level, h.lastHealthNotify, send = lvl, now, true
+		h.notified, h.haveLevel = lvl, true
+	case lvl != h.notified && now.Sub(h.lastHealthNotify) >= h.cfg.healthMinInterval:
+		h.notified, h.lastHealthNotify, send = lvl, now, true
 	}
+	h.level = lvl
 	h.mu.Unlock()
 	if send {
 		h.notify(hostHealthURI)

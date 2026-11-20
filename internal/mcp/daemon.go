@@ -299,6 +299,13 @@ func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest)
 	})
 	switch {
 	case err == nil:
+		if s.alertsUnavailableReason() != "" {
+			// The watcher samples locally while the daemon's stream is
+			// unusable; serve that sample so content matches its updates.
+			if local, lerr := s.localHostSample(ctx); lerr == nil {
+				return jsonResource(hostHealthURI, newHostHealthDoc(local, true, alerts, s.hubVerdict(false)), hostHealthTTLMs)
+			}
+		}
 		return jsonResource(hostHealthURI, newHostHealthDoc(sample, true, alerts, s.hubVerdict(true)), hostHealthTTLMs)
 	case !errors.Is(err, errDaemonUnavailable):
 		return nil, &jsonrpc.Error{Code: -32000, Message: err.Error()}
