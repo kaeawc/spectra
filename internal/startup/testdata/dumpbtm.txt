@@ -1,0 +1,348 @@
+========================
+ Records for UID -2 : 00000000-0000-0000-0000-000000000000
+========================
+
+ ServiceManagement migrated: true
+ LaunchServices registered: false
+
+ Items:
+
+ #1:
+                 UUID: 00000000-0000-0000-0000-000000000001
+                 Name: Example Network Ltd
+       Developer Name: Example Network Ltd
+                 Type: developer (0x20)
+                Flags: [ curated ] (0x4)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: Example Network Ltd
+                  URL: (null)
+           Generation: 0
+  Embedded Item Identifiers:
+    #1: 16.com.example.vpnd
+
+ #2:
+                 UUID: 00000000-0000-0000-0000-000000000002
+                 Name: com.example.vpnd
+       Developer Name: Example Network Ltd
+      Team Identifier: BCDEF23456
+                 Type: legacy daemon (0x10010)
+                Flags: [ legacy, curated ] (0x5)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 16.com.example.vpnd
+                  URL: file:///Library/LaunchDaemons/com.example.vpnd.plist
+      Executable Path: /Library/PrivilegedHelperTools/com.example.vpnd
+           Generation: 1
+    Assoc. Bundle IDs: [ com.example.vpn ]
+    Parent Identifier: Example Network Ltd
+
+ #3:
+                 UUID: 00000000-0000-0000-0000-000000000003
+                 Name: Example Meet
+       Developer Name: (null)
+      Team Identifier: CDEFG34567
+                 Type: app (0x2)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: 2.com.example.meet
+                  URL: file:///Applications/Example%20Meet.app/
+           Generation: 10
+    Bundle Identifier: com.example.meet
+  Embedded Item Identifiers:
+    #1: 16.com.example.meet.daemon
+
+ #4:
+                 UUID: 00000000-0000-0000-0000-000000000004
+                 Name: com.example.meet.daemon
+       Developer Name: Example Meet Inc.
+      Team Identifier: CDEFG34567
+                 Type: legacy daemon (0x10010)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 16.com.example.meet.daemon
+                  URL: file:///Library/LaunchDaemons/com.example.meet.daemon.plist
+      Executable Path: /Library/PrivilegedHelperTools/com.example.meet.daemon
+           Generation: 13
+    Assoc. Bundle IDs: [ com.example.meet ]
+    Parent Identifier: 2.com.example.meet
+
+
+
+========================
+ Records for UID 501 : 00000000-0000-0000-0000-000000000501
+========================
+
+ ServiceManagement migrated: true
+ LaunchServices registered: true
+
+ Items:
+
+ #1:
+                 UUID: 00000000-0000-0000-0000-000000000011
+                 Name: (null)
+       Developer Name: (null)
+                 Type: developer (0x20)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: Unknown Developer
+                  URL: (null)
+           Generation: 1
+
+ #2:
+                 UUID: 00000000-0000-0000-0000-000000000012
+                 Name: example_autoupdate
+       Developer Name: (null)
+                 Type: legacy agent (0x10008)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.autoupdate
+                  URL: file:///Users/user/Library/LaunchAgents/com.example.autoupdate.plist
+      Executable Path: /Users/user/Library/Application Support/com.example.autoupdate/example_autoupdate
+           Generation: 1
+    Parent Identifier: Unknown Developer
+
+
+ #11:
+                 UUID: 00000000-0000-0000-0000-000000000013
+                 Name: Example Notes
+       Developer Name: Example Software Inc.
+      Team Identifier: ABCDE12345
+                 Type: app (0x2)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: 2.com.example.notes
+                  URL: file:///Applications/Example%20Notes.app/
+           Generation: 23
+    Bundle Identifier: com.example.notes
+
+ #12:
+                 UUID: 00000000-0000-0000-0000-000000000014
+                 Name: Example Notes Browser Helper
+       Developer Name: Example Software Inc.
+      Team Identifier: ABCDE12345
+                 Type: login item (0x4)
+                Flags: [ sandboxed ] (0x40)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 4.ABCDE12345.com.example.notes.browser-helper
+                  URL: Contents/Library/LoginItems/Example%20Notes%20Browser%20Helper.app
+           Generation: 1
+    Bundle Identifier: ABCDE12345.com.example.notes.browser-helper
+    Parent Identifier: 2.com.example.notes
+
+ #13:
+                 UUID: 00000000-0000-0000-0000-000000000015
+                 Name: Example Notes Launcher
+       Developer Name: Example Software Inc.
+      Team Identifier: ABCDE12345
+                 Type: login item (0x4)
+                Flags: [ sandboxed ] (0x40)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 4.com.example.notes.launcher
+                  URL: Contents/Library/LoginItems/Example%20Notes%20Launcher.app
+           Generation: 1
+    Bundle Identifier: com.example.notes.launcher
+    Parent Identifier: 2.com.example.notes
+
+ #14:
+                 UUID: 00000000-0000-0000-0000-000000000016
+                 Name: Example Clipboard 2
+       Developer Name: (null)
+      Team Identifier: DEFGH45678
+                 Type: app (0x2)
+                Flags: [  ] (0)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 2.com.example.clipboard
+                  URL: file:///Applications/Example%20Clipboard%202.app/
+           Generation: 1
+    Bundle Identifier: com.example.clipboard
+
+ #15:
+                 UUID: 00000000-0000-0000-0000-000000000017
+                 Name: Example Chat
+       Developer Name: Example Chat LLC
+      Team Identifier: EFGHI56789
+                 Type: app (0x2)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: 2.com.example.chat
+                  URL: file:///Applications/Example%20Chat%20Classic.app/
+           Generation: 14
+    Bundle Identifier: com.example.chat
+
+ #16:
+                 UUID: 00000000-0000-0000-0000-000000000018
+                 Name: ExampleChatHelper
+       Developer Name: (null)
+      Team Identifier: EFGHI56789
+                 Type: agent (0x8)
+                Flags: [  ] (0)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.chat.helper
+                  URL: Contents/Library/LaunchAgents/com.example.chat.helper.plist
+      Executable Path: Contents/Resources/ExampleChatHelper
+           Generation: 19
+    Parent Identifier: 2.com.example.chat
+
+
+ #24:
+                 UUID: 00000000-0000-0000-0000-000000000019
+                 Name: Example Studio
+       Developer Name: (null)
+      Team Identifier: FGHIJ67890
+                 Type: app (0x2)
+                Flags: [ sandboxed ] (0x40)
+          Disposition: [disabled, allowed, notified] (0xa)
+           Identifier: 2.com.example.studio
+                  URL: file:///Applications/Example%20Studio.app/
+           Generation: 2
+    Bundle Identifier: com.example.studio
+
+ #25:
+                 UUID: 00000000-0000-0000-0000-000000000020
+                 Name: ExampleStudioQuickLook.appex
+       Developer Name: (null)
+      Team Identifier: FGHIJ67890
+                 Type: quicklook (0x800)
+                Flags: [ sandboxed ] (0x40)
+          Disposition: [enabled, allowed, not notified] (0x3)
+           Identifier: 2048.com.example.studio.QuickLook
+                  URL: Contents/PlugIns/ExampleStudioQuickLook.appex
+           Generation: 0
+    Bundle Identifier: com.example.studio.QuickLook
+    Parent Identifier: 2.com.example.studio
+
+ #26:
+                 UUID: 00000000-0000-0000-0000-000000000021
+                 Name: ExampleStudioSpotlight.appex
+       Developer Name: (null)
+      Team Identifier: FGHIJ67890
+                 Type: spotlight (0x1000)
+                Flags: [ sandboxed ] (0x40)
+          Disposition: [enabled, allowed, not notified] (0x3)
+           Identifier: 4096.com.example.studio.Spotlight
+                  URL: Contents/Library/Spotlight/ExampleStudioSpotlight.appex
+           Generation: 0
+    Bundle Identifier: com.example.studio.Spotlight
+    Parent Identifier: 2.com.example.studio
+
+ #27:
+                 UUID: 00000000-0000-0000-0000-000000000022
+                 Name: ExampleStudioDockTile.plugin
+       Developer Name: (null)
+      Team Identifier: FGHIJ67890
+                 Type: dock tile (0x2000)
+                Flags: [  ] (0)
+          Disposition: [enabled, allowed, not notified] (0x3)
+           Identifier: 8192.com.example.studio.DockTile
+                  URL: Contents/PlugIns/ExampleStudioDockTile.plugin
+           Generation: 0
+    Bundle Identifier: com.example.studio.DockTile
+    Parent Identifier: 2.com.example.studio
+
+
+ #35:
+                 UUID: 00000000-0000-0000-0000-000000000023
+                 Name: Example Tools s.r.o.
+       Developer Name: Example Tools s.r.o.
+                 Type: developer (0x20)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, not notified] (0x2)
+           Identifier: Example Tools s.r.o.
+                  URL: (null)
+           Generation: 98
+
+ #36:
+                 UUID: 00000000-0000-0000-0000-000000000024
+                 Name: Example Toolbox
+       Developer Name: Example Tools s.r.o.
+      Team Identifier: GHIJK78901
+                 Type: legacy agent (0x10008)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.toolbox
+                  URL: file:///Users/user/Library/LaunchAgents/com.example.toolbox.plist
+      Executable Path: /Applications/Example Toolbox.app/Contents/MacOS/example-toolbox
+           Generation: 98
+    Parent Identifier: Example Tools s.r.o.
+
+
+ #53:
+                 UUID: 00000000-0000-0000-0000-000000000025
+                 Name: Example Meet
+       Developer Name: (null)
+      Team Identifier: CDEFG34567
+                 Type: app (0x2)
+                Flags: [  ] (0)
+          Disposition: [disabled, allowed, notified] (0xa)
+           Identifier: 2.com.example.meet
+                  URL: file:///Applications/Example%20Meet.app/
+           Generation: 45
+    Bundle Identifier: com.example.meet
+  Embedded Item Identifiers:
+    #1: 16.com.example.meet.daemon
+
+ #54:
+                 UUID: 00000000-0000-0000-0000-000000000026
+                 Name: Example Meet Updater
+       Developer Name: Example Meet Inc.
+      Team Identifier: CDEFG34567
+                 Type: legacy agent (0x10008)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.meet.updater.login.check
+                  URL: file:///Library/LaunchAgents/com.example.meet.updater.login.check.plist
+      Executable Path: /Applications/Example Meet.app/Contents/Library/LaunchAgents/ExampleMeetUpdater.app/Contents/MacOS/ExampleMeetUpdater
+           Generation: 13
+    Assoc. Bundle IDs: [ com.example.meet ]
+    Parent Identifier: 2.com.example.meet
+
+ #55:
+                 UUID: 00000000-0000-0000-0000-000000000027
+                 Name: Example Meet Updater
+       Developer Name: Example Meet Inc.
+      Team Identifier: CDEFG34567
+                 Type: legacy agent (0x10008)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.meet.updater
+                  URL: file:///Library/LaunchAgents/com.example.meet.updater.plist
+      Executable Path: /Applications/Example Meet.app/Contents/Library/LaunchAgents/ExampleMeetUpdater.app/Contents/MacOS/ExampleMeetUpdater
+           Generation: 13
+    Assoc. Bundle IDs: [ com.example.meet ]
+    Parent Identifier: 2.com.example.meet
+
+
+========================
+ Records for UID 502 : 00000000-0000-0000-0000-000000000502
+========================
+
+ ServiceManagement migrated: false
+ LaunchServices registered: false
+
+ Items:
+
+ #1:
+                 UUID: 00000000-0000-0000-0000-000000000031
+                 Name: Example Network Ltd
+       Developer Name: Example Network Ltd
+                 Type: developer (0x20)
+                Flags: [ curated ] (0x4)
+          Disposition: [disabled, allowed, notified] (0xa)
+           Identifier: Example Network Ltd
+                  URL: (null)
+           Generation: 1
+  Embedded Item Identifiers:
+    #1: 16.com.example.vpnd
+
+ #2:
+                 UUID: 00000000-0000-0000-0000-000000000032
+                 Name: other_user_agent
+       Developer Name: (null)
+                 Type: legacy agent (0x10008)
+                Flags: [ legacy ] (0x1)
+          Disposition: [enabled, allowed, notified] (0xb)
+           Identifier: 8.com.example.otheruser
+                  URL: file:///Users/other/Library/LaunchAgents/com.example.otheruser.plist
+      Executable Path: /Users/other/bin/other_user_agent
+           Generation: 1
+    Parent Identifier: Unknown Developer
+

@@ -18,6 +18,9 @@ type LaunchJob struct {
 	StartInterval    int       `json:"start_interval,omitempty"`
 	StartCalendar    string    `json:"start_calendar,omitempty"`
 	WatchPaths       []string  `json:"watch_paths,omitempty"`
+	// AssociatedBundleIdentifiers is the plist key macOS 13+ uses to
+	// attribute a job to the app that installed it.
+	AssociatedBundleIdentifiers []string `json:"associated_bundle_identifiers,omitempty"`
 }
 
 type LaunchInventory struct {

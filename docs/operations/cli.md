@@ -277,6 +277,24 @@ to review; the command never kills anything. Processes with an unreadable
 working directory are skipped and counted. Exit codes: `0` none found, `3`
 non-daemon orphans found, `1` runtime or output error, `2` usage error.
 
+`spectra startup [list] [--json] [--scope user|system|all] [--include-apple]`
+lists what launches at login or boot on macOS, one row per item: launchd
+plists from `~/Library/LaunchAgents`, `/Library/LaunchAgents` and
+`/Library/LaunchDaemons` (`/System/Library` with `--include-apple`), with
+label, program, trigger (`login`, `boot`, `interval`, `calendar`,
+`on_demand`, `keep_alive`), scope, plist owner, enabled/disabled from
+`launchctl print-disabled`, loaded/running and pid from `launchctl print
+<domain>`, and the owning app with its team id. Login Items from
+Background Task Management (`sfltool dumpbtm`) are merged in only when run as
+root, since `sfltool` otherwise asks for administrator authorization; the
+`sources` field says so. `spectra startup disable <label>` and
+`spectra startup enable <label>` change user-scope launchd items only
+(`launchctl disable` + `bootout`, `launchctl enable` + `bootstrap`); Apple,
+system-scope, duplicate-label and BTM-only items are refused with the command
+or System Settings pane to use instead. Exit codes: `0` ok, `1` error
+(including a re-read state that does not match the change), `2` usage, `3`
+refused. See [Startup items](startup-items.md).
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.

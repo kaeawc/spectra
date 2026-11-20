@@ -49,6 +49,7 @@ func subcommandList() []subcommand {
 		{"fswatch", "Watch a directory tree by polling and report which files and directories keep changing", runFswatch},
 		{"timemachine", "Show Time Machine status, destinations, and local snapshots", runTimeMachine},
 		{"services", "Show launchd jobs and plist schedules", runServices},
+		{"startup", "List what launches at login or boot; disable or enable user launch agents", runStartup},
 		{"logs", "Run bounded unified log queries", runLogs},
 		{"updates", "Show macOS install/update log entries", runUpdates},
 		{"system", "Show system resource limits and saturation", runSystem},

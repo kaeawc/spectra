@@ -171,15 +171,21 @@ func readLaunchPlist(path, domain string) (LaunchJob, error) {
 	if err != nil {
 		return LaunchJob{}, err
 	}
-	var root map[string]any
-	if _, err := plist.Unmarshal(data, &root); err != nil {
-		return LaunchJob{}, err
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return LaunchJob{}, err
 	}
-	return jobFromPlist(root, path, domain, info.ModTime()), nil
+	return ParseLaunchPlist(data, path, domain, info.ModTime())
+}
+
+// ParseLaunchPlist decodes the launchd job plist data read from path. It
+// does no I/O, so callers with their own filesystem seam can reuse it.
+func ParseLaunchPlist(data []byte, path, domain string, mtime time.Time) (LaunchJob, error) {
+	var root map[string]any
+	if _, err := plist.Unmarshal(data, &root); err != nil {
+		return LaunchJob{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return jobFromPlist(root, path, domain, mtime), nil
 }
 
 func jobFromPlist(root map[string]any, path, domain string, mtime time.Time) LaunchJob {
@@ -197,6 +203,7 @@ func jobFromPlist(root map[string]any, path, domain string, mtime time.Time) Lau
 		WatchPaths:    stringSlice(root["WatchPaths"]),
 	}
 	job.ProgramArguments = stringSlice(root["ProgramArguments"])
+	job.AssociatedBundleIdentifiers = stringSlice(root["AssociatedBundleIdentifiers"])
 	return job
 }
 
