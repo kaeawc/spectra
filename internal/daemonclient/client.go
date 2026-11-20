@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/buildversion"
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/jsonrpc"
 )
@@ -229,7 +230,7 @@ func CheckVersion(st daemon.StatusResult, clientVersion string) error {
 	if st.Protocol != daemon.ProtocolVersion {
 		return fmt.Errorf("%w: protocol %q", ErrVersionMismatch, st.Protocol)
 	}
-	if st.Version == "" || st.Version == "dev" || clientVersion == "" || clientVersion == "dev" {
+	if st.Version == "" || buildversion.IsDev(st.Version) || clientVersion == "" || buildversion.IsDev(clientVersion) {
 		return nil
 	}
 	if st.Version != clientVersion {

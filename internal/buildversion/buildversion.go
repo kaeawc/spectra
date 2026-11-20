@@ -6,16 +6,26 @@
 // from a source build still identifies the commit it came from.
 package buildversion
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+	"strings"
+)
 
 // Dev is the placeholder version of a build without -X main.version.
 const Dev = "dev"
+
+// IsDev reports whether v is a source-build version: "dev", "dev+<rev>" or
+// "dev+<rev>.dirty". Such builds have no release identity to compare.
+func IsDev(v string) bool {
+	return v == Dev || strings.HasPrefix(v, Dev+"+")
+}
 
 // shortRevision is the commit-hash prefix length reported for source builds.
 const shortRevision = 12
 
 // Resolve returns stamped unchanged when it carries a real version, and
-// otherwise "dev", "dev+<rev>" or "dev+<rev>.dirty" from the build info.
+// otherwise the module version `go install module@vX.Y.Z` embeds, or "dev",
+// "dev+<rev>" or "dev+<rev>.dirty" from the build info.
 func Resolve(stamped string) string {
 	return resolve(stamped, debug.ReadBuildInfo)
 }
@@ -39,6 +49,12 @@ func resolve(stamped string, read func() (*debug.BuildInfo, bool)) string {
 		}
 	}
 	if revision == "" {
+		// `go install module@v0.1.0` records the module version and no VCS data.
+		// Builds inside a checkout also get a pseudo-version there, so the
+		// module version is only trusted when the VCS revision is absent.
+		if mv := info.Main.Version; mv != "" && mv != "(devel)" {
+			return mv
+		}
 		return Dev
 	}
 	if len(revision) > shortRevision {

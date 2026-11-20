@@ -28,6 +28,15 @@ func TestResolve(t *testing.T) {
 		{"dirty tree", Dev, infoWith(rev, dirty), "dev+65cc800aa1b2.dirty"},
 		{"short revision kept whole", Dev, infoWith(debug.BuildSetting{Key: "vcs.revision", Value: "abc123"}), "dev+abc123"},
 		{"no vcs info", Dev, infoWith(), Dev},
+		{"go install module version", Dev, func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0"}}, true
+		}, "v0.1.0"},
+		{"devel main version", Dev, func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, true
+		}, Dev},
+		{"vcs revision beats checkout pseudo-version", Dev, func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Main: debug.Module{Version: "v0.1.1-0.20261101-abc+dirty"}, Settings: []debug.BuildSetting{rev}}, true
+		}, "dev+65cc800aa1b2"},
 		{"no build info", Dev, func() (*debug.BuildInfo, bool) { return nil, false }, Dev},
 	}
 	for _, tt := range tests {
@@ -36,5 +45,16 @@ func TestResolve(t *testing.T) {
 				t.Fatalf("resolve(%q) = %q, want %q", tt.stamped, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsDev(t *testing.T) {
+	for v, want := range map[string]bool{
+		"dev": true, "dev+abc": true, "dev+abc.dirty": true,
+		"": false, "v0.1.0": false, "devel": false, "v0.1.0-dev": false,
+	} {
+		if got := IsDev(v); got != want {
+			t.Errorf("IsDev(%q) = %v, want %v", v, got, want)
+		}
 	}
 }

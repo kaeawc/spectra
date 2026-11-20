@@ -39,7 +39,7 @@ build_one() {
     local archive="$DIST_DIR/spectra_${VERSION}_${goos}_${arch}.tar.gz"
 
     rm -rf "$stage"
-    mkdir -p "$stage/bin" "$stage/docs" "$stage/licenses"
+    mkdir -p "$stage/bin" "$stage/docs"
 
     # Linux ships a static, pure-Go binary (CGO off; the cgo libproc thread
     # collector is darwin-only and the Linux path reads procfs). Darwin forces
@@ -65,7 +65,7 @@ build_one() {
     done
 
     cp "$ROOT/README.md" "$stage/"
-    cp "$ROOT/LICENSE" "$stage/licenses/LICENSE"
+    cp "$ROOT/LICENSE" "$stage/LICENSE"
     cp "$ROOT/docs/install.md" "$stage/docs/install.md"
     cp "$ROOT/docs/operations/install-services.md" "$stage/docs/install-services.md"
     cp "$ROOT/docs/design/distribution.md" "$stage/docs/distribution.md"

@@ -40,6 +40,8 @@ class Spectra < Formula
     pkgshare.install "agent/spectra-agent.jar" if File.exist?("agent/spectra-agent.jar")
     (pkgshare/"systemd").install Dir["systemd/*.service"] if OS.linux?
     doc.install Dir["docs/*.md"]
+    prefix.install "LICENSE"
+    prefix.install "README.md" if File.exist?("README.md")
   end
 
   test do
