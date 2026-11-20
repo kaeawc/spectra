@@ -49,6 +49,13 @@ type Server struct {
 	// overrides its intervals and local sampler (mainly for tests).
 	live    *liveHub
 	liveCfg liveConfig
+	// artifactDir overrides where tool artifacts are stored and served from.
+	artifactDir string
+	completions completionCache
+	// jobs runs job_start's background tool calls for the current Run;
+	// jobsCfg overrides its limits and clock (mainly for tests).
+	jobs    *jobStore
+	jobsCfg jobConfig
 }
 
 // NewServer returns a configured MCP server from stdin/stdout handles.
@@ -154,6 +161,7 @@ const defaultEOFWait = 30 * time.Second
 func (s *Server) Run(ctx context.Context) error {
 	srv := s.sdkServer()
 	defer s.live.close()
+	defer s.jobs.close()
 	tracker := newReplyTracker()
 	err := srv.Run(ctx, &sdk.IOTransport{
 		Reader: io.NopCloser(newTrackingReader(ctx, s.reader, tracker, s.eofWait)),
@@ -183,6 +191,7 @@ func (s *Server) sdkServer() *sdk.Server {
 		},
 		SubscribeHandler:   hub.subscribe,
 		UnsubscribeHandler: hub.unsubscribe,
+		CompletionHandler:  s.complete,
 	}
 	if s.Verbose {
 		opts.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -198,8 +207,15 @@ func (s *Server) sdkServer() *sdk.Server {
 	for _, def := range toolDefinitions() {
 		srv.AddTool(sdkTool(def), s.sdkToolHandler(handlers[def.Name]))
 	}
+	s.jobs = newJobStore(s.jobsCfg, s.collect.Clock)
+	for _, def := range jobToolDefinitions() {
+		srv.AddTool(jobSDKTool(def), s.jobToolHandler(def.Name))
+	}
 	for _, r := range resourceDefinitions() {
 		srv.AddResource(r, s.resourceHandler(r.URI))
+	}
+	for _, t := range artifactTemplates() {
+		srv.AddResourceTemplate(t, s.readArtifact)
 	}
 	for _, p := range promptDefinitions() {
 		srv.AddPrompt(p, getPrompt)
@@ -247,15 +263,25 @@ func (s *Server) sdkToolHandler(h toolHandler) sdk.ToolHandler {
 			// The client cancelled; the transport drops this reply.
 			return nil, err
 		}
-		out := &sdk.CallToolResult{IsError: res.IsError, Content: make([]sdk.Content, 0, len(res.Content))}
-		for _, c := range res.Content {
-			out.Content = append(out.Content, &sdk.TextContent{Text: c.Text})
-		}
-		if !res.IsError && res.Structured != nil {
-			out.StructuredContent = res.Structured
-		}
-		return out, nil
+		return sdkResult(res), nil
 	}
+}
+
+// sdkResult converts a tool's result to the wire form: text content, then
+// resource links, then structuredContent on success. Direct calls and
+// job_result share it so a job's result matches a direct call's.
+func sdkResult(res ToolResult) *sdk.CallToolResult {
+	out := &sdk.CallToolResult{IsError: res.IsError, Content: make([]sdk.Content, 0, len(res.Content)+len(res.Links))}
+	for _, c := range res.Content {
+		out.Content = append(out.Content, &sdk.TextContent{Text: c.Text})
+	}
+	for _, l := range res.Links {
+		out.Content = append(out.Content, l.content())
+	}
+	if !res.IsError && res.Structured != nil {
+		out.StructuredContent = res.Structured
+	}
+	return out
 }
 
 func (s *Server) slot() chan struct{} {

@@ -701,7 +701,11 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 	if p.IncludeRaw {
 		env.Raw = snap
 	}
-	return toolText(env)
+	res := toolText(env)
+	if p.Store && validArtifactID(snap.ID) {
+		res = withLinks(res, artifactLink{URI: artifactURI(kindSnapshot, snap.ID), Name: snap.ID, Description: "Stored snapshot " + snap.ID, MIMEType: "application/json"})
+	}
+	return res
 }
 
 func (s *Server) toolSnapshotList(p snapshotParams) ToolResult {
@@ -729,7 +733,11 @@ func (s *Server) toolSnapshotGet(p snapshotParams) ToolResult {
 	if p.IncludeRaw {
 		env.Raw = snap
 	}
-	return toolText(env)
+	res := toolText(env)
+	if validArtifactID(p.ID) {
+		res = withLinks(res, artifactLink{URI: artifactURI(kindSnapshot, p.ID), Name: p.ID, Description: "Stored snapshot " + p.ID, MIMEType: "application/json"})
+	}
+	return res
 }
 
 func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
@@ -837,7 +845,11 @@ func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResul
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
+		res := toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", p.PID, duration), Raw: map[string]interface{}{"pid": p.PID, "output": out}, Timestamp: s.now()})
+		if link, ok := s.saveArtifact(kindSample, fmt.Sprintf("sample-%d", p.PID), ".txt", fmt.Sprintf("Sample report for pid %d", p.PID), []byte(out)); ok {
+			res = withLinks(res, link)
+		}
+		return res
 	case "history":
 		return s.toolProcessHistory(ctx, p.PID, p.Limit)
 	default:
@@ -1089,12 +1101,16 @@ func (s *Server) toolJVMHeapDump(ctx context.Context, p jvmParams) ToolResult {
 	if err := s.collect.JVMs.HeapDump(ctx, p.PID, p.Dest); err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{
+	res := toolText(toolEnvelope{
 		Summary:     fmt.Sprintf("wrote heap dump for pid %d", p.PID),
 		NextActions: []string{fmt.Sprintf("jvm heap_leak_suspects with dest=%s and confirm_sensitive=true", p.Dest)},
 		Raw:         map[string]interface{}{"pid": p.PID, "dest": p.Dest},
 		Timestamp:   s.now(),
 	})
+	if link, ok := s.registerHeapDump(p.PID, p.Dest); ok {
+		res = withLinks(res, link)
+	}
+	return res
 }
 
 // validateHPROFPath requires path to be an absolute path to an existing
@@ -1170,7 +1186,11 @@ func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult 
 	if err != nil {
 		return toolError(err.Error())
 	}
-	return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+	res := toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": p.Dest}, Timestamp: s.now()})
+	if link, ok := s.adoptFile(kindFlamegraph, fmt.Sprintf("flamegraph-%d", p.PID), p.Dest, fmt.Sprintf("Flamegraph of pid %d", p.PID)); ok {
+		res = withLinks(res, link)
+	}
+	return res
 }
 
 func (s *Server) toolNetwork(ctx context.Context, raw json.RawMessage) ToolResult {

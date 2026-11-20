@@ -1054,6 +1054,431 @@
       }
     },
     {
+      "description": "Cancel a working job: it becomes cancelled at once and its tool is stopped.",
+      "inputSchema": {
+        "properties": {
+          "job_id": {
+            "description": "Job ID from job_start or job_list.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "name": "job_cancel",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "pollInterval": {
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": false,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "progress": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "progress"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "resultAvailable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "working",
+              "input_required",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "statusMessage": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "ttl": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "tool",
+          "status",
+          "createdAt",
+          "lastUpdatedAt",
+          "ttl",
+          "pollInterval",
+          "resultAvailable"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "This session's jobs, oldest first, including finished ones until they expire.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "job_list",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "jobId": {
+                  "type": "string"
+                },
+                "lastUpdatedAt": {
+                  "type": "string"
+                },
+                "operation": {
+                  "type": "string"
+                },
+                "pollInterval": {
+                  "type": "integer"
+                },
+                "progress": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "progress": {
+                      "type": "number"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "progress"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "resultAvailable": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "enum": [
+                    "working",
+                    "input_required",
+                    "completed",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                "statusMessage": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "ttl": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "jobId",
+                "tool",
+                "status",
+                "createdAt",
+                "lastUpdatedAt",
+                "ttl",
+                "pollInterval",
+                "resultAvailable"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "The wrapped tool's result (its text, resource links and structuredContent, exactly as a direct call returns them) once the job is completed or failed. Errors while the job is working.",
+      "inputSchema": {
+        "properties": {
+          "job_id": {
+            "description": "Job ID from job_start or job_list.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "name": "job_result",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "description": "Run a slow tool in the background and return its job record at once. tool is one of diagnose, idle, jvm, load, orphans, process, snapshot, spawns, triage (process only for operation=sample, jvm only for flamegraph, snapshot only for create or baseline); arguments are that tool's arguments, checked now. Poll job_status (status working, then completed, failed or cancelled) and fetch the tool's own result with job_result. Ask: \"Trace spawns for 30s without blocking.\"",
+      "inputSchema": {
+        "properties": {
+          "arguments": {
+            "description": "The wrapped tool's arguments, as for a direct call.",
+            "type": "object"
+          },
+          "tool": {
+            "default": "spawns",
+            "enum": [
+              "diagnose",
+              "idle",
+              "jvm",
+              "load",
+              "orphans",
+              "process",
+              "snapshot",
+              "spawns",
+              "triage"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "type": "object"
+      },
+      "name": "job_start",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "pollInterval": {
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": false,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "progress": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "progress"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "resultAvailable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "working",
+              "input_required",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "statusMessage": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "ttl": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "tool",
+          "status",
+          "createdAt",
+          "lastUpdatedAt",
+          "ttl",
+          "pollInterval",
+          "resultAvailable"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "A job's record: status (working, input_required, completed, failed, cancelled), statusMessage, the latest progress the tool reported, createdAt, lastUpdatedAt, ttl and pollInterval (ms).",
+      "inputSchema": {
+        "properties": {
+          "job_id": {
+            "description": "Job ID from job_start or job_list.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "name": "job_status",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "pollInterval": {
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": false,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "progress": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "progress"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "resultAvailable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "working",
+              "input_required",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "statusMessage": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "ttl": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "tool",
+          "status",
+          "createdAt",
+          "lastUpdatedAt",
+          "ttl",
+          "pollInterval",
+          "resultAvailable"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "description": "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"",
       "inputSchema": {
         "properties": {
@@ -3614,6 +4039,14 @@
       "mimeType": "text/markdown",
       "name": "Debug Workflows",
       "uri": "spectra://workflows/debugging"
+    }
+  ],
+  "resourceTemplates": [
+    {
+      "description": "A sample report, flamegraph, heap dump record or stored snapshot Spectra produced. kind is one of sample, flamegraph, heap, snapshot; tool results link these.",
+      "name": "Artifact",
+      "title": "Spectra artifact",
+      "uriTemplate": "spectra://artifact/{kind}/{id}"
     }
   ],
   "prompts": [

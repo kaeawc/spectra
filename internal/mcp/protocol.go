@@ -19,6 +19,8 @@ type ToolResult struct {
 	// Structured is the compact JSON of the value Content's text renders; it
 	// is sent as structuredContent on success.
 	Structured json.RawMessage `json:"-"`
+	// Links are resource_link items sent after the text content.
+	Links []artifactLink `json:"-"`
 }
 
 // ContentBlock is one text content item of a tool result.
