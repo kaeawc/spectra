@@ -101,7 +101,7 @@ func readSigning(ctx context.Context, osKind hostos.Kind, runner proc.Runner, ex
 func verifyApple(ctx context.Context, runner proc.Runner, exe string, v signingVerdict) (signingVerdict, error) {
 	res, err := runner.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"--verify", "--ignore-resources", "-R=" + appleRequirement, exe}})
 	if err == nil {
-		err = vanished(res)
+		err = noVerdict(res)
 	}
 	if err != nil {
 		return signingVerdict{Signing: Signing{Status: SigningUnknown}, Claim: v.Claim}, fmt.Errorf("codesign --verify: %w", err)
@@ -117,7 +117,7 @@ func verifyApple(ctx context.Context, runner proc.Runner, exe string, v signingV
 func verifyThirdParty(ctx context.Context, runner proc.Runner, exe string, v signingVerdict) (signingVerdict, error) {
 	res, err := runner.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"--verify", "--strict", exe}})
 	if err == nil {
-		err = vanished(res)
+		err = noVerdict(res)
 	}
 	if err != nil {
 		return v, fmt.Errorf("codesign --verify --strict: %w", err)
@@ -137,11 +137,20 @@ func verifyThirdParty(ctx context.Context, runner proc.Runner, exe string, v sig
 // update or uninstall racing the listing): that says nothing about the code.
 var errVanished = errors.New("executable vanished during codesign --verify")
 
-func vanished(res proc.Result) error {
+// noVerdict turns a verify that did not produce a verdict into an error, so
+// the caller retries and never caches it. Only exit 0 (passed), 1 (invalid
+// signature) and 3 (requirement not met) are verdicts. Exit 2 is a usage or
+// internal error, and a codesign killed by a signal reports -1 with no error
+// from the runner.
+func noVerdict(res proc.Result) error {
 	if res.ExitCode != 0 && strings.Contains(string(res.Stderr), "No such file or directory") {
 		return errVanished
 	}
-	return nil
+	switch res.ExitCode {
+	case 0, 1, 3:
+		return nil
+	}
+	return fmt.Errorf("codesign --verify exited %d without a verdict", res.ExitCode)
 }
 
 // detritusComplaint is codesign --strict's rejection of extended attributes

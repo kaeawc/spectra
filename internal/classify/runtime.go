@@ -431,6 +431,9 @@ func rustVerdict(format string, hits int, syms symbolFacts, libs []string) binar
 
 func rustVerdictOf(format string, hits int, syms symbolFacts, libs []string) binaryVerdict {
 	cxx := syms.cxx || linksCxx(libs)
+	if !cxx && !syms.rustEntry && hits > 0 && linksNativeRuntime(libs) {
+		return binaryVerdict{Runtime: RuntimeNative, Evidence: fmt.Sprintf("links Rust std (%d rustc markers) with a Swift, Objective-C or Foundation runtime and no std::rt::lang_start", hits)}
+	}
 	switch {
 	case syms.rustEntry:
 		return binaryVerdict{Runtime: RuntimeRust, Evidence: format + " defines std::rt::lang_start (Rust main)"}
@@ -444,6 +447,19 @@ func rustVerdictOf(format string, hits int, syms symbolFacts, libs []string) bin
 		return binaryVerdict{Runtime: RuntimeRust, Evidence: fmt.Sprintf("%s with %d rustc std markers and no C++ runtime; std::rt::lang_start is absent (link-time optimization can inline it)", format, hits)}
 	}
 	return binaryVerdict{Runtime: RuntimeRust, Evidence: fmt.Sprintf("stripped %s with %d rustc std markers and no C++ runtime", format, hits)}
+}
+
+// linksNativeRuntime reports a Swift, Objective-C or Foundation runtime
+// dependency: a C-family main that statically links a Rust library links
+// these, and a Rust main has no reason to.
+func linksNativeRuntime(libs []string) bool {
+	for _, l := range libs {
+		if strings.Contains(l, "libswiftCore") || strings.Contains(l, "libobjc") ||
+			strings.Contains(l, "/Foundation.framework/") || strings.Contains(l, "/CoreFoundation.framework/") {
+			return true
+		}
+	}
+	return false
 }
 
 func linksCxx(libs []string) bool {

@@ -32,13 +32,10 @@ type ShardedStore struct {
 	now    func() time.Time
 }
 
-// pruneBatch bounds how many directory entries one Put's sweep examines.
-const pruneBatch = 256
-
 // WithMaxAge turns on age-based pruning and returns s. Each Put then sweeps
-// the one shard directory it wrote to (at most pruneBatch entries) and
-// removes files whose mtime is older than maxAge, including temp files a
-// crashed writer left. Keys hash uniformly across the 256 shards, so the
+// the one shard directory it wrote to (the whole directory, which sharding
+// bounds to about entries/256) and removes files whose mtime is older than
+// maxAge, including temp files a crashed writer left. Keys hash uniformly across the 256 shards, so the
 // store stays bounded by what was written in the last maxAge with no
 // separate GC pass. An entry is not refreshed on read: one in steady use is
 // rewritten after it ages out and its next lookup misses.
@@ -110,7 +107,10 @@ func (s *ShardedStore) prune(dir, keep string) {
 	if err != nil {
 		return
 	}
-	entries, _ := d.ReadDir(pruneBatch)
+	// The whole shard: ReadDir(n) returns the same first n entries every
+	// time, so a capped read would never reach the rest of a large shard.
+	// Work per Put is bounded by sharding (entries/256), not by a cap.
+	entries, _ := d.ReadDir(-1)
 	_ = d.Close()
 	now := time.Now
 	if s.now != nil {

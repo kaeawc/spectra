@@ -101,6 +101,9 @@ func TestThirdPartySignatureVerification(t *testing.T) {
 	fail := func(stderr string) proc.Response {
 		return proc.Response{Result: proc.Result{ExitCode: 1, Stderr: []byte(stderr)}}
 	}
+	fail2 := func(stderr string) proc.Response {
+		return proc.Response{Result: proc.Result{ExitCode: 2, Stderr: []byte(stderr)}}
+	}
 	cases := []struct {
 		name      string
 		display   string
@@ -118,6 +121,8 @@ func TestThirdPartySignatureVerification(t *testing.T) {
 		{"only --strict detritus", devIDCodesign, fail("/opt/x: resource fork, Finder information, or similar detritus not allowed\n"),
 			SigningDeveloperID, false, true, "rejected extended attributes or resource forks"},
 		{"executable vanished", devIDCodesign, fail("/opt/x: No such file or directory\n"), SigningDeveloperID, false, false, "could not run"},
+		{"verify killed by a signal", devIDCodesign, proc.Response{Result: proc.Result{ExitCode: -1}}, SigningDeveloperID, false, false, "could not run"},
+		{"verify usage error", devIDCodesign, fail2("codesign: internal error\n"), SigningDeveloperID, false, false, "could not run"},
 		{"verify timed out", devIDCodesign, proc.Response{Err: context.DeadlineExceeded}, SigningDeveloperID, false, false, "could not run"},
 	}
 	for _, tc := range cases {
@@ -349,7 +354,7 @@ func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 // struct with fields silently zeroed. Bump cacheVersion, then update both pins.
 func TestCacheVersionPinsEntryShape(t *testing.T) {
 	const (
-		pinnedVersion = "classify/v4"
+		pinnedVersion = "classify/v5"
 		pinnedShape   = "5e05118381521607"
 	)
 	var b strings.Builder
@@ -476,6 +481,11 @@ func TestRustVerdict(t *testing.T) {
 		{"unstripped LTO Rust, no lang_start", 5, symbolFacts{locals: true}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "link-time optimization"},
 		{"stripped C++ (adb)", 5, symbolFacts{cxx: true}, nil, RuntimeNative, "links Rust std"},
 		{"stripped, links libc++ (netsimd)", 5, symbolFacts{}, []string{"/usr/lib/libc++.1.dylib"}, RuntimeNative, "links Rust std"},
+		{"stripped ObjC main linking Rust", 5, symbolFacts{}, []string{"/usr/lib/libobjc.A.dylib"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"unstripped Swift main linking Rust", 5, symbolFacts{locals: true}, []string{"/usr/lib/swift/libswiftCore.dylib"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"Foundation C main linking Rust", 5, symbolFacts{locals: true}, []string{"/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"CoreFoundation stripped", 5, symbolFacts{}, []string{"/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"}, RuntimeNative, "Swift, Objective-C or Foundation"},
+		{"Rust main with lang_start still wins over ObjC libs", 5, symbolFacts{rustEntry: true}, []string{"/usr/lib/libobjc.A.dylib"}, RuntimeRust, "lang_start"},
 		{"stripped Rust (fd)", 5, symbolFacts{}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "stripped"},
 		{"no markers", 0, symbolFacts{cxx: true}, nil, RuntimeNative, "no Go, Bun or Rust"},
 	}
@@ -505,6 +515,62 @@ func TestRustVerdict(t *testing.T) {
 	for _, name := range []string{"__ZNSt3__112basic_stringIcEE", "___gxx_personality_v0", "__Znwm", "___cxa_throw"} {
 		if !cxxSymbol(name) {
 			t.Errorf("%s not recognised as C++ runtime", name)
+		}
+	}
+}
+
+func TestAppleVerifyWithoutVerdictIsNotInvalidOrCached(t *testing.T) {
+	files := newFakeFS()
+	files.add("/opt/evil", buildMachO(macho.CpuArm64))
+	for _, exit := range []int{-1, 2} {
+		store := newMemStore()
+		fake := verifyFake(spoofPlatformCodesign, exit)
+		r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), Input{UID: 0, Command: "evil", ExecutablePath: "/opt/evil"})
+		if r.Signing == nil || r.Signing.Status == SigningInvalid || store.puts != 0 {
+			t.Fatalf("exit %d: signing=%+v puts=%d, want not invalid and not cached", exit, r.Signing, store.puts)
+		}
+	}
+}
+
+func TestCacheMissesWhenBundleSealChanges(t *testing.T) {
+	files := newFakeFS()
+	exe := "/Applications/Tool.app/Contents/MacOS/tool"
+	seal := "Applications/Tool.app/Contents/_CodeSignature/CodeResources"
+	files.add(exe, buildMachO(macho.CpuArm64))
+	files.files[seal] = &fstest.MapFile{Data: []byte("seal-a"), Mode: 0o644, ModTime: fixtureTime}
+	store := newMemStore()
+	in := Input{UID: 501, Command: "tool", ExecutablePath: exe}
+	run := func() int {
+		fake := codesignFake(adhocCodesign)
+		classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), in)
+		return fake.CallCount()
+	}
+	if run() == 0 {
+		t.Fatal("cold run did not call codesign")
+	}
+	if n := run(); n != 0 {
+		t.Fatalf("unchanged bundle re-ran codesign %d times", n)
+	}
+	files.files[seal] = &fstest.MapFile{Data: []byte("seal-bb"), Mode: 0o644, ModTime: fixtureTime.Add(time.Hour)}
+	if run() == 0 {
+		t.Fatal("changed CodeResources did not invalidate the cached signing verdict")
+	}
+}
+
+func TestOnlyDetritusWithNestedSubcomponents(t *testing.T) {
+	d := detritusComplaint
+	cases := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{"nested bundle detritus only", "/opt/X.app: " + d + "\nIn subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n/opt/X.app/Contents/Frameworks/Y.framework/Y: " + d + "\nIn architecture: arm64\n", true},
+		{"nested bundle also invalid", "/opt/X.app: " + d + "\nIn subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n/opt/X.app/Contents/Frameworks/Y.framework: invalid signature (code or signature have been modified)\n", false},
+		{"subcomponent header alone", "In subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n", false},
+	}
+	for _, tc := range cases {
+		if got := onlyDetritus(tc.out); got != tc.want {
+			t.Errorf("%s: onlyDetritus = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

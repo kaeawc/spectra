@@ -90,3 +90,34 @@ func TestClassifyStorePrunes(t *testing.T) {
 		t.Fatalf("classify maxAge=%v detect maxAge=%v", stores.Classify.maxAge, stores.Detect.maxAge)
 	}
 }
+
+func TestPruneReachesEntriesBeyondFirstBatch(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	s := NewShardedStore(t.TempDir(), KindClassify).WithMaxAge(30 * 24 * time.Hour)
+	s.SetClock(func() time.Time { return now })
+	dir := filepath.Join(s.root, "ab")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-40 * 24 * time.Hour)
+	const n = 700
+	for i := 0; i < n; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("old-%04d", i))
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Put(keyInShard(t, "ab", 1), []byte("y")); err != nil {
+		t.Fatal(err)
+	}
+	left, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 {
+		t.Fatalf("%d entries left in the shard, want only the one just written", len(left))
+	}
+}
