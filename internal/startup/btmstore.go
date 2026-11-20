@@ -291,6 +291,14 @@ func unmarshalBTM(ctx context.Context, data []byte) (map[string]any, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
+		// howett.net/plist panics on some hostile lengths (a UTF-16 length
+		// whose doubling wraps); a panic here must become an error, not a
+		// crash of the whole listing.
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- result{nil, fmt.Errorf("decode panicked: %v", r)}
+			}
+		}()
 		var root map[string]any
 		_, err := plist.Unmarshal(data, &root)
 		ch <- result{root, err}
