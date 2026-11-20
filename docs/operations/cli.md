@@ -315,6 +315,11 @@ when it hit the bound) and a `hint` naming the action: exclude the root, or
 shrink it. Nothing is written or changed. On Linux each entry carries only
 `unsupported`.
 
+`spectra storage --spotlight` runs only `mdutil -s <mount>`, a read. It no longer
+runs `mdutil -p` (which flushes network caches), so the per-volume `progress`
+field is never set and is omitted from the JSON; the field is kept in the schema
+for compatibility.
+
 `spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--json]` finds
 leftover processes from worktrees and finished jobs: parent pid 1, a readable
 working directory under a root (default: the current directory), and older than
