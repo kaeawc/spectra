@@ -263,7 +263,7 @@ var planLimitations = []string{
 	"If another installed app (in the app folders, one folder below them, or found by Spotlight) has the same bundle id ignoring case, or an id under this app's id, every id-derived item is reported as shared; so is an item whose helper id or label is another installed app's id.",
 	"A com.apple.* id (main, helper, label or group.com.apple.* group) is report-only unless the bundle satisfies codesign's `anchor apple` requirement and Spotlight answered.",
 	"An item whose location folder is a symbolic link, or whose parent folder resolves elsewhere through one, is never planned or moved.",
-	"A bundle id of fewer than three segments is report-only for id-derived items unless the app has a verified team id; a team id counts only when `codesign --verify --strict` passes.",
+	"A bundle id of fewer than three segments is report-only for id-derived items unless the app has a verified team id; a team id counts only when `codesign --verify --strict` passes (or, if it rejects only Finder metadata, a plain `codesign --verify`).",
 	"A launch agent or daemon is booted out (or a bootout command printed) only for a label under the app's own bundle id, never for com.apple.*.",
 	"Files a pkgutil receipt installed are reported only; another tool may have replaced them.",
 	"Name-only matches are low confidence and are acted on only with --include-low-confidence.",

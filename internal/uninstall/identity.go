@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/codesignout"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/plistread"
 	"github.com/kaeawc/spectra/internal/proc"
@@ -268,7 +269,7 @@ func declaredJobs(f FS, bundle string, bi bundleInfo) []string {
 // team is set. `codesign -dv` alone only reads what the signature claims;
 // `--verify --strict` (not deep, which is codesign's default) checks it.
 func readTeamID(ctx context.Context, r proc.Runner, bundle string) string {
-	if !runOK(ctx, r, "codesign", "--verify", "--strict", bundle) {
+	if !verifiedBundle(ctx, r, bundle) {
 		return ""
 	}
 	res, err := r.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"-dv", bundle}})
@@ -281,6 +282,23 @@ func readTeamID(ctx context.Context, r proc.Runner, bundle string) string {
 		return ""
 	}
 	return team
+}
+
+// verifiedBundle reports whether the bundle passes codesign --verify
+// --strict. A --strict rejection that is only Finder metadata is retried
+// with a plain verify, which still checks code and resources.
+func verifiedBundle(ctx context.Context, r proc.Runner, bundle string) bool {
+	res, err := r.Run(ctx, proc.Cmd{Name: "codesign", Args: []string{"--verify", "--strict", bundle}})
+	if err != nil {
+		return false
+	}
+	if res.ExitCode == 0 {
+		return true
+	}
+	if !codesignout.OnlyDetritus(string(res.Stderr) + string(res.Stdout)) {
+		return false
+	}
+	return runOK(ctx, r, "codesign", "--verify", bundle)
 }
 
 // runOK reports whether the command ran and exited 0.

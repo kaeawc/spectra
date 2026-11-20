@@ -57,9 +57,11 @@ declaration is trusted only when it points back at the app itself:
   team id, so its team groups are shared. `--strict` also rejects a bundle
   that carries Finder metadata or other extended attributes ("resource fork,
   Finder information, or similar detritus not allowed"), which is common for
-  apps copied out of a download; such a bundle has no team id either, and its
-  team groups are report-only. This is deliberate: Spectra does not strip
-  attributes or relax the check to recover a team id.
+  apps copied out of a download. When that is the only complaint (including
+  in nested "In subcomponent:" sections), Spectra retries a plain
+  `codesign --verify <bundle>`; if it passes, the team id is trusted. Any
+  other `--strict` failure, or a failing retry, leaves no team id and its team
+  groups report-only. Spectra never strips attributes.
 
 An id can also be Apple's or another app's. So, in every mode:
 

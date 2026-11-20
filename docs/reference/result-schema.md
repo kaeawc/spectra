@@ -254,7 +254,8 @@ type Signing struct {
 
 `validated` is always present. It is true only for `apple` (passed
 `codesign --verify --ignore-resources -R="anchor apple"`) and for
-`developer_id` that passed `codesign --verify --strict`; every other
+`developer_id` that passed `codesign --verify --strict` (or a plain
+`codesign --verify` when `--strict` rejected only Finder metadata); every other
 status, and a `developer_id` whose verify could not settle it, is what
 `codesign -dv` displays and is false. Clients should draw a signature as
 trusted only when `validated` is true.

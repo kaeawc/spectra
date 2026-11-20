@@ -16,6 +16,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/codesignout"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
@@ -89,10 +90,15 @@ func TestVerifyRunsOnlyForAppleClaimsAndAppleIssuedCerts(t *testing.T) {
 	}
 }
 
-func thirdPartyVerifyFake(display string, verify proc.Response) *proc.Fake {
+func thirdPartyVerifyFake(display string, verify proc.Response, plain ...proc.Response) *proc.Fake {
+	plainRes := proc.Response{Result: proc.Result{ExitCode: 1, Stderr: []byte("/opt/x: invalid signature\n")}}
+	if len(plain) > 0 {
+		plainRes = plain[0]
+	}
 	return proc.NewFake().
 		On(proc.MatchPrefix("codesign", "-dv"), proc.Response{Result: proc.Result{Stderr: []byte(display)}}).
-		On(proc.MatchExact("codesign", "--verify", "--strict", "/opt/x"), verify)
+		On(proc.MatchExact("codesign", "--verify", "--strict", "/opt/x"), verify).
+		On(proc.MatchExact("codesign", "--verify", "/opt/x"), plainRes)
 }
 
 func TestThirdPartySignatureVerification(t *testing.T) {
@@ -118,7 +124,7 @@ func TestThirdPartySignatureVerification(t *testing.T) {
 		{"intact Mac App Store", masCodesign, proc.Response{}, SigningDeveloperID, true, true, "team BQR82RBBHL validated by"},
 		{"tampered Developer ID", devIDCodesign, fail("/opt/x: invalid signature (code or signature have been modified)\nIn architecture: arm64\n"),
 			SigningInvalid, false, true, "displays an Apple-issued certificate but codesign --verify --strict failed"},
-		{"only --strict detritus", devIDCodesign, fail("/opt/x: resource fork, Finder information, or similar detritus not allowed\n"),
+		{"only --strict detritus, plain verify fails", devIDCodesign, fail("/opt/x: resource fork, Finder information, or similar detritus not allowed\n"),
 			SigningDeveloperID, false, true, "rejected extended attributes or resource forks"},
 		{"executable vanished", devIDCodesign, fail("/opt/x: No such file or directory\n"), SigningDeveloperID, false, false, "could not run"},
 		{"verify killed by a signal", devIDCodesign, proc.Response{Result: proc.Result{ExitCode: -1}}, SigningDeveloperID, false, false, "could not run"},
@@ -140,20 +146,6 @@ func TestThirdPartySignatureVerification(t *testing.T) {
 				t.Fatalf("evidence %q lacks %q", ev, tc.ev)
 			}
 		})
-	}
-}
-
-func TestOnlyDetritus(t *testing.T) {
-	for out, want := range map[string]bool{
-		"/a: resource fork, Finder information, or similar detritus not allowed\n":                                   true,
-		"/a: resource fork, Finder information, or similar detritus not allowed\nIn subcomponent: /a/b\n":            true,
-		"/a: resource fork, Finder information, or similar detritus not allowed\n/a: a sealed resource is missing\n": false,
-		"/a: invalid signature (code or signature have been modified)\n":                                             false,
-		"": false,
-	} {
-		if got := onlyDetritus(out); got != want {
-			t.Errorf("onlyDetritus(%q) = %v, want %v", out, got, want)
-		}
 	}
 }
 
@@ -354,8 +346,8 @@ func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 // struct with fields silently zeroed. Bump cacheVersion, then update both pins.
 func TestCacheVersionPinsEntryShape(t *testing.T) {
 	const (
-		pinnedVersion = "classify/v5"
-		pinnedShape   = "5e05118381521607"
+		pinnedVersion = "classify/v6"
+		pinnedShape   = "e7d185d960d8e191"
 	)
 	var b strings.Builder
 	describeType(&b, reflect.TypeOf(exeEntry{}), map[reflect.Type]bool{})
@@ -592,7 +584,7 @@ func TestCacheMissesWhenBundleSealChanges(t *testing.T) {
 }
 
 func TestOnlyDetritusWithNestedSubcomponents(t *testing.T) {
-	d := detritusComplaint
+	d := codesignout.DetritusComplaint
 	cases := []struct {
 		name string
 		out  string
@@ -603,7 +595,7 @@ func TestOnlyDetritusWithNestedSubcomponents(t *testing.T) {
 		{"subcomponent header alone", "In subcomponent: /opt/X.app/Contents/Frameworks/Y.framework\n", false},
 	}
 	for _, tc := range cases {
-		if got := onlyDetritus(tc.out); got != tc.want {
+		if got := codesignout.OnlyDetritus(tc.out); got != tc.want {
 			t.Errorf("%s: onlyDetritus = %v, want %v", tc.name, got, tc.want)
 		}
 	}
