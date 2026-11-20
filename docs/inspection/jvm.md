@@ -504,5 +504,6 @@ Implemented:
     `build-daemon-jdk-gone` recommendation and a `jvm explain` observation
     name the cause (for example `brew upgrade` removed the JDK) and advise
     letting it idle out or stopping that PID, never `gradle --stop`.
-    Comparing the daemon's JDK to a project's configured toolchain is not
-    implemented.
+    The `build-daemon-jdk-mismatch` recommendation compares the daemon's JDK
+    with the project's configuration (see the recommendations engine doc):
+    medium for an explicit pin, low for a compile-toolchain-only difference.
