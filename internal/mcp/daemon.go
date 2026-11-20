@@ -215,15 +215,134 @@ func (s *Server) readFiringAlerts(_ context.Context, _ *sdk.ReadResourceRequest)
 		alerts, callErr = client.Alerts(ctx, "firing", 2000)
 		return callErr
 	})
-	if err != nil {
+	var value any = alerts
+	if reason := s.alertsUnavailableReason(); reason != "" && err == nil {
+		value = map[string]any{"daemon": "alerts unavailable", "message": "the daemon accepted the connection but its alert stream failed: " + reason, "alerts": []hostwatch.Alert{}}
+	}
+	switch {
+	case errors.Is(err, errDaemonUnavailable):
+		// A subscriber keeps reading this resource while the daemon is down;
+		// say so in the content and send resources/updated when it returns.
+		value = map[string]any{"daemon": "not running", "message": "start it with `spectra daemon start` or install it with `spectra daemon install`", "alerts": []hostwatch.Alert{}}
+	case err != nil:
 		return nil, &jsonrpc.Error{Code: -32000, Message: fmt.Sprintf("%v; start it with `spectra daemon start`", err)}
 	}
-	data, err := json.Marshal(alerts)
+	return jsonResource(firingAlertsURI, value, alertsTTLMs)
+}
+
+// Cache hints for the live resources. Both describe this host, so they are
+// never shared; a subscriber is told about changes, so a short TTL is safe.
+const (
+	alertsTTLMs     = 5_000
+	hostHealthTTLMs = 10_000
+)
+
+func jsonResource(uri string, value any, ttlMs int) (*sdk.ReadResourceResult, error) {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: err.Error()}
 	}
-	res := &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{URI: firingAlertsURI, MIMEType: "application/json", Text: string(data)}}}
-	// Alerts describe this host: stale at once (ttlMs 0) and never shared.
+	res := &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{URI: uri, MIMEType: "application/json", Text: string(data)}}}
 	res.CacheScope = "private"
+	res.TTLMs = ttlMs
 	return res, nil
+}
+
+// hostHealthDoc is the compact host-health resource: the fields its
+// notifications track plus the numbers behind them.
+type hostHealthDoc struct {
+	Daemon           string    `json:"daemon"`
+	At               time.Time `json:"at"`
+	NCPU             int       `json:"ncpu"`
+	Load1            float64   `json:"load1"`
+	Load5            float64   `json:"load5"`
+	Load15           float64   `json:"load15"`
+	LoadPerCPU       float64   `json:"load_per_cpu"`
+	LoadVerdict      string    `json:"load_verdict"`
+	MemoryPressure   string    `json:"memory_pressure"`
+	MemFreePct       float64   `json:"mem_free_pct"`
+	SwapUsedMB       float64   `json:"swap_used_mb"`
+	DataFreeGB       float64   `json:"data_free_gb"`
+	ThermalThrottled bool      `json:"thermal_throttled"`
+	ActiveAlerts     *int      `json:"active_alerts,omitempty"`
+}
+
+func newHostHealthDoc(s hostwatch.Sample, daemonUp bool, activeAlerts []hostwatch.Alert, verdict string) hostHealthDoc {
+	if verdict == "" {
+		verdict = loadVerdict(s.Load1, s.NCPU, "")
+	}
+	doc := hostHealthDoc{
+		Daemon: "not running", At: s.At, NCPU: s.NCPU,
+		Load1: round2(s.Load1), Load5: round2(s.Load5), Load15: round2(s.Load15),
+		LoadPerCPU: round2(loadPerCPU(s.Load1, s.NCPU)), LoadVerdict: verdict,
+		MemoryPressure: s.MemoryPressure, MemFreePct: round2(s.MemFreePct), SwapUsedMB: round2(s.SwapUsedMB),
+		DataFreeGB: round2(s.DataFreeGB), ThermalThrottled: s.ThermalThrottled,
+	}
+	if daemonUp {
+		n := len(activeAlerts)
+		doc.Daemon, doc.ActiveAlerts = "running", &n
+	}
+	return doc
+}
+
+// readHostHealth serves the daemon's current sample, or samples the host
+// locally when the daemon is not running.
+func (s *Server) readHostHealth(ctx context.Context, _ *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+	var sample hostwatch.Sample
+	var alerts []hostwatch.Alert
+	err := s.withDaemon(func(ctx context.Context, client daemonWatchClient) error {
+		var callErr error
+		sample, alerts, callErr = client.Current(ctx)
+		return callErr
+	})
+	switch {
+	case err == nil:
+		if s.alertsUnavailableReason() != "" {
+			// The watcher samples locally while the daemon's stream is
+			// unusable; serve that sample so content matches its updates.
+			if local, lerr := s.localHostSample(ctx); lerr == nil {
+				return jsonResource(hostHealthURI, newHostHealthDoc(local, true, alerts, s.hubVerdict(false)), hostHealthTTLMs)
+			}
+		}
+		return jsonResource(hostHealthURI, newHostHealthDoc(sample, true, alerts, s.hubVerdict(true)), hostHealthTTLMs)
+	case !errors.Is(err, errDaemonUnavailable):
+		return nil, &jsonrpc.Error{Code: -32000, Message: err.Error()}
+	}
+	sample, err = s.localHostSample(ctx)
+	if err != nil {
+		return nil, &jsonrpc.Error{Code: -32000, Message: fmt.Sprintf("sample host: %v", err)}
+	}
+	return jsonResource(hostHealthURI, newHostHealthDoc(sample, false, nil, s.hubVerdict(false)), hostHealthTTLMs)
+}
+
+// hubVerdict is the hysteresis-aware verdict the live hub notifies with, or
+// "" when no subscription is tracking it.
+func (s *Server) hubVerdict(daemon bool) string {
+	if s.live == nil {
+		return ""
+	}
+	v, _ := s.live.levelVerdict(daemon)
+	return v
+}
+
+func (s *Server) alertsUnavailableReason() string {
+	if s.live == nil {
+		return ""
+	}
+	return s.live.alertsUnavailable()
+}
+
+func (s *Server) localHostSample(ctx context.Context) (hostwatch.Sample, error) {
+	cfg := s.liveCfg.withDefaults()
+	if s.live != nil {
+		if sample, ok := s.live.cachedLocalSample(); ok {
+			return sample, nil
+		}
+		cfg = s.live.cfg
+	}
+	ctx, cancel := context.WithTimeout(ctx, localSampleTimeout)
+	defer cancel()
+	return cfg.sampleLocal(ctx)
 }

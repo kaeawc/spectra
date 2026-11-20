@@ -14,8 +14,10 @@ or `2025-11-25` when it asks for one the server does not know. A `2026-07-28`
 client skips the handshake: it calls `server/discover` and sends the protocol
 version in each request's `_meta`.
 
-The server advertises the `tools`, `resources` and `prompts` capabilities. The
-set never changes while it runs, so it sends no list-changed notifications.
+The server advertises the `tools`, `resources` (with `subscribe`) and
+`prompts` capabilities. The set never changes while it runs, so it sends no
+list-changed notifications. Resource subscriptions are covered under
+[Live resources](#live-resources).
 Tools that only read carry the `readOnlyHint` annotation. `snapshot`,
 `diagnose`, `jvm`, `network`, `issues`, `cache`, `alerts` and `triage` do not,
 because some of their operations store snapshots or issues, acknowledge alerts,
@@ -42,8 +44,57 @@ retains its unavailable error with the same hint. Daemon calls have a two-second
 timeout and reconnect once after a broken connection. The existing MCP tools
 using in-process collectors remain available without the daemon.
 
-The `spectra://alerts/firing` resource returns the current firing alerts as
-JSON and also requires the daemon.
+## Live resources
+
+Two resources describe this host and change while the server runs. A client
+can subscribe to them (`resources/subscribe` up to `2025-11-25`, or a
+`subscriptions/listen` stream on `2026-07-28`) and re-read them when it gets
+`notifications/resources/updated`. On `2026-07-28` the notification goes only
+to sessions whose listen stream names the URI. The static markdown resources
+accept a subscription and never send an update.
+
+| URI | Content | Cache hint |
+| --- | --- | --- |
+| `spectra://alerts/firing` | The daemon's firing alerts as a JSON array. Without the daemon: `{"daemon": "not running", "message": ..., "alerts": []}` | `private`, `ttlMs` 5000 |
+| `spectra://host/health` | Compact JSON: `daemon` (`running` or `not running`), `at`, `ncpu`, `load1`/`load5`/`load15`, `load_per_cpu`, `load_verdict` (`admit` or `hold`), `memory_pressure`, `mem_free_pct`, `swap_used_mb`, `data_free_gb`, `thermal_throttled`, and `active_alerts` when the daemon is running | `private`, `ttlMs` 10000 |
+
+The alerts resource has two shapes. With the daemon running it is a bare JSON
+array of firing alerts (empty when none fire). Without it, it is an object,
+`{"daemon": "not running", "message": ..., "alerts": []}`, so a subscriber can
+tell a quiet host from a missing daemon. If the daemon accepts the connection
+but its alert stream fails before delivering anything (an older or broken
+daemon), the object reads `{"daemon": "alerts unavailable", "message": <reason>,
+"alerts": []}`, and host health falls back to local sampling. Both shapes carry
+the `private`, `ttlMs` 5000 cache hint, so a client may reuse a read for 5
+seconds unless it is notified first. A burst of alert events is coalesced into
+one `resources/updated` about 1 second after the first event.
+
+The host-health resource is built from the same sample as the `host_health`
+tool: the daemon's current sample when it runs, otherwise one taken locally.
+`load_verdict` is `hold` when the 1-minute load reaches 1.5 per CPU (the
+`load` tool's default limit). While a session subscribes, `load_verdict` is the
+watcher's level with the 1.35 release hysteresis, the same one that drives
+notifications, so content and updates agree.
+
+While a session subscribes to either resource, one watcher shared by all
+sessions runs:
+
+- **Daemon running.** It follows the daemon's alert stream. Alert events
+  send one debounced update for `spectra://alerts/firing`. Each daemon sample is compared
+  with the last one notified, and `spectra://host/health` is updated when the
+  load verdict, memory pressure level or thermal state changes, at most once
+  every 10 seconds. Once the verdict is `hold`, it stays there until load drops
+  below 1.35 per CPU, so load near the limit does not flap.
+- **No daemon.** Subscriptions are still accepted. The watcher samples the host
+  locally every 30 seconds while a session subscribes to host health, applies
+  the same thresholds, and tries to reach the daemon again at the same pace.
+  Reads between polls reuse the last local sample.
+- **Daemon starts or stops.** Both subscribed resources are updated, because
+  their content changes.
+
+The watcher stops when the last subscription ends or its session closes, so an
+idle server neither samples the host nor holds a daemon connection.
+`SPECTRA_NO_DAEMON=1` keeps the server on the local path.
 
 ## Host report tools
 

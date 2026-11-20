@@ -1668,6 +1668,12 @@
       "mimeType": "text/markdown"
     },
     {
+      "uri": "spectra://host/health",
+      "name": "Host Health",
+      "description": "Compact host load, memory pressure and thermal state in JSON.",
+      "mimeType": "application/json"
+    },
+    {
       "uri": "spectra://workflows/debugging",
       "name": "Debug Workflows",
       "description": "Short app, JVM, network, and baseline workflows.",

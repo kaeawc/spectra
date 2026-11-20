@@ -6,11 +6,15 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const firingAlertsURI = "spectra://alerts/firing"
+const (
+	firingAlertsURI = "spectra://alerts/firing"
+	hostHealthURI   = "spectra://host/health"
+)
 
 func resourceDefinitions() []*sdk.Resource {
 	return []*sdk.Resource{
 		{URI: firingAlertsURI, Name: "Firing Alerts", Description: "Current daemon alerts in JSON.", MIMEType: "application/json"},
+		{URI: hostHealthURI, Name: "Host Health", Description: "Compact host load, memory pressure and thermal state in JSON.", MIMEType: "application/json"},
 		{
 			URI:         "spectra://capabilities",
 			Name:        "Capabilities",
@@ -24,6 +28,17 @@ func resourceDefinitions() []*sdk.Resource {
 			MIMEType:    "text/markdown",
 		},
 	}
+}
+
+// resourceHandler returns the read handler for a registered resource URI.
+func (s *Server) resourceHandler(uri string) sdk.ResourceHandler {
+	switch uri {
+	case firingAlertsURI:
+		return s.readFiringAlerts
+	case hostHealthURI:
+		return s.readHostHealth
+	}
+	return readStaticResource
 }
 
 // readStaticResource serves the markdown resources. The SDK only routes URIs
