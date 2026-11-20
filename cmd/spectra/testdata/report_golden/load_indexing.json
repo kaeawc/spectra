@@ -1,0 +1,100 @@
+{
+  "verdict": "admit",
+  "reason": "1-minute load 1.00 is below the limit 6.00 and available memory 16.0 GiB is at least 8.0 GiB",
+  "exit_code": 0,
+  "load1": 1,
+  "load_limit": 6,
+  "cpus": 4,
+  "available_gb": 16,
+  "min_free_gb": 8,
+  "backoff_free_gb": 4,
+  "cause": {
+    "kind": "indexing",
+    "detail": "indexing leads the CPU table (mds_stores)",
+    "cpu_pct": 120
+  },
+  "top_cpu": [
+    {
+      "pid": 50,
+      "command": "mds_stores",
+      "cpu_pct": 120,
+      "rss_kib": 0,
+      "dir": "unknown"
+    },
+    {
+      "pid": 10,
+      "command": "go",
+      "cpu_pct": 5,
+      "rss_kib": 0,
+      "cwd": "/r/wt1/sub",
+      "dir": "/r/wt1"
+    }
+  ],
+  "top_rss": [
+    {
+      "pid": 10,
+      "command": "go",
+      "cpu_pct": 5,
+      "rss_kib": 0,
+      "cwd": "/r/wt1/sub",
+      "dir": "/r/wt1"
+    },
+    {
+      "pid": 50,
+      "command": "mds_stores",
+      "cpu_pct": 120,
+      "rss_kib": 0,
+      "dir": "unknown"
+    }
+  ],
+  "families": [
+    {
+      "name": "mds_stores",
+      "kind": "other",
+      "members": 1,
+      "cpu_pct": 120,
+      "rss_kib": 0
+    },
+    {
+      "name": "go",
+      "kind": "other",
+      "members": 1,
+      "cpu_pct": 5,
+      "rss_kib": 0
+    }
+  ],
+  "dirs": [
+    {
+      "dir": "/r/wt1",
+      "procs": 1,
+      "cpu_pct": 5,
+      "rss_kib": 0
+    }
+  ],
+  "unknown": {
+    "dir": "unknown",
+    "procs": 1,
+    "cpu_pct": 120,
+    "rss_kib": 0
+  },
+  "devices": {
+    "simulators": 0,
+    "emulators": 0,
+    "booted": 0,
+    "booted_recently": 0,
+    "boot_window_seconds": 300,
+    "by_root": [],
+    "list": []
+  },
+  "spotlight": [
+    {
+      "root": "/r",
+      "unsupported": "spotlight root state: unsupported on host OS (linux)",
+      "excluded": null
+    }
+  ],
+  "cpu_window_ms": 0,
+  "cpu_basis": "lifetime",
+  "elapsed_ms": 0,
+  "process_count": 2
+}

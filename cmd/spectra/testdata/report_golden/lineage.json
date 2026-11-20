@@ -1,0 +1,48 @@
+{
+  "pid": 10,
+  "flags": [
+    "reparented"
+  ],
+  "ancestors": [
+    {
+      "pid": 10,
+      "ppid": 1,
+      "user": "me",
+      "start_time": "0001-01-01T00:00:00Z",
+      "command": "zsh"
+    },
+    {
+      "pid": 1,
+      "ppid": 0,
+      "user": "root",
+      "start_time": "0001-01-01T00:00:00Z",
+      "command": "launchd"
+    }
+  ],
+  "tree": {
+    "pid": 10,
+    "ppid": 1,
+    "user": "me",
+    "start_time": "0001-01-01T00:00:00Z",
+    "command": "zsh",
+    "rss_kib": 100,
+    "cpu_pct": 0,
+    "count": 2,
+    "subtree_rss_kib": 300,
+    "subtree_cpu_pct": 5,
+    "children": [
+      {
+        "pid": 20,
+        "ppid": 10,
+        "user": "me",
+        "start_time": "0001-01-01T00:00:00Z",
+        "command": "make",
+        "rss_kib": 200,
+        "cpu_pct": 5,
+        "count": 1,
+        "subtree_rss_kib": 200,
+        "subtree_cpu_pct": 5
+      }
+    ]
+  }
+}
