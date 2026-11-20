@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,8 +86,15 @@ func TestHostArgvLinuxProcfs(t *testing.T) {
 }
 
 func TestHostArgvOwnProcess(t *testing.T) {
-	kind := hostos.Current()
-	if kind != hostos.Darwin && kind != hostos.Linux {
+	// The real OS, not hostos.Current: other tests in this package override
+	// the reported OS, but the sysctl and /proc reads depend on the build.
+	var kind hostos.Kind
+	switch runtime.GOOS {
+	case "darwin":
+		kind = hostos.Darwin
+	case "linux":
+		kind = hostos.Linux
+	default:
 		t.Skip("argv is read on macOS and Linux only")
 	}
 	got, err := hostArgv(kind, "/proc", os.Getpid())
