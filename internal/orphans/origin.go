@@ -131,7 +131,7 @@ func originOf(pid int, live map[int]time.Time, answers map[spawnorigin.Key]spawn
 	}
 	first := a.Record.FirstSeen
 	o.FirstSeen = &first
-	chain := chainOf(*a.Record, a.Ancestors, live)
+	chain := chainOf(*a.Record, a.Chain, live)
 	if len(chain) == 0 {
 		o.Reason = ReasonNoParent
 		return o, nil

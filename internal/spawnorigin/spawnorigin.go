@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // StartTolerance is how far two start times of one pid may differ and still
@@ -16,15 +17,15 @@ import (
 // derive from a btime that can drift by about a second.
 const StartTolerance = 2 * time.Second
 
-// Defaults bound the store to a few MB: argv and cwd are truncated, so a
-// record is well under 2 KiB.
+// Defaults bound the store to a few MB: argv, cwd and comm are truncated to
+// these byte limits, so a record's strings total under 2 KiB.
 const (
 	DefaultMaxRecords = 4096
 	DefaultExitedTTL  = 24 * time.Hour
 	maxAncestors      = 32
-	maxArgvRunes      = 512
-	maxCwdRunes       = 1024
-	maxCommRunes      = 64
+	maxArgvBytes      = 512
+	maxCwdBytes       = 1024
+	maxCommBytes      = 64
 )
 
 // Proc is one process-table row as the daemon's spawn probe sees it.
@@ -123,18 +124,20 @@ func (s *Store) Observe(at time.Time, procs []Proc) {
 		if s.opts.UID >= 0 && p.UID != s.opts.UID {
 			continue
 		}
-		if r := s.liveLocked(p.PID, p.Start); r != nil {
-			r.LastSeen = at
+		if r := s.recs[KeyOf(p.PID, p.Start)]; r != nil {
+			// A probe that missed this process marked it exited; seeing
+			// the same lifetime again revives it rather than duplicating it.
+			r.LastSeen, r.ExitedAt = at, time.Time{}
 			present[r.key()] = true
 			continue
 		}
 		r := &Record{
-			PID: p.PID, StartTime: p.Start.UTC(), PPID: p.PPID, Comm: truncate(p.Comm, maxCommRunes),
+			PID: p.PID, StartTime: p.Start.UTC(), PPID: p.PPID, Comm: truncate(p.Comm, maxCommBytes),
 			FirstSeen: at, LastSeen: at, Baseline: !s.observed,
 		}
 		if parent, ok := byPID[p.PPID]; ok && p.PPID > 1 {
 			r.ParentStart = parent.Start.UTC()
-			r.ParentComm = truncate(parent.Comm, maxCommRunes)
+			r.ParentComm = truncate(parent.Comm, maxCommBytes)
 		}
 		k := r.key()
 		s.recs[k] = r
@@ -148,18 +151,6 @@ func (s *Store) Observe(at time.Time, procs []Proc) {
 	}
 	s.observed = true
 	s.pruneLocked(at)
-}
-
-// liveLocked returns the not-yet-exited record of pid whose start is within
-// StartTolerance of start, so start-time jitter does not split a lifetime.
-func (s *Store) liveLocked(pid int, start time.Time) *Record {
-	for _, k := range s.byPID[pid] {
-		r := s.recs[k]
-		if r != nil && r.ExitedAt.IsZero() && within(r.StartTime, start) {
-			return r
-		}
-	}
-	return nil
 }
 
 func within(a, b time.Time) bool {
@@ -208,7 +199,7 @@ func (s *Store) SetDetail(k Key, argv, cwd string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r := s.recs[k]; r != nil {
-		r.Argv, r.Cwd, r.detailed = truncate(argv, maxArgvRunes), truncate(cwd, maxCwdRunes), true
+		r.Argv, r.Cwd, r.detailed = truncate(argv, maxArgvBytes), truncate(cwd, maxCwdBytes), true
 	}
 }
 
@@ -267,8 +258,10 @@ func (s *Store) MaxRecords() int { return s.opts.MaxRecords }
 
 // pruneLocked drops exited records past the TTL unless a live process
 // descends from them, then evicts down to MaxRecords: unneeded exited
-// records first, then exited ancestors of live processes, then the oldest
-// live records, oldest first within each tier.
+// records first, then exited ancestors of live processes, then live records
+// nothing live descends from, and last live ancestors, so long-lived agent and
+// shell ancestors outlast their short-lived children; oldest first within each
+// tier.
 func (s *Store) pruneLocked(at time.Time) {
 	keep := s.liveAncestryLocked()
 	type cand struct {
@@ -287,6 +280,8 @@ func (s *Store) pruneLocked(at time.Time) {
 			cands = append(cands, cand{k, 0, r.ExitedAt})
 		case !r.ExitedAt.IsZero():
 			cands = append(cands, cand{k, 1, r.ExitedAt})
+		case keep[k]:
+			cands = append(cands, cand{k, 3, r.FirstSeen})
 		default:
 			cands = append(cands, cand{k, 2, r.FirstSeen})
 		}
@@ -360,12 +355,15 @@ func absDur(d time.Duration) time.Duration {
 	return d
 }
 
+// truncate cuts s to at most n bytes without splitting a UTF-8 sequence.
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n])
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // Query names one process lifetime to look up.
@@ -377,31 +375,83 @@ type Query struct {
 // MaxQueries bounds one lookup request.
 const MaxQueries = 4096
 
-// Answer is the lookup result for one Query.
+// Ref names one entry of Response.Ancestors.
+type Ref struct {
+	PID       int       `json:"pid"`
+	StartTime time.Time `json:"start_time"`
+}
+
+// Answer is the lookup result for one Query. On the wire Ancestors are Refs
+// into Response.Ancestors, so an ancestor shared by many answers is sent
+// once; Response.Resolve fills Chain from them.
 type Answer struct {
 	PID       int       `json:"pid"`
 	StartTime time.Time `json:"start_time"`
 	Found     bool      `json:"found"`
 	Record    *Record   `json:"record,omitempty"`
-	Ancestors []Record  `json:"ancestors,omitempty"`
+	Ancestors []Ref     `json:"ancestors,omitempty"`
+	// Chain is the recorded ancestors, nearest first, rebuilt by Resolve.
+	Chain []Record `json:"-"`
 }
 
-// Response is the reply to a lookup.
+// Response is the reply to a lookup. Truncated reports that the queries were
+// cut to MaxQueries; answers cover the leading unique ones.
 type Response struct {
 	RecordingSince time.Time `json:"recording_since,omitzero"`
 	Records        int       `json:"records"`
 	MaxRecords     int       `json:"max_records"`
 	Answers        []Answer  `json:"answers"`
+	Ancestors      []Record  `json:"ancestors,omitempty"`
+	Truncated      bool      `json:"truncated,omitempty"`
 }
 
-// Answer looks up every query.
+// Resolve rebuilds each answer's Chain from the shared ancestor table.
+func (r *Response) Resolve() {
+	table := make(map[Key]Record, len(r.Ancestors))
+	for _, rec := range r.Ancestors {
+		table[rec.key()] = rec
+	}
+	for i := range r.Answers {
+		a := &r.Answers[i]
+		a.Chain = a.Chain[:0]
+		for _, ref := range a.Ancestors {
+			if rec, ok := table[KeyOf(ref.PID, ref.StartTime)]; ok {
+				a.Chain = append(a.Chain, rec)
+			}
+		}
+	}
+}
+
+// Answer looks up every query. Duplicate queries (same pid and start) are
+// answered once and each ancestor is returned once, so the response is
+// bounded by the store size rather than by the request. Queries beyond
+// MaxQueries are dropped and Truncated is set.
 func (s *Store) Answer(queries []Query) Response {
-	resp := Response{RecordingSince: s.Since(), Records: s.Len(), MaxRecords: s.MaxRecords(), Answers: make([]Answer, 0, len(queries))}
+	resp := Response{RecordingSince: s.Since(), Records: s.Len(), MaxRecords: s.MaxRecords(), Answers: make([]Answer, 0, min(len(queries), MaxQueries))}
+	seenQuery := map[Key]bool{}
+	seenAnc := map[Key]bool{}
 	for _, q := range queries {
+		qk := KeyOf(q.PID, q.StartTime)
+		if seenQuery[qk] {
+			continue
+		}
+		if len(resp.Answers) >= MaxQueries {
+			resp.Truncated = true
+			break
+		}
+		seenQuery[qk] = true
 		a := Answer{PID: q.PID, StartTime: q.StartTime}
 		if !q.StartTime.IsZero() {
 			if rec, anc, ok := s.Lookup(q.PID, q.StartTime); ok {
-				a.Found, a.Record, a.Ancestors = true, &rec, anc
+				a.Found, a.Record = true, &rec
+				for _, r := range anc {
+					k := r.key()
+					a.Ancestors = append(a.Ancestors, Ref{PID: r.PID, StartTime: r.StartTime})
+					if !seenAnc[k] {
+						seenAnc[k] = true
+						resp.Ancestors = append(resp.Ancestors, r)
+					}
+				}
 			}
 		}
 		resp.Answers = append(resp.Answers, a)

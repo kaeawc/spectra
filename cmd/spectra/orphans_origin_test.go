@@ -63,7 +63,7 @@ func TestRunOrphansReportsRecordedOrigin(t *testing.T) {
 		return orphans.OriginSource{Response: spawnorigin.Response{Answers: []spawnorigin.Answer{{
 			PID: 10, StartTime: old, Found: true,
 			Record: &spawnorigin.Record{PID: 10, StartTime: old, PPID: 70, ParentStart: old.Add(-time.Minute), ParentComm: "zsh"},
-			Ancestors: []spawnorigin.Record{
+			Chain: []spawnorigin.Record{
 				{PID: 70, StartTime: old.Add(-time.Minute), PPID: 60, ParentStart: old.Add(-time.Hour), Comm: "zsh", Argv: "zsh -c npm run dev", Cwd: "/private/tmp/work/wt1", ExitedAt: exited},
 				{PID: 60, StartTime: old.Add(-time.Hour), PPID: 1, Comm: "claude", Argv: "claude"},
 			},

@@ -487,7 +487,7 @@ func TestDarwinSpawnLive(t *testing.T) {
 	if runtime.GOOS != "darwin" || os.Getenv("SPECTRA_HOSTWATCH_LIVE") != "1" {
 		t.Skip("requires macOS and SPECTRA_HOSTWATCH_LIVE=1")
 	}
-	b := newSpawnBackend()
+	b := newSpawnBackend(nil)
 	start := time.Now()
 	rows, err := b.List()
 	if err != nil {

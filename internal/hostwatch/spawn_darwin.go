@@ -11,12 +11,13 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/kaeawc/spectra/internal/hostload"
+	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
 type platformSpawnBackend struct{}
 
-func newSpawnBackend() SpawnBackend { return platformSpawnBackend{} }
+func newSpawnBackend(_ logger.Logger) SpawnBackend { return platformSpawnBackend{} }
 
 func (platformSpawnBackend) List() ([]SpawnProcess, error) {
 	rows, err := unix.SysctlKinfoProcSlice("kern.proc.all")

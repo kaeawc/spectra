@@ -45,7 +45,7 @@ func TestAttachOriginsKnown(t *testing.T) {
 		Answers: []spawnorigin.Answer{
 			{PID: 10, StartTime: now.Add(-time.Hour), Found: true,
 				Record: &spawnorigin.Record{PID: 10, StartTime: now.Add(-time.Hour).Add(400 * time.Millisecond), PPID: 200, ParentStart: now.Add(-2 * time.Hour), ParentComm: "zsh", FirstSeen: now.Add(-time.Hour)},
-				Ancestors: []spawnorigin.Record{
+				Chain: []spawnorigin.Record{
 					{PID: 200, StartTime: now.Add(-2 * time.Hour), PPID: 100, ParentStart: now.Add(-3 * time.Hour), Comm: "zsh", Argv: "zsh -c npm run dev", Cwd: "/r/lane-7", ExitedAt: exited},
 					{PID: 100, StartTime: now.Add(-3 * time.Hour), PPID: 1, Comm: "claude", Argv: "claude", Cwd: "/r"},
 				}},

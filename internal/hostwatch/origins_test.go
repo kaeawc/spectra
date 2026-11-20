@@ -65,15 +65,16 @@ func TestOriginRecordedWhenParentExitsWhileDaemonRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp := out.(spawnorigin.Response)
+	resp.Resolve()
 	a := resp.Answers[0]
-	if !a.Found || a.Record.PPID != 200 || len(a.Ancestors) != 2 {
+	if !a.Found || a.Record.PPID != 200 || len(a.Chain) != 2 {
 		t.Fatalf("answer = %+v", a)
 	}
-	parent := a.Ancestors[0]
+	parent := a.Chain[0]
 	if parent.Argv != "/bin/zsh -c ./gradlew run" || parent.Cwd != "/w/lane-7/app" || !parent.ExitedAt.Equal(t0.Add(10*time.Second)) {
 		t.Fatalf("parent = %+v", parent)
 	}
-	if g := a.Ancestors[1]; g.Comm != "claude" || g.Cwd != "/w/lane-7" || !g.ExitedAt.IsZero() {
+	if g := a.Chain[1]; g.Comm != "claude" || g.Cwd != "/w/lane-7" || !g.ExitedAt.IsZero() {
 		t.Fatalf("grandparent = %+v", g)
 	}
 	if resp.Answers[1].Found {

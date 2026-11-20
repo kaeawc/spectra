@@ -88,6 +88,7 @@ func (w *Client) ProcessHistory(ctx context.Context, pid, limit int) ([]metrics.
 func (w *Client) Origins(ctx context.Context, queries []spawnorigin.Query) (spawnorigin.Response, error) {
 	var result spawnorigin.Response
 	err := w.c.Call(ctx, hostwatch.MethodProcessOrigins, map[string]any{"processes": queries}, &result)
+	result.Resolve()
 	return result, err
 }
 

@@ -127,7 +127,7 @@ func NewService(opts ServiceOptions) *Service {
 		opts.Notifier = NoopNotifier{}
 	}
 	if opts.SpawnBackend == nil {
-		opts.SpawnBackend = newSpawnBackend()
+		opts.SpawnBackend = newSpawnBackend(opts.Logger)
 	}
 	if opts.UID == nil {
 		opts.UID = currentUID

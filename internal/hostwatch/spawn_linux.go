@@ -7,40 +7,29 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/kaeawc/spectra/internal/logger"
 )
 
-// platformSpawnBackend reads btime once: it can drift by about a second
-// between reads, which would shift every start time and split lifetimes.
+// platformSpawnBackend reads btime until a read succeeds, then keeps it: btime
+// can drift by about a second between reads, which would shift every start
+// time and split lifetimes. A failed read is retried on the next call and
+// warned about once.
 type platformSpawnBackend struct {
-	btimeOnce *sync.Once
-	btime     *time.Time
+	boot *bootTimer
 }
 
-func newSpawnBackend() SpawnBackend {
-	return platformSpawnBackend{btimeOnce: &sync.Once{}, btime: &time.Time{}}
+func newSpawnBackend(log logger.Logger) SpawnBackend {
+	if log == nil {
+		log = logger.Discard()
+	}
+	return platformSpawnBackend{boot: &bootTimer{read: func() ([]byte, error) { return os.ReadFile("/proc/stat") }, log: log}}
 }
 
-func (b platformSpawnBackend) bootTime() time.Time {
-	b.btimeOnce.Do(func() {
-		data, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if rest, ok := strings.CutPrefix(line, "btime "); ok {
-				if secs, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64); err == nil {
-					*b.btime = time.Unix(secs, 0)
-				}
-				break
-			}
-		}
-	})
-	return *b.btime
-}
+func (b platformSpawnBackend) bootTime() time.Time { return b.boot.get() }
 
 func (b platformSpawnBackend) List() ([]SpawnProcess, error) {
 	entries, err := os.ReadDir("/proc")
