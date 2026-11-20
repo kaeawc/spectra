@@ -798,7 +798,7 @@ func TestAppUptimeIgnoresMissingStartTimes(t *testing.T) {
 	}
 }
 
-func TestParseLstartUsesLocalTimeZone(t *testing.T) {
+func TestParseLstartReadsUTCAndReturnsLocal(t *testing.T) {
 	oldLocal := time.Local
 	loc := time.FixedZone("Spectra/Test", -5*60*60)
 	time.Local = loc
@@ -808,7 +808,7 @@ func TestParseLstartUsesLocalTimeZone(t *testing.T) {
 	if got.Location() != loc {
 		t.Fatalf("location = %v, want %v", got.Location(), loc)
 	}
-	if got.Hour() != 12 || got.Minute() != 34 || got.Second() != 56 {
+	if got.Hour() != 7 || got.Minute() != 34 || got.Second() != 56 {
 		t.Fatalf("parsed time = %v", got)
 	}
 }
