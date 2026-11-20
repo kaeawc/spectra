@@ -151,13 +151,41 @@ func TestJVMToolSchemaExposesMBeanProperties(t *testing.T) {
 		`"mbean_name"`,
 		`"attribute"`,
 		`"mbean_operation"`,
-		`"asprof_path"`,
 		`"agent"`,
 		`"samples"`,
 	} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("jvm input schema missing %s:\n%s", want, schema)
 		}
+	}
+}
+
+func TestJVMSchemaOmitsAsprofPath(t *testing.T) {
+	for _, def := range toolDefinitions() {
+		if def.Name != "jvm" {
+			continue
+		}
+		raw, _ := json.Marshal(def.InputSchema)
+		if strings.Contains(string(raw), "asprof_path") {
+			t.Fatalf("jvm schema must not advertise asprof_path: %s", raw)
+		}
+	}
+}
+
+func TestJVMFlamegraphRejectsAsprofPath(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "asprof")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ntouch "+filepath.Join(dir, "ran")+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{fake, "/bin/sh", "asprof"} {
+		res := (&Server{}).toolJVMFlamegraph(context.Background(), jvmParams{PID: 1, ConfirmSensitive: true, AsprofPath: path})
+		if !res.IsError || !strings.Contains(res.Content[0].Text, "asprof_path is not accepted") {
+			t.Fatalf("path %q not rejected: %+v", path, res)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
+		t.Fatal("fake asprof was executed")
 	}
 }
 

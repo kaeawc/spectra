@@ -309,7 +309,6 @@ func operationToolDef(name, description string, operations []string) ToolDefinit
 			"mbean_operation":   stringProp("MBean operation name. Required for mbean_invoke."),
 			"agent":             stringProp("Path to spectra-agent.jar override."),
 			"samples":           integerProp("Number of samples."),
-			"asprof_path":       stringProp("async-profiler asprof path override."),
 		}, []string{"operation"}),
 	}
 }
@@ -883,6 +882,12 @@ func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
 	return handler(ctx, p)
 }
 
+// asprofPathRejection explains why asprof_path is refused. The profiler is
+// resolved from PATH only: an MCP client is usually an AI agent, so letting it
+// choose the executable would make prompt injection arbitrary code execution.
+// The CLI keeps its --asprof flag.
+const asprofPathRejection = "asprof_path is not accepted over MCP: the profiler is always the `asprof` found on the server's PATH (the CLI still offers an override); put async-profiler's bin directory on PATH instead"
+
 type jvmParams struct {
 	Operation        string `json:"operation"`
 	PID              int    `json:"pid"`
@@ -892,7 +897,7 @@ type jvmParams struct {
 	Event            string `json:"event"`
 	DurationSeconds  int    `json:"duration_seconds"`
 	ConfirmSensitive bool   `json:"confirm_sensitive"`
-	AsprofPath       string `json:"asprof_path"`
+	AsprofPath       string `json:"asprof_path"` // rejected, see asprofPathRejection
 	Agent            string `json:"agent"`
 	MBeanName        string `json:"mbean_name"`
 	Attribute        string `json:"attribute"`
@@ -1147,6 +1152,9 @@ func (s *Server) toolJVMHeapLeakSuspects(_ context.Context, p jvmParams) ToolRes
 }
 
 func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
+	if p.AsprofPath != "" {
+		return toolError(asprofPathRejection)
+	}
 	if !p.ConfirmSensitive {
 		return toolError("jvm flamegraph requires confirm_sensitive=true")
 	}
@@ -1157,7 +1165,7 @@ func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult 
 		p.Dest = fmt.Sprintf("/tmp/spectra-flamegraph-%d.html", p.PID)
 	}
 	stop := progressFrom(ctx).elapsed(ctx, time.Duration(p.DurationSeconds)*time.Second, fmt.Sprintf("profiling pid %d", p.PID))
-	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{AsprofPath: p.AsprofPath, Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
+	err := s.collect.JVMs.CaptureFlamegraph(ctx, p.PID, jvm.FlamegraphOptions{Event: p.Event, DurationSeconds: p.DurationSeconds, OutputPath: p.Dest})
 	stop()
 	if err != nil {
 		return toolError(err.Error())

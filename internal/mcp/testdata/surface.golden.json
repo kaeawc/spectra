@@ -192,10 +192,6 @@
             "description": "Actor.",
             "type": "string"
           },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
-            "type": "string"
-          },
           "attribute": {
             "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
             "type": "string"
@@ -868,10 +864,6 @@
             "description": "Actor.",
             "type": "string"
           },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
-            "type": "string"
-          },
           "attribute": {
             "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
             "type": "string"
@@ -1071,10 +1063,6 @@
           },
           "applied_by": {
             "description": "Actor.",
-            "type": "string"
-          },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
             "type": "string"
           },
           "attribute": {
@@ -2031,10 +2019,6 @@
             "description": "Actor.",
             "type": "string"
           },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
-            "type": "string"
-          },
           "attribute": {
             "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
             "type": "string"
@@ -2712,10 +2696,6 @@
             "description": "Actor.",
             "type": "string"
           },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
-            "type": "string"
-          },
           "attribute": {
             "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
             "type": "string"
@@ -3278,10 +3258,6 @@
           },
           "applied_by": {
             "description": "Actor.",
-            "type": "string"
-          },
-          "asprof_path": {
-            "description": "async-profiler asprof path override.",
             "type": "string"
           },
           "attribute": {
