@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -127,6 +128,36 @@ func Output(ctx context.Context, r Runner, name string, args ...string) ([]byte,
 	return res.Stdout, nil
 }
 
+// StableTimeEnv returns the parent environment with TZ=UTC0 and LC_ALL=C
+// forced, so tools such as ps print timestamps in UTC with English month and
+// day names regardless of the user's zone or locale. Pass it as Cmd.Env.
+func StableTimeEnv() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "TZ=") || strings.HasPrefix(kv, "LC_ALL=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "TZ=UTC0", "LC_ALL=C")
+}
+
+// OutputEnv is Output with an explicit subprocess environment.
+func OutputEnv(ctx context.Context, r Runner, env []string, name string, args ...string) ([]byte, error) {
+	if r == nil {
+		r = Default
+	}
+	cmd := Cmd{Name: name, Args: args, Env: env}
+	res, err := r.Run(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("%s exited %d: %s", formatCmd(cmd), res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	return res.Stdout, nil
+}
+
 // BoundedOutput is exec.Command(name, args...).Output() with DefaultTimeout
 // applied. It keeps Output's error contract (*exec.ExitError carrying stderr
 // on a non-zero exit) so it can replace that call in default collector
@@ -154,6 +185,7 @@ type Call struct {
 	Name string
 	Args []string
 	Dir  string
+	Env  []string
 }
 
 // Response describes a scripted reply Fake should return for a matched
@@ -251,6 +283,7 @@ func (f *Fake) Run(_ context.Context, cmd Cmd) (Result, error) {
 		Name: cmd.Name,
 		Args: append([]string{}, cmd.Args...),
 		Dir:  cmd.Dir,
+		Env:  append([]string(nil), cmd.Env...),
 	})
 	rules := f.rules
 	f.mu.Unlock()
@@ -274,6 +307,7 @@ func (f *Fake) Calls() []Call {
 			Name: c.Name,
 			Args: append([]string{}, c.Args...),
 			Dir:  c.Dir,
+			Env:  append([]string(nil), c.Env...),
 		}
 	}
 	return out

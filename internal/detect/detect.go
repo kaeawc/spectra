@@ -357,6 +357,14 @@ func (d detector) output(name string, args ...string) ([]byte, error) {
 	return proc.BoundedOutput(name, args...)
 }
 
+// psOutput runs ps with TZ=UTC0 LC_ALL=C so lstart is unambiguous and
+// English; parseLstart reads it as UTC.
+func (d detector) psOutput(args ...string) ([]byte, error) {
+	ctx, cancel := toolContext()
+	defer cancel()
+	return proc.OutputEnv(ctx, d.opts.Runner, proc.StableTimeEnv(), "ps", args...)
+}
+
 // toolContext bounds one inspection subprocess. Without it a single wedged
 // tool (spctl blocked on syspolicyd is the common case) stalls the whole
 // scan and anything driving it, such as the daemon or the MCP server.
@@ -1880,7 +1888,7 @@ const lstartLayout = "Mon Jan  2 15:04:05 2006"
 // lstart produces 5 whitespace-separated tokens ("Sat May  2 22:37:01 2026")
 // so the command starts at fields[7] (0-indexed: 0=pid, 1=rss, 2-6=lstart, 7+=comm).
 func (d detector) scanRunningProcesses(appPath string) []ProcessInfo {
-	out, err := d.output("ps", "-axwwo", "pid=,rss=,lstart=,comm=")
+	out, err := d.psOutput("-axwwo", "pid=,rss=,lstart=,comm=")
 	if err != nil {
 		return nil
 	}
@@ -1923,8 +1931,11 @@ func (d detector) scanRunningProcesses(appPath string) []ProcessInfo {
 }
 
 func parseLstart(s string) time.Time {
-	t, _ := time.ParseInLocation(lstartLayout, s, time.Local)
-	return t
+	t, err := time.ParseInLocation(lstartLayout, s, time.UTC)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.In(time.Local)
 }
 
 func appUptime(procs []ProcessInfo, now time.Time) (*time.Time, int64) {

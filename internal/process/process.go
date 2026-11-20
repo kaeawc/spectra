@@ -89,7 +89,9 @@ type CollectOptions struct {
 	// per collection.
 	Deep bool
 
-	// CmdRunner overrides exec.Command for testing.
+	// CmdRunner overrides exec.Command for testing. A production CmdRunner
+	// must run ps with TZ=UTC0 and LC_ALL=C (see proc.StableTimeEnv): lstart
+	// is parsed as UTC.
 	// Deprecated: prefer Runner for new code.
 	CmdRunner func(name string, args ...string) ([]byte, error)
 
@@ -136,15 +138,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	run := opts.CmdRunner
-	if opts.Runner != nil {
-		run = func(name string, args ...string) ([]byte, error) {
-			return proc.Output(ctx, opts.Runner, name, args...)
-		}
-	}
-	if run == nil {
-		run = defaultRunner
-	}
+	run := selectRunner(ctx, opts)
 
 	// Linux has no BSD ps(1) column syntax or libproc; read procfs
 	// directly, which also works on minimal distros (Alpine/BusyBox)
@@ -265,11 +259,32 @@ func applyThreadCounts(procs []Info, counter func([]Info) map[int]int) {
 	}
 }
 
+// selectRunner picks the command seam. ps always runs with TZ=UTC0 LC_ALL=C
+// so lstart parses in UTC regardless of host zone or locale.
+func selectRunner(ctx context.Context, opts CollectOptions) func(string, ...string) ([]byte, error) {
+	if opts.Runner != nil {
+		return func(name string, args ...string) ([]byte, error) {
+			if name == "ps" {
+				return proc.OutputEnv(ctx, opts.Runner, proc.StableTimeEnv(), name, args...)
+			}
+			return proc.Output(ctx, opts.Runner, name, args...)
+		}
+	}
+	if opts.CmdRunner != nil {
+		return opts.CmdRunner
+	}
+	return defaultRunner
+}
+
 // defaultRunner runs the real ps command.
 func defaultRunner(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Output()
+	c := exec.CommandContext(ctx, name, args...)
+	if name == "ps" {
+		c.Env = proc.StableTimeEnv()
+	}
+	return c.Output()
 }
 
 // parsePS converts raw ps output to a slice of Info.
@@ -311,8 +326,9 @@ func parseRow(line string) Info {
 	// fields[6] = user; fields[7:12] = lstart (5 tokens); fields[12:] = command
 	lstartStr := strings.Join(fields[7:12], " ")
 	var startTime time.Time
-	if t, err := time.ParseInLocation(lstartLayout, lstartStr, time.Local); err == nil {
-		startTime = t
+	if t, err := time.ParseInLocation(lstartLayout, lstartStr, time.UTC); err == nil {
+		// ps ran with TZ=UTC0 LC_ALL=C; present the instant in host-local time.
+		startTime = t.In(time.Local)
 	}
 	full := strings.Join(fields[12:], " ")
 	return Info{

@@ -99,7 +99,7 @@ func TestParsePSStartTime(t *testing.T) {
 func TestCollectAll(t *testing.T) {
 	opts := CollectOptions{
 		CmdRunner:   fakePS(psFixture),
-		Now:         func() time.Time { return time.Date(2026, 5, 3, 22, 40, 0, 0, time.Local) },
+		Now:         func() time.Time { return time.Date(2026, 5, 3, 22, 40, 0, 0, time.UTC) },
 		MemoryBytes: func() uint64 { return 1024 * 1024 * 1024 },
 	}
 	procs := CollectAll(context.Background(), opts)
