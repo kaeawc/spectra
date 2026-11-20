@@ -89,8 +89,11 @@ func defaultRunner(name string, args ...string) ([]byte, error) {
 
 // RegisterAll registers all helper methods on d using the provided runner.
 // run may be nil (uses the real commands).
+// The launchd methods use the real host, commands and filesystem; they
+// return hostos.Unsupported off macOS.
 func RegisterAll(d *Dispatcher, run CmdRunner) {
 	registerAll(d, run, nil)
+	registerLaunchd(d, LaunchdOptions{})
 }
 
 func registerAll(d *Dispatcher, run CmdRunner, fsUsageStarter fsUsageStarter) {

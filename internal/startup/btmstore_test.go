@@ -235,6 +235,7 @@ func TestDecodeBTMStoreMatchesDumpBTM(t *testing.T) {
 	want := map[key]btmItem{}
 	for _, it := range parseDumpBTM([]byte(readBTMFixture(t))) {
 		if it.UID != 502 { // another user's random UUID is not resolved
+			it.flags = nil // dumpbtm only; the store does not record flags
 			want[key{it.UID, it.Identifier}] = it
 		}
 	}

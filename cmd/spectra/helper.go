@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/helper"
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/hostos"
 )
@@ -135,6 +136,9 @@ func installHelper(deps helperInstallDeps, opts helperInstallOptions) error {
 		{"Install helper log rotation", func() error {
 			return installRootTextFile(helperNewsyslogConf, helperNewsyslogContent, deps.runRoot, deps.writeTemp)
 		}},
+		{"Install helper denylist", func() error {
+			return installHelperDenylist(deps)
+		}},
 		{"Load LaunchDaemon", func() error {
 			return deps.runRoot("launchctl", "load", "-w", helperPlist)
 		}},
@@ -197,6 +201,31 @@ func helperInstallUser(getenv func(string) string) string {
 		return user
 	}
 	return getenv("USER")
+}
+
+// installHelperDenylist creates the root-owned denylist directory and, only
+// when no file exists yet, writes the default denylist. An existing file is
+// never overwritten: editing it is the administrator's job.
+func installHelperDenylist(deps helperInstallDeps) error {
+	if err := deps.runRoot("mkdir", "-p", helper.DenylistDir); err != nil {
+		return err
+	}
+	if err := deps.runRoot("chown", "root:wheel", helper.DenylistDir); err != nil {
+		return err
+	}
+	if err := deps.runRoot("chmod", "755", helper.DenylistDir); err != nil {
+		return err
+	}
+	if _, err := deps.stat(helper.DenylistPath); err == nil {
+		return nil
+	}
+	if err := installRootTextFile(helper.DenylistPath, helper.DefaultDenylistPlist, deps.runRoot, deps.writeTemp); err != nil {
+		return err
+	}
+	if err := deps.runRoot("chown", "root:wheel", helper.DenylistPath); err != nil {
+		return err
+	}
+	return deps.runRoot("chmod", "644", helper.DenylistPath)
 }
 
 type rootRunner func(name string, args ...string) error

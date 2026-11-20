@@ -87,6 +87,9 @@ The helper's RPC surface is intentionally narrow. It listens on
 | `helper.net_capture.stop(handle)` | Stop a capture and return capture path + size metadata |
 | `helper.process.tree()` | Process tree including processes the user can't see (e.g. system daemons) |
 | `helper.health()` | Liveness + version |
+| `helper.launchd.system.prepare(label, action)` | Verify a third-party system launch daemon and return the plan and a single-use token; admins only |
+| `helper.launchd.system.disable(token)` | `launchctl disable`, then `bootout` when loaded, for the prepared daemon |
+| `helper.launchd.system.enable(token)` | `launchctl enable`, then `bootstrap` when not loaded, for the prepared daemon |
 
 `helper.fs_usage.start` requires a numeric PID and an allowlisted mode
 (`filesys`, `pathname`, `exec`, `diskio`, or `network`). It defaults to
@@ -116,8 +119,40 @@ Notably absent:
   path. Each method has a fixed source.
 - **No arbitrary command execution.** Each method invokes exactly one
   pre-defined system command with structured arguments.
-- **No mutation methods.** The helper observes; it does not change
-  system state.
+- **System configuration mutation only per the reviewed designs listed
+  here.** The only system configuration the helper changes is step 1
+  below: the disabled override and loaded state of one verified
+  third-party system launch daemon. It does not change any other launchd
+  job, preferences, privacy databases, or installed software, and it never
+  deletes, moves or edits a file to do so. It does write files of its own: `net_capture`
+  creates the capture directories under `/var/tmp/spectra-netcap`, then a
+  root-owned `0600` pcap in the caller's subdirectory, and chowns the pcap
+  to the caller when the capture completes. A method that
+  changes system configuration is added only after its own design,
+  threat-model update, security review and owner approval (issue #600).
+  Each step is **one reviewed method family**: a reviewed pair of
+  compensating operations on one kind of target, which ships as a single
+  step:
+    - *Step 1, implemented:*
+      [helper launchd mutation](helper-launchd-mutation.md). The family is
+      disable/enable of a system launch daemon:
+      `helper.launchd.system.prepare`, `.disable` and `.enable` for a
+      `/Library/LaunchDaemons` job owned by a verified third-party bundle.
+      `disable` and `enable` count as one step because they are a reviewed
+      pair of compensating operations on the same target. They are not
+      exact inverses: `enable` also bootstraps a daemon that is not loaded,
+      and `disable` of a daemon that is not loaded does not load it first,
+      so `enable` after `disable` can leave a daemon loaded that was not
+      loaded before. They share every check, the token, the denylist and
+      the audit format, so the review covers both at once. Shipping
+      `disable` alone would leave users no supported way to undo it except
+      `sudo launchctl`. It takes a label only, re-derives and verifies every
+      path itself, never deletes, needs a single-use confirmation token bound
+      to the planned commands and an `admin`-group caller. `enable` also
+      bootstraps an unloaded daemon. It refuses configuration-profile
+      managed daemons it can detect, and it always refuses labels and team
+      ids in a root-owned denylist
+      (`/Library/Application Support/Spectra/helper-denylist.plist`).
 
 ## Wire protocol
 

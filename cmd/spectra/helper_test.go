@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kaeawc/spectra/internal/helper"
 	"github.com/kaeawc/spectra/internal/helperclient"
 )
 
@@ -68,6 +69,34 @@ func TestInstallRootTextFileCopiesTemporaryContent(t *testing.T) {
 	}
 }
 
+func TestInstallHelperDenylistWritesDefaultOnlyWhenAbsent(t *testing.T) {
+	fake := newFakeHelperInstallDeps(t)
+	deps := fake.deps()
+	deps.stat = func(p string) (os.FileInfo, error) {
+		if p == helper.DenylistPath {
+			return nil, os.ErrNotExist
+		}
+		return nil, nil
+	}
+	if err := installHelperDenylist(deps); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"mkdir", "-p", helper.DenylistDir},
+		{"chown", "root:wheel", helper.DenylistDir},
+		{"chmod", "755", helper.DenylistDir},
+		{"cp", "/tmp/spectra-helper-1", helper.DenylistPath},
+		{"chown", "root:wheel", helper.DenylistPath},
+		{"chmod", "644", helper.DenylistPath},
+	}
+	if !reflect.DeepEqual(fake.runs, want) {
+		t.Fatalf("runs = %v", fake.runs)
+	}
+	if len(fake.tempContents) != 1 || fake.tempContents[0] != helper.DefaultDenylistPlist {
+		t.Fatalf("temp contents = %q", fake.tempContents)
+	}
+}
+
 func TestInstallHelperRunsExpectedRootOperations(t *testing.T) {
 	fake := newFakeHelperInstallDeps(t)
 	fake.env["SUDO_USER"] = "alice"
@@ -85,6 +114,10 @@ func TestInstallHelperRunsExpectedRootOperations(t *testing.T) {
 		{"chmod", "755", helperBinaryDest},
 		{"cp", "/tmp/spectra-helper-1", helperPlist},
 		{"cp", "/tmp/spectra-helper-2", helperNewsyslogConf},
+		// The fake stat finds an existing denylist, which is never overwritten.
+		{"mkdir", "-p", helper.DenylistDir},
+		{"chown", "root:wheel", helper.DenylistDir},
+		{"chmod", "755", helper.DenylistDir},
 		{"launchctl", "load", "-w", helperPlist},
 	}
 	if !reflect.DeepEqual(fake.runs, wantRuns) {
