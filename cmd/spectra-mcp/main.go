@@ -7,10 +7,15 @@ import (
 	"log"
 	"os"
 
+	"github.com/kaeawc/spectra/internal/buildversion"
 	"github.com/kaeawc/spectra/internal/mcp"
 )
 
+// version is stamped by release builds with -ldflags "-X main.version=vX.Y.Z";
+// source builds keep "dev", which init extends with the VCS revision.
 var version = "dev"
+
+func init() { version = buildversion.Resolve(version) }
 
 func main() {
 	versionFlag := flag.Bool("version", false, "Print version")

@@ -36,8 +36,19 @@ signing key. A separate `sign` job, which runs only for tag pushes inside the
 `publish` job creates the GitHub release. A `workflow_dispatch` run builds
 unsigned archives only and uploads them as a workflow artifact.
 
-Published release assets are the platform archives, `checksums.txt`,
-`spectra-release.json`, and `spectra-release.json.sig`.
+The `build` job forces cgo on for both darwin targets (Go otherwise drops
+cgo when cross-compiling darwin/amd64 on the arm64 runner) and builds the
+Linux targets static with cgo off, then fails if any binary was built with the
+wrong cgo setting or if `spectra version` does not print the tag.
+
+Published release assets are the four platform archives
+(`spectra_<tag>_{darwin,linux}_{arm64,amd64}.tar.gz`, each with `spectra`,
+`spectra-mcp` and `spectra-helper`), `checksums.txt`, `spectra-release.json`,
+`spectra-release.json.sig`, and the rendered Homebrew formula `spectra.rb`.
+The formula is kept outside the signed manifest, which covers the archives.
+
+The per-release checklist, including the manual Homebrew tap update, is in
+`packaging/release/README.md`.
 
 ## Verifying a release
 
@@ -65,4 +76,18 @@ key id in the manifest and verifies against it) and replace the `release`
 environment's `SPECTRA_RELEASE_ED25519_KEY` secret. Each key has a distinct
 key id.
 
-The Homebrew formula, if present, is unchanged by this release pipeline.
+## Homebrew formula
+
+`packaging/homebrew/spectra.rb` is a template for a binary formula that
+installs the release archives. `scripts/release-formula.sh <tag> dist out.rb`
+fills in the tag and the per-platform SHA-256 values from `checksums.txt` and
+fails if any is missing. The workflow attaches the result to the release;
+copying it into `kaeawc/homebrew-tap` is a manual maintainer step.
+
+## Version strings
+
+Release builds stamp the tag with `-ldflags "-X main.version=<tag>"`, which
+`spectra version`, `spectra-mcp --version`, `spectra-helper --version` and
+`spectra capabilities --json` (`spectra_version`) report. Source builds report
+`dev+<12-character commit>` (with `.dirty` for uncommitted changes) from the
+VCS stamp the Go toolchain embeds, or plain `dev` when there is none.

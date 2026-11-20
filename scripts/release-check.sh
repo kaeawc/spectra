@@ -110,6 +110,8 @@ check "mkdocs.yml exists" test -f mkdocs.yml
 check "dist script exists" test -x scripts/dist.sh
 check "notarize script exists" test -x scripts/notarize-archives.sh
 check "Homebrew formula template exists" test -f packaging/homebrew/spectra.rb
+check "formula render script exists" test -x scripts/release-formula.sh
+check "install script exists" test -x scripts/install.sh
 
 echo ""
 echo "Git:"

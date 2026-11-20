@@ -27,11 +27,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/buildversion"
 	"github.com/kaeawc/spectra/internal/helper"
 	"github.com/kaeawc/spectra/internal/hostos"
 )
 
+// version is stamped by release builds with -ldflags "-X main.version=vX.Y.Z";
+// source builds keep "dev", which init extends with the VCS revision.
 var version = "dev"
+
+func init() { version = buildversion.Resolve(version) }
+
 var lookupGroup = user.LookupGroup
 
 // sockPath is a var only so tests can point it at a temp socket.

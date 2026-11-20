@@ -42,19 +42,27 @@ build_one() {
     mkdir -p "$stage/bin" "$stage/docs" "$stage/licenses"
 
     # Linux ships a static, pure-Go binary (CGO off; the cgo libproc thread
-    # collector is darwin-only and the Linux path reads procfs). Darwin keeps
-    # the toolchain default so its native cgo thread collector links.
-    local cgo_env=()
+    # collector is darwin-only and the Linux path reads procfs). Darwin forces
+    # cgo on: Go disables it by default when cross-compiling, so the amd64
+    # build on an arm64 runner would otherwise silently drop the libproc,
+    # memstate and rusage collectors. Apple clang targets either arch.
+    local cgo=1
     if [[ "$goos" == "linux" ]]; then
-        cgo_env=(CGO_ENABLED=0)
+        cgo=0
     fi
 
-    (
-        cd "$ROOT"
-        env "${cgo_env[@]}" GOOS="$goos" GOARCH="$arch" go build -trimpath -ldflags "$LDFLAGS" -o "$stage/bin/spectra" ./cmd/spectra/
-        env "${cgo_env[@]}" GOOS="$goos" GOARCH="$arch" go build -trimpath -ldflags "$LDFLAGS" -o "$stage/bin/spectra-mcp" ./cmd/spectra-mcp/
-        env "${cgo_env[@]}" GOOS="$goos" GOARCH="$arch" go build -trimpath -ldflags "$LDFLAGS" -o "$stage/bin/spectra-helper" ./cmd/spectra-helper/
-    )
+    local cmd
+    for cmd in spectra spectra-mcp spectra-helper; do
+        (
+            cd "$ROOT"
+            CGO_ENABLED="$cgo" GOOS="$goos" GOARCH="$arch" \
+                go build -trimpath -ldflags "$LDFLAGS" -o "$stage/bin/$cmd" "./cmd/$cmd/"
+        )
+        if ! go version -m "$stage/bin/$cmd" | grep -q "CGO_ENABLED=$cgo\$"; then
+            echo "error: $goos/$arch $cmd was not built with CGO_ENABLED=$cgo" >&2
+            exit 1
+        fi
+    done
 
     cp "$ROOT/README.md" "$stage/"
     cp "$ROOT/LICENSE" "$stage/licenses/LICENSE"

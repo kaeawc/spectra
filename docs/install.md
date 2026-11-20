@@ -1,15 +1,27 @@
 # Install
 
-Spectra is currently distributed via source build. The repo also contains
-release packaging for Homebrew and macOS tarball archives, but published
-formulae and signed/notarized binaries are release-owner tasks (see
-[design/distribution.md](design/distribution.md)).
+Spectra ships prebuilt archives for macOS (arm64, amd64) and Linux (amd64,
+arm64) on each tagged GitHub release, a Homebrew formula, and a source build.
+
+## Release binaries
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/install.sh | sh
+```
+
+The script downloads the archive for this OS and architecture, verifies its
+SHA-256 against the release's `checksums.txt`, and installs `spectra`,
+`spectra-mcp` and `spectra-helper` into `~/.local/bin` (change it with
+`--prefix`). Pin a release with `--version vX.Y.Z`. See
+[Install release binaries](operations/install-binaries.md) for CI usage and
+all options.
 
 ## From source
 
-Requires Go 1.26+ and a macOS host (the detection internals shell out to
-`plutil`, `otool`, `codesign`, `file`, and `sqlite3`, which are all macOS
-preinstalled).
+Requires Go 1.26+ on macOS or Linux. App-bundle inspection is macOS-only
+(it shells out to `plutil`, `otool`, `codesign`, `file`, and `sqlite3`, which
+are all macOS preinstalled). Source builds report `dev+<commit>` from
+`spectra version`.
 
 ```bash
 git clone https://github.com/kaeawc/spectra.git
@@ -37,23 +49,24 @@ brew install kaeawc/tap/spectra
 spectra /Applications/Slack.app
 ```
 
-The formula template lives at `packaging/homebrew/spectra.rb`. It builds
-`spectra`, `spectra-mcp`, and `spectra-helper` from source and does not
-install the privileged helper automatically. Publishing requires replacing
-the placeholder tag and checksum in the template and copying it into the
-tap repository.
+The formula installs the release archive for the platform, with
+`spectra`, `spectra-mcp`, and `spectra-helper`, and does not install the
+privileged helper automatically. Its template lives at
+`packaging/homebrew/spectra.rb`; each release attaches a rendered copy
+(`spectra.rb`) that a maintainer copies into the tap.
 
-## Prebuilt archives
+## Building archives locally
 
 Release owners can build unsigned local archives with:
 
 ```bash
-make dist
+VERSION=vX.Y.Z make dist
 ```
 
-This writes `dist/spectra_<version>_darwin_arm64.tar.gz`,
-`dist/spectra_<version>_darwin_amd64.tar.gz`, and `dist/checksums.txt`.
-To sign binaries inside the archives:
+This writes `dist/spectra_<version>_{darwin,linux}_{arm64,amd64}.tar.gz` and
+`dist/checksums.txt`. Darwin builds need Xcode's command-line tools for cgo;
+Linux builds are static and cross-compile from macOS.
+To sign the darwin binaries inside the archives:
 
 ```bash
 CODESIGN_ID="Developer ID Application: Example Corp (TEAMID)" make dist

@@ -120,15 +120,15 @@ release process the signed helper identity that `SMAppService` or
   Users who want root-grade visibility opt in separately.
 - The same formula installs to every Mac in a tailnet — important for the
   cross-host remote portal.
-- Notarization is required only for prebuilt/cask artifacts; the CLI
-  formula builds from source.
+- Notarization is required only for cask artifacts; the CLI formula
+  installs the release tarballs, which Homebrew does not quarantine.
 
 ```bash
 brew install kaeawc/tap/spectra
 ```
 
-The formula template lives at `packaging/homebrew/spectra.rb`. It builds
-the unprivileged CLI, MCP server, and helper binary, but does not install
+The formula template lives at `packaging/homebrew/spectra.rb`. It installs
+the release archive's CLI, MCP server, and helper binary, but does not install
 or start the helper automatically. User-daemon lifecycle is available
 after install through:
 
@@ -142,8 +142,9 @@ Root visibility stays behind the same explicit command:
 sudo spectra install-helper
 ```
 
-Publishing the formula still requires a release tag, source archive
-checksum, and tap repository update.
+Each release renders the formula with the archive checksums and attaches it
+as `spectra.rb`; copying it into the tap repository is a manual step (see
+`packaging/release/README.md`).
 
 ## Prebuilt archives
 
@@ -153,7 +154,7 @@ Release archives are built by:
 make dist
 ```
 
-This produces arm64 and amd64 macOS tarballs plus SHA-256 checksums under
+This produces arm64 and amd64 macOS and Linux tarballs plus SHA-256 checksums under
 `dist/`. The archives contain:
 
 - `bin/spectra`
