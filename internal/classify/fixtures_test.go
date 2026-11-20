@@ -241,3 +241,75 @@ func infoPlist(id, exe string) []byte {
 func codesignFake(out string) *proc.Fake {
 	return proc.NewFake().On(proc.MatchPrefix("codesign"), proc.Response{Result: proc.Result{Stderr: []byte(out), ExitCode: 0}})
 }
+
+// elfSym is one function symbol of a synthetic ELF symbol table.
+type elfSym struct {
+	name  string
+	local bool // STB_LOCAL instead of STB_GLOBAL
+}
+
+// buildELFWithSymtab returns a minimal 64-bit little-endian ELF with a
+// .rodata section and an unstripped .symtab of function symbols. Locals
+// must come first, as ELF requires.
+func buildELFWithSymtab(rodata []byte, syms ...elfSym) []byte {
+	le := binary.LittleEndian
+	strtab := []byte{0}
+	var symtab bytes.Buffer
+	symtab.Write(make([]byte, 24)) // the null symbol
+	firstGlobal := 1
+	for i, s := range syms {
+		info := byte(0x12) // STB_GLOBAL, STT_FUNC
+		if s.local {
+			info = 0x02 // STB_LOCAL, STT_FUNC
+			firstGlobal = i + 2
+		}
+		_ = binary.Write(&symtab, le, uint32(len(strtab)))
+		symtab.Write([]byte{info, 0})
+		_ = binary.Write(&symtab, le, uint16(1)) // defined in .rodata's slot; only the name matters
+		_ = binary.Write(&symtab, le, []uint64{0x1000, 16})
+		strtab = append(strtab, s.name...)
+		strtab = append(strtab, 0)
+	}
+	shstr := []byte("\x00.rodata\x00.symtab\x00.strtab\x00.shstrtab\x00")
+	const nRodata, nSymtab, nStrtab, nShstr = 1, 9, 17, 25
+
+	var data bytes.Buffer
+	pad := func() {
+		for data.Len()%8 != 0 {
+			data.WriteByte(0)
+		}
+	}
+	rodataOff := 64 + data.Len()
+	data.Write(rodata)
+	pad()
+	symOff := 64 + data.Len()
+	data.Write(symtab.Bytes())
+	strOff := 64 + data.Len()
+	data.Write(strtab)
+	shstrOff := 64 + data.Len()
+	data.Write(shstr)
+	pad()
+	shoff := 64 + data.Len()
+	const shnum = 5
+
+	var out bytes.Buffer
+	out.Write([]byte{0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	_ = binary.Write(&out, le, []uint16{2, 62})
+	_ = binary.Write(&out, le, uint32(1))
+	_ = binary.Write(&out, le, []uint64{0, 0, uint64(shoff)})
+	_ = binary.Write(&out, le, uint32(0))
+	_ = binary.Write(&out, le, []uint16{64, 56, 0, 64, shnum, shnum - 1})
+	out.Write(data.Bytes())
+	shdr := func(name, typ uint32, off, size int, link, info uint32, entsize uint64) {
+		_ = binary.Write(&out, le, []uint32{name, typ})
+		_ = binary.Write(&out, le, []uint64{2, 0, uint64(off), uint64(size)})
+		_ = binary.Write(&out, le, []uint32{link, info})
+		_ = binary.Write(&out, le, []uint64{8, entsize})
+	}
+	out.Write(make([]byte, 64)) // SHN_UNDEF
+	shdr(nRodata, 1, rodataOff, len(rodata), 0, 0, 0)
+	shdr(nSymtab, 2, symOff, symtab.Len(), 3, uint32(firstGlobal), 24)
+	shdr(nStrtab, 3, strOff, len(strtab), 0, 0, 0)
+	shdr(nShstr, 3, shstrOff, len(shstr), 0, 0, 0)
+	return out.Bytes()
+}

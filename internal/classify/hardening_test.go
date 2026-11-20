@@ -64,7 +64,7 @@ func TestAppleClaimNeedsVerification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := verifyFake(tc.display, tc.exit)
 			r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), in)
-			if r.Signing == nil || r.Signing.Status != tc.status || r.Role != tc.role {
+			if r.Signing == nil || r.Signing.Status != tc.status || r.Role != tc.role || r.Signing.Validated != (tc.status == SigningApple) {
 				t.Fatalf("signing=%+v role=%s, want %s/%s (evidence %v)", r.Signing, r.Role, tc.status, tc.role, r.Evidence)
 			}
 			if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, tc.ev) || !strings.Contains(ev, "file on disk") {
@@ -74,17 +74,81 @@ func TestAppleClaimNeedsVerification(t *testing.T) {
 	}
 }
 
-func TestVerifyRunsOnlyForAppleClaims(t *testing.T) {
+func TestVerifyRunsOnlyForAppleClaimsAndAppleIssuedCerts(t *testing.T) {
 	files := newFakeFS()
-	files.add("/opt/evil", buildMachO(macho.CpuArm64))
-	fake := codesignFake(devIDCodesign)
-	r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), Input{UID: 501, Command: "evil", ExecutablePath: "/opt/evil"})
-	if fake.CallCount() != 1 {
-		t.Fatalf("codesign ran %d times for a Developer ID binary: %v", fake.CallCount(), fake.Calls())
+	files.add("/opt/x", buildMachO(macho.CpuArm64))
+	for _, display := range []string{adhocCodesign, unsignedCodesign} {
+		fake := codesignFake(display)
+		r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake}), Input{UID: 501, Command: "x", ExecutablePath: "/opt/x"})
+		if fake.CallCount() != 1 || r.Signing == nil || r.Signing.Validated {
+			t.Fatalf("codesign ran %d times, signing=%+v: %v", fake.CallCount(), r.Signing, fake.Calls())
+		}
+		if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, "as displayed by codesign -dv, not validated; verdict is for the file on disk") {
+			t.Fatalf("evidence = %q", ev)
+		}
 	}
-	ev := strings.Join(r.Evidence, "\n")
-	if !strings.Contains(ev, "signing: developer_id, team ABCDE12345 as displayed by codesign -dv, not validated; verdict is for the file on disk") {
-		t.Fatalf("evidence = %q", ev)
+}
+
+func thirdPartyVerifyFake(display string, verify proc.Response) *proc.Fake {
+	return proc.NewFake().
+		On(proc.MatchPrefix("codesign", "-dv"), proc.Response{Result: proc.Result{Stderr: []byte(display)}}).
+		On(proc.MatchExact("codesign", "--verify", "--strict", "/opt/x"), verify)
+}
+
+func TestThirdPartySignatureVerification(t *testing.T) {
+	files := newFakeFS()
+	files.add("/opt/x", buildMachO(macho.CpuArm64))
+	fail := func(stderr string) proc.Response {
+		return proc.Response{Result: proc.Result{ExitCode: 1, Stderr: []byte(stderr)}}
+	}
+	cases := []struct {
+		name      string
+		display   string
+		verify    proc.Response
+		status    SigningStatus
+		validated bool
+		persisted bool
+		ev        string
+	}{
+		{"intact Developer ID", devIDCodesign, proc.Response{}, SigningDeveloperID, true, true,
+			"signing: developer_id, team ABCDE12345 validated by codesign --verify --strict; verdict is for the file on disk"},
+		{"intact Mac App Store", masCodesign, proc.Response{}, SigningDeveloperID, true, true, "team BQR82RBBHL validated by"},
+		{"tampered Developer ID", devIDCodesign, fail("/opt/x: invalid signature (code or signature have been modified)\nIn architecture: arm64\n"),
+			SigningInvalid, false, true, "displays an Apple-issued certificate but codesign --verify --strict failed"},
+		{"only --strict detritus", devIDCodesign, fail("/opt/x: resource fork, Finder information, or similar detritus not allowed\n"),
+			SigningDeveloperID, false, true, "rejected extended attributes or resource forks"},
+		{"executable vanished", devIDCodesign, fail("/opt/x: No such file or directory\n"), SigningDeveloperID, false, false, "could not run"},
+		{"verify timed out", devIDCodesign, proc.Response{Err: context.DeadlineExceeded}, SigningDeveloperID, false, false, "could not run"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := thirdPartyVerifyFake(tc.display, tc.verify)
+			store := newMemStore()
+			r := classifyOne(t, New(Options{OS: hostos.Darwin, FS: files, Runner: fake, Store: store}), Input{UID: 501, Command: "x", ExecutablePath: "/opt/x"})
+			if r.Signing == nil || r.Signing.Status != tc.status || r.Signing.Validated != tc.validated {
+				t.Fatalf("signing=%+v, want %s validated=%v (calls %v)", r.Signing, tc.status, tc.validated, fake.Calls())
+			}
+			if (store.puts > 0) != tc.persisted {
+				t.Fatalf("puts=%d, want persisted=%v", store.puts, tc.persisted)
+			}
+			if ev := strings.Join(r.Evidence, "\n"); !strings.Contains(ev, tc.ev) {
+				t.Fatalf("evidence %q lacks %q", ev, tc.ev)
+			}
+		})
+	}
+}
+
+func TestOnlyDetritus(t *testing.T) {
+	for out, want := range map[string]bool{
+		"/a: resource fork, Finder information, or similar detritus not allowed\n":                                   true,
+		"/a: resource fork, Finder information, or similar detritus not allowed\nIn subcomponent: /a/b\n":            true,
+		"/a: resource fork, Finder information, or similar detritus not allowed\n/a: a sealed resource is missing\n": false,
+		"/a: invalid signature (code or signature have been modified)\n":                                             false,
+		"": false,
+	} {
+		if got := onlyDetritus(out); got != want {
+			t.Errorf("onlyDetritus(%q) = %v, want %v", out, got, want)
+		}
 	}
 }
 
@@ -285,8 +349,8 @@ func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 // struct with fields silently zeroed. Bump cacheVersion, then update both pins.
 func TestCacheVersionPinsEntryShape(t *testing.T) {
 	const (
-		pinnedVersion = "classify/v3"
-		pinnedShape   = "e590c1d66c2237ef"
+		pinnedVersion = "classify/v4"
+		pinnedShape   = "5e05118381521607"
 	)
 	var b strings.Builder
 	describeType(&b, reflect.TypeOf(exeEntry{}), map[reflect.Type]bool{})
@@ -407,7 +471,9 @@ func TestRustVerdict(t *testing.T) {
 		ev   string
 	}{
 		{"rust main symbol", 5, symbolFacts{rustEntry: true, locals: true}, nil, RuntimeRust, "lang_start"},
-		{"C++ main with Rust linked, unstripped", 5, symbolFacts{locals: true}, nil, RuntimeNative, "links Rust std"},
+		{"C++ main with Rust linked, unstripped", 5, symbolFacts{locals: true, cxx: true}, nil, RuntimeNative, "links Rust std"},
+		{"unstripped, links libc++, no lang_start", 5, symbolFacts{locals: true}, []string{"/usr/lib/libc++.1.dylib"}, RuntimeNative, "links Rust std"},
+		{"unstripped LTO Rust, no lang_start", 5, symbolFacts{locals: true}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "link-time optimization"},
 		{"stripped C++ (adb)", 5, symbolFacts{cxx: true}, nil, RuntimeNative, "links Rust std"},
 		{"stripped, links libc++ (netsimd)", 5, symbolFacts{}, []string{"/usr/lib/libc++.1.dylib"}, RuntimeNative, "links Rust std"},
 		{"stripped Rust (fd)", 5, symbolFacts{}, []string{"/usr/lib/libSystem.B.dylib"}, RuntimeRust, "stripped"},

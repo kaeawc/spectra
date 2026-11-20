@@ -136,7 +136,7 @@ type exeKey struct {
 
 // cacheVersion prefixes every disk key; bump it whenever exeEntry (or
 // anything it contains) changes shape or meaning.
-const cacheVersion = "classify/v3"
+const cacheVersion = "classify/v4"
 
 // exeEntry is the cached per-executable work. A nil field was not needed yet.
 type exeEntry struct {

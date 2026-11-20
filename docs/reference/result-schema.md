@@ -236,6 +236,29 @@ type PythonApp struct {
 }
 ```
 
+## Process classification
+
+`spectra process -json --classify` adds `role`, `runtime`, `app`,
+`signing` and `evidence` to each process; see
+[../inspection/running-processes.md](../inspection/running-processes.md)
+for the values and rules. `signing` (macOS only) is:
+
+```go
+type Signing struct {
+    Status          string // apple, developer_id, adhoc, unsigned, invalid, unknown
+    TeamID          string `json:"team_id,omitempty"`
+    HardenedRuntime bool   `json:"hardened_runtime"`
+    Validated       bool   `json:"validated"` // a codesign --verify step passed
+}
+```
+
+`validated` is always present. It is true only for `apple` (passed
+`codesign --verify --ignore-resources -R="anchor apple"`) and for
+`developer_id` that passed `codesign --verify --strict`; every other
+status, and a `developer_id` whose verify could not settle it, is what
+`codesign -dv` displays and is false. Clients should draw a signature as
+trusted only when `validated` is true.
+
 ## Stability
 
 Field names and JSON tag shape are intended to be stable. Adding new

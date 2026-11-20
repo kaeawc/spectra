@@ -25,7 +25,30 @@ import (
 // Multiple ShardedStores share one versioned root (e.g. ~/.cache/spectra/v1).
 type ShardedStore struct {
 	root string // absolute path to <versionedRoot>/<kind>
+
+	// maxAge, when positive, makes every Put sweep the shard it wrote to,
+	// removing entries last written more than maxAge ago.
+	maxAge time.Duration
+	now    func() time.Time
 }
+
+// pruneBatch bounds how many directory entries one Put's sweep examines.
+const pruneBatch = 256
+
+// WithMaxAge turns on age-based pruning and returns s. Each Put then sweeps
+// the one shard directory it wrote to (at most pruneBatch entries) and
+// removes files whose mtime is older than maxAge, including temp files a
+// crashed writer left. Keys hash uniformly across the 256 shards, so the
+// store stays bounded by what was written in the last maxAge with no
+// separate GC pass. An entry is not refreshed on read: one in steady use is
+// rewritten after it ages out and its next lookup misses.
+func (s *ShardedStore) WithMaxAge(maxAge time.Duration) *ShardedStore {
+	s.maxAge = maxAge
+	return s
+}
+
+// SetClock overrides the time source pruning compares mtimes against.
+func (s *ShardedStore) SetClock(clk func() time.Time) { s.now = clk }
 
 // NewShardedStore returns a store rooted at <versionedRoot>/<kind>.
 // The directory is created on first Put, not here.
@@ -70,7 +93,40 @@ func (s *ShardedStore) Put(key, data []byte) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, dest)
+	if err := os.Rename(tmpPath, dest); err != nil {
+		return err
+	}
+	if s.maxAge > 0 {
+		s.prune(dir, filepath.Base(dest))
+	}
+	return nil
+}
+
+// prune removes files in one shard directory older than maxAge, skipping
+// keep (the entry just written). It is best-effort: a failure leaves the
+// file for a later sweep.
+func (s *ShardedStore) prune(dir, keep string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	entries, _ := d.ReadDir(pruneBatch)
+	_ = d.Close()
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	cutoff := now().Add(-s.maxAge)
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == keep {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }
 
 // Get retrieves data for key. Returns (nil, false, nil) on cache miss.

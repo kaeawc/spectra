@@ -61,7 +61,7 @@ func TestParseCodesign(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := parseCodesign(tc.out)
-			if got.Signing != tc.want || got.Claim != tc.claim || got.Platform || got.Validated {
+			if got.Signing != tc.want || got.Claim != tc.claim || got.Platform || got.Signing.Validated {
 				t.Fatalf("parseCodesign = %+v, want %+v claim=%q and nothing granted", got, tc.want, tc.claim)
 			}
 		})
@@ -357,10 +357,11 @@ func TestSigningOncePerExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.CallCount() != 1 {
+	// One display and one --verify --strict, however many processes share it.
+	if fake.CallCount() != 2 {
 		t.Fatalf("codesign ran %d times for one executable", fake.CallCount())
 	}
-	want := Signing{Status: SigningDeveloperID, TeamID: "ABCDE12345", HardenedRuntime: true}
+	want := Signing{Status: SigningDeveloperID, TeamID: "ABCDE12345", HardenedRuntime: true, Validated: true}
 	if res[2].Signing == nil || *res[2].Signing != want || res[2].Role != RoleApp {
 		t.Fatalf("result = %+v signing=%+v", res[2], res[2].Signing)
 	}
