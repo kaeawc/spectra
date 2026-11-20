@@ -230,6 +230,17 @@ Implemented rules:
 - `build-daemon-jdk-gone` (a running Gradle or Kotlin daemon whose `java.home`
   or executable no longer exists; fix is to let it idle out or stop that PID,
   never `gradle --stop`)
+- `build-daemon-jdk-mismatch` (a running Gradle or Kotlin daemon whose JDK
+  differs from the project's configuration, read from the daemon's working
+  directory up to the first `settings.gradle(.kts)`: medium when
+  `org.gradle.java.home` (user then project `gradle.properties`),
+  `.java-version`, `.tool-versions` or `.sdkmanrc` pins another JDK, in that
+  precedence order; low ("usually fine") when only a `build.gradle(.kts)`,
+  settings or `buildSrc`/`build-logic` toolchain block
+  (`JavaLanguageVersion.of(N)`, `jvmToolchain(N)`, `JavaVersion.VERSION_N`
+  inside `toolchain {}`) names another major. Evidence cites file and line;
+  scans are bounded in depth and file size; fix is to stop that PID, never
+  `gradle --stop`)
 - `jdk-major-version-drift`
 - `java-home-mismatch`
 - `library-storage-footprint`
