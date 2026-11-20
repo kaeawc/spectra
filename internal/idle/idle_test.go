@@ -113,6 +113,17 @@ func TestFindChildSpawnedInWindowIsActivity(t *testing.T) {
 	}
 }
 
+// A child born inside the window that is gone by the second reading has no
+// CPU figure; it is still activity, not a reason to call 20 unmeasured.
+func TestFindChildBornAndGoneInWindowIsBusy(t *testing.T) {
+	s := sample(idleCPU())
+	s.Procs = append(s.Procs, process.Info{PID: 22, PPID: 20, Command: "sh", StartTime: ago(2 * time.Second)})
+	res := Find(s, cwds(), opts())
+	if res.Busy != 1 || res.Unmeasured != 0 {
+		t.Errorf("busy = %d unmeasured = %d, want 1 and 0", res.Busy, res.Unmeasured)
+	}
+}
+
 func TestFindUnmeasured(t *testing.T) {
 	cpu := idleCPU()
 	delete(cpu, 21)

@@ -40,6 +40,10 @@ type Options struct {
 	MaxCPUPct float64 // summed over the process and all its descendants
 	Now       time.Time
 	SelfPID   int // excluded with its ancestors and descendants
+	// Under reports whether cwd is inside any of roots (a root's typed and
+	// resolved spellings). Nil compares by path component only; the CLI
+	// passes owner's matcher, which also compares file identity on macOS.
+	Under func(cwd string, roots []string) bool
 }
 
 // Sample is a process table with CPU measured over a window.
@@ -208,7 +212,7 @@ func Find(s Sample, cwds map[int]string, opts Options) Result {
 			continue
 		}
 		cwd := strings.TrimSuffix(cwds[p.PID], deletedSuffix)
-		matched := scope(p.PID, cwd, wanted, opts.Roots)
+		matched := scope(p.PID, cwd, wanted, opts)
 		if matched == "" {
 			continue
 		}
@@ -247,19 +251,36 @@ func missing(t table, pids []int) []int {
 }
 
 // scope names why p is in scope: an explicit pid, or the root its cwd is under.
-func scope(pid int, cwd string, wanted map[int]bool, roots []Root) string {
+func scope(pid int, cwd string, wanted map[int]bool, opts Options) string {
 	if wanted[pid] {
 		return "pid"
 	}
 	if cwd == "" {
 		return ""
 	}
-	for _, r := range roots {
-		if under(cwd, r.Path) || (r.Resolved != "" && under(cwd, r.Resolved)) {
+	match := opts.Under
+	if match == nil {
+		match = underAny
+	}
+	for _, r := range opts.Roots {
+		spellings := []string{r.Path}
+		if r.Resolved != "" && r.Resolved != r.Path {
+			spellings = append(spellings, r.Resolved)
+		}
+		if match(cwd, spellings) {
 			return r.Path
 		}
 	}
 	return ""
+}
+
+func underAny(p string, roots []string) bool {
+	for _, r := range roots {
+		if under(p, r) {
+			return true
+		}
+	}
+	return false
 }
 
 func under(p, root string) bool {
@@ -271,7 +292,9 @@ func under(p, root string) bool {
 
 // judge decides whether p and its whole subtree are idle. A descendant that
 // started during the window counts as activity: a wrapper that keeps
-// spawning short tasks is working even if no single sample is busy.
+// spawning short tasks is working even if no single sample is busy. That is
+// checked before CPU coverage, because a child born during the window is
+// often gone (or unmeasured) by the second reading.
 func judge(t table, p process.Info, s Sample, opts Options) (verdict, []int) {
 	if s.Basis != BasisWindow || s.Window <= 0 {
 		return vUnmeasured, nil
@@ -284,14 +307,16 @@ func judge(t table, p process.Info, s Sample, opts Options) (verdict, []int) {
 	}
 	tree := t.descendants(p.PID)
 	windowStart := opts.Now.Add(-s.Window - startTolerance)
+	for _, pid := range tree {
+		if t.byPID[pid].StartTime.After(windowStart) {
+			return vBusy, nil
+		}
+	}
 	total := 0.0
 	for _, pid := range append([]int{p.PID}, tree...) {
 		c, ok := s.CPU[pid]
 		if !ok {
 			return vUnmeasured, nil
-		}
-		if pid != p.PID && t.byPID[pid].StartTime.After(windowStart) {
-			return vBusy, nil
 		}
 		total += c
 	}

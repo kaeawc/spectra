@@ -25,7 +25,8 @@ is listed in `--pids`. It is reported when all of these hold:
 - its CPU plus every descendant's CPU, summed, is under `--max-cpu` percent
   of one CPU (default `1`) over the `--window` sample (default `5s`);
 - no descendant started during the window (a wrapper that keeps spawning
-  short tasks is working);
+  short tasks is working; this is checked before CPU coverage, so a child
+  born and gone inside the window counts as busy, not unmeasured);
 - CPU was measured for it and every descendant.
 
 When an idle process has an idle ancestor that is also in scope, only the
@@ -41,8 +42,10 @@ never candidates.
 | macOS | two `ps -axo pid=,time=` readings of cumulative CPU time; a process started inside the window is scored on all of its CPU | `window` |
 
 If CPU could not be measured over a window (`cpu_basis` is not `window`),
-nothing is reported: a lifetime or decaying average is not evidence of
-idleness now.
+the run is an error (exit `1`): a lifetime or decaying average is not
+evidence of idleness now. Working directories are read and matched as in
+[Working-directory owners](owner-under.md), including lsof escape decoding
+and the macOS file-identity fallback.
 
 ## Wait evidence
 
@@ -67,5 +70,5 @@ in-scope processes skipped as `skipped_busy`, `skipped_young`,
 |---|---|
 | `0` | no idle holders found |
 | `3` | idle holders found |
-| `1` | error, including reaching `--timeout` (default `1m`, must exceed `--window`) |
+| `1` | error, including reaching `--timeout` (default `1m`, must exceed `--window`), CPU not measured over a window, an empty process table, or a `--root` that is not an existing directory |
 | `2` | usage |

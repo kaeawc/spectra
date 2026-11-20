@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +36,12 @@ func fakeIdleDeps(cpu map[int]float64) (idleDeps, *time.Duration) {
 		Waits: func(_ context.Context, pids []int) map[int]*idle.Wait {
 			return map[int]*idle.Wait{21: {WChan: "futex_wait_queue", LockFiles: []string{"/work/lane/slot.lock"}}}
 		},
+		Stat: func(n string) (os.FileInfo, error) {
+			if strings.HasPrefix(n, "/work/") {
+				return dirStat{}, nil
+			}
+			return nil, fs.ErrNotExist
+		},
 		Now:          func() time.Time { return idleNow },
 		Pid:          func() int { return 99 },
 		Getwd:        func() (string, error) { return "/work/lane", nil },
@@ -58,6 +66,7 @@ func TestRunIdle(t *testing.T) {
 		{name: "bad window", args: []string{"--window", "1ms"}, wantCode: 2, wantErr: "invalid arguments"},
 		{name: "timeout below window", args: []string{"--window", "5s", "--timeout", "1s"}, wantCode: 2},
 		{name: "extra arg", args: []string{"x"}, wantCode: 2},
+		{name: "missing root", args: []string{"--root", "/gone"}, cpu: map[int]float64{20: 0, 21: 0}, wantCode: 1, wantErr: "--root /gone"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,6 +112,32 @@ func TestRunIdleJSON(t *testing.T) {
 	if got.CPUBasis != "window" || !got.Incomplete || len(hs) != 1 || hs[0].PID != 20 || len(hs[0].Chain) != 1 ||
 		len(hs[0].Descendants) != 1 || hs[0].Descendants[0].Wait == nil || hs[0].Descendants[0].Wait.WChan != "futex_wait_queue" {
 		t.Errorf("json = %s", out.String())
+	}
+}
+
+type dirStat struct{ os.FileInfo }
+
+func (dirStat) IsDir() bool { return true }
+
+func TestRunIdleUnmeasurableIsError(t *testing.T) {
+	for name, mutate := range map[string]func(*idle.Sample){
+		"lifetime basis": func(s *idle.Sample) { s.Basis = "lifetime" },
+		"zero window":    func(s *idle.Sample) { s.Window = 0 },
+		"empty table":    func(s *idle.Sample) { s.Procs = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps, _ := fakeIdleDeps(map[int]float64{20: 0, 21: 0})
+			sample := deps.Sample
+			deps.Sample = func(ctx context.Context, w time.Duration) (idle.Sample, error) {
+				s, err := sample(ctx, w)
+				mutate(&s)
+				return s, err
+			}
+			var out, errb bytes.Buffer
+			if code := runIdleWithIO(nil, &out, &errb, deps); code != 1 {
+				t.Fatalf("code = %d, want 1 (out=%q err=%q)", code, out.String(), errb.String())
+			}
+		})
 	}
 }
 

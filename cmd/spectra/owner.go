@@ -19,7 +19,10 @@ const (
 	ownerExitError   = 1
 	ownerExitUsage   = 2
 	ownerExitNoOwner = 3
-	ownerTimeout     = 30 * time.Second
+	// ownerExitUnderIncomplete: --under saw nobody, but some processes could
+	// not be read, so the tree may still be in use.
+	ownerExitUnderIncomplete = 4
+	ownerTimeout             = 30 * time.Second
 )
 
 const ownerUsage = `usage: spectra owner [--json] [--timeout 30s] <target>
@@ -38,9 +41,12 @@ it (both compared as given and symlink-resolved), with pid, command, cwd, start
 time and parent chain. Spectra itself and its own children are left out.
 
 --timeout bounds the whole run; reaching it is an error (exit 1), never
-"none found".
+"none found". Flags may come before or after the target or directories; use
+-- to end flags before a name that starts with "-".
 
 Exit codes: 0 owner found, 1 error, 2 usage, 3 no owner found.
+With --under: 3 only when every process was read; 4 when none is visible but
+some processes could not be read (re-run with sudo before removing the tree).
 `
 
 // ownerFind resolves a target; tests substitute it.
@@ -61,7 +67,8 @@ func runOwnerWithIO(args []string, stdout, stderr io.Writer, cwd string, find ow
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	underMode := fs.Bool("under", false, "Treat the arguments as directories and list processes whose cwd is inside them")
 	timeout := fs.Duration("timeout", ownerTimeout, "Give up (exit 1) after this long")
-	if err := fs.Parse(args); err != nil {
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
 		return ownerExitUsage
 	}
 	if *timeout <= 0 {
@@ -69,13 +76,13 @@ func runOwnerWithIO(args []string, stdout, stderr io.Writer, cwd string, find ow
 		return ownerExitUsage
 	}
 	if *underMode {
-		return runOwnerUnder(fs.Args(), stdout, stderr, cwd, *asJSON, *timeout, under)
+		return runOwnerUnder(pos, stdout, stderr, cwd, *asJSON, *timeout, under)
 	}
-	if fs.NArg() != 1 {
+	if len(pos) != 1 {
 		fs.Usage()
 		return ownerExitUsage
 	}
-	t, err := owner.ParseTarget(fs.Arg(0), cwd)
+	t, err := owner.ParseTarget(pos[0], cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "owner: %v\n", err)
 		return ownerExitUsage
@@ -106,6 +113,38 @@ func ownerExitFor(holders int) int {
 		return ownerExitNoOwner
 	}
 	return ownerExitFound
+}
+
+// underExitFor never reports "none" for a scan that could not read every
+// process: a cleanup script must not take that as "the tree is free".
+func underExitFor(r owner.UnderResult) int {
+	switch {
+	case len(r.Holders) > 0:
+		return ownerExitFound
+	case r.Incomplete:
+		return ownerExitUnderIncomplete
+	}
+	return ownerExitNoOwner
+}
+
+// parseInterspersed parses fs over args, letting flags follow positional
+// arguments; everything after a "--" is positional.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return pos, nil
+		}
+		if used := len(args) - len(rest); used > 0 && args[used-1] == "--" {
+			return append(pos, rest...), nil
+		}
+		pos = append(pos, rest[0])
+		args = rest[1:]
+	}
 }
 
 func writeOwnerJSON(w io.Writer, v any) error {
@@ -147,14 +186,18 @@ func runOwnerUnder(args []string, stdout, stderr io.Writer, cwd string, asJSON b
 	} else {
 		printOwnerUnder(stdout, res)
 	}
-	return ownerExitFor(len(res.Holders))
+	return underExitFor(res)
 }
 
 func printOwnerUnder(w io.Writer, r owner.UnderResult) {
 	where := strings.Join(r.Dirs, ", ")
-	if len(r.Holders) == 0 {
+	switch {
+	case len(r.Holders) == 0 && r.Incomplete:
+		fmt.Fprintf(w, "No visible process is working under %s, but some processes could not be read: %s.\n", where, r.Hint)
+		return
+	case len(r.Holders) == 0:
 		fmt.Fprintf(w, "No process is working under %s.\n", where)
-	} else {
+	default:
 		fmt.Fprintf(w, "Processes working under %s:\n", where)
 	}
 	for _, h := range r.Holders {

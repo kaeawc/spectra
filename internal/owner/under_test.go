@@ -27,6 +27,11 @@ func (d dirFS) Stat(n string) (os.FileInfo, error) {
 	return dirInfo{fi.(fakeInfo)}, nil
 }
 
+func (d dirFS) SameFile(a, b os.FileInfo) bool {
+	x, y := a.(dirInfo), b.(dirInfo)
+	return x.id != "" && x.id == y.id
+}
+
 var underStart = time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 
 func underProcs(context.Context) []process.Info {
@@ -123,8 +128,7 @@ func TestUnderResolvesProcessCwd(t *testing.T) {
 
 func TestUnderDarwin(t *testing.T) {
 	lsofOut := "p10\nfcwd\nn/Users/me\np20\nfcwd\nn/work/repo/app\np30\nfcwd\nn/work/repository\np99\nfcwd\nn/work/repo\np100\nfcwd\nn/work/repo\n"
-	run := proc.NewFake().On(proc.MatchPrefix("lsof", "-w", "-nP", "-a", "-d", "cwd"), proc.Response{Result: proc.Result{ExitCode: 1, Stdout: []byte(lsofOut)}})
-	f := underFinder(hostos.Darwin, run)
+	f := underFinder(hostos.Darwin, lsofCwdRunner(lsofOut, 0))
 	res, err := f.Under(context.Background(), []string{"/work/repo"})
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +143,119 @@ func TestUnderDarwin(t *testing.T) {
 	f.IsRoot = func() bool { return true }
 	if res, _ := f.Under(context.Background(), []string{"/work/repo"}); res.Incomplete {
 		t.Error("root sees everything; want complete")
+	}
+}
+
+func lsofCwdRunner(out string, code int) proc.Runner {
+	return proc.NewFake().On(proc.MatchPrefix("lsof", "-w", "-nP", "-a", "-d", "cwd"),
+		proc.Response{Result: proc.Result{ExitCode: code, Stdout: []byte(out), Stderr: []byte("lsof: status error")}})
+}
+
+// lsof -F escapes the name field; these are the spellings it really prints
+// for "grün", a tab, a newline and a backslash.
+func TestUnderDarwinDecodesLsofEscapes(t *testing.T) {
+	for _, tt := range []struct{ name, dir, lsofName string }{
+		{"utf8", "/work/grün", `/work/gr\xc3\xbcn/sub`},
+		{"tab and backslash", "/work/t\tb\\s", `/work/t\tb\\s`},
+		{"newline", "/work/a\nb", `/work/a\nb/x`},
+		{"control", "/work/c\x01d", `/work/c^Ad`},
+		{"literal caret", "/work/x^Ay", `/work/x^Ay`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := underFinder(hostos.Darwin, lsofCwdRunner("p20\nR10\ncgradle\nfcwd\nn"+tt.lsofName+"\n", 0))
+			f.FS = dirFS{fakeFS{exist: map[string]bool{tt.dir: true}}}
+			res, err := f.Under(context.Background(), []string{tt.dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := pidsOf(res.Holders); !equalInts(got, []int{20}) {
+				t.Fatalf("pids = %v (lsof name %q, dir %q)", got, tt.lsofName, tt.dir)
+			}
+		})
+	}
+}
+
+func TestLsofNameSpellings(t *testing.T) {
+	for in, want := range map[string][]string{
+		`/plain`:            {"/plain"},
+		`/gr\xc3\xbcn`:      {"/grün"},
+		`/a\\b\tc\nd\re\bf`: {"/a\\b\tc\nd\re\bf"},
+		`/bad\xZZ\q`:        {`/bad\xZZ\q`},
+		`/c^A^?`:            {"/c\x01\x7f", `/c^A^?`},
+		`/caret^x`:          {`/caret^x`},
+	} {
+		if got := lsofNameSpellings(in); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("lsofNameSpellings(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// On a case-insensitive volume lsof reports the spelling on disk, which can
+// differ in case from the directory the caller typed.
+func TestUnderDarwinCaseInsensitiveIdentity(t *testing.T) {
+	fsys := dirFS{fakeFS{ids: map[string]string{
+		"/work/WT": "ino-wt", "/work/wt": "ino-wt", "/work/wt/app": "ino-app", "/work": "ino-work", "/": "ino-root",
+		"/work/other": "ino-other",
+	}}}
+	out := "p20\nR10\nfcwd\nn/work/wt/app\np30\nR10\nfcwd\nn/work/other\n"
+	f := underFinder(hostos.Darwin, lsofCwdRunner(out, 0))
+	f.FS = fsys
+	res, err := f.Under(context.Background(), []string{"/work/WT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pidsOf(res.Holders); !equalInts(got, []int{20}) {
+		t.Fatalf("pids = %v, want [20]", got)
+	}
+	// Linux keeps exact path matching.
+	m := Finder{OS: hostos.Linux, FS: fsys}.NewCwdMatcher()
+	if m.Under("/work/wt/app", []string{"/work/WT"}) {
+		t.Error("linux matched by identity")
+	}
+}
+
+func TestUnderDarwinLsofFailureIsError(t *testing.T) {
+	f := underFinder(hostos.Darwin, lsofCwdRunner("p20\nfcwd\nn/work/repo/app\n", 1))
+	if _, err := f.Under(context.Background(), []string{"/work/repo"}); err == nil || !strings.Contains(err.Error(), "exited 1") {
+		t.Fatalf("err = %v, want lsof failure", err)
+	}
+}
+
+func TestUnderEmptyProcessListIsError(t *testing.T) {
+	for _, k := range []hostos.Kind{hostos.Linux, hostos.Darwin} {
+		f := underFinder(k, lsofCwdRunner("", 0))
+		f.Procs = func(context.Context) []process.Info { return nil }
+		if _, err := f.Under(context.Background(), []string{"/work/repo"}); err == nil || !strings.Contains(err.Error(), "process list is empty") {
+			t.Errorf("%v: err = %v, want empty-process-list error", k, err)
+		}
+	}
+}
+
+// A pid the cwd source reports but the process table missed is still a
+// holder; one whose parent is Spectra is still excluded.
+func TestUnderHoldersFromCwdSource(t *testing.T) {
+	out := "p555\nR10\ncninja\nfcwd\nn/work/repo/out\np556\nR99\nclsof\nfcwd\nn/work/repo\n"
+	res, err := underFinder(hostos.Darwin, lsofCwdRunner(out, 0)).Under(context.Background(), []string{"/work/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Holders) != 1 || res.Holders[0].PID != 555 || res.Holders[0].Command != "ninja" ||
+		len(res.Holders[0].Chain) != 2 || res.Holders[0].Chain[0].PID != 10 {
+		t.Fatalf("holders = %+v", res.Holders)
+	}
+
+	fsys := underFS()
+	fsys.dirs = map[string][]string{"/proc": {"1", "10", "20", "77", "self"}}
+	fsys.links["/proc/77/cwd"] = "/work/repo/late"
+	fsys.files = map[string]string{"/proc/77/stat": "77 (make (x)) S 10 77 77 0"}
+	f := underFinder(hostos.Linux, nil)
+	f.FS = fsys
+	res, err = f.Under(context.Background(), []string{"/work/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pidsOf(res.Holders); !equalInts(got, []int{20, 77}) || res.Holders[1].Command != "make (x)" {
+		t.Fatalf("holders = %+v", res.Holders)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,8 +31,11 @@ const (
 type idleDeps struct {
 	Sample func(ctx context.Context, window time.Duration) (idle.Sample, error)
 	// Cwds returns working directories and whether some could not be read.
-	Cwds         func(ctx context.Context, procs []process.Info) (map[int]string, bool, error)
-	Waits        func(ctx context.Context, pids []int) map[int]*idle.Wait
+	Cwds  func(ctx context.Context, procs []process.Info) (map[int]string, bool, error)
+	Waits func(ctx context.Context, pids []int) map[int]*idle.Wait
+	// Under matches a cwd against a root's spellings; nil is path-only.
+	Under        func(cwd string, roots []string) bool
+	Stat         func(string) (os.FileInfo, error)
 	Now          func() time.Time
 	Pid          func() int
 	Getwd        func() (string, error)
@@ -48,10 +52,13 @@ func defaultIdleDeps() idleDeps {
 		})
 	}
 	sampler := idle.HostSampler{OS: osk, Runner: proc.Default, Collect: collect, Now: time.Now, Sleep: sleepCtx}
+	finder := owner.Finder{OS: osk}
 	return idleDeps{
 		Sample:       sampler.Sample,
-		Cwds:         owner.Finder{OS: osk}.Cwds,
+		Cwds:         finder.Cwds,
 		Waits:        idle.WaitReader{OS: osk}.Read,
+		Under:        finder.NewCwdMatcher().Under,
+		Stat:         os.Stat,
 		Now:          time.Now,
 		Pid:          os.Getpid,
 		Getwd:        os.Getwd,
@@ -124,7 +131,8 @@ Flags:
 Exit codes:
   0  no idle holders found
   3  idle holders found
-  1  runtime or output error (including reaching --timeout)
+  1  runtime or output error (including reaching --timeout, CPU that could
+     not be measured over a window, and a --root that is not a directory)
   2  usage
 `)
 	}
@@ -163,6 +171,10 @@ func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
 		}
 		f.roots = stringList{wd}
 	}
+	if err := checkIdleRoots(f.roots, deps); err != nil {
+		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
+		return idleExitError
+	}
 	rep, err := collectIdle(f, pids, deps)
 	if err != nil {
 		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
@@ -184,12 +196,36 @@ func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
 	return idleExitNone
 }
 
+// checkIdleRoots rejects a root that is not an existing directory: matching
+// nothing under it would read as "no idle holders".
+func checkIdleRoots(roots []string, deps idleDeps) error {
+	if deps.Stat == nil {
+		return nil
+	}
+	for _, r := range roots {
+		fi, err := deps.Stat(r)
+		if err != nil {
+			return fmt.Errorf("--root %s: %w", r, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("--root %s is not a directory", r)
+		}
+	}
+	return nil
+}
+
 func collectIdle(f idleFlags, pids []int, deps idleDeps) (idleReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
 	s, err := deps.Sample(ctx, f.window)
 	if err != nil {
 		return idleReport{}, err
+	}
+	if s.Basis != idle.BasisWindow || s.Window <= 0 {
+		return idleReport{}, fmt.Errorf("CPU could not be measured over a window (basis %q), so idleness is unknown", s.Basis)
+	}
+	if len(s.Procs) == 0 {
+		return idleReport{}, errors.New("the process list is empty (ps or /proc could not be read)")
 	}
 	rep := idleReport{
 		Roots: []string(f.roots), PIDs: pids, MinAgeSeconds: int64(f.minAge / time.Second), MaxCPUPct: f.maxCPU,
@@ -209,7 +245,7 @@ func collectIdle(f idleFlags, pids []int, deps idleDeps) (idleReport, error) {
 	}
 	rep.Result = idle.Find(s, cwds, idle.Options{
 		Roots: idleRoots(f.roots, deps), PIDs: pids, MinAge: f.minAge, MaxCPUPct: f.maxCPU,
-		Now: deps.Now(), SelfPID: deps.Pid(),
+		Now: deps.Now(), SelfPID: deps.Pid(), Under: deps.Under,
 	})
 	if len(rep.Result.Holders) > 0 {
 		rep.Result.AttachWaits(deps.Waits(ctx, rep.Result.Pids()))
@@ -240,9 +276,6 @@ func printIdle(w io.Writer, rep idleReport) {
 			scope += " and "
 		}
 		scope += "pids " + joinInts(rep.PIDs)
-	}
-	if rep.CPUBasis != idle.BasisWindow {
-		fmt.Fprintf(w, "CPU could not be measured over a window (basis %q); nothing is reported.\n", rep.CPUBasis)
 	}
 	if len(res.Holders) == 0 {
 		fmt.Fprintf(w, "No idle holders under %s (checked %d: %d busy, %d younger than %ds, %d unmeasured).\n",

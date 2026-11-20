@@ -34,6 +34,7 @@ func TestRunOwner(t *testing.T) {
 		{name: "no args", wantCode: 2, wantErr: "Exit codes"},
 		{name: "bad target", args: []string{"garbage"}, wantCode: 2, wantErr: "unrecognised"},
 		{name: "bad flag", args: []string{"--nope", "1"}, wantCode: 2},
+		{name: "flag after target", args: []string{":8080", "--nope"}, wantCode: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,7 +87,11 @@ func TestRunOwnerUnder(t *testing.T) {
 	}{
 		{name: "found", args: []string{"--under", "/work/repo"}, res: busy, wantDirs: []string{"/work/repo"}, wantCode: 0, wantOut: "cwd: /work/repo/app"},
 		{name: "relative", args: []string{"--under", "repo", "/b/../c"}, wantDirs: []string{"/work/repo", "/c"}, wantCode: 3, wantOut: "No process is working under /work/repo, /c"},
-		{name: "incomplete", args: []string{"--under", "/x"}, res: owner.UnderResult{Incomplete: true, Hint: "denied"}, wantCode: 3, wantOut: "may be incomplete: denied"},
+		{name: "incomplete", args: []string{"--under", "/x"}, res: owner.UnderResult{Incomplete: true, Hint: "denied"}, wantCode: 4, wantOut: "could not be read: denied"},
+		{name: "incomplete with holder", args: []string{"--under", "/x"}, res: owner.UnderResult{Holders: busy.Holders, Incomplete: true, Hint: "denied"}, wantCode: 0, wantOut: "may be incomplete: denied"},
+		{name: "flags after dirs", args: []string{"--under", "/x", "--timeout", "0s"}, wantCode: 2, wantErr: "positive"},
+		{name: "under after dir", args: []string{"/work/repo", "--under"}, res: busy, wantDirs: []string{"/work/repo"}, wantCode: 0},
+		{name: "double dash", args: []string{"--under", "--", "-odd", "--json"}, wantDirs: []string{"/work/-odd", "/work/--json"}, wantCode: 3, wantOut: "No process is working"},
 		{name: "deadline", args: []string{"--under", "--timeout", "1ms", "/x"}, err: context.DeadlineExceeded, wantCode: 1, wantErr: "deadline"},
 		{name: "no dirs", args: []string{"--under"}, wantCode: 2, wantErr: "--under"},
 		{name: "bad timeout", args: []string{"--under", "--timeout", "0s", "/x"}, wantCode: 2, wantErr: "positive"},
@@ -117,8 +122,8 @@ func TestRunOwnerUnderJSON(t *testing.T) {
 	under := func(_ context.Context, dirs []string) (owner.UnderResult, error) {
 		return owner.UnderResult{Dirs: dirs, Incomplete: true}, nil
 	}
-	if code := runOwnerWithIO([]string{"--under", "--json", "/w"}, &out, &bytes.Buffer{}, "/", nil, under); code != 3 {
-		t.Fatalf("code = %d", code)
+	if code := runOwnerWithIO([]string{"--under", "/w", "--json"}, &out, &bytes.Buffer{}, "/", nil, under); code != 4 {
+		t.Fatalf("code = %d, want 4 (none visible, incomplete): %s", code, out.String())
 	}
 	var got struct {
 		Dirs       []string `json:"dirs"`
