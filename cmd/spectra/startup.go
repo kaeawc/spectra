@@ -22,8 +22,8 @@ const (
 )
 
 const startupUsage = `usage: spectra startup [list] [--json] [--scope user|system|all] [--include-apple]
-       spectra startup disable <label> [--scope user] [--json]
-       spectra startup enable <label> [--scope user] [--json]
+       spectra startup disable <label> [--scope user|system] [--yes] [--json]
+       spectra startup enable <label> [--scope user|system] [--yes] [--json]
 
 What launches at login or boot, one row per item, merged from:
   launchd plists   ~/Library/LaunchAgents (user), /Library/LaunchAgents and
@@ -32,21 +32,32 @@ What launches at login or boot, one row per item, merged from:
   BTM              Login Items from sfltool dumpbtm, only when run as root
                    (otherwise it asks for administrator authorization)
 
-disable and enable change user-scope launchd items only, with launchctl
-disable/bootout and enable/bootstrap. Apple (com.apple.*) and system-scope
-items, and labels defined by more than one plist or under /System, are
-refused with the command to run yourself; BTM-only login items are changed in
-System Settings > General > Login Items.
+disable and enable change user-scope launchd items with launchctl
+disable/bootout and enable/bootstrap. Apple (com.apple.*) items, and labels
+defined by more than one plist or under /System, are refused with the command
+to run yourself; BTM-only login items are changed in System Settings >
+General > Login Items.
+
+With --scope system they change a third-party launch daemon in
+/Library/LaunchDaemons through the privileged helper (sudo spectra
+install-helper), for administrators only. The helper verifies the daemon,
+spectra prints the target and the exact commands, and asks for confirmation
+on a terminal; --yes confirms without asking and is required without a
+terminal. Without the helper, the sudo launchctl commands are printed.
 
 Exit codes: 0 ok, 1 error (or the re-read state does not match the change),
 2 usage, 3 refused.
 `
 
 func runStartup(args []string) int {
-	return runStartupWithIO(args, os.Stdout, os.Stderr, startup.Options{})
+	return runStartupWith(args, os.Stdout, os.Stderr, startup.Options{}, defaultStartupSystem())
 }
 
 func runStartupWithIO(args []string, stdout, stderr io.Writer, opts startup.Options) int {
+	return runStartupWith(args, stdout, stderr, opts, defaultStartupSystem())
+}
+
+func runStartupWith(args []string, stdout, stderr io.Writer, opts startup.Options, sys startupSystem) int {
 	verb := "list"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		verb, args = args[0], args[1:]
@@ -55,7 +66,7 @@ func runStartupWithIO(args []string, stdout, stderr io.Writer, opts startup.Opti
 	case "list":
 		return runStartupList(args, stdout, stderr, opts)
 	case "disable", "enable":
-		return runStartupChange(verb, args, stdout, stderr, opts)
+		return runStartupChange(verb, args, stdout, stderr, opts, sys)
 	case "help":
 		fmt.Fprint(stdout, startupUsage)
 		return startupExitOK
@@ -103,10 +114,11 @@ func validStartupScope(s string) bool {
 	return s == "user" || s == "system" || s == "all"
 }
 
-func runStartupChange(verb string, args []string, stdout, stderr io.Writer, opts startup.Options) int {
+func runStartupChange(verb string, args []string, stdout, stderr io.Writer, opts startup.Options, sys startupSystem) int {
 	fs := startupFlags(verb, stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
-	scope := fs.String("scope", "user", "Scope: only user can be changed")
+	scope := fs.String("scope", "user", "Scope: user, or system through the privileged helper")
+	yes := fs.Bool("yes", false, "With --scope system: confirm without asking")
 	if err := fs.Parse(args); err != nil {
 		return startupExitUsage
 	}
@@ -119,6 +131,9 @@ func runStartupChange(verb string, args []string, stdout, stderr io.Writer, opts
 	if err := fs.Parse(fs.Args()[1:]); err != nil || fs.NArg() != 0 || label == "" {
 		fs.Usage()
 		return startupExitUsage
+	}
+	if *scope == string(startup.ScopeSystem) {
+		return runStartupSystemChange(startupSystemRequest{verb: verb, label: label, asJSON: *asJSON, yes: *yes}, stdout, stderr, opts, sys)
 	}
 	do := startup.Disable
 	if verb == "enable" {

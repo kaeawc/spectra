@@ -371,10 +371,15 @@ Background Task Management are merged in without root from the BTM store
 (`btm_store` source, store version 16 only); when the store cannot be used the
 `btm` source is `needs_root` unless run as root (`sfltool dumpbtm`), and the
 `sources` field says so. `spectra startup disable <label>` and
-`spectra startup enable <label>` change user-scope launchd items only
+`spectra startup enable <label>` change user-scope launchd items
 (`launchctl disable` + `bootout`, `launchctl enable` + `bootstrap`); Apple,
 system-scope, duplicate-label and BTM-only items are refused with the command
-or System Settings pane to use instead. Exit codes: `0` ok, `1` error
+or System Settings pane to use instead. With `--scope system [--yes]` they
+change a verified third-party daemon in `/Library/LaunchDaemons` through the
+privileged helper, for administrators only: Spectra prints the target and the
+exact commands and asks `[y/N]` on a terminal (`--yes` is required without
+one). Without the helper they print the `sudo launchctl` commands and an
+install hint. Exit codes: `0` ok, `1` error
 (including a re-read state that does not match the change), `2` usage, `3`
 refused. See [Startup items](startup-items.md).
 

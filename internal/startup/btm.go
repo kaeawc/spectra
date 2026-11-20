@@ -12,6 +12,9 @@ import (
 type btmItem struct {
 	BTM
 	Name string
+	// flags are the words of dumpbtm's Flags line; the store file does not
+	// record them, so they stay out of the reported BTM.
+	flags []string
 }
 
 var (
@@ -76,6 +79,10 @@ func applyBTMField(it *btmItem, key, value string) {
 		it.Type = btmHexRE.ReplaceAllString(value, "")
 	case "Disposition":
 		it.Disposition = btmList(value)
+	case "Flags":
+		// Non-nil even when empty, so a caller can tell "no flags" from a
+		// record whose Flags line was missing.
+		it.flags = btmFlags(value)
 	case "Identifier":
 		it.Identifier = value
 	case "URL":
@@ -99,6 +106,24 @@ func applyBTMField(it *btmItem, key, value string) {
 func btmList(v string) []string {
 	v = strings.Trim(btmHexRE.ReplaceAllString(v, ""), "[] ")
 	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// btmFlags reads the words between the brackets of a Flags value, ignoring
+// the trailing bitmask, which dumpbtm prints as "(0x5)" or, when empty,
+// "(0)". A value without brackets yields one word per part, so a changed
+// format surfaces as unknown flags instead of none.
+func btmFlags(v string) []string {
+	out := []string{}
+	open, closing := strings.Index(v, "["), strings.LastIndex(v, "]")
+	if open >= 0 && closing > open {
+		v = v[open+1 : closing]
+	}
 	for _, part := range strings.Split(v, ",") {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)

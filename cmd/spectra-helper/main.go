@@ -6,6 +6,9 @@
 //   - powermetrics samples
 //   - fs_usage traces for a specific PID
 //   - Full process tree (including system daemons)
+//   - Disable or enable one verified third-party system launch daemon
+//     (helper.launchd.system.prepare/.disable/.enable; admins only, with a
+//     single-use confirmation token; see docs/design/helper-launchd-mutation.md)
 //
 // The socket is /var/run/spectra-helper.sock (0660 root:_spectra).
 // Only processes in the _spectra group can connect.

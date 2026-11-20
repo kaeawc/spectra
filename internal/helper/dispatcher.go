@@ -151,7 +151,12 @@ func (d *Dispatcher) handle(uid uint32, raw []byte) Response {
 	result, err := fn(uid, req.Params)
 	if err != nil {
 		d.auditRequest(start, uid, req.Method, false, err.Error())
-		return Response{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: -32603, Message: err.Error()}}
+		code := -32603
+		var ce *rpcError
+		if errors.As(err, &ce) {
+			code = ce.code
+		}
+		return Response{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: code, Message: err.Error()}}
 	}
 	d.auditRequest(start, uid, req.Method, true, "")
 	return Response{JSONRPC: "2.0", ID: req.ID, Result: result}
@@ -181,6 +186,16 @@ func (d *Dispatcher) auditRequest(start time.Time, uid uint32, method string, ok
 		Error:      msg,
 	}
 	_ = json.NewEncoder(d.audit).Encode(event)
+}
+
+// writeAudit appends one JSON line to the audit log, if enabled.
+func (d *Dispatcher) writeAudit(v any) {
+	d.auditMu.Lock()
+	defer d.auditMu.Unlock()
+	if d.audit == nil {
+		return
+	}
+	_ = json.NewEncoder(d.audit).Encode(v)
 }
 
 type rateLimiter struct {

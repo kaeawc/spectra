@@ -46,14 +46,32 @@ func (c *Client) Available() bool {
 	return true
 }
 
+// RPCError is a JSON-RPC error the helper returned.
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string { return fmt.Sprintf("helper error %d: %s", e.Code, e.Message) }
+
+// IsRateLimited reports whether err is the helper's rate-limit error.
+func IsRateLimited(err error) bool {
+	var re *RPCError
+	return errors.As(err, &re) && re.Code == -32001
+}
+
 // call sends one JSON-RPC request and returns the raw result JSON.
 func (c *Client) call(method string, params any) (json.RawMessage, error) {
+	return c.callTimeout(method, params, 30*time.Second)
+}
+
+func (c *Client) callTimeout(method string, params any, timeout time.Duration) (json.RawMessage, error) {
 	conn, err := net.DialTimeout("unix", c.sockPath, 3*time.Second)
 	if err != nil {
 		return nil, ErrHelperUnavailable
 	}
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, fmt.Errorf("helperclient: set deadline: %w", err)
 	}
 
@@ -89,7 +107,7 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("helperclient: unmarshal: %w", err)
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("helper error %d: %s", resp.Error.Code, resp.Error.Message)
+		return nil, &RPCError{Code: resp.Error.Code, Message: resp.Error.Message}
 	}
 	return resp.Result, nil
 }
@@ -225,4 +243,43 @@ func (c *Client) NetCaptureStop(handle string) (map[string]any, error) {
 	}
 	var m map[string]any
 	return m, json.Unmarshal(raw, &m)
+}
+
+// launchdTimeout covers codesign verification of a large bundle and a full
+// BTM dump, which the helper runs on every prepare and execute.
+const launchdTimeout = 3 * time.Minute
+
+// LaunchdSystemPrepare asks the helper to verify a system launch daemon and
+// return the plan and a single-use confirmation token.
+func (c *Client) LaunchdSystemPrepare(label, action string) (helper.LaunchdPrepareResult, error) {
+	var res helper.LaunchdPrepareResult
+	raw, err := c.callTimeout(helper.MethodLaunchdPrepare, map[string]string{"label": label, "action": action}, launchdTimeout)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return res, fmt.Errorf("helperclient: parse prepare result: %w", err)
+	}
+	return res, nil
+}
+
+// LaunchdSystemChange runs a prepared disable or enable with its token.
+func (c *Client) LaunchdSystemChange(action, token string) (helper.LaunchdChangeResult, error) {
+	var res helper.LaunchdChangeResult
+	method := helper.MethodLaunchdDisable
+	switch action {
+	case "disable":
+	case "enable":
+		method = helper.MethodLaunchdEnable
+	default:
+		return res, fmt.Errorf("helperclient: unknown launchd action %q", action)
+	}
+	raw, err := c.callTimeout(method, map[string]string{"token": token}, launchdTimeout)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return res, fmt.Errorf("helperclient: parse change result: %w", err)
+	}
+	return res, nil
 }

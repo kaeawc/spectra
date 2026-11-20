@@ -32,10 +32,11 @@ the daemon stops if its socket is removed or replaced.
 - Preserve an explicit user boundary around destructive diagnostics and helper
   installation.
 
-## Proposed: helper launchd mutation
+## Helper launchd mutation
 
-Status: proposed, not implemented. See
-[helper launchd mutation](helper-launchd-mutation.md).
+Status: implemented (step 1 of issue #600). See
+[helper launchd mutation](helper-launchd-mutation.md). The VM integration
+test is a manual pre-release step.
 
 New assets:
 
@@ -57,10 +58,12 @@ New assets:
 | Toggling a daemon to cause disruption | 10 mutations per 10 minutes per uid, one mutation in flight |
 | Prepared plan differs from what executes (e.g. daemon loaded after `prepare`, adding a `bootout`) | Token binds the loaded state and the planned argv; any difference at execute refuses `target_changed` and nothing runs |
 | Undoing an MDM administrator's decision | Daemons matched by a `com.apple.servicemanagement` managed-preferences rule or flagged managed in BTM are refused; an unreadable management source refuses `management_unknown`; the denylist covers MDM-installed agents these sources miss |
+| Program replaced after verification, so launchd runs other code as root | The program and every directory above it must be root-owned, not world-writable and not group-writable (except an `admin`-group directory such as `/Applications`), with no symlink; refused `program_writable` otherwise, at prepare and again at execute. This also protects every later launch, since launchd runs whatever is at that path as root |
 | Loss of the files that launch a daemon | No delete, move or edit operation exists; `disable` only adds a launchd override and boots the job out, so the plist, program and bundle are untouched |
 
 `enable` removes the override `disable` added. When the daemon is not
-loaded, `enable` also bootstraps it from the verified plist. If that
+loaded, `enable` also bootstraps (loads) it from the verified plist; an
+on-demand daemon is then loaded but not running until triggered. If that
 `bootstrap` fails, the daemon stays enabled but stopped. The result reports
 "enabled but not loaded", and the daemon next starts at boot or by a
 manual `sudo launchctl bootstrap`. `enable` does not restore anything
@@ -75,6 +78,6 @@ complete as its entries, and anyone with `sudo` can edit it. Management
 detection sees only service-management rules and BTM flags. An admin can
 still run `sudo launchctl` directly with the commands the refusal prints.
 `enable` also loads a not-loaded daemon, so re-enabling a verified daemon
-normally starts it at once. If its bootstrap fails, it stays enabled but
+normally starts it at once if it runs at load. If its bootstrap fails, it stays enabled but
 stopped until boot or a manual bootstrap. This is a deliberate, narrow
 privilege step, and the audit log records every prepare and execution.

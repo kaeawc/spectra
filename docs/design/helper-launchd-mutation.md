@@ -1,13 +1,15 @@
-# Helper launchd mutation (proposed)
+# Helper launchd mutation
 
-!!! warning "Status: proposed"
-    This is the design for step 1 of the helper mutation plan in issue #600.
-    Nothing here is implemented. No helper code lands until the owner
-    approves this design and an independent security review signs off.
-    The owner answered four open questions on 2026-11-20 (admin gate,
-    `enable` bootstrap, no stop-only method, denylist); those are now part
-    of the proposal below. The fifth open question, VM fixture signing, is
-    resolved as proposed. Everything stays proposed until it is implemented.
+!!! note "Status: implemented"
+    This is step 1 of the helper mutation plan in issue #600, approved by
+    the owner on 2026-11-20 and implemented in `internal/helper`
+    (`launchd*.go`), `internal/helperclient` and `spectra startup
+    disable|enable --scope system`. The owner's answers (admin gate,
+    `enable` bootstrap, no stop-only method, denylist, VM fixture signing)
+    are part of the design below. The VM integration test is a manual
+    pre-release step (see [testing](#testing)). Where this page was
+    ambiguous the implementation chose the more restrictive reading; those
+    choices are listed under [implementation notes](#implementation-notes).
 
 The privileged helper gains one narrow ability: disable (and stop) or
 re-enable a **system-domain launchd daemon** whose plist sits in
@@ -32,9 +34,12 @@ Three methods. Each does one thing.
 | `helper.launchd.system.enable` | yes | `launchctl enable system/<label>`, then `launchctl bootstrap system <plist>` when the job is not loaded |
 
 `disable` and `enable` match the user-scope `spectra startup disable/enable`
-verbs: `enable` also loads the daemon when it is not loaded, so it runs
-without a reboot. The bootstrap rules are under
-[Enable and bootstrap](#enable-and-bootstrap).
+verbs: `enable` also loads (bootstraps) the daemon when it is not loaded,
+without a reboot. Loading does not guarantee a process starts: a job with
+`RunAtLoad` or `KeepAlive` starts at once, while an on-demand job stays
+loaded but not running until a socket, Mach port or event triggers it. The
+result reports `loaded` and `running` separately. The bootstrap rules are
+under [Enable and bootstrap](#enable-and-bootstrap).
 
 ### Request and response
 
@@ -57,7 +62,7 @@ without a reboot. The bootstrap rules are under
     "bundle_id": "com.example.app",
     "team_id": "ABCDE12345"
   },
-  "before": {"loaded": true, "disabled": false, "pid": 412},
+  "before": {"loaded": true, "running": true, "disabled": false, "pid": 412},
   "planned": [["/bin/launchctl", "disable", "system/com.example.agentd"],
               ["/bin/launchctl", "bootout", "system/com.example.agentd"]]
 }
@@ -71,9 +76,9 @@ without a reboot. The bootstrap rules are under
   "via": "helper", "refused": false, "target": {…},
   "commands": [{"argv": [...], "exit_code": 0}, {"argv": [...], "exit_code": 0}],
   "pending": false,
-  "before": {"loaded": true, "disabled": false, "pid": 412},
-  "after":  {"loaded": false, "disabled": true, "pid": 0},
-  "mismatch": ""
+  "before": {"loaded": true, "running": true, "disabled": false, "pid": 412},
+  "after":  {"loaded": false, "running": false, "disabled": true, "pid": 0},
+  "mismatch": "", "outcome": "ok"
 }
 ```
 
@@ -95,7 +100,9 @@ Any check failing means refusal and no `launchctl` call.
 1. **Label.** At most 200 bytes, reverse-DNS with at least two non-empty
    segments, only characters `bundleid.Valid` allows (the same rule as
    `uninstall.validID`). Refuse any label starting with `com.apple.` (case
-   folded) and the helper's own label `dev.spectra.helper`.
+   folded) with `apple_label`, and the helper's own label
+   `dev.spectra.helper` with `denylisted` (a built-in entry). A label that
+   fails the shape rule is malformed params (JSON-RPC `-32602`).
 2. **Plist path.** Exactly `/Library/LaunchDaemons/<label>.plist`, joined
    with the `idPath` rule so the result sits directly in that directory. No
    other directory is searched. A label whose file has another name is
@@ -111,12 +118,17 @@ Any check failing means refusal and no `launchctl` call.
    The SHA-256 of the bytes is part of the token binding.
 5. **Duplicate labels.** Scan every entry of `/Library/LaunchDaemons` and
    `/System/Library/LaunchDaemons`, the two directories whose jobs load into
-   the `system` domain. Refuse with `duplicate_label` when another plist
+   the `system` domain. Only **candidate job plists** are read: entries
+   whose name ends in `.plist` and does not start with `.`. Other entries
+   (`.DS_Store`, a README) are ignored and never block a change. A
+   candidate that is not a regular file (a directory or symlink named
+   `x.plist`) counts as unreadable and non-inert below.
+   Refuse with `duplicate_label` when another plist
    defines the same label (the `startup.refuseCopies` rule). Then apply a
    **system-domain unreadable rule**. `startup.refuseUnreadable` is not
    reused, because it skips every entry outside the `gui` domain and would
    therefore ignore all of these plists. The helper's own rule takes every
-   entry in those two directories other than the target plist, and for each
+   candidate in those two directories other than the target plist, and for each
    one that cannot be opened, stat'd or parsed as a plist (too large,
    malformed, not a regular file, permission error):
    - if a partial scan read its `Label` as the requested label, refuse with
@@ -140,6 +152,20 @@ Any check failing means refusal and no `launchctl` call.
      named by the plist's `AssociatedBundleIdentifiers`, matched by bundle id.
 
    Anything else is refused (`program_not_in_bundle`).
+
+   **The program stays protected until launch.** launchd runs whatever is
+   at the program path as root, on this launch and on every later one, so
+   the helper requires that no one but root can replace it. The program
+   file and every ancestor directory up to `/` must be owned by uid 0,
+   contain no symlink, be not world-writable, and be not group-writable,
+   except a directory whose group is `admin` (gid 80), such as
+   `/Applications` (`root:admin 0775`): an admin can already act as root.
+   The program file itself may never be group-writable. Anything else is
+   refused with `program_writable`, for `disable` and `enable` alike, at
+   `prepare` and again at execute. An app dragged into `/Applications` by a
+   user is owned by that user and is therefore refused; that is deliberate,
+   since the user could swap the binary that `enable` would have launchd
+   run as root.
 7. **Bundle and team id.** The bundle path is not a symlink and not under
    `/System`. Then, with absolute `/usr/bin/codesign`:
    - `codesign --verify --strict <bundle>` must pass;
@@ -148,8 +174,14 @@ Any check failing means refusal and no `launchctl` call.
    - `codesign --verify --strict -R='anchor apple generic and
      certificate leaf[subject.OU] = "<TEAM>"'` must pass for both the bundle
      and the program, so the daemon binary carries the bundle's team;
-   - `codesign --verify -R='anchor apple'` must **fail** for both. Anything
-     Apple-signed is refused, whatever its label.
+   - `codesign --verify -R='anchor apple'` must **fail** for both, with
+     exit 3 (requirement not met). Exit 0 is `apple_signed`; any other exit
+     is no verdict and refuses `unsigned`. Anything Apple-signed is
+     refused, whatever its label.
+   - A `--strict` rejection whose only complaint is Finder metadata
+     ("detritus") is retried once without `--strict`, which still checks
+     code and resources (the `internal/codesignout` rule the uninstaller
+     uses). Any other complaint refuses.
 8. **Launchd's view.** `launchctl print system/<label>`. When the job is
    loaded, its `path` must equal the plist path and its `program` (or first
    argument) the derived program; otherwise launchd is running a different
@@ -194,7 +226,9 @@ Neither source needs a prompt.
    managed, the helper refuses with `managed`. The same applies when a
    selected record carries a flag word outside the set that the
    implementation PR pins from `sfltool` fixtures for each supported macOS
-   version (today's fixtures show `legacy`, `curated` and `sandboxed`).
+   version. The pinned set is `legacy`, `curated` and `sandboxed`; any
+   other word, including `managed`, refuses `managed`. A selected record
+   with no `Flags` line refuses `management_unknown`.
    Disposition is not used as a management signal. `enabled`/`disabled` is
    ordinary state, and `allowed` is the user's choice.
 
@@ -204,7 +238,9 @@ in these cases:
 - a service-management file exists but fails its integrity checks or does
   not parse;
 - `/Library/Managed Preferences` exists but cannot be read;
-- `sfltool dumpbtm` exits non-zero, cannot be parsed, or is too large.
+- `sfltool dumpbtm` exits non-zero, cannot be parsed (no `Records for
+  UID` header), or is larger than 16 MiB;
+- a service-management rule has a `RuleType` the helper does not know.
 
 The helper does not refuse in these cases:
 
@@ -274,7 +310,9 @@ Decided by the owner (2026-11-20): `enable` matches user-scope
    result says "disabled but running".
 4. After `bootstrap`, `print system/<label>` must show the job loaded with
    `path` equal to the plist path and program equal to the derived program;
-   `print-disabled` must show it enabled. Otherwise `mismatch` is set.
+   `print-disabled` must show it enabled. Otherwise `mismatch` is set. A
+   loaded job that has no process yet (an on-demand daemon) is a success,
+   reported as loaded and not running.
 
 Failure handling:
 
@@ -459,6 +497,9 @@ is one audited path.
 |---|---|---|
 | Helper not installed or socket refused | — | Today's refusal plus install hint; exit 3 |
 | Caller not admin | `not_admin` | "changing system daemons needs an administrator account"; exit 3 |
+| No plist at the fixed path for the label | `unknown_label` | The path; exit 3 |
+| Plist uses `BundleProgram` (an `SMAppService` job) | `bundle_program` | The plist; exit 3 |
+| Program or an ancestor directory is not root-owned, or is writable by others | `program_writable` | The path, owner and mode; exit 3 |
 | Daemon on the denylist | `denylisted` | Matched entry and manual commands; exit 3 |
 | Denylist exists but not root-owned, not `0644` or stricter, or unparseable | `denylist_invalid` | Failed check and path; all mutations refused; exit 3 |
 | `enable` succeeded, `bootstrap` failed | `outcome: error` | "enabled but not loaded", argv, stderr, manual bootstrap command; exit 1 |
@@ -505,6 +546,12 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
 - **Fuzz:** label validation and plist parsing.
 - **CLI tests:** helper absent, refusal, no TTY without `--yes`, success and
   mismatch output, all against a fake helper client.
+Implemented as table and unit tests in `internal/helper/launchd_test.go`
+(fakes in `launchd_fake_test.go`), `cmd/spectra/startup_system_test.go`,
+`internal/helperclient/launchd_test.go` and
+`internal/startup/export_test.go`, including `FuzzLaunchdParams` for the
+request decoder. The VM test below is not automated.
+
 - **VM-only integration (manual pre-release step):** build tag `helper_vm`
   plus `SPECTRA_VM_TEST=1`. It runs only inside a disposable macOS VM, never
   on CI hosts or developer machines. The owner runs it by hand before each
@@ -524,6 +571,34 @@ result says so and suggests a reboot or `sudo launchctl bootout`.
 - **Bootstrap tests:** skipped when already loaded; plist changed between
   `prepare` and execute; `enable` ok then `bootstrap` fails; post-bootstrap
   mismatch.
+
+## Implementation notes
+
+Choices the implementation made where this page left room, each the more
+restrictive reading:
+
+- The admin check runs `/usr/bin/dsmemberutil checkmembership -u <uid> -G
+  admin` and fails closed on any output it does not recognise.
+- The mutating methods take the token out of the store before the rate
+  limit, the admin check and every other step; a rate-limited or refused
+  execute still uses up its token.
+- Every execute counts toward the 10-per-10-minutes limit, refused or not,
+  and a second execute while one is in flight is a `-32001` error.
+- A program in `/Library/PrivilegedHelperTools` must be owned by exactly
+  one app directly in `/Applications`; two matching apps refuse as
+  ambiguous.
+- A per-user entry of `/Library/Managed Preferences` that is a symlink
+  refuses `management_unknown`; payload files use the denylist's file
+  rule (root-owned, mode `0644` or stricter).
+- A BTM record is selected by an `Identifier` ending in `.<label>` or by its
+  file URL; any record so selected must pass the flag rule.
+- The denylist's directory must also resolve without symlinks. The default
+  file `install-helper` writes lists the helper's label and label prefixes
+  of common endpoint-security, device-management and backup agents, for
+  review; `TeamIDs` ships empty.
+- Commands run with a fixed environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`,
+  `LC_ALL=C`) and a 60-second timeout each; a whole prepare or execute is
+  bounded at 150 seconds.
 
 ## Out of scope
 
