@@ -295,6 +295,31 @@ or System Settings pane to use instead. Exit codes: `0` ok, `1` error
 (including a re-read state that does not match the change), `2` usage, `3`
 refused. See [Startup items](startup-items.md).
 
+`spectra uninstall plan <path/to/App.app | bundle id> [-json]` lists, read-only,
+the bundle and every file tied to it: each item's path, `kind`, allocated
+`size_bytes`, `owner_uid`, `removable_by_user` (judged from ownership and the
+parent directory's mode bits, never by trying), `reason` (`bundle_id`,
+`helper_of_bundle`, `team_id`, `entitlement_group`, `launchd_program_in_bundle`,
+`receipt`, or `name`), `shared`, `confidence` and the `action` apply would take
+(`trash`, `needs_root` with a `command`, or `report_only`), plus the app's
+running processes and launchd labels. Apps under `/System`, symlinked `.app`
+paths and bundle ids that are not reverse-DNS are refused. Declared labels and
+app groups not under the app's own bundle id (or verified team id), ids shared
+with another installed app (ignoring case), and receipt-installed files are
+reported only.
+`spectra uninstall apply --plan <plan.json> [-json] [--dry-run] [--quit]
+[--include-low-confidence] [--data-only] [--leftovers]` acts only on that
+plan's items after re-deriving each one; it refuses while the app runs unless
+`--quit` (SIGTERM to pid+start-time-verified processes, up to 10s, never
+SIGKILL), then boots out your own launch agents, and moves the bundle and then
+your own items into a new folder in `~/.Trash`. It stops before touching data
+when the bundle cannot be moved unless `--data-only`, and refuses a plan whose
+bundle is gone unless `--leftovers` (exact `<location>/<bundle id>` paths
+only; never `com.apple.*` or an installed app's id). It never deletes and never
+touches root-owned or shared items. Exit codes: `0` ok, `1` error or refused,
+`2` usage, `3` items left that need root or failed to move. See
+[App uninstall](uninstall.md) for the matching rules.
+
 Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
