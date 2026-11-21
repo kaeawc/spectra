@@ -37,6 +37,7 @@ func runRules(args []string) int {
 	rulesConfig := fs.String("rules-config", "", "Path to spectra.yml rule overrides (default: ./spectra.yml if present)")
 	rulePaths := fs.String("rules", "", "Comma-separated YAML rule files or globs to load")
 	threadDumpPIDs := fs.String("thread-dump-pid", "", "Comma-separated JVM PIDs to capture a thread dump for (enables jvm-deadlock)")
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "Run the real spctl Gatekeeper assessment so app-gatekeeper-rejected can fire (slow; serialized, 15s timeout per app)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -55,7 +56,7 @@ func runRules(args []string) int {
 		}
 		snap = *s
 	} else {
-		snap = buildLiveRulesSnapshot(dumpPIDs)
+		snap = buildLiveRulesSnapshot(dumpPIDs, *assessGatekeeper)
 	}
 
 	catalog, err := loadRuleCatalogWithOptions(ruleCatalogOptions{
@@ -100,10 +101,10 @@ func threadDumpPIDsFlag(raw, snapID string) ([]int, error) {
 	return pids, nil
 }
 
-func buildLiveRulesSnapshot(threadDumpPIDs []int) snapshot.Snapshot {
+func buildLiveRulesSnapshot(threadDumpPIDs []int, assessGatekeeper bool) snapshot.Snapshot {
 	opts := snapshot.Options{
 		SpectraVersion: version,
-		DetectOpts:     detect.Options{},
+		DetectOpts:     detect.Options{AssessGatekeeper: assessGatekeeper, SealCache: sealCache()},
 		ThreadDumpPIDs: threadDumpPIDs,
 		// This path feeds attachCLIHistory, so it is a history sampler.
 		JVMOpts: jvm.CollectOptions{SampleNMT: true},

@@ -789,6 +789,10 @@
       "description": "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
       "inputSchema": {
         "properties": {
+          "assess_gatekeeper": {
+            "description": "Run the real spctl Gatekeeper assessment (slow, 15s cap per app). Default infers it from the signature.",
+            "type": "boolean"
+          },
           "deep": {
             "description": "Join live process, open-FD/listening-port, and connection state for each app.",
             "type": "boolean"

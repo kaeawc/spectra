@@ -316,7 +316,7 @@ type cliSnapshotSource struct {
 func (s cliSnapshotSource) Live(ctx context.Context) (snapshot.Snapshot, error) {
 	return snapshot.Build(ctx, snapshot.Options{
 		SpectraVersion: s.version,
-		DetectOpts:     detect.Options{},
+		DetectOpts:     detect.Options{SealCache: sealCache()},
 	}), nil
 }
 

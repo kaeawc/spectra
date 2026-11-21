@@ -25,6 +25,7 @@ func runInspect(args []string) int {
 	all := fs.Bool("all", false, "Scan every .app under /Applications (and /Applications/Utilities)")
 	verbose := fs.Bool("v", false, "Show detection signals")
 	withNetwork := fs.Bool("network", false, "Extract embedded URL hosts (slower; scans app.asar)")
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "Run the real spctl Gatekeeper assessment (slow; serialized, 15s timeout per app). Default infers it from the code signature")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -48,7 +49,7 @@ func runInspect(args []string) int {
 	}
 	sort.Strings(paths)
 
-	results, failed := scanInspect(paths, detect.Options{ScanNetwork: *withNetwork})
+	results, failed := scanInspect(paths, detect.Options{ScanNetwork: *withNetwork, AssessGatekeeper: *assessGatekeeper, SealCache: sealCache()})
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -250,12 +251,8 @@ func printSecurityMeta(r detect.Result) {
 	if len(security) > 0 {
 		fmt.Printf("    security: %s\n", strings.Join(security, ", "))
 	}
-	if r.GatekeeperStatus != "" {
-		if r.GatekeeperSource != "" {
-			fmt.Printf("    gatekeeper: %s (%s)\n", r.GatekeeperStatus, r.GatekeeperSource)
-		} else {
-			fmt.Printf("    gatekeeper: %s\n", r.GatekeeperStatus)
-		}
+	if line := gatekeeperLine(r); line != "" {
+		fmt.Printf("    gatekeeper: %s\n", line)
 	}
 	if len(r.Entitlements) > 0 {
 		fmt.Printf("    entitlements: %s\n", strings.Join(r.Entitlements, ", "))
@@ -263,6 +260,37 @@ func printSecurityMeta(r detect.Result) {
 	if r.SparkleFeedURL != "" {
 		fmt.Printf("    sparkle feed: %s\n", r.SparkleFeedURL)
 	}
+}
+
+// gatekeeperLine renders the Gatekeeper answer, keeping a signature
+// inference visibly distinct from a real spctl verdict.
+func gatekeeperLine(r detect.Result) string {
+	if r.GatekeeperStatus != "" {
+		if r.GatekeeperSource != "" {
+			return fmt.Sprintf("%s (%s)", r.GatekeeperStatus, r.GatekeeperSource)
+		}
+		return r.GatekeeperStatus
+	}
+	var line string
+	switch {
+	case r.GatekeeperLikely != "":
+		line = "likely " + r.GatekeeperLikely + " ("
+		if r.GatekeeperLikelySource != "" {
+			line += r.GatekeeperLikelySource + ", "
+		}
+		line += "from signature; not assessed)"
+	case strings.HasPrefix(r.GatekeeperLikelyReason, detect.GatekeeperReasonSealUnchecked):
+		line = "unknown: " + r.GatekeeperLikelyReason + " (from signature; not assessed)"
+	case r.GatekeeperLikelyReason != "":
+		line = "likely not accepted: " + r.GatekeeperLikelyReason + " (from signature; not assessed)"
+	}
+	if r.GatekeeperError != "" {
+		if line != "" {
+			line += "; "
+		}
+		line += "spctl: " + r.GatekeeperError
+	}
+	return line
 }
 
 func printPrivacyMeta(r detect.Result) {

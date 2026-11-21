@@ -856,7 +856,9 @@ func atoi(s string) int {
 
 // ruleGatekeeperRejected fires when spctl --assess explicitly rejects an app.
 // A "rejected" verdict means Gatekeeper would block the app from running on
-// an unmodified macOS 10.15+ system.
+// an unmodified macOS 10.15+ system. It needs a real, opt-in assessment
+// (`--assess-gatekeeper`, detect.Options.AssessGatekeeper); the signature
+// inference in GatekeeperLikely never sets GatekeeperStatus.
 func ruleGatekeeperRejected() Rule {
 	return Rule{
 		ID:       "app-gatekeeper-rejected",

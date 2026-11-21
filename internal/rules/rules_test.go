@@ -1125,6 +1125,19 @@ func TestGatekeeperRejectedNoFireUnknown(t *testing.T) {
 	}
 }
 
+// A signature inference, or an assessment that timed out, is never a verdict.
+func TestGatekeeperRejectedNoFireOnInference(t *testing.T) {
+	s := baseSnap()
+	s.Apps = []detect.Result{
+		{Path: "/Applications/Inferred.app", GatekeeperLikely: "accepted", GatekeeperLikelySource: "Notarized Developer ID", GatekeeperMethod: detect.GatekeeperMethodSignature},
+		{Path: "/Applications/Unknown.app"},
+		{Path: "/Applications/Slow.app", GatekeeperError: detect.GatekeeperErrorTimeout},
+	}
+	if findings := ruleGatekeeperRejected().MatchFn(s); len(findings) != 0 {
+		t.Errorf("expected 0 findings without an spctl verdict, got %d", len(findings))
+	}
+}
+
 func TestBrewDeprecatedFormulaFires(t *testing.T) {
 	s := baseSnap()
 	s.Toolchains.Brew.Formulae = []toolchain.BrewFormula{

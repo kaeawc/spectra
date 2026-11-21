@@ -14,6 +14,7 @@ const (
 	KindToolchain = "toolchain"
 	KindStorage   = "storage"
 	KindClassify  = "classify"
+	KindSeal      = "seal"
 )
 
 // Stores holds the concrete ShardedStore instances for every kind.
@@ -29,6 +30,7 @@ type Stores struct {
 	Toolchain *ShardedStore
 	Storage   *ShardedStore
 	Classify  *ShardedStore
+	Seal      *ShardedStore
 }
 
 // NewStores creates all ShardedStores under versionedRoot and registers
@@ -49,6 +51,7 @@ func NewStores(versionedRoot string, reg *Registry) *Stores {
 		Toolchain: mk(KindToolchain),
 		Storage:   mk(KindStorage),
 		Classify:  mk(KindClassify).WithMaxAge(ClassifyMaxAge),
+		Seal:      mk(KindSeal).WithMaxAge(SealMaxAge),
 	}
 }
 
@@ -57,3 +60,7 @@ func NewStores(versionedRoot string, reg *Registry) *Stores {
 // binary orphans its old entry; pruning on write bounds the store, and an
 // entry for an unchanged binary costs one recomputation per period.
 const ClassifyMaxAge = 30 * 24 * time.Hour
+
+// SealMaxAge bounds the seal store the same way: entries are keyed by
+// bundle path + CDHash, so every app update orphans the old one.
+const SealMaxAge = 30 * 24 * time.Hour

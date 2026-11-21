@@ -107,16 +107,48 @@ type Result struct {
 	GrantedPermissions []string
 
 	// GatekeeperStatus is the result of `spctl --assess --type exec` on
-	// the bundle: "accepted", "rejected", or "" when spctl is unavailable
-	// or the assessment could not be completed. "accepted" means the app
+	// the bundle: "accepted", "rejected", or "" when it was not assessed
+	// (the default; see Options.AssessGatekeeper), spctl is unavailable, or
+	// the assessment could not be completed. "accepted" means the app
 	// passes Gatekeeper's notarization / Developer ID check; "rejected"
-	// means it would be blocked by Gatekeeper on macOS 10.15+.
+	// means it would be blocked by Gatekeeper on macOS 10.15+. Only a real
+	// spctl verdict ever lands here.
 	GatekeeperStatus string
 
 	// GatekeeperSource is the policy source spctl reports for the verdict
 	// ("Apple System", "Mac App Store", "Notarized Developer ID", ...).
 	// Empty when spctl gives none, which is normal for rejections.
 	GatekeeperSource string
+
+	// GatekeeperLikely is the verdict predicted from the code signature
+	// alone: "accepted" or "". It is never "rejected": chains the
+	// signature cannot vouch for leave it empty rather than guess.
+	GatekeeperLikely string `json:",omitempty"`
+
+	// GatekeeperLikelySource is the policy source the signature implies
+	// for GatekeeperLikely ("Notarized Developer ID", "Mac App Store",
+	// "Apple System").
+	GatekeeperLikelySource string `json:",omitempty"`
+
+	// GatekeeperLikelyReason explains a withheld prediction for a chain
+	// that would otherwise be likely accepted: "resource seal invalid",
+	// "signature invalid: <reason>", or "seal not checked: <why>" (unknown,
+	// not negative).
+	GatekeeperLikelyReason string `json:",omitempty"`
+
+	// GatekeeperMethod says where the Gatekeeper answer came from:
+	// "spctl" when GatekeeperStatus holds a real verdict, "signature" when
+	// only GatekeeperLikely / GatekeeperLikelyReason is known, "" when
+	// neither.
+	GatekeeperMethod string `json:",omitempty"`
+
+	// GatekeeperError explains a requested assessment that produced no
+	// verdict: "timeout", "canceled", "spctl unavailable", or
+	// "no verdict: <reason>".
+	GatekeeperError string `json:",omitempty"`
+
+	// CDHash is the main executable's code-directory hash from codesign.
+	CDHash string `json:",omitempty"`
 }
 
 // Helpers groups sub-bundles found inside the .app.
@@ -260,9 +292,23 @@ type RustInspection struct {
 // Options controls optional, more expensive sub-detections.
 type Options struct {
 	ScanNetwork bool // scan binary + app.asar for embedded URL hosts
-	Now         func() time.Time
-	Runner      proc.Runner
-	Home        string
+	// AssessGatekeeper runs the real `spctl --assess` (bounded, serialized,
+	// cached by CDHash). Off by default: syspolicyd can take minutes on
+	// large bundles, so the signature-based GatekeeperLikely is the default.
+	AssessGatekeeper bool
+	// Gatekeeper overrides the process-wide assessor (tests).
+	Gatekeeper *GatekeeperAssessor
+	// SealCache persists the `codesign --verify` seal check behind an
+	// "accepted" prediction, keyed by path+CDHash. Nil re-verifies each run.
+	SealCache SealCache
+	// SealTimeout bounds one seal check; zero means 30 s.
+	SealTimeout time.Duration
+	// Context cancels the Gatekeeper assessment and seal check; nil means
+	// context.Background().
+	Context context.Context
+	Now     func() time.Time
+	Runner  proc.Runner
+	Home    string
 	// OS selects the host operating system. The zero value
 	// (hostos.Unknown) resolves to the host. App-bundle inspection is
 	// macOS-only; on any other OS DetectWith returns hostos.Unsupported.
@@ -523,7 +569,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	}
 	r.Rust = inspectRustApp(appPath, exe, &r)
 
-	d.populateMetadata(appPath, exe, &r)
+	si := d.populateMetadata(appPath, exe, &r)
 
 	// The remaining sub-detections are independent and dominated by subprocess
 	// spawns and file I/O, so run them concurrently. Each goroutine writes only
@@ -543,6 +589,8 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 		running    []ProcessInfo
 		granted    []string
 		gatekeeper gatekeeperVerdict
+		likely     gatekeeperLikely
+		cdHash     = r.CDHash
 		endpoints  []string
 	)
 	var wg sync.WaitGroup
@@ -561,7 +609,10 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	spawn(func() { loginItems = d.scanLoginItems(appPath, bundleID) })
 	spawn(func() { running = d.scanRunningProcesses(appPath) })
 	spawn(func() { granted = d.scanGrantedPermissions(bundleID) })
-	spawn(func() { gatekeeper = d.readGatekeeperStatus(appPath) })
+	spawn(func() { likely = d.likelyGatekeeper(appPath, si) })
+	if opts.AssessGatekeeper {
+		spawn(func() { gatekeeper = d.assessGatekeeper(appPath, cdHash) })
+	}
 	if opts.ScanNetwork {
 		spawn(func() { endpoints = scanNetworkEndpoints(appPath, exe) })
 	}
@@ -576,8 +627,8 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.RunningProcesses = running
 	r.AppStartedAt, r.AppUptimeSeconds = appUptime(running, detectNow(opts))
 	r.GrantedPermissions = granted
-	r.GatekeeperStatus = gatekeeper.status
-	r.GatekeeperSource = gatekeeper.source
+	applyGatekeeperLikely(&r, likely)
+	applyGatekeeperVerdict(&r, gatekeeper)
 	r.NetworkEndpoints = endpoints
 	return r, nil
 }
@@ -591,8 +642,9 @@ func detectNow(opts Options) time.Time {
 
 // populateMetadata fills the metadata fields on Result. Each piece is
 // best-effort and silently skipped on failure — these are decoration,
-// not part of the verdict.
-func (d detector) populateMetadata(appPath, exe string, r *Result) {
+// not part of the verdict. It returns the parsed signature for the
+// Gatekeeper prediction.
+func (d detector) populateMetadata(appPath, exe string, r *Result) signingInfo {
 	plist := filepath.Join(appPath, "Contents", "Info.plist")
 	r.BundleID = d.readPlistString(plist, "CFBundleIdentifier")
 	r.AppVersion = d.readPlistString(plist, "CFBundleShortVersionString")
@@ -610,12 +662,14 @@ func (d detector) populateMetadata(appPath, exe string, r *Result) {
 	}
 	// r.BundleSizeBytes/ApparentSizeBytes are set by the caller from
 	// bundleTreeStats (one walk shared with jar counting).
-	r.TeamID, r.HardenedRuntime = d.readSigning(appPath)
+	si := d.readSigning(appPath)
+	r.TeamID, r.HardenedRuntime, r.CDHash = si.teamID, si.hardened, si.cdHash
 	var appGroups []string
 	r.Sandboxed, r.Entitlements, appGroups = d.readEntitlementsDetail(appPath)
 	r.MASReceipt = exists(filepath.Join(appPath, "Contents", "_MASReceipt"))
 	r.Storage = scanStorage(appPath, r.BundleID)
 	r.Swift = inspectSwiftApp(appPath, exe, realSwiftInspectionSource{appGroups: appGroups})
+	return si
 }
 
 func (d detector) frameworkVersions(appPath string, r *Result) map[string]string {
@@ -815,31 +869,17 @@ func bundleSize(appPath string) int64 {
 	return a
 }
 
-// readSigning parses `codesign -dv` stderr for the team identifier and
-// the hardened-runtime flag (flags=0x10000(runtime)).
-func (d detector) readSigning(appPath string) (teamID string, hardened bool) {
-	return parseSigningOutput(d.stderrOf("codesign", "-dv", appPath))
+// readSigning parses `codesign -dv --verbose=4` stderr: team identifier,
+// hardened-runtime flag (flags=0x10000(runtime)), authority chain, stapled
+// notarization ticket, and CDHash. --verbose=4 costs nothing extra.
+func (d detector) readSigning(appPath string) signingInfo {
+	return parseSigningInfo(d.stderrOf("codesign", "-dv", "--verbose=4", appPath))
 }
 
 // ParseSigningOutput extracts the team identifier and hardened-runtime flag
 // from `codesign -dv` stderr, for callers that run codesign themselves.
 func ParseSigningOutput(out string) (teamID string, hardened bool) {
 	return parseSigningOutput(out)
-}
-
-func parseSigningOutput(out string) (teamID string, hardened bool) {
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "TeamIdentifier=") {
-			v := strings.TrimPrefix(line, "TeamIdentifier=")
-			if v != "not set" {
-				teamID = v
-			}
-		}
-		if hasCodeDirectoryFlag(line, "runtime") {
-			hardened = true
-		}
-	}
-	return teamID, hardened
 }
 
 // hasCodeDirectoryFlag reports whether a `flags=0x...(a,b,c)` list on line
@@ -862,16 +902,18 @@ func hasCodeDirectoryFlag(line, flag string) bool {
 	return false
 }
 
-// readGatekeeperStatus runs `spctl --assess -v --type exec <appPath>`.
-// Without -v spctl only prints on rejection: an accepted bundle exits 0
-// silently, so the verdict has to be requested explicitly.
-func (d detector) readGatekeeperStatus(appPath string) gatekeeperVerdict {
-	return parseGatekeeperOutput(d.stderrOf("spctl", "--assess", "-v", "--type", "exec", appPath))
+func parseSigningOutput(out string) (teamID string, hardened bool) {
+	si := parseSigningInfo(out)
+	return si.teamID, si.hardened
 }
 
+// gatekeeperVerdict is one `spctl --assess -v --type exec` outcome. The -v
+// matters: without it spctl only prints on rejection, so an accepted bundle
+// would exit 0 silently.
 type gatekeeperVerdict struct {
 	status string // "accepted", "rejected", or "" when unassessable
 	source string
+	err    string // why there is no status, when one was requested
 }
 
 // parseGatekeeperOutput extracts the verdict and policy source from

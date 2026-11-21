@@ -241,7 +241,7 @@ func buildAsarPayload(appPath string, inspect detectFunc) (asarPayload, error) {
 	if err != nil {
 		return asarPayload{}, fmt.Errorf("%s: %w", appPath, err)
 	}
-	res, err := inspect(appPath, detect.Options{ScanNetwork: true})
+	res, err := inspect(appPath, detect.Options{ScanNetwork: true, SealCache: sealCache()})
 	if err != nil {
 		return asarPayload{}, fmt.Errorf("inspect %s: %w", appPath, err)
 	}
