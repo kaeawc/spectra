@@ -48,15 +48,9 @@ func parseSysProps(out string) map[string]string {
 	return m
 }
 
-// collectCommandLine runs `jcmd <pid> VM.command_line` and returns the
-// VM flags and arguments strings.
-func collectCommandLine(pid int, run CmdRunner) (vmFlags, vmArgs string) {
-	vmFlags, vmArgs, _ = collectCommandLineOK(pid, run)
-	return vmFlags, vmArgs
-}
-
-// collectCommandLineOK also reports whether jcmd succeeded: a JVM started
-// without options prints no jvm_args line, so empty output is still a result.
+// collectCommandLineOK runs `jcmd <pid> VM.command_line` and returns the VM
+// flags and arguments, plus whether jcmd succeeded: a JVM started without
+// options prints no jvm_args line, so empty output is still a result.
 func collectCommandLineOK(pid int, run CmdRunner) (vmFlags, vmArgs string, ok bool) {
 	out, err := run("jcmd", fmt.Sprint(pid), "VM.command_line")
 	if err != nil {
