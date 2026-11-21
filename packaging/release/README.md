@@ -29,7 +29,7 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
 
 3. **Create the `release` environment** (Settings, Environments, New
    environment, name `release`):
-   - Required reviewers: the maintainers who approve each signature.
+   - No required reviewers: a tag push releases with no approval step.
    - Deployment branches and tags: "Selected branches and tags", add a tag
      rule `v*`.
    - Environment secret `SPECTRA_RELEASE_ED25519_KEY` = the full contents of
@@ -48,13 +48,11 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
      -R kaeawc/spectra < ~/spectra-release.key
    ```
 
-   Add the required reviewers in the web UI (the API needs numeric user ids).
-
 4. **Protect `v*` tags with a ruleset** (Settings, Rules, Rulesets, New tag
    ruleset): target `refs/tags/v*`, restrict creations, updates and
    deletions, and block force pushes, with a bypass only for release
-   maintainers. Anyone who can push a matching tag can request a signature;
-   the environment reviewers are the last check before one is produced.
+   maintainers. A matching tag push signs and publishes a release with no
+   further approval, so this ruleset is the gate on who can release.
 
 5. **Optional, macOS signing**: a repository secret `CODESIGN_ID` (a Developer
    ID Application identity available on the runner) makes `scripts/dist.sh`
@@ -79,8 +77,7 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    git push origin vX.Y.Z
    ```
 
-3. Approve the `sign` job's deployment to the `release` environment when
-   GitHub asks. The jobs then run:
+3. The tag push starts the release workflow, which runs without approval:
    - `build` (macOS): builds `spectra`, `spectra-mcp` and `spectra-helper` for
      darwin-arm64, darwin-amd64 (cgo on), linux-amd64 and linux-arm64 (static,
      cgo off), writes `checksums.txt`, checks that `spectra version` prints
