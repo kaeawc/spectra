@@ -107,6 +107,11 @@ func buildLiveRulesSnapshot(threadDumpPIDs []int) snapshot.Snapshot {
 		ThreadDumpPIDs: threadDumpPIDs,
 		// This path feeds attachCLIHistory, so it is a history sampler.
 		JVMOpts: jvm.CollectOptions{SampleNMT: true},
+		// Only the storage rule reads the ~/Library footprint, and its
+		// finding states the measurement age, so a cached footprint up to
+		// 24h old is fine; walk only on a full miss. The snapshot is not
+		// persisted (only JVM samples are).
+		FootprintPolicy: snapshot.FootprintAcceptStale,
 	}
 	// Reuse the persistent on-disk caches so per-app inspection
 	// (detect: codesign + plist + framework scan), toolchain enumeration,

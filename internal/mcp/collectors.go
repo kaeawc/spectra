@@ -158,17 +158,22 @@ type Clock interface {
 }
 
 func defaultCollectors() Collectors {
+	// The MCP server is long-lived, so one footprint cache shared by the
+	// storage and snapshot tools can serve a stale ~/Library footprint
+	// while a single background walk refreshes it. Snapshots that get
+	// persisted read it fresh-only (FootprintPolicy's zero value).
+	footprint := snapshot.NewFootprintCache(nil)
 	return Collectors{
 		Apps:        defaultAppInspector{},
 		Processes:   defaultProcessCollector{},
 		Network:     defaultNetworkCollector{},
-		Snapshots:   defaultSnapshotCollector{},
+		Snapshots:   defaultSnapshotCollector{footprint: footprint},
 		JVMs:        defaultJVMCollector{},
 		Toolchain:   defaultToolchainCollector{},
 		DB:          defaultDBInspector{},
 		Power:       defaultPowerCollector{},
 		Memory:      defaultMemoryCollector{},
-		Storage:     defaultStorageCollector{},
+		Storage:     defaultStorageCollector{footprint: footprint},
 		System:      defaultSystemCollector{},
 		Services:    defaultServicesCollector{},
 		Logs:        defaultLogCollector{},
@@ -237,9 +242,14 @@ func (defaultNetworkCollector) CollectConnections(ctx context.Context) []netstat
 	return netstate.CollectConnections(netstate.ContextRunner(ctx))
 }
 
-type defaultSnapshotCollector struct{}
+type defaultSnapshotCollector struct {
+	footprint *snapshot.FootprintCache
+}
 
-func (defaultSnapshotCollector) BuildSnapshot(ctx context.Context, opts snapshot.Options) snapshot.Snapshot {
+func (c defaultSnapshotCollector) BuildSnapshot(ctx context.Context, opts snapshot.Options) snapshot.Snapshot {
+	if opts.FootprintCache == nil {
+		opts.FootprintCache = c.footprint
+	}
 	return snapshot.Build(ctx, opts)
 }
 
@@ -323,10 +333,14 @@ func (defaultMemoryCollector) Collect() (memstate.MemoryState, error) {
 	return memstate.Collect()
 }
 
-type defaultStorageCollector struct{}
+type defaultStorageCollector struct {
+	footprint *snapshot.FootprintCache
+}
 
-func (defaultStorageCollector) Collect(opts storagestate.CollectOptions) storagestate.State {
-	return storagestate.Collect(opts)
+// Collect reads df/mount data live and the footprint through the shared
+// serve-stale cache.
+func (c defaultStorageCollector) Collect(opts storagestate.CollectOptions) storagestate.State {
+	return snapshot.CollectStorage(opts, nil, c.footprint, snapshot.FootprintServeStale)
 }
 
 type defaultSystemCollector struct{}

@@ -205,11 +205,20 @@ type Options struct {
 	// to amortize repeated rules invocations.
 	ToolchainCache *cache.TTLStore
 
-	// StorageCache is a TTL cache for storagestate.State JSON. Storage walks
-	// can be slow (~Library on a developer machine is large); a 30-second
-	// TTL keeps results meaningfully fresh while collapsing close-together
-	// invocations.
+	// StorageCache is a TTL cache for storagestate.State JSON minus the user
+	// footprint; a 30-second TTL keeps df/mount data meaningfully fresh
+	// while collapsing close-together invocations. When FootprintCache is
+	// nil, the footprint is cached in the same backing store on its own
+	// 10-minute window.
 	StorageCache *cache.TTLStore
+
+	// FootprintCache serves the ~/Library footprint. Long-lived callers pass
+	// one shared instance; nil caches in StorageCache's store, if any.
+	FootprintCache *FootprintCache
+
+	// FootprintPolicy bounds the cached footprint's age. The zero value,
+	// FootprintFreshOnly, is required for snapshots that get persisted.
+	FootprintPolicy FootprintPolicy
 
 	// HeapDumpFS is the filesystem used to locate JVM heap dumps.
 	// Zero value uses the live filesystem.
@@ -294,7 +303,11 @@ func Build(ctx context.Context, opts Options) Snapshot {
 	if !opts.SkipStorage {
 		go func() {
 			defer wg.Done()
-			s.Storage = collectStorageCached(opts.StorageOpts, opts.StorageCache)
+			storageOpts := opts.StorageOpts
+			if storageOpts.Now == nil {
+				storageOpts.Now = clk.Now
+			}
+			s.Storage = collectStorageCached(storageOpts, opts.StorageCache, opts.FootprintCache, opts.FootprintPolicy, clk)
 		}()
 	}
 	if !opts.SkipServices {

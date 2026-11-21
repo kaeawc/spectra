@@ -320,6 +320,26 @@ runs `mdutil -p` (which flushes network caches), so the per-volume `progress`
 field is never set and is omitted from the JSON; the field is kept in the schema
 for compatibility.
 
+`spectra storage [--fresh]` reads volumes and mounts live on every call, but the
+user footprint (`user_library_bytes`, `app_caches_bytes`) comes from one
+parallel walk of `~/Library` (Caches is a subtotal of the same walk; on Linux,
+only the XDG cache dir) that is cached for 10 minutes. `user_footprint_as_of`
+(RFC 3339) says when it was measured; `--fresh` re-walks and updates the cache,
+so the next plain run shows the new totals. The same walk fills
+`user_library_top` (bytes per top-level `~/Library` folder, the 12 largest
+plus `other`) and `user_library_reclaimable` (Xcode DerivedData,
+CoreSimulator, iOS DeviceSupport and Archives, when present); the human
+output prints both under the `~/Library` total. Hardlinked files are
+counted once, like `du`, so totals can be slightly lower than before this
+change. `user_footprint_skipped_dirs` counts directories the walk could not
+read (usually TCC-protected), whose contents are missing from the totals.
+Long-lived callers (the MCP server's storage, triage and live-rules tools)
+may serve a footprint up to 24 hours old with `user_footprint_stale: true`
+while one background walk refreshes it; MCP snapshot create/baseline always
+read it fresh. `spectra rules` accepts a cached footprint up to 24 hours old
+without refreshing and walks only when none is cached; the
+`library-storage-footprint` finding says when the footprint was measured.
+
 `spectra orphans [--root DIR]... [--min-age 1m] [--pids] [--no-daemon] [--json]` finds
 leftover processes from worktrees and finished jobs: parent pid 1, a readable
 working directory under a root (default: the current directory), and older than
