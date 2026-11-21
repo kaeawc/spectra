@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer};
 
 /// Spectra writes `null` for an empty list or map; read it as empty.
-fn nullable<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+pub(crate) fn nullable<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
     Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 

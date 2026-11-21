@@ -1,0 +1,61 @@
+{
+ "report": {
+  "total_shallow_bytes": 23212764,
+  "reachable_objects": 34081,
+  "reachable_bytes": 23195560,
+  "threshold_percent": 10,
+  "suspects": [
+   {
+    "kind": "object",
+    "class_name": "class Lab",
+    "id": 481053184600,
+    "instances": 1,
+    "retained_bytes": 21768773,
+    "percent_of_heap": 93.84887883715676,
+    "accumulation_point": {
+     "id": 481054716120,
+     "class_name": "[Ljava.lang.Object;",
+     "retained_bytes": 21767672,
+     "percent_of_heap": 93.84413223910093,
+     "direct_children": 332,
+     "depth": 2
+    },
+    "path_to_root": {
+     "roots": [
+      {
+       "kind": "sticky_class"
+      }
+     ],
+     "steps": [
+      {
+       "id": 481054008472,
+       "class_name": "class sun.launcher.LauncherHelper"
+      },
+      {
+       "id": 481053184600,
+       "class_name": "class Lab"
+      },
+      {
+       "id": 481053186408,
+       "class_name": "java.util.ArrayList"
+      },
+      {
+       "id": 481054716120,
+       "class_name": "[Ljava.lang.Object;"
+      }
+     ]
+    },
+    "description": "class Lab (0x7001011258) retains 20.8 MiB (93.8% of the reachable heap). Memory accumulates in [Ljava.lang.Object; (0x70011870d8), which retains 20.8 MiB across 332 directly dominated objects. Shortest path from a GC root: [sticky_class] class sun.launcher.LauncherHelper (0x70010da498) \u2192 class Lab (0x7001011258) \u2192 java.util.ArrayList (0x7001011968) \u2192 [Ljava.lang.Object; (0x70011870d8)."
+   }
+  ]
+ },
+ "findings": [
+  {
+   "rule_id": "jvm-heap-leak-suspect",
+   "severity": "high",
+   "message": "class Lab (0x7001011258) retains 20.8 MiB (93.8% of the reachable heap). Memory accumulates in [Ljava.lang.Object; (0x70011870d8), which retains 20.8 MiB across 332 directly dominated objects. Shortest path from a GC root: [sticky_class] class sun.launcher.LauncherHelper (0x70010da498) \u2192 class Lab (0x7001011258) \u2192 java.util.ArrayList (0x7001011968) \u2192 [Ljava.lang.Object; (0x70011870d8). (heap dump Lab-96728.hprof)",
+   "fix": "Release the references that keep the subtree alive or bound the collection; trace them with `spectra jvm heap-hprof --paths 0x70011870d8 Lab-96728.hprof`.",
+   "subject": "heap leak suspect: class Lab"
+  }
+ ]
+}

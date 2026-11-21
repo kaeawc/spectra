@@ -1,6 +1,6 @@
 //! A process page's tools: each of Spectra's per-process tools with a Run button, what it's
 //! doing while it runs, and its result or why it failed. One runs at a time; nothing runs on
-//! its own.
+//! its own. A JVM's page leads with its JVM tools (`jvm_tools.rs`).
 
 use rune::{Align, Cursor, El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, Kit, Spinner};
@@ -17,20 +17,27 @@ use crate::tools::{
     SampleReport, Tool, VmmapReport, fmt_bytes,
 };
 
+#[path = "jvm_tools.rs"]
+mod jvm;
+#[cfg(test)]
+#[path = "tests_jvm.rs"]
+mod tests_jvm;
+
 /// Stacks and regions listed in a result.
 const ROWS: usize = 10;
 
 pub fn panel(s: &App, pid: u32, k: &Kit) -> El {
     let c = &k.c;
     let mut body = col().key("tools").w_full().gap(14.0);
-    for kind in Kind::ALL {
+    let is_jvm = s.jvm(pid).is_some();
+    for kind in Kind::ALL.into_iter().filter(|k| is_jvm || *k != Kind::Jvm) {
         let mut list = col()
             .key(format!("tools-{}", kind.label().to_lowercase()))
             .w_full()
             .radius(k.radius.md)
             .fill(c.layer_01)
             .border(1.0, c.border_weak);
-        for (i, tool) in Tool::ALL.into_iter().filter(|t| t.kind() == kind).enumerate() {
+        for (i, tool) in Tool::ALL.into_iter().filter(|t| t.kind() == kind && t.has_row()).enumerate() {
             if i > 0 {
                 list = list.child(el().w_full().h(1.0).fill(c.border_weak));
             }
@@ -47,13 +54,35 @@ pub fn panel(s: &App, pid: u32, k: &Kit) -> El {
     section("Tools", body, k)
 }
 
-fn tool_row(s: &App, tool: Tool, pid: u32, k: &Kit) -> El {
-    let c = &k.c;
+/// What a tool's button says: its verb, or that it can run again.
+fn verb(tool: Tool, again: bool) -> &'static str {
+    match (tool, again) {
+        (Tool::HeapDump, true) => "Take another",
+        (Tool::JfrStart, _) => "Start recording",
+        (t, false) => t.verb(),
+        (_, true) => "Run again",
+    }
+}
+
+/// What pressing a tool's button does, in a line.
+fn press_help(s: &App, tool: Tool, pid: u32) -> String {
+    match tool {
+        Tool::HeapDump => format!("Writes the heap to {}", crate::jvm_tools::out_dir().display()),
+        Tool::LeakSuspects | Tool::Dominators => format!("Reads {}", s.heap_dump_path().unwrap_or_default()),
+        Tool::JfrStart => format!("Starts a recording named {} on pid {pid}", crate::jvm_tools::RECORDING),
+        Tool::JfrStop => format!("Writes the recording to {} and stops it", crate::jvm_tools::out_dir().display()),
+        t if t.kind() == Kind::Jvm => format!("Runs spectra {}", t.args(pid).join(" ")),
+        t => format!("Run spectra {} on pid {pid}", t.id()),
+    }
+}
+
+/// A tool's button: Run (or its verb), Cancel while it runs, or off with the reason.
+fn button(s: &App, tool: Tool, pid: u32, k: &Kit) -> El {
     let id = tool.id();
     let state = s.inspect.state(tool);
     let refusal = s.tool_refusal(tool);
     let busy = s.inspect.busy();
-    let button = match state {
+    match state {
         _ if refusal.is_some() => Button::new("Run")
             .variant(ButtonVariant::Outline)
             .disabled(true)
@@ -74,18 +103,28 @@ fn tool_row(s: &App, tool: Tool, pid: u32, k: &Kit) -> El {
         _ => {
             let again = matches!(state, Some(RunState::Done(_) | RunState::Failed(_) | RunState::Cancelled));
             let waiting = busy.filter(|b| *b != tool);
-            Button::new(if again { "Run again" } else { "Run" })
+            Button::new(verb(tool, again))
                 .variant(ButtonVariant::Outline)
                 .disabled(waiting.is_some())
                 .help(match waiting {
                     Some(b) => format!("Waiting for {} to finish", b.label().to_lowercase()),
-                    None => format!("Run spectra {} on pid {pid}", id),
+                    None => press_help(s, tool, pid),
                 })
                 .on_press(move |s: &mut App| s.run_tool(tool))
                 .build(k)
                 .key(format!("tool-{id}-run"))
         }
-    };
+    }
+}
+
+fn tool_row(s: &App, tool: Tool, pid: u32, k: &Kit) -> El {
+    let c = &k.c;
+    let id = tool.id();
+    let state = s.inspect.state(tool);
+    // A recording's row stops it while it runs.
+    let pressed = if tool == Tool::JfrStart && jvm::stopping_or_recording(s) { Tool::JfrStop } else { tool };
+    let refusal = if pressed == tool { s.tool_refusal(tool) } else { None };
+    let button = button(s, pressed, pid, k);
     let about = col()
         .grow(1.0)
         .min_w(0.0)
@@ -121,8 +160,12 @@ fn tool_row(s: &App, tool: Tool, pid: u32, k: &Kit) -> El {
         .py(10.0)
         .gap(10.0)
         .child(head.child(button));
-    if let Some(state) = state {
+    // A recording that started says so instead of its start's result.
+    if let Some(state) = state.filter(|st| !(tool == Tool::JfrStart && matches!(st, RunState::Done(_)))) {
         r = r.child(status(s, tool, state, k));
+    }
+    if let Some(more) = jvm::below(s, tool, pid, k) {
+        r = r.child(more);
     }
     r
 }
@@ -188,6 +231,16 @@ fn result(s: &App, report: &Report, k: &Kit) -> El {
         Report::Lineage(r) => lineage(s, r, k),
         Report::Owner(r) => owner(r, k),
         Report::Runtime(r) => runtime(r, k),
+        Report::Threads(r) => jvm::threads(s, r, k),
+        Report::Histogram(r) => jvm::histogram(s, r, k),
+        Report::Gc(r) => jvm::gc(s, r, k),
+        Report::NativeMemory(r) => jvm::native_memory(r, k),
+        Report::Explain(r) => jvm::explain(r, k),
+        Report::HeapDump(r) => jvm::heap_dump(r, k),
+        Report::Leaks(r) => jvm::leaks(r, k),
+        Report::Dominators(r) => jvm::dominators(r, k),
+        Report::JfrStarted => el(),
+        Report::Jfr(r) => jvm::recording(r, k),
     }
 }
 

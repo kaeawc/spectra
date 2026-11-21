@@ -106,6 +106,33 @@ What it shows:
   - Spindump and Mach ports (`lsmp`) need root and are shown off with the reason; Spectra Desktop
     never runs sudo. Tools that read another user's threads or memory (sample, hang, vmmap,
     vmregions) are off on their processes, with the reason.
+  - JVM, first on a JVM's page and nowhere else. They attach to the JVM, so they're off on
+    another user's JVMs, with the reason.
+    - Thread dump (`spectra jvm thread-dump --json <pid>`): threads by state (runnable, blocked,
+      waiting, timed waiting); a deadlock comes first, in red, naming its threads and who waits
+      for which lock held by whom. Threads with the same stack are one row with a count; press it
+      for the frames. Filter by name and by state.
+    - Heap histogram (`spectra jvm heap-histogram --json <pid>`): classes by bytes and by
+      objects, and Spectra's leak suspects. The page keeps the last histogram; the next one shows
+      how much each class grew or shrank since.
+    - GC stats (`spectra jvm gc-stats --json <pid>`): young, full and concurrent collections
+      with count, total and average pause, and how full eden, survivors, old, metaspace and
+      class space are.
+    - Native memory (`spectra jvm nmt --json <pid>` and `spectra jvm vm-memory --json <pid>`):
+      categories by committed memory, and the heap as the JVM describes it. When native memory
+      tracking is off it says so, with Spectra's reason and the flag to restart with.
+    - Explain (`spectra jvm explain --json <pid>`): Spectra's findings, worst first, each with
+      its evidence and what to do.
+    - Heap dump (`spectra jvm heap-dump --out <file> <pid>`), only on press: written to
+      `~/Downloads/<name>-<pid>-<UTC time>.hprof` (the temp folder when there is no Downloads),
+      and the page shows where. Then Leak suspects (`spectra jvm heap-hprof --json
+      --leak-suspects <file>`) and Dominators (`spectra jvm dominators --json <file>`), each on
+      press.
+    - Flight recording: Start recording runs `spectra jvm jfr start --name spectra-desktop
+      <pid>`; Stop and analyze runs `jfr dump --out ~/Downloads/<name>-<pid>-<UTC time>.jfr`,
+      `jfr stop` and `jfr summary --json <file>`, and shows what happened most. Stop runs even
+      when the dump fails. Leaving the page, or quitting the app, stops the recording and keeps
+      nothing.
 - **Quit and Force quit**: in a process page's header, and over the list for the row under the
   cursor. An app's row acts on the app's main process ("Quit Slack"); a row of several
   processes that isn't one app (twelve `zsh`) has no action, so open it and pick one. ⌥⌘Q opens
@@ -138,6 +165,9 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # quit-still, quit-ended, app, app-loading, tools, tools-root,
                             # tool-sample, tool-hang, tool-vmmap, tool-vmregions,
                             # tool-memtrace, tool-lineage, tool-owner, tool-runtime, tool-failed,
+                            # jvm-tools, tool-threads, tool-threads-deadlock, tool-histogram,
+                            # tool-gc, tool-nmt, tool-nmt-off, tool-explain, tool-heapdump,
+                            # tool-jfr, tool-jfr-summary,
                             # system, system-pressure, system-failed, system-linux
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
@@ -156,12 +186,13 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/inspect.rs`: what an open page runs (tools, live rounds, the bundle read): one job per
   thread, numbered so an answer lands only on the page it was for, behind a `Spectra` trait that
   tests replace with a fake. `src/tools.rs`, `src/live.rs` and `src/bundle.rs`: those commands
-  and their JSON.
+  and their JSON; `src/jvm_tools.rs`: a JVM's tools' JSON and the sums made from it (histogram
+  growth, thread groups), with fixtures captured from a real JVM in `tests/fixtures/jvm`.
 - `src/system.rs`: the machine-wide readings, their threads, parsing and history;
   `src/system_findings.rs`: the rules that turn them into findings; `src/sample_system.rs`:
   their sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
-- `src/sample.rs`: sample data for the headless scenes and tests.
+- `src/sample.rs` and `src/sample_jvm.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.
 
 Rune is pre-release and pinned to a `dev` rev in `Cargo.toml`; the `[patch.crates-io]` revs must

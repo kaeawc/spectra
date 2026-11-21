@@ -630,7 +630,7 @@ pub fn old_scene(s: &mut App) {
 }
 
 /// Live readings as a page that has been open a couple of minutes has them.
-fn sample_live(s: &mut App) {
+pub(crate) fn sample_live(s: &mut App) {
     const WAVE: [f64; 12] = [1.0, 1.4, 0.8, 2.6, 1.1, 0.9, 3.2, 1.2, 0.7, 1.5, 2.1, 1.0];
     for i in 0..24 {
         let w = WAVE[i % 12];
@@ -748,7 +748,8 @@ pub fn tool_output(tool: Tool) -> &'static str {
             "capabilities":[{"name":"user-space CPU sample","how":"spectra sample 1300"},
                             {"name":"attach a native debugger","how":"rust-lldb -p 1300"},
                             {"name":"flame graph","how":"spectra flamegraph 1300"}]}"#,
-        Tool::Spindump | Tool::Lsmp => "{}",
+        // A JVM's tools print the sample checkout server's; the root tools never run.
+        t => crate::sample_jvm::output(t),
     }
 }
 

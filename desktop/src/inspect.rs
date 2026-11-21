@@ -3,19 +3,25 @@
 //! opening. Everything runs Spectra off the UI thread with a deadline, and lands only on the
 //! page it was for.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rune::TextEdit;
+
 use crate::app::App;
 use crate::bundle::{self, Bundle};
+use crate::jvm_tools::{self, HistogramReport, Recording, ThreadState};
 use crate::live::{self, NetPoint, Round, Series};
 use crate::procs::{self, Process, ProcSample, Role};
 use crate::run::{self, Ended};
-use crate::tools::{Report, Tool};
+use crate::tools::{Kind, Paths, Report, Tool};
+
+/// How long stopping a flight recording may take.
+const STOP_DEADLINE: Duration = Duration::from_secs(15);
 
 /// The most a tool may print: a sample of a busy process with every stack is a few MB.
 const MAX_OUTPUT: usize = 32 << 20;
@@ -117,10 +123,25 @@ pub enum BundleState {
     Failed(String),
 }
 
+/// What a JVM's page keeps between runs: the last histogram, the recording, and how the thread
+/// dump is filtered. A new page starts over.
+#[derive(Default)]
+pub struct JvmPage {
+    /// The histogram the latest one is compared with.
+    pub prev_histogram: Option<HistogramReport>,
+    /// A flight recording running on this page's JVM. Leaving the page stops it.
+    pub recording: Option<Recording>,
+    pub threads_query: TextEdit,
+    pub threads_state: Option<ThreadState>,
+    /// The thread groups shown open, by their first thread's name.
+    pub threads_open: HashSet<String>,
+}
+
 /// What the worker hands back, numbered by the job it was.
 #[derive(Clone, Debug)]
 pub enum Landed {
-    Tool { job: u64, tool: Tool, result: Result<Report, Failure> },
+    /// `pid` is the process it ran on: a recording that started late is stopped there.
+    Tool { job: u64, tool: Tool, pid: u32, result: Result<Report, Failure> },
     Live { job: u64, round: Round },
     Bundle { job: u64, result: Result<Box<Bundle>, String> },
 }
@@ -150,6 +171,10 @@ pub struct Inspector {
     next_live: f64,
     pub bundle: Option<BundleState>,
     bundle_job: Option<Flight>,
+    pub jvm: JvmPage,
+    /// Recording starts not yet landed, job to pid, whichever page they were for: each may have
+    /// started a recording that quitting must stop.
+    starts: HashMap<u64, u32>,
     job: u64,
     pub spectra: Arc<dyn Spectra>,
     pub exec: Exec,
@@ -171,6 +196,8 @@ impl Inspector {
             next_live: 0.0,
             bundle: None,
             bundle_job: None,
+            jvm: JvmPage::default(),
+            starts: HashMap::new(),
             job: 0,
             spectra: Arc::new(System),
             exec: Exec::Thread,
@@ -212,6 +239,7 @@ impl Inspector {
         self.energy = Series::default();
         self.next_live = 0.0;
         self.bundle = None;
+        self.jvm = JvmPage::default();
         self.subject = subject;
     }
 
@@ -231,6 +259,64 @@ impl Drop for Inspector {
 impl Default for Inspector {
     fn default() -> Inspector {
         Inspector::new()
+    }
+}
+
+/// Runs `tool`'s Spectra commands on `pid` in order and reads the answer. Native memory reads
+/// NMT and the VM's own view, and says plainly when NMT is off. Stopping a recording always
+/// stops it, even when writing it out failed or was cancelled; a start that was cancelled or
+/// failed (a deadline, or an attach error after `JFR.start` ran) is stopped again at once.
+fn perform(tool: Tool, pid: u32, paths: &Paths, spectra: &dyn Spectra, flag: &AtomicBool) -> Result<Report, Failure> {
+    let steps = tool.steps(pid, paths);
+    let deadline = tool.deadline();
+    let never = AtomicBool::new(false);
+    let why = |f: Failure| match f {
+        Failure::Cancelled => "Stopped.".to_owned(),
+        Failure::Failed(w) => w,
+    };
+    match tool {
+        Tool::NativeMemory => {
+            let nmt = spectra.run(&steps[0], deadline, flag);
+            if matches!(nmt, Err(Failure::Cancelled)) {
+                return Err(Failure::Cancelled);
+            }
+            let vm = spectra.run(&steps[1], deadline, flag);
+            if matches!(vm, Err(Failure::Cancelled)) {
+                return Err(Failure::Cancelled);
+            }
+            jvm_tools::native_memory(nmt.map_err(why), vm.map_err(why)).map(Report::NativeMemory).map_err(Failure::Failed)
+        }
+        Tool::JfrStart => {
+            let started = spectra.run(&steps[0], deadline, flag);
+            let cancelled = flag.load(Ordering::Relaxed) || matches!(started, Err(Failure::Cancelled));
+            if cancelled || started.is_err() {
+                let _ = spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never);
+            }
+            if cancelled {
+                return Err(Failure::Cancelled);
+            }
+            tool.parse(&started?).map_err(Failure::Failed)
+        }
+        Tool::JfrStop => {
+            let dumped = spectra.run(&steps[0], deadline, flag);
+            let _ = spectra.run(&steps[1], STOP_DEADLINE, &never);
+            dumped?;
+            let out = spectra.run(&steps[2], deadline, flag)?;
+            match tool.parse(&out).map_err(Failure::Failed)? {
+                Report::Jfr(mut r) => {
+                    r.path = paths.out.clone();
+                    Ok(Report::Jfr(r))
+                }
+                other => Ok(other),
+            }
+        }
+        _ => {
+            let mut out = String::new();
+            for step in &steps {
+                out = spectra.run(step, deadline, flag)?;
+            }
+            tool.parse(&out).map_err(Failure::Failed)
+        }
     }
 }
 
@@ -270,6 +356,10 @@ impl App {
         let subject = self.subject();
         if self.inspect.subject == subject {
             return;
+        }
+        // A recording is the page's: leaving it stops the recording, and keeps nothing.
+        if let Some(rec) = self.inspect.jvm.recording.take() {
+            self.stop_recording(rec.pid);
         }
         self.inspect.reset(subject);
         if self.inspect.auto && matches!(self.inspect.subject, Some(Subject::App(_))) {
@@ -319,14 +409,86 @@ impl App {
         if self.ended_page().is_some() {
             return Some("That process has ended".into());
         }
-        if tool.reads_task()
+        if tool.kind() == Kind::Jvm {
+            if self.jvm(*pid).is_none() {
+                return Some("Not a JVM".into());
+            }
+            let recording = self.inspect.jvm.recording.is_some();
+            match tool {
+                Tool::LeakSuspects | Tool::Dominators if self.heap_dump_path().is_none() => return Some("Take a heap dump first".into()),
+                Tool::JfrStart if recording => return Some("Already recording".into()),
+                Tool::JfrStop if !recording => return Some("Not recording".into()),
+                _ => {}
+            }
+        }
+        if (tool.reads_task() || tool.attaches())
             && let (Some(p), Some(me)) = (self.process(*pid), self.me.uid)
             && p.uid != me
         {
             let who = if p.user.is_empty() { format!("uid {}", p.uid) } else { p.user.clone() };
-            return Some(format!("Owned by {who}; reading its threads or memory needs root"));
+            return Some(if tool.attaches() {
+                format!("Owned by {who}; only that user can attach to its JVM")
+            } else {
+                format!("Owned by {who}; reading its threads or memory needs root")
+            });
         }
         None
+    }
+
+    /// The heap dump taken on this page, if one was.
+    pub fn heap_dump_path(&self) -> Option<String> {
+        match self.inspect.state(Tool::HeapDump)? {
+            RunState::Done(r) => match &**r {
+                Report::HeapDump(h) => Some(h.path.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The files `tool` reads or writes on `pid`: a new heap dump or recording in Downloads,
+    /// named for the JVM, and the page's heap dump for its analyses.
+    fn tool_paths(&self, tool: Tool, pid: u32) -> Paths {
+        let name = self.jvm(pid).map(|j| j.name()).or_else(|| self.process(pid).map(|p| p.name().into_owned())).unwrap_or_default();
+        let out = match tool {
+            Tool::HeapDump => jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "hprof"),
+            Tool::JfrStop => jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "jfr"),
+            _ => String::new(),
+        };
+        Paths { out, hprof: self.heap_dump_path().unwrap_or_default() }
+    }
+
+    /// Stops the flight recording on `pid` off the UI thread; nothing waits for the answer but
+    /// quitting, which waits a moment for it from the moment it's queued.
+    fn stop_recording(&mut self, pid: u32) {
+        let (job, _) = self.inspect.next_job();
+        let spectra = Arc::clone(&self.inspect.spectra);
+        let pending = run::pending();
+        self.submit_inspect(
+            Box::new(move || {
+                let _pending = pending;
+                let never = AtomicBool::new(false);
+                let result = spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never).map(|_| Report::JfrStarted);
+                Landed::Tool { job, tool: Tool::JfrStop, pid, result }
+            }),
+            Landed::Tool { job, tool: Tool::JfrStop, pid, result: Err(Failure::Cancelled) },
+        );
+    }
+
+    /// Stops the page's flight recording before the app quits, waiting for Spectra, and any
+    /// recording a start still in flight (or done but not landed) may have begun.
+    pub fn stop_recording_now(&mut self) {
+        if let Some(r) = self.inspect.runs.get(&Tool::JfrStart) {
+            r.cancel.store(true, Ordering::Relaxed);
+        }
+        let mut pids: Vec<u32> = self.inspect.jvm.recording.take().map(|r| r.pid).into_iter().collect();
+        pids.extend(self.inspect.starts.drain().map(|(_, pid)| pid));
+        pids.sort_unstable();
+        pids.dedup();
+        let never = AtomicBool::new(false);
+        for pid in pids {
+            let _ = self.inspect.spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never);
+        }
     }
 
     /// Runs `tool` on the open page's process, unless another tool is running or it can't.
@@ -335,18 +497,41 @@ impl App {
             return;
         }
         let Some(Subject::Process { pid, .. }) = self.inspect.subject.clone() else { return };
+        let paths = self.tool_paths(tool, pid);
+        match tool {
+            // The histogram this one will be compared with.
+            Tool::Histogram => {
+                if let Some(RunState::Done(r)) = self.inspect.state(tool)
+                    && let Report::Histogram(h) = &**r
+                {
+                    self.inspect.jvm.prev_histogram = Some(h.clone());
+                }
+            }
+            // A new dump's analyses start over.
+            Tool::HeapDump => {
+                self.inspect.runs.remove(&Tool::LeakSuspects);
+                self.inspect.runs.remove(&Tool::Dominators);
+            }
+            // The recording ends with this run, whatever it finds.
+            Tool::JfrStop => self.inspect.jvm.recording = None,
+            _ => {}
+        }
         let (job, cancel) = self.inspect.next_job();
         let spectra = Arc::clone(&self.inspect.spectra);
         let flag = Arc::clone(&cancel);
         self.inspect.runs.insert(tool, ToolRun { state: RunState::Running { since: self.now }, job, cancel });
+        if tool == Tool::JfrStart {
+            self.inspect.starts.insert(job, pid);
+        }
+        // Both may run `jfr stop` after their first command ends: quitting waits for that too.
+        let pending = matches!(tool, Tool::JfrStart | Tool::JfrStop).then(run::pending);
         self.submit_inspect(
             Box::new(move || {
-                let result = spectra
-                    .run(&tool.args(pid), tool.deadline(), &flag)
-                    .and_then(|out| tool.parse(&out).map_err(Failure::Failed));
-                Landed::Tool { job, tool, result }
+                let _pending = pending;
+                let result = perform(tool, pid, &paths, &*spectra, &flag);
+                Landed::Tool { job, tool, pid, result }
             }),
-            Landed::Tool { job, tool, result: Err(Failure::Failed("Spectra Desktop hit an internal error running it.".into())) },
+            Landed::Tool { job, tool, pid, result: Err(Failure::Failed("Spectra Desktop hit an internal error running it.".into())) },
         );
     }
 
@@ -506,10 +691,22 @@ impl App {
 
     pub fn land_inspected(&mut self, l: Landed) {
         let now = self.now;
+        if let Landed::Tool { job, tool: Tool::JfrStart, pid, result } = &l {
+            self.inspect.starts.remove(job);
+            // A start that got through after its run was cancelled or its page was left: nothing
+            // will keep or stop that recording, so stop it now.
+            let wanted = self.inspect.runs.get(&Tool::JfrStart).is_some_and(|r| r.job == *job && !matches!(r.state, RunState::Cancelling));
+            if result.is_ok() && !wanted {
+                self.stop_recording(*pid);
+            }
+        }
         let i = &mut self.inspect;
         match l {
-            Landed::Tool { job, tool, result } => {
+            Landed::Tool { job, tool, pid, result } => {
                 let Some(r) = i.runs.get_mut(&tool).filter(|r| r.job == job) else { return };
+                if tool == Tool::JfrStart && result.is_ok() && !matches!(r.state, RunState::Cancelling) {
+                    i.jvm.recording = Some(Recording { pid, since: now });
+                }
                 r.state = match (&r.state, result) {
                     (RunState::Cancelling, _) | (_, Err(Failure::Cancelled)) => RunState::Cancelled,
                     (_, Ok(report)) => RunState::Done(Box::new(report)),
@@ -553,6 +750,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::app::init;
     use crate::groups::tests::{app, proc};
+    use crate::jvm_tools::tests as jx;
     use crate::tools::tests as fx;
 
     /// A Spectra that answers from fixtures by subcommand and records what it was asked.
@@ -584,6 +782,19 @@ pub(crate) mod tests {
                 ("network", Ok(crate::live::tests::NET)),
                 ("impact", Ok(crate::live::tests::IMPACT)),
                 ("--json", Ok(crate::bundle::tests::CHAT)),
+                ("jvm thread-dump", Ok(jx::THREADS)),
+                ("jvm heap-histogram", Ok(jx::HISTOGRAM)),
+                ("jvm gc-stats", Ok(jx::GC)),
+                ("jvm nmt", Ok(jx::NMT)),
+                ("jvm vm-memory", Ok(jx::VM_MEMORY)),
+                ("jvm explain", Ok(jx::EXPLAIN)),
+                ("jvm heap-dump", Ok(jx::HEAP_DUMP_OUT)),
+                ("jvm heap-hprof", Ok(jx::HPROF)),
+                ("jvm dominators", Ok(jx::DOMINATORS)),
+                ("jvm jfr start", Ok(jx::JFR_STARTED)),
+                ("jvm jfr dump", Ok("/Users/user/Downloads/x.jfr\n")),
+                ("jvm jfr stop", Ok("JFR recording \"spectra-desktop\" stopped on PID 7\n")),
+                ("jvm jfr summary", Ok(jx::JFR)),
             ])
         }
 
@@ -598,7 +809,10 @@ pub(crate) mod tests {
             if cancel.load(Ordering::Relaxed) {
                 return Err(Failure::Cancelled);
             }
-            match self.replies.get(args[0].as_str()) {
+            // `jvm jfr start`, then `jvm nmt`, then the subcommand alone.
+            let key = |n: usize| args.iter().take(n).map(String::as_str).collect::<Vec<_>>().join(" ");
+            let reply = [3, 2, 1].into_iter().find_map(|n| (args.len() >= n).then(|| self.replies.get(key(n).as_str())).flatten());
+            match reply {
                 Some(Ok(out)) => Ok(out.clone()),
                 Some(Err(why)) => Err(Failure::Failed(why.clone())),
                 None => Err(Failure::Failed(format!("no fake for {}", args[0]))),
@@ -850,6 +1064,365 @@ pub(crate) mod tests {
         assert_eq!(failure_line("spectra", &args, b"", Some(2)), "spectra spindump stopped with exit status 2");
     }
 
+    /// `faked`, with pid 7 also a JVM.
+    fn jvm_faked(fake: Fake) -> (App, Arc<Fake>) {
+        let (mut s, fake) = faked(fake);
+        s.land(Ok(vec![crate::data::Jvm {
+            pid: 7,
+            main_class: "com.acme.App".into(),
+            ..Default::default()
+        }]));
+        (s, fake)
+    }
+
+    fn jvm_calls(fake: &Fake, sub: &str) -> usize {
+        fake.calls()
+            .iter()
+            .filter(|c| c.len() > 1 && c[0] == "jvm" && c[1..].join(" ").starts_with(sub))
+            .count()
+    }
+
+    #[test]
+    fn jvm_tools_are_refused_on_a_page_that_isnt_a_jvm() {
+        let (mut s, fake) = faked(Fake::all());
+        s.open(7);
+        for tool in Tool::ALL.into_iter().filter(|t| t.kind() == Kind::Jvm) {
+            assert_eq!(
+                s.tool_refusal(tool).as_deref(),
+                Some("Not a JVM"),
+                "{tool:?}"
+            );
+            s.run_tool(tool);
+        }
+        s.run_held_inspect();
+        assert!(fake.calls().is_empty(), "nothing ran");
+        assert_eq!(
+            s.tool_refusal(Tool::Lineage),
+            None,
+            "its other tools still run"
+        );
+    }
+
+    #[test]
+    fn a_jvm_tool_runs_spectras_jvm_command_and_lands() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::Threads);
+        s.run_held_inspect();
+        assert!(
+            matches!(s.inspect.state(Tool::Threads), Some(RunState::Done(r)) if matches!(**r, Report::Threads(_)))
+        );
+        assert_eq!(fake.calls(), [vec!["jvm", "thread-dump", "--json", "7"]]);
+        assert_eq!(
+            s.tool_refusal(Tool::LeakSuspects).as_deref(),
+            Some("Take a heap dump first")
+        );
+        assert_eq!(
+            s.tool_refusal(Tool::JfrStop).as_deref(),
+            Some("Not recording")
+        );
+    }
+
+    #[test]
+    fn a_second_histogram_keeps_the_first_to_compare() {
+        let (mut s, _) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::Histogram);
+        s.run_held_inspect();
+        assert!(
+            s.inspect.jvm.prev_histogram.is_none(),
+            "nothing to compare with yet"
+        );
+        s.run_tool(Tool::Histogram);
+        assert!(
+            s.inspect.jvm.prev_histogram.is_some(),
+            "the first is kept as the run starts"
+        );
+        s.run_held_inspect();
+        s.open(900);
+        assert!(
+            s.inspect.jvm.prev_histogram.is_none(),
+            "a new page starts over"
+        );
+    }
+
+    #[test]
+    fn native_memory_with_nmt_off_is_an_answer_not_a_failure() {
+        let mut fake = Fake::all();
+        fake.replies.insert(
+            "jvm nmt",
+            Err(crate::jvm_tools::tests::NMT_OFF_ERR.trim().to_owned()),
+        );
+        let (mut s, fake) = jvm_faked(fake);
+        s.open(7);
+        s.run_tool(Tool::NativeMemory);
+        s.run_held_inspect();
+        let Some(RunState::Done(r)) = s.inspect.state(Tool::NativeMemory) else {
+            panic!("{:?}", s.inspect.state(Tool::NativeMemory))
+        };
+        let Report::NativeMemory(n) = &**r else {
+            panic!()
+        };
+        assert!(n.off().unwrap().contains("NativeMemoryTracking"));
+        assert!(n.vm.is_some());
+        assert_eq!(fake.calls().len(), 2, "nmt and vm-memory");
+    }
+
+    #[test]
+    fn a_heap_dump_goes_to_a_named_file_and_its_analyses_read_it() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::HeapDump);
+        s.run_held_inspect();
+        let call = &fake.calls()[0];
+        assert_eq!(&call[..3], ["jvm", "heap-dump", "--out"]);
+        let out = std::path::Path::new(&call[3]);
+        assert!(
+            out.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("App-7-"),
+            "{out:?}"
+        );
+        assert_eq!(out.extension().unwrap(), "hprof");
+        assert_eq!(call[4], "7");
+        let path = s.heap_dump_path().expect("the path Spectra printed");
+        s.run_tool(Tool::LeakSuspects);
+        s.run_held_inspect();
+        s.run_tool(Tool::Dominators);
+        s.run_held_inspect();
+        assert_eq!(
+            fake.calls()[1],
+            [
+                "jvm",
+                "heap-hprof",
+                "--json",
+                "--leak-suspects",
+                path.as_str()
+            ]
+        );
+        assert_eq!(
+            fake.calls()[2],
+            ["jvm", "dominators", "--json", path.as_str()]
+        );
+        assert!(matches!(
+            s.inspect.state(Tool::Dominators),
+            Some(RunState::Done(_))
+        ));
+        s.run_tool(Tool::HeapDump);
+        assert!(
+            s.inspect.state(Tool::LeakSuspects).is_none(),
+            "a new dump's analyses start over"
+        );
+    }
+
+    #[test]
+    fn stop_and_analyze_dumps_stops_and_summarises_the_recording() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.now = 3.0;
+        s.run_tool(Tool::JfrStart);
+        s.run_held_inspect();
+        assert_eq!(
+            s.inspect.jvm.recording,
+            Some(Recording { pid: 7, since: 3.0 })
+        );
+        assert_eq!(
+            s.tool_refusal(Tool::JfrStart).as_deref(),
+            Some("Already recording")
+        );
+        s.run_tool(Tool::JfrStop);
+        assert!(s.inspect.jvm.recording.is_none());
+        s.run_held_inspect();
+        let calls = fake.calls();
+        assert_eq!(
+            calls[0],
+            ["jvm", "jfr", "start", "--name", "spectra-desktop", "7"]
+        );
+        assert_eq!(
+            &calls[1][..5],
+            ["jvm", "jfr", "dump", "--name", "spectra-desktop"]
+        );
+        let out = calls[1][6].clone();
+        assert!(out.ends_with(".jfr"));
+        assert_eq!(
+            calls[2],
+            ["jvm", "jfr", "stop", "--name", "spectra-desktop", "7"]
+        );
+        assert_eq!(calls[3], ["jvm", "jfr", "summary", "--json", out.as_str()]);
+        let Some(RunState::Done(r)) = s.inspect.state(Tool::JfrStop) else {
+            panic!()
+        };
+        assert!(
+            matches!(&**r, Report::Jfr(j) if j.path == out),
+            "the path is where it was written"
+        );
+    }
+
+    #[test]
+    fn a_failed_dump_still_stops_the_recording() {
+        let mut fake = Fake::all();
+        fake.replies
+            .insert("jvm jfr dump", Err("JFR.dump failed".into()));
+        let (mut s, fake) = jvm_faked(fake);
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.run_held_inspect();
+        s.run_tool(Tool::JfrStop);
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
+        assert_eq!(jvm_calls(&fake, "jfr summary"), 0);
+        assert_eq!(
+            s.inspect.state(Tool::JfrStop),
+            Some(&RunState::Failed("JFR.dump failed".into()))
+        );
+    }
+
+    #[test]
+    fn leaving_the_page_stops_its_recording() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.run_held_inspect();
+        assert!(s.inspect.jvm.recording.is_some());
+        s.open(900);
+        assert!(s.inspect.jvm.recording.is_none());
+        s.run_held_inspect();
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &["jvm", "jfr", "stop", "--name", "spectra-desktop", "7"]
+        );
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
+        assert!(s.inspect.runs.is_empty(), "its answer lands nowhere");
+    }
+
+    #[test]
+    fn a_recording_started_as_the_page_is_left_is_stopped_at_once() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.open(900);
+        s.run_held_inspect();
+        assert_eq!(
+            jvm_calls(&fake, "jfr stop"),
+            1,
+            "the start was cancelled, and stopped to be sure"
+        );
+        assert!(s.inspect.jvm.recording.is_none());
+    }
+
+    #[test]
+    fn quitting_stops_the_recording_and_waits_for_it() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.run_held_inspect();
+        s.stop_recording_now();
+        assert_eq!(
+            jvm_calls(&fake, "jfr stop"),
+            1,
+            "run there and then, not handed to a worker"
+        );
+        s.stop_recording_now();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "only once");
+    }
+
+    /// The work a test's `Exec::Held` is holding, to run and land in an order of its own.
+    fn take_held(s: &App) -> Vec<Work> {
+        match &s.inspect.exec {
+            Exec::Held(q) => std::mem::take(&mut *q.lock().unwrap()),
+            Exec::Thread => Vec::new(),
+        }
+    }
+
+    /// Runs a recording start to the end, so `jfr start` succeeded, without landing it.
+    fn started_not_landed(s: &mut App) -> Landed {
+        s.run_tool(Tool::JfrStart);
+        let mut work = take_held(s);
+        assert_eq!(work.len(), 1);
+        let landed = (work.pop().unwrap())();
+        assert!(matches!(&landed, Landed::Tool { pid: 7, result: Ok(_), .. }), "{landed:?}");
+        landed
+    }
+
+    const STOP_7: [&str; 6] = ["jvm", "jfr", "stop", "--name", "spectra-desktop", "7"];
+
+    #[test]
+    fn a_start_that_lands_after_the_page_was_left_is_stopped() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        let landed = started_not_landed(&mut s);
+        s.open(900);
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 0, "nothing knew of it yet");
+        s.land_inspected(landed);
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
+        assert_eq!(fake.calls().last().unwrap(), &STOP_7);
+        assert!(s.inspect.jvm.recording.is_none());
+    }
+
+    #[test]
+    fn a_start_that_lands_after_cancel_is_stopped() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        let landed = started_not_landed(&mut s);
+        s.cancel_tool(Tool::JfrStart);
+        s.land_inspected(landed);
+        assert_eq!(s.inspect.state(Tool::JfrStart), Some(&RunState::Cancelled));
+        assert!(s.inspect.jvm.recording.is_none());
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
+        assert_eq!(fake.calls().last().unwrap(), &STOP_7);
+        assert_eq!(s.tool_refusal(Tool::JfrStart), None, "it can start again");
+    }
+
+    #[test]
+    fn quitting_with_a_start_done_but_not_landed_stops_it() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        let _landed = started_not_landed(&mut s);
+        s.stop_recording_now();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "stopped there and then");
+        assert_eq!(fake.calls().last().unwrap(), &STOP_7);
+    }
+
+    #[test]
+    fn quitting_with_a_start_in_flight_cancels_and_stops_it() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.stop_recording_now();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "stopped there and then");
+        let landed = (take_held(&s).pop().unwrap())();
+        assert!(matches!(landed, Landed::Tool { result: Err(Failure::Cancelled), .. }), "the start itself was cancelled");
+    }
+
+    #[test]
+    fn quitting_with_a_start_from_a_page_already_left_stops_it() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        let _landed = started_not_landed(&mut s);
+        s.open(900);
+        s.stop_recording_now();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
+        assert_eq!(fake.calls().last().unwrap(), &STOP_7);
+    }
+
+    #[test]
+    fn a_failed_start_is_stopped_too() {
+        let mut fake = Fake::all();
+        fake.replies.insert("jvm jfr start", Err("timed out after 30s".into()));
+        let (mut s, fake) = jvm_faked(fake);
+        s.open(7);
+        s.run_tool(Tool::JfrStart);
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "JFR.start may have run before it failed");
+        assert_eq!(s.inspect.state(Tool::JfrStart), Some(&RunState::Failed("timed out after 30s".into())));
+        assert!(s.inspect.jvm.recording.is_none());
+    }
+
     /// Needs Spectra and runs it on a `sleep` this test starts: `cargo test -- --ignored`.
     #[test]
     #[ignore]
@@ -859,7 +1432,7 @@ pub(crate) mod tests {
         let never = AtomicBool::new(false);
         let calc = System.run(&bundle::args("/System/Applications/Calculator.app"), bundle::DEADLINE, &never);
         println!("bundle     {:?}", calc.map_err(|e| format!("{e:?}")).and_then(|o| bundle::parse(&o)).map(|b| b.built_with()));
-        for tool in Tool::ALL.into_iter().filter(|t| t.needs_root().is_none()) {
+        for tool in Tool::ALL.into_iter().filter(|t| t.needs_root().is_none() && t.kind() != Kind::Jvm) {
             let out = System.run(&tool.args(pid), tool.deadline(), &never);
             let parsed = out.map_err(|e| format!("{e:?}")).and_then(|o| tool.parse(&o));
             println!("{:<10} {}", tool.id(), if parsed.is_ok() { "ok".into() } else { format!("{parsed:?}") });

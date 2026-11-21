@@ -1,0 +1,37 @@
+{
+ "enabled": true,
+ "total_reserved_kib": 33557344,
+ "total_committed_kib": 312384,
+ "categories": [
+  {
+   "name": "Java Heap",
+   "reserved_kib": 31440896,
+   "committed_kib": 163840
+  },
+  {
+   "name": "GC",
+   "reserved_kib": 675217,
+   "committed_kib": 64657
+  },
+  {
+   "name": "Thread",
+   "reserved_kib": 59822,
+   "committed_kib": 59822
+  },
+  {
+   "name": "Code",
+   "reserved_kib": 247764,
+   "committed_kib": 7636
+  },
+  {
+   "name": "Internal",
+   "reserved_kib": 1246,
+   "committed_kib": 1246
+  },
+  {
+   "name": "Symbol",
+   "reserved_kib": 1132,
+   "committed_kib": 1132
+  }
+ ]
+}

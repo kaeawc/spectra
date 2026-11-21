@@ -9,11 +9,13 @@ mod data;
 mod findings;
 mod groups;
 mod inspect;
+mod jvm_tools;
 mod live;
 mod proc_findings;
 mod procs;
 mod run;
 mod sample;
+mod sample_jvm;
 mod sample_system;
 mod signal;
 mod system;
@@ -77,8 +79,11 @@ fn setup(s: &mut App, wake: rune::Waker) {
 }
 
 /// Quitting stops every Spectra job the pages started (a memtrace can run 20 s), and waits a
-/// moment for them to be killed, since the process ends right after.
+/// moment for them to be killed, and for any queued `jfr stop`, since the process ends right
+/// after.
 fn on_quit(s: &mut App, _: &mut Tx) {
+    // A flight recording the open page started ends with the app, like leaving the page.
+    s.stop_recording_now();
     s.inspect.cancel_all();
     system::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     run::wait_idle(Duration::from_secs(2));
@@ -157,6 +162,17 @@ fn main() {
             ("tool-owner", sample::tool_owner_scene),
             ("tool-runtime", sample::tool_runtime_scene),
             ("tool-failed", sample::tool_failed_scene),
+            ("jvm-tools", sample_jvm::jvm_tools_scene),
+            ("tool-threads", sample_jvm::tool_threads_scene),
+            ("tool-threads-deadlock", sample_jvm::tool_threads_deadlock_scene),
+            ("tool-histogram", sample_jvm::tool_histogram_scene),
+            ("tool-gc", sample_jvm::tool_gc_scene),
+            ("tool-nmt", sample_jvm::tool_nmt_scene),
+            ("tool-nmt-off", sample_jvm::tool_nmt_off_scene),
+            ("tool-explain", sample_jvm::tool_explain_scene),
+            ("tool-heapdump", sample_jvm::tool_heapdump_scene),
+            ("tool-jfr", sample_jvm::tool_jfr_scene),
+            ("tool-jfr-summary", sample_jvm::tool_jfr_summary_scene),
             ("system", sample_system::system_scene),
             ("system-pressure", sample_system::system_pressure_scene),
             ("system-failed", sample_system::system_failed_scene),

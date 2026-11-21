@@ -30,7 +30,18 @@ impl Drop for Running {
     }
 }
 
-/// Waits until every run has finished (a cancelled one finishes within a check or two), or
+/// Work that will run a command (or another after its first) but may not have started it:
+/// [`wait_idle`] waits for it from the moment it's queued until it's dropped.
+pub struct Pending {
+    _running: Running,
+}
+
+/// Holds quit until the returned [`Pending`] is dropped.
+pub fn pending() -> Pending {
+    Pending { _running: Running::new() }
+}
+
+/// Waits until every run, and every [`Pending`] job, has finished (a cancelled one finishes within a check or two), or
 /// `limit` passes. True when none is left. Used at quit, so cancelled jobs are killed before the
 /// process exits.
 pub fn wait_idle(limit: Duration) -> bool {
@@ -199,6 +210,19 @@ pub(crate) mod tests {
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
+    }
+
+    #[test]
+    fn quit_waits_for_a_pending_job_until_it_is_done() {
+        let job = pending();
+        assert!(!wait_idle(Duration::from_millis(30)), "queued but not started still counts");
+        let start = Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(job);
+        });
+        wait_idle(Duration::from_secs(2));
+        assert!(start.elapsed() >= Duration::from_millis(90));
     }
 
     #[test]
