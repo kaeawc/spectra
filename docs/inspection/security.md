@@ -71,9 +71,15 @@ present, is `GatekeeperSource`. A timeout or an unassessable bundle (for
 example a damaged signature) leaves `GatekeeperStatus` empty and records
 why in `GatekeeperError`.
 
-Real verdicts are cached in-process for 24 h keyed by bundle path and the
-main executable's `CDHash`, so a long-running daemon or MCP server does not
-re-ask syspolicyd. The on-disk detect cache never stores a spctl
+Real verdicts are cached for 24 h keyed by bundle path and the main
+executable's `CDHash`, in process and in the on-disk `seal` cache kind
+(with the time of the assessment), so neither a long-running daemon nor a
+series of one-shot CLI runs re-asks syspolicyd within that window.
+Timeouts and cancellations are never cached. `spectra daemon run
+--assess-gatekeeper` keeps these verdicts warm: it walks `/Applications`
+and `/Applications/Utilities` hourly, runs one `spctl` at a time for apps
+whose verdict is missing or stale, and pauses between runs. It is opt-in,
+like `--assess-gatekeeper` elsewhere. The detect cache never stores a spctl
 verdict or a timeout. Its key is content-only, so a cache hit re-reads the
 signature for the requested path (one `codesign -dv`) before predicting,
 and is re-assessed (through the in-process cache) whenever an assessment

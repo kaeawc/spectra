@@ -44,7 +44,7 @@ one bulk `ps` call per tick for process counts, CPU, RSS, top processes, and pro
 history. When Java processes are present, one additional `ps` call fetches the
 arguments for up to 64 Java PIDs so Gradle and Kotlin daemons can be classified.
 It also reads load average, memory pressure and swap, kernel limits,
-free space on the data volume, thermal state, and its own CPU time. It does not
+free space on the data volume, thermal state, and its own CPU time. By default it does not
 scan apps, collect snapshots, or inspect protected paths. On macOS, thermal
 state requires one `pmset -g therm` call; on Linux, thermal throttling is not
 reported where the kernel has no common direct signal. Limits without a cheap
@@ -52,6 +52,11 @@ current-usage counter are reported with a zero limit percentage and do not
 trigger an alert. If the daemon averages more than 2% CPU over ten ticks, the
 watch doubles its interval up to four times the base; it returns to the base
 below 0.5%.
+
+With `--assess-gatekeeper` (macOS, off by default) the daemon also
+re-assesses installed apps with `spctl` in the background, one at a time
+and under the usual 15 s cap, so `GatekeeperStatus` is usually served from
+the 24 h verdict cache. See [Security inspection](../inspection/security.md).
 
 An independent process-spawn probe runs every five seconds, including while a
 regular sample is blocked or backed off. On macOS it reads `kern.proc.all` and

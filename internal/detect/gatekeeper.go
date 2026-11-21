@@ -10,6 +10,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/codesignout"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -263,6 +264,11 @@ func verdictKey(appPath, cdHash string) string {
 	return appPath + "\x00" + cdHash
 }
 
+func (a *GatekeeperAssessor) fresh(at time.Time) bool {
+	age := a.now().Sub(at)
+	return age >= 0 && age < a.ttl
+}
+
 func (a *GatekeeperAssessor) cached(key string) (gatekeeperVerdict, bool) {
 	if key == "" {
 		return gatekeeperVerdict{}, false
@@ -270,42 +276,101 @@ func (a *GatekeeperAssessor) cached(key string) (gatekeeperVerdict, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e, ok := a.cache[key]
-	if !ok || a.now().Sub(e.at) >= a.ttl {
+	if !ok || !a.fresh(e.at) {
 		return gatekeeperVerdict{}, false
 	}
 	return e.verdict, true
 }
 
-func (a *GatekeeperAssessor) store(key string, v gatekeeperVerdict) {
+// persistedVerdict is one real spctl verdict as written to the on-disk
+// cache. AssessedAt lets each process apply its own TTL and clock instead
+// of trusting the store's expiry alone.
+type persistedVerdict struct {
+	Status     string    `json:"status"`
+	Source     string    `json:"source,omitempty"`
+	AssessedAt time.Time `json:"assessed_at"`
+}
+
+var verdictCacheSchema = []byte("spctl-v1\x00")
+
+func verdictCacheKey(appPath, cdHash string) []byte {
+	return cache.Key(verdictCacheSchema, []byte(appPath), []byte{0}, []byte(cdHash))
+}
+
+// lookup returns a fresh verdict from memory or, failing that, from the
+// persistent store, promoting a disk hit into memory with its original
+// assessment time so it expires on the same schedule.
+func (a *GatekeeperAssessor) lookup(store SealCache, appPath, cdHash string) (gatekeeperVerdict, bool) {
+	key := verdictKey(appPath, cdHash)
+	if v, ok := a.cached(key); ok {
+		return v, true
+	}
+	if key == "" || store == nil {
+		return gatekeeperVerdict{}, false
+	}
+	blob, ok := store.Get(verdictCacheKey(appPath, cdHash))
+	if !ok {
+		return gatekeeperVerdict{}, false
+	}
+	var p persistedVerdict
+	if json.Unmarshal(blob, &p) != nil || p.Status == "" || !a.fresh(p.AssessedAt) {
+		return gatekeeperVerdict{}, false
+	}
+	v := gatekeeperVerdict{status: p.Status, source: p.Source}
+	a.mu.Lock()
+	a.cache[key] = gatekeeperCacheEntry{verdict: v, at: p.AssessedAt}
+	a.mu.Unlock()
+	return v, true
+}
+
+// store remembers a real verdict in memory and, when store is set, on
+// disk. Timeouts, cancellations and unassessable bundles carry no status
+// and are never stored.
+func (a *GatekeeperAssessor) store(store SealCache, appPath, cdHash string, v gatekeeperVerdict) {
+	key := verdictKey(appPath, cdHash)
 	if key == "" || v.status == "" {
 		return
 	}
+	at := a.now()
 	a.mu.Lock()
-	a.cache[key] = gatekeeperCacheEntry{verdict: v, at: a.now()}
+	a.cache[key] = gatekeeperCacheEntry{verdict: v, at: at}
 	a.mu.Unlock()
+	if store == nil {
+		return
+	}
+	if blob, err := json.Marshal(persistedVerdict{Status: v.status, Source: v.source, AssessedAt: at}); err == nil {
+		_ = store.Put(verdictCacheKey(appPath, cdHash), blob, a.ttl)
+	}
 }
 
 // assess returns the spctl verdict for appPath. Only real verdicts are
 // cached; a timeout, cancellation, or unassessable bundle is retried next
 // time. A caller canceled while queued gives up without running spctl.
 func (a *GatekeeperAssessor) assess(ctx context.Context, runner proc.Runner, appPath, cdHash string) gatekeeperVerdict {
-	key := verdictKey(appPath, cdHash)
-	if v, ok := a.cached(key); ok {
-		return v
+	v, _ := a.assessPersist(ctx, runner, nil, appPath, cdHash)
+	return v
+}
+
+// assessPersist is assess backed by a persistent verdict store (nil for
+// memory only). ran reports whether spctl actually executed.
+func (a *GatekeeperAssessor) assessPersist(ctx context.Context, runner proc.Runner, store SealCache, appPath, cdHash string) (v gatekeeperVerdict, ran bool) {
+	if v, ok := a.lookup(store, appPath, cdHash); ok {
+		return v, false
 	}
 	select {
 	case a.sem <- struct{}{}:
 	case <-ctx.Done():
-		return gatekeeperVerdict{err: GatekeeperErrorCanceled}
+		return gatekeeperVerdict{err: GatekeeperErrorCanceled}, false
 	}
 	defer func() { <-a.sem }()
-	// Another caller may have assessed the same binary while we queued.
-	if v, ok := a.cached(key); ok {
-		return v
+	// Another caller, or another process sharing the store, may have
+	// assessed the same binary while we queued.
+	if v, ok := a.lookup(store, appPath, cdHash); ok {
+		return v, false
 	}
-	v := a.run(ctx, runner, appPath)
-	a.store(key, v)
-	return v
+	v = a.run(ctx, runner, appPath)
+	a.store(store, appPath, cdHash, v)
+	return v, true
 }
 
 func (a *GatekeeperAssessor) run(parent context.Context, runner proc.Runner, appPath string) gatekeeperVerdict {
@@ -360,7 +425,33 @@ func (d detector) context() context.Context {
 }
 
 func (d detector) assessGatekeeper(appPath, cdHash string) gatekeeperVerdict {
-	return d.gatekeeperAssessor().assess(d.context(), d.opts.Runner, appPath, cdHash)
+	v, _ := d.gatekeeperAssessor().assessPersist(d.context(), d.opts.Runner, d.opts.SealCache, appPath, cdHash)
+	return v
+}
+
+// GatekeeperRefresh reports what RefreshGatekeeper did for one bundle.
+type GatekeeperRefresh struct {
+	Assessed bool   // spctl ran; false when a fresh verdict was already cached
+	Status   string // "accepted", "rejected", or "" with Err set
+	Err      string
+}
+
+// RefreshGatekeeper makes sure a fresh spctl verdict for the bundle at
+// appPath is cached in the assessor and in opts.SealCache, running spctl
+// (serialized and bounded like any assessment) only when none is fresh.
+// Bundles without a CDHash are skipped: their verdict could not be cached,
+// so assessing them in the background would only repeat the cost.
+func RefreshGatekeeper(appPath string, opts Options) GatekeeperRefresh {
+	if hostos.Resolve(opts.OS) != hostos.Darwin {
+		return GatekeeperRefresh{Err: hostos.Unsupported("Gatekeeper assessment").Error()}
+	}
+	d := newDetector(opts)
+	cdHash := d.readSigning(appPath).cdHash
+	if cdHash == "" {
+		return GatekeeperRefresh{Err: "no CDHash"}
+	}
+	v, ran := d.gatekeeperAssessor().assessPersist(d.context(), opts.Runner, opts.SealCache, appPath, cdHash)
+	return GatekeeperRefresh{Assessed: ran, Status: v.status, Err: v.err}
 }
 
 // RefreshSignature re-derives the signature-dependent fields of r for the

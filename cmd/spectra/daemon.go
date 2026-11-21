@@ -19,6 +19,8 @@ import (
 
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
+	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
@@ -90,11 +92,12 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	idle := fs.Duration("idle-timeout", 0, "stop after inactivity")
 	watchInterval := fs.Duration("watch-interval", 15*time.Second, "host monitoring interval")
 	noNotify := fs.Bool("no-notify", false, "disable desktop notifications")
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "re-assess installed apps with spctl in the background, one at a time (macOS)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 || *idle < 0 || *watchInterval <= 0 {
-		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration] [--watch-interval duration] [--no-notify]")
+		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration] [--watch-interval duration] [--no-notify] [--assess-gatekeeper]")
 	}
 	if err := os.MkdirAll(filepath.Dir(paths.Log), 0o700); err != nil {
 		return fmt.Errorf("daemon log directory: %w", err)
@@ -139,10 +142,32 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 			log.Error("watch stopped", "error", err)
 		}
 	}()
+	stopGatekeeper := startGatekeeperRefresh(ctx, *assessGatekeeper, log)
 	err = server.Run(ctx)
 	cancelWatch()
+	stopGatekeeper()
 	<-watchDone
 	return err
+}
+
+// startGatekeeperRefresh runs the background spctl refresher when enabled
+// (opt-in, like --assess-gatekeeper on inspect) and returns a func that
+// stops it and waits for the in-flight assessment to end.
+func startGatekeeperRefresh(ctx context.Context, enabled bool, log logger.Logger) func() {
+	if !enabled || hostos.Current() != hostos.Darwin {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	r := daemon.NewGatekeeperRefresher(daemon.GatekeeperRefreshOptions{
+		Apps: func() []string {
+			return append(scanAppDir("/Applications"), scanAppDir("/Applications/Utilities")...)
+		},
+		Detect: detect.Options{SealCache: sealCache()},
+		Logger: log,
+	})
+	done := make(chan struct{})
+	go func() { defer close(done); r.Run(ctx) }()
+	return func() { cancel(); <-done }
 }
 
 func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {

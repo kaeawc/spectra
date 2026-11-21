@@ -300,6 +300,9 @@ type Options struct {
 	Gatekeeper *GatekeeperAssessor
 	// SealCache persists the `codesign --verify` seal check behind an
 	// "accepted" prediction, keyed by path+CDHash. Nil re-verifies each run.
+	// Real spctl verdicts are persisted there too (under their own key
+	// schema, with the assessment time) so the 24 h verdict TTL also spans
+	// one-shot CLI runs.
 	SealCache SealCache
 	// SealTimeout bounds one seal check; zero means 30 s.
 	SealTimeout time.Duration
