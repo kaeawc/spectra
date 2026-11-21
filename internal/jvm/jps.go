@@ -52,6 +52,7 @@ func discoverPIDs(run CmdRunner) (pids map[int]string, available bool) {
 //	23456 org.gradle.launcher.daemon.bootstrap.GradleDaemon
 //	34567
 //	56789 sun.tools.jps.Jps   ← jps itself; excluded
+//	67890 jdk.jcmd/sun.tools.jps.Jps   ← JDK 9+ form; excluded
 func parseJPS(out string) map[int]string {
 	result := make(map[int]string)
 	for _, line := range strings.Split(out, "\n") {
@@ -65,8 +66,10 @@ func parseJPS(out string) map[int]string {
 			continue
 		}
 		main := strings.TrimSpace(rest)
-		// Skip jps itself and the Jstat internal tools.
-		if strings.HasPrefix(main, "sun.tools.") {
+		// Skip jps itself and the Jstat internal tools. JDK 9+ prefixes the
+		// module ("jdk.jcmd/sun.tools.jps.Jps"); jps has exited by the time
+		// jcmd probes it, and each probe then waits ~6 s on the attach.
+		if strings.HasPrefix(main, "sun.tools.") || strings.Contains(main, "/sun.tools.") {
 			continue
 		}
 		result[pidN] = main
