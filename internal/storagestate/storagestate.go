@@ -6,9 +6,9 @@ package storagestate
 
 import (
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
 )
@@ -20,8 +20,25 @@ type State struct {
 	Spotlight        []SpotlightVolume `json:"spotlight,omitempty"`
 	UserLibraryBytes int64             `json:"user_library_bytes"`
 	AppCachesBytes   int64             `json:"app_caches_bytes"`
-	LargestApps      []AppSize         `json:"largest_apps,omitempty"`
-	LogFiles         []LogFile         `json:"log_files,omitempty"`
+	// UserFootprintAsOf is when UserLibraryBytes and AppCachesBytes were
+	// measured. The footprint walk is cached far longer than the df data,
+	// so consumers use this to judge its age.
+	UserFootprintAsOf time.Time `json:"user_footprint_as_of,omitzero"`
+	// UserFootprintStale marks a footprint served past its freshness
+	// window while a background refresh runs (long-lived callers only).
+	UserFootprintStale bool `json:"user_footprint_stale,omitempty"`
+	// UserFootprintSkippedDirs counts directories the footprint walk could
+	// not read (TCC-protected or permission-denied); their contents are
+	// missing from the totals.
+	UserFootprintSkippedDirs int `json:"user_footprint_skipped_dirs,omitempty"`
+	// UserLibraryTop splits UserLibraryBytes by top-level ~/Library folder,
+	// largest first, with the tail rolled into "other".
+	UserLibraryTop []DirSize `json:"user_library_top,omitempty"`
+	// UserLibraryReclaimable sizes known regenerable developer areas
+	// (DerivedData, CoreSimulator, ...) that exist under ~/Library.
+	UserLibraryReclaimable []DirSize `json:"user_library_reclaimable,omitempty"`
+	LargestApps            []AppSize `json:"largest_apps,omitempty"`
+	LogFiles               []LogFile `json:"log_files,omitempty"`
 }
 
 // Volume is one mounted filesystem.
@@ -91,6 +108,11 @@ type CollectOptions struct {
 	// OS selects OS-specific behavior (df pseudo-volume filtering, the
 	// fstype source, and log/cache roots). Zero value resolves to host.
 	OS hostos.Kind
+	// SkipUserFootprint leaves the ~/Library / cache walk out so a caller
+	// can source the footprint from its own, longer-lived cache.
+	SkipUserFootprint bool
+	// Now stamps UserFootprintAsOf. Nil uses time.Now.
+	Now func() time.Time
 }
 
 // Collect gathers StorageState.
@@ -114,20 +136,7 @@ func Collect(opts CollectOptions) State {
 			s.Mounts = mounts
 		}
 	}
-	if out, err := run("df", "-Pk"); err == nil {
-		s.Volumes = parseDF(string(out), osKind)
-	}
-	if len(s.Volumes) > 0 {
-		if osKind == hostos.Linux {
-			// Linux mount(8) output format differs; /proc/mounts needs no
-			// subprocess and is the reliable fstype source.
-			if data, err := os.ReadFile("/proc/mounts"); err == nil {
-				applyFSTypes(s.Volumes, parseProcMounts(string(data)))
-			}
-		} else if out, err := run("mount"); err == nil {
-			applyMountInfo(s.Volumes, parseMountInfos(string(out)))
-		}
-	}
+	s.Volumes = collectVolumes(run, osKind)
 	if osKind != hostos.Linux {
 		if opts.IncludeSnapshots {
 			applyAPFSSnapshots(s.Volumes, run)
@@ -136,7 +145,9 @@ func Collect(opts CollectOptions) State {
 			s.Spotlight = collectSpotlight(run, s.Mounts)
 		}
 	}
-	s.UserLibraryBytes, s.AppCachesBytes = collectUserFootprint(osKind, opts.Home)
+	if !opts.SkipUserFootprint {
+		s.ApplyFootprint(CollectFootprint(osKind, opts.Home, opts.Now), false)
+	}
 	if len(opts.AppPaths) > 0 {
 		s.LargestApps = topApps(opts.AppPaths, opts.LargestAppsN)
 	}
@@ -144,19 +155,26 @@ func Collect(opts CollectOptions) State {
 	return s
 }
 
-// collectUserFootprint returns the user's library and cache on-disk sizes.
-// macOS uses ~/Library and ~/Library/Caches; Linux has no ~/Library, so
-// library size is left zero and cache maps to the XDG cache dir.
-func collectUserFootprint(osKind hostos.Kind, home string) (library, caches int64) {
-	if osKind == hostos.Linux {
-		cacheDir := filepath.Join(home, ".cache")
-		if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
-			cacheDir = xdg
-		}
-		return 0, dirBytes(cacheDir)
+// collectVolumes reads df and annotates each volume with its fstype.
+func collectVolumes(run CmdRunner, osKind hostos.Kind) []Volume {
+	out, err := run("df", "-Pk")
+	if err != nil {
+		return nil
 	}
-	return dirBytes(filepath.Join(home, "Library")),
-		dirBytes(filepath.Join(home, "Library", "Caches"))
+	volumes := parseDF(string(out), osKind)
+	if len(volumes) == 0 {
+		return volumes
+	}
+	if osKind == hostos.Linux {
+		// Linux mount(8) output format differs; /proc/mounts needs no
+		// subprocess and is the reliable fstype source.
+		if data, err := os.ReadFile("/proc/mounts"); err == nil {
+			applyFSTypes(volumes, parseProcMounts(string(data)))
+		}
+	} else if out, err := run("mount"); err == nil {
+		applyMountInfo(volumes, parseMountInfos(string(out)))
+	}
+	return volumes
 }
 
 // parseProcMounts converts /proc/mounts lines (spec mountpoint fstype
@@ -296,17 +314,10 @@ func parseMountLine(line string) (mountPoint string, info mountInfo, ok bool) {
 }
 
 // dirBytes returns the total on-disk size of all files under dir using
-// sparse-file-aware block counting. Returns 0 if dir doesn't exist.
+// sparse-file-aware block counting, hardlinks counted once. Returns 0 if
+// dir doesn't exist.
 func dirBytes(dir string) int64 {
-	var total int64
-	filepath.Walk(dir, func(_ string, fi os.FileInfo, _ error) error { //nolint:errcheck
-		if fi == nil || fi.IsDir() {
-			return nil
-		}
-		total += diskBytes(fi)
-		return nil
-	})
-	return total
+	return walkTree(dir).Total
 }
 
 // topApps returns the top-N app paths by on-disk size, sorted descending.
