@@ -446,7 +446,7 @@ func RefreshGatekeeper(appPath string, opts Options) GatekeeperRefresh {
 		return GatekeeperRefresh{Err: hostos.Unsupported("Gatekeeper assessment").Error()}
 	}
 	d := newDetector(opts)
-	cdHash := d.readSigning(appPath).cdHash
+	cdHash := d.readSigningCtx(d.context(), appPath).cdHash
 	if cdHash == "" {
 		return GatekeeperRefresh{Err: "no CDHash"}
 	}

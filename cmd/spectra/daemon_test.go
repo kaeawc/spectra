@@ -45,7 +45,7 @@ func fakeDaemonDeps(goos string) (daemonDeps, *[]string) {
 
 func TestDaemonServiceRendering(t *testing.T) {
 	mac, _ := fakeDaemonDeps("darwin")
-	_, plist, err := daemonServiceContent(mac)
+	_, plist, err := daemonServiceContent(mac, []string{"daemon", "run"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestDaemonServiceRendering(t *testing.T) {
 		}
 	}
 	linux, _ := fakeDaemonDeps("linux")
-	_, unit, err := daemonServiceContent(linux)
+	_, unit, err := daemonServiceContent(linux, []string{"daemon", "run"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDaemonInstallFakeServiceManagers(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			deps, calls := fakeDaemonDeps(goos)
 			var out bytes.Buffer
-			if err := daemonInstall(daemon.Paths{Log: "/tmp/spd-log/daemon.jsonl"}, &out, deps); err != nil {
+			if err := daemonInstall(daemon.Paths{Log: "/tmp/spd-log/daemon.jsonl"}, &out, deps, []string{"daemon", "run"}); err != nil {
 				t.Fatal(err)
 			}
 			joined := strings.Join(*calls, "\n")
@@ -135,7 +135,7 @@ func TestDaemonStartAlreadyRunningAndSpawned(t *testing.T) {
 		return nil, nil
 	}
 	var out bytes.Buffer
-	if err := daemonStart(paths, &out, deps); err != nil || !strings.Contains(out.String(), "already running") {
+	if err := daemonStart(paths, &out, deps, []string{"daemon", "run"}); err != nil || !strings.Contains(out.String(), "already running") {
 		t.Fatalf("already running: %q, %v", out.String(), err)
 	}
 	out.Reset()
@@ -148,7 +148,7 @@ func TestDaemonStartAlreadyRunningAndSpawned(t *testing.T) {
 		}
 		return daemonclient.Dial(ctx, paths.Socket)
 	}
-	if err := daemonStart(paths, &out, deps); err != nil || !spawned || !strings.Contains(out.String(), "started") {
+	if err := daemonStart(paths, &out, deps, []string{"daemon", "run"}); err != nil || !spawned || !strings.Contains(out.String(), "started") {
 		t.Fatalf("spawned: %q, %v", out.String(), err)
 	}
 }
@@ -334,7 +334,7 @@ func TestRunDaemonWithIOExitCodes(t *testing.T) {
 		args []string
 		want int
 	}{
-		{nil, 2}, {[]string{"start", "extra"}, 2}, {[]string{"unknown"}, 2}, {[]string{"status"}, 1},
+		{nil, 2}, {[]string{"start", "extra"}, 2}, {[]string{"install", "--bogus"}, 2}, {[]string{"stop", "--assess-gatekeeper"}, 2}, {[]string{"unknown"}, 2}, {[]string{"status"}, 1},
 	} {
 		var out, stderr bytes.Buffer
 		if got := runDaemonWithIO(tc.args, &out, &stderr, deps); got != tc.want {
@@ -344,8 +344,58 @@ func TestRunDaemonWithIOExitCodes(t *testing.T) {
 }
 
 func TestDaemonUnitEscaping(t *testing.T) {
-	unit := daemonUnit(`/opt/Spectra % "Tools"\spectra`)
+	unit := daemonUnit(`/opt/Spectra % "Tools"\spectra`, []string{"daemon", "run"})
 	if !strings.Contains(unit, `ExecStart="/opt/Spectra %% \"Tools\"\\spectra" daemon run`) {
 		t.Fatal(unit)
+	}
+}
+
+// TestDaemonAssessGatekeeperForwarded checks that --assess-gatekeeper on
+// start, install and print-plist reaches the spawned argv, the launchd
+// plist and the systemd unit, and that it is omitted when not given.
+func TestDaemonAssessGatekeeperForwarded(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false}, {[]string{"--assess-gatekeeper"}, true},
+	} {
+		has := func(s string) bool { return strings.Contains(s, "--assess-gatekeeper") }
+
+		deps, _ := fakeDaemonDeps("darwin")
+		deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+		var spawnArgs []string
+		deps.ensureRunning = func(_ context.Context, _ daemon.Paths, opts daemonclient.SpawnOptions) (*daemonclient.Client, error) {
+			spawnArgs = opts.Args
+			return nil, errors.New("stop here")
+		}
+		var out, stderr bytes.Buffer
+		runDaemonWithIO(append([]string{"start"}, tc.args...), &out, &stderr, deps)
+		if got := has(strings.Join(spawnArgs, " ")); got != tc.want || len(spawnArgs) < 2 || spawnArgs[0] != "daemon" || spawnArgs[1] != "run" {
+			t.Errorf("start %v spawned %q", tc.args, spawnArgs)
+		}
+
+		out.Reset()
+		if code := runDaemonWithIO(append([]string{"print-plist"}, tc.args...), &out, &stderr, deps); code != 0 {
+			t.Fatalf("print-plist %v: exit %d, %s", tc.args, code, stderr.String())
+		}
+		if got := has(out.String()) && strings.Contains(out.String(), "<string>run</string><string>--assess-gatekeeper</string>"); got != tc.want {
+			t.Errorf("print-plist %v: flag present=%v\n%s", tc.args, has(out.String()), out.String())
+		}
+
+		for _, goos := range []string{"darwin", "linux"} {
+			deps, _ := fakeDaemonDeps(goos)
+			var written string
+			deps.writeFile = func(_ string, data []byte, _ os.FileMode) error { written = string(data); return nil }
+			if code := runDaemonWithIO(append([]string{"install"}, tc.args...), &out, &stderr, deps); code != 0 {
+				t.Fatalf("install %s %v: exit %d, %s", goos, tc.args, code, stderr.String())
+			}
+			if has(written) != tc.want {
+				t.Errorf("install %s %v wrote:\n%s", goos, tc.args, written)
+			}
+			if goos == "linux" && tc.want && !strings.Contains(written, `spectra" daemon run --assess-gatekeeper`+"\n") {
+				t.Errorf("unit ExecStart missing flag:\n%s", written)
+			}
+		}
 	}
 }

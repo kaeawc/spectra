@@ -75,8 +75,9 @@ Real verdicts are cached for 24 h keyed by bundle path and the main
 executable's `CDHash`, in process and in the on-disk `seal` cache kind
 (with the time of the assessment), so neither a long-running daemon nor a
 series of one-shot CLI runs re-asks syspolicyd within that window.
-Timeouts and cancellations are never cached. `spectra daemon run
---assess-gatekeeper` keeps these verdicts warm: it walks `/Applications`
+Timeouts and cancellations are never cached. A daemon started with
+`spectra daemon start --assess-gatekeeper` (or installed with
+`spectra daemon install --assess-gatekeeper`) keeps these verdicts warm: it walks `/Applications`
 and `/Applications/Utilities` hourly, runs one `spctl` at a time for apps
 whose verdict is missing or stale, and pauses between runs. It is opt-in,
 like `--assess-gatekeeper` elsewhere. The detect cache never stores a spctl

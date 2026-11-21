@@ -56,7 +56,16 @@ below 0.5%.
 With `--assess-gatekeeper` (macOS, off by default) the daemon also
 re-assesses installed apps with `spctl` in the background, one at a time
 and under the usual 15 s cap, so `GatekeeperStatus` is usually served from
-the 24 h verdict cache. See [Security inspection](../inspection/security.md).
+the 24 h verdict cache. Enable it with `spectra daemon start
+--assess-gatekeeper` or `spectra daemon install --assess-gatekeeper`; both
+pass it to the `daemon run` they launch, and `install` writes it into the
+LaunchAgent plist or systemd unit so service restarts keep it. To change the
+setting, stop (or reinstall) the daemon and start it again with or without the
+flag; `start` against a running daemon leaves it as it is. Background runs share
+the process-wide one-at-a-time assessor with interactive requests, so an
+interactive `--assess-gatekeeper` may wait up to 15 s behind a background
+`spctl`. Apps whose assessment times out are not cached and are retried on the
+next hourly pass. See [Security inspection](../inspection/security.md).
 
 An independent process-spawn probe runs every five seconds, including while a
 regular sample is blocked or backed off. On macOS it reads `kern.proc.all` and

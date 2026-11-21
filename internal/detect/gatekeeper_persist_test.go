@@ -2,11 +2,13 @@ package detect
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // diskVerdictStore opens the on-disk store a fresh process would, sharing
@@ -112,5 +114,43 @@ func TestRefreshGatekeeper(t *testing.T) {
 	}
 	if got := RefreshGatekeeper("/x.app", Options{OS: hostos.Linux}); got.Assessed || got.Err == "" {
 		t.Fatalf("linux refresh = %+v, want unsupported", got)
+	}
+}
+
+// blockingCodesign blocks codesign until its context ends and records why.
+type blockingCodesign struct {
+	started chan struct{}
+	err     chan error
+}
+
+func (f blockingCodesign) Run(ctx context.Context, cmd proc.Cmd) (proc.Result, error) {
+	if cmd.Name != "codesign" {
+		return proc.Result{}, errors.New("unexpected " + cmd.Name)
+	}
+	close(f.started)
+	<-ctx.Done()
+	f.err <- ctx.Err()
+	return proc.Result{}, ctx.Err()
+}
+
+func TestRefreshGatekeeperCancelKillsCodesign(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := blockingCodesign{started: make(chan struct{}), err: make(chan error, 1)}
+	done := make(chan GatekeeperRefresh, 1)
+	go func() {
+		done <- RefreshGatekeeper("/Applications/App.app", Options{OS: hostos.Darwin, Context: ctx, Runner: f, Gatekeeper: newTestAssessor(nil)})
+	}()
+	<-f.started
+	cancel()
+	select {
+	case err := <-f.err:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("codesign context ended with %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceling the refresh did not cancel codesign's context")
+	}
+	if got := <-done; got.Assessed {
+		t.Fatalf("canceled refresh assessed: %+v", got)
 	}
 }
