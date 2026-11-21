@@ -274,9 +274,13 @@ func printLibraryBreakdown(s storagestate.State) {
 		}
 	}
 	if len(s.UserLibraryReclaimable) > 0 {
-		fmt.Println("  reclaimable developer data (regenerated on demand):")
+		fmt.Println("  developer data:")
 		for _, d := range s.UserLibraryReclaimable {
-			fmt.Printf("    %10s  ~/Library/%s\n", humanSize(d.Bytes), d.Name)
+			note := "  (regenerated on demand)"
+			if d.Name == storagestate.AreaXcodeArchives {
+				note = "  (keep: release builds and dSYMs for crash symbolication)"
+			}
+			fmt.Printf("    %10s  ~/Library/%s%s\n", humanSize(d.Bytes), d.Name, note)
 		}
 	}
 }

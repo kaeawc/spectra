@@ -81,7 +81,7 @@ func (c *FootprintCache) Footprint(osKind hostos.Kind, home string, policy Footp
 	osKind = hostos.Resolve(osKind)
 	key := footprintCacheKey(osKind, home)
 	if policy == FootprintRefresh {
-		return c.wait(key, osKind, home), false
+		return c.wait(key, osKind, home, true), false
 	}
 	if fp, ok := c.lookup(key); ok {
 		age := c.now().Sub(fp.AsOf)
@@ -91,14 +91,14 @@ func (c *FootprintCache) Footprint(osKind hostos.Kind, home string, policy Footp
 		if age < c.maxStale() {
 			switch policy {
 			case FootprintServeStale:
-				c.start(key, osKind, home)
+				c.start(key, osKind, home, false)
 				return fp, true
 			case FootprintAcceptStale:
 				return fp, true
 			}
 		}
 	}
-	return c.wait(key, osKind, home), false
+	return c.wait(key, osKind, home, false), false
 }
 
 // Refresh walks now (joining a walk already in flight) and stores the
@@ -108,8 +108,8 @@ func (c *FootprintCache) Refresh(osKind hostos.Kind, home string) storagestate.F
 	return fp
 }
 
-func (c *FootprintCache) wait(key string, osKind hostos.Kind, home string) storagestate.Footprint {
-	f := c.start(key, osKind, home)
+func (c *FootprintCache) wait(key string, osKind hostos.Kind, home string, force bool) storagestate.Footprint {
+	f := c.start(key, osKind, home, force)
 	<-f.done
 	return f.fp
 }
@@ -129,11 +129,23 @@ func (c *FootprintCache) lookup(key string) (storagestate.Footprint, bool) {
 }
 
 // start returns the in-flight walk for key, launching one if none runs.
-func (c *FootprintCache) start(key string, osKind hostos.Kind, home string) *footprintFlight {
+// Unless force is set, a fresh in-memory result that another caller stored
+// after this caller's lookup is returned as an already finished flight, so
+// a racing caller never starts a second full walk.
+func (c *FootprintCache) start(key string, osKind hostos.Kind, home string, force bool) *footprintFlight {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if f, ok := c.flights[key]; ok {
 		return f
+	}
+	if !force {
+		if fp, ok := c.mem[key]; ok {
+			if age := c.now().Sub(fp.AsOf); age >= 0 && age < c.freshFor() {
+				done := make(chan struct{})
+				close(done)
+				return &footprintFlight{done: done, fp: fp}
+			}
+		}
 	}
 	if c.flights == nil {
 		c.flights = map[string]*footprintFlight{}

@@ -513,6 +513,15 @@ func TestStorageFootprintNoFireForLargeLibraryAlone(t *testing.T) {
 	}
 }
 
+func TestStorageFootprintSkipsCachesOnLinux(t *testing.T) {
+	s := baseSnap()
+	// Linux: no ~/Library, AppCachesBytes measures the XDG cache dir.
+	s.Storage = storagestate.State{UserLibraryBytes: 0, AppCachesBytes: 40 * oneGiB}
+	if findings := ruleStorageFootprint().MatchFn(s); len(findings) != 0 {
+		t.Errorf("an XDG cache must not be reported as ~/Library/Caches, got %v", findings)
+	}
+}
+
 func TestFootprintAgeWording(t *testing.T) {
 	at := time.Date(2026, 11, 21, 15, 0, 0, 0, time.UTC)
 	cases := map[time.Duration]string{

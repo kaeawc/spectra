@@ -214,3 +214,23 @@ func TestCollectStorageNoCachesIsLive(t *testing.T) {
 		t.Errorf("live collect should stamp as_of: %v", s.UserFootprintAsOf)
 	}
 }
+
+func TestFootprintCacheStartReusesFreshResultFromRacingCaller(t *testing.T) {
+	clk := clock.NewFake(footprintT0)
+	w := &countingWalk{}
+	c := &FootprintCache{Clock: clk, Collect: w.collect}
+	key := footprintCacheKey(hostos.Darwin, "/Users/user")
+	// Another caller finished a walk after this caller's lookup missed.
+	c.mem = map[string]storagestate.Footprint{key: {LibraryBytes: 42, AsOf: clk.Now()}}
+
+	f := c.start(key, hostos.Darwin, "/Users/user", false)
+	<-f.done
+	if f.fp.LibraryBytes != 42 || w.calls.Load() != 0 {
+		t.Fatalf("non-forced start walked again: fp=%+v walks=%d", f.fp, w.calls.Load())
+	}
+	f = c.start(key, hostos.Darwin, "/Users/user", true)
+	<-f.done
+	if w.calls.Load() != 1 {
+		t.Fatalf("forced start must walk, walks=%d", w.calls.Load())
+	}
+}

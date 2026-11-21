@@ -108,6 +108,12 @@ func storageOffenders(st storagestate.State) []storageOffender {
 	}
 	var out []storageOffender
 	for _, a := range storageFootprintAreas {
+		// Linux footprints have no ~/Library (UserLibraryBytes stays 0) and
+		// AppCachesBytes there measures the XDG cache dir, which the
+		// ~/Library/Caches advice would misname.
+		if a.area == "" && st.UserLibraryBytes == 0 {
+			continue
+		}
 		if b := sizes[a.area]; b >= a.threshold {
 			out = append(out, storageOffender{path: a.path, bytes: b, fix: a.fix})
 		}
