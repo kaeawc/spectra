@@ -60,7 +60,9 @@ check `result_schema` before decoding JSON.
 !!! note "Change in #657"
     Snapshots taken before #657 recorded `HardenedRuntime=false` for apps whose
     codesign flags are a multi-flag list (Chrome, for example). Diffs against
-    those snapshots show a one-time `hardened-runtime` change for such apps.
+    those snapshots show a one-time `hardened-runtime` change for those whose
+    list contains `runtime`; apps whose list has no `runtime` stay false and
+    show no change.
 
 ## Live + structural fields
 
