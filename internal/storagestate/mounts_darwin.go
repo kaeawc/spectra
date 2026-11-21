@@ -30,11 +30,32 @@ func collectMounts(run CmdRunner) ([]Mount, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Mount, 0, n)
-	for i := range raw[:n] {
-		out = append(out, convertStatfs(&raw[i], run))
+	return convertStatfsAll(raw[:n], run), nil
+}
+
+// maxDiskutilWorkers bounds concurrent `diskutil info` calls. Each call
+// costs ~100 ms and a Mac with simulators mounts dozens of APFS volumes,
+// so a serial loop dominated `spectra storage`; past ~8 workers
+// diskarbitrationd serializes and more buys nothing.
+const maxDiskutilWorkers = 8
+
+// convertStatfsAll converts every entry, running the per-mount diskutil
+// lookups concurrently while preserving getfsstat order.
+func convertStatfsAll(raw []unix.Statfs_t, run CmdRunner) []Mount {
+	out := make([]Mount, len(raw))
+	sem := make(chan struct{}, maxDiskutilWorkers)
+	var wg sync.WaitGroup
+	for i := range raw {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i] = convertStatfs(&raw[i], run)
+		}()
 	}
-	return out, nil
+	wg.Wait()
+	return out
 }
 
 func convertStatfs(raw *unix.Statfs_t, run CmdRunner) Mount {
