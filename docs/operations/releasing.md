@@ -13,12 +13,13 @@ go tool spectra-release keygen \
 The release tool version is pinned by the `tool` directive in `go.mod`.
 
 Review and commit `packaging/release/spectra-release.pub`. Create a GitHub
-environment named `release` with required reviewers and a deployment rule that
-allows only `v*` tags, then store the private key file's contents as the
+environment named `release` with a deployment rule that allows only `v*` tags
+(no required reviewers), then store the private key file's contents as the
 environment secret `SPECTRA_RELEASE_ED25519_KEY` (not a repository secret).
 Keep an offline backup of the private key. Also protect `v*` tags with a tag
-ruleset: anyone who can push a matching tag can request a signature, and the
-environment reviewers are the last check before one is produced.
+ruleset that lets only repository admins create, update, or delete them:
+pushing a matching tag signs and publishes a release with no further approval,
+so that ruleset is the gate on who can release.
 
 ## Cutting a release
 
@@ -33,7 +34,8 @@ git push origin vX.Y.Z
 The release workflow builds macOS and Linux archives without access to the
 signing key. A separate `sign` job, which runs only for tag pushes inside the
 `release` environment, creates and verifies the signed manifest, and the
-`publish` job creates the GitHub release. A `workflow_dispatch` run builds
+`publish` job creates the GitHub release. The whole run is automatic once the
+tag is pushed. A `workflow_dispatch` run builds
 unsigned archives only and uploads them as a workflow artifact.
 
 The `build` job forces cgo on for both darwin targets (Go otherwise drops
