@@ -35,6 +35,23 @@ func TestParseJPS(t *testing.T) {
 	}
 }
 
+func TestParseJPSExcludesModulePrefixedJps(t *testing.T) {
+	out := `12345 com.example.Main
+67890 jdk.jcmd/sun.tools.jps.Jps
+45678 /opt/app/sun.tools-free/app.jar
+`
+	got := parseJPS(out)
+	if _, ok := got[67890]; ok {
+		t.Errorf("jdk.jcmd/sun.tools.jps.Jps should be excluded, got %v", got)
+	}
+	if got[12345] != "com.example.Main" {
+		t.Errorf("12345: got %q", got[12345])
+	}
+	if got[45678] != "/opt/app/sun.tools-free/app.jar" {
+		t.Errorf("45678 jar path must be kept, got %q", got[45678])
+	}
+}
+
 func TestParseJPSEmpty(t *testing.T) {
 	if got := parseJPS(""); len(got) != 0 {
 		t.Errorf("expected empty map, got %v", got)
