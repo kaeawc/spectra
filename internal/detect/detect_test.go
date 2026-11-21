@@ -951,6 +951,21 @@ func TestDetectRejectsNonBundle(t *testing.T) {
 	}
 }
 
+func TestParseSigningOutputHardenedRuntime(t *testing.T) {
+	cases := map[string]bool{
+		"CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+7 location=embedded":                                    true,
+		"CodeDirectory v=20500 size=637 flags=0x12a00(kill,restrict,library-validation,runtime) hashes=9+7 location=embedded": true,
+		"CodeDirectory v=20400 size=3757 flags=0x0(none) hashes=107+7 location=embedded":                                      false,
+		"CodeDirectory v=20400 size=254 flags=0x20002(adhoc,linker-signed) hashes=5+0 location=embedded":                      false,
+		"Identifier=com.example.runtime": false,
+	}
+	for line, want := range cases {
+		if _, got := parseSigningOutput(line + "\n"); got != want {
+			t.Errorf("hardened(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
 // Fixtures are real `spctl --assess -v --type exec` stderr from macOS 26.
 func TestParseGatekeeperOutput(t *testing.T) {
 	cases := []struct {
@@ -993,9 +1008,9 @@ func (f *spctlFake) Run(_ context.Context, cmd proc.Cmd) (proc.Result, error) {
 
 func TestReadGatekeeperStatusRequestsVerdict(t *testing.T) {
 	f := &spctlFake{}
-	got := newDetector(Options{Runner: f}).readGatekeeperStatus("/Applications/Zed.app")
-	if got.status != "accepted" || got.source != "Notarized Developer ID" {
-		t.Fatalf("readGatekeeperStatus = %+v (spctl args %q), want accepted / Notarized Developer ID", got, f.args)
+	got := newTestAssessor(nil).assess(context.Background(), f, "/Applications/Zed.app", "")
+	if got.status != "accepted" || got.source != "Notarized Developer ID" || got.err != "" {
+		t.Fatalf("assess = %+v (spctl args %q), want accepted / Notarized Developer ID", got, f.args)
 	}
 }
 
@@ -1005,9 +1020,9 @@ func TestReadGatekeeperStatusRealSpctl(t *testing.T) {
 	if _, err := os.Stat(calc); err != nil {
 		t.Skipf("%s not present: %v", calc, err)
 	}
-	got := newDetector(Options{}).readGatekeeperStatus(calc)
+	got := NewGatekeeperAssessor(defaultGatekeeperTimeout, time.Hour, nil).assess(context.Background(), nil, calc, "")
 	if got.status != "accepted" || got.source != "Apple System" {
-		t.Fatalf("readGatekeeperStatus(%s) = %+v, want accepted / Apple System", calc, got)
+		t.Fatalf("assess(%s) = %+v, want accepted / Apple System", calc, got)
 	}
 }
 

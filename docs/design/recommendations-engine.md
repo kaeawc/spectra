@@ -260,7 +260,7 @@ Implemented rules:
 - `path-shadows-active-runtime`
 - `permission-mismatch`
 - `sparse-file-inflation`
-- `app-gatekeeper-rejected`
+- `app-gatekeeper-rejected` (needs a real assessment: `spectra rules --assess-gatekeeper`; the default signature inference never fires it)
 - `fd-pressure`
 - `process-memory-hog`
 - `network.proxy_configured`

@@ -16,20 +16,68 @@ Pulled from `codesign -dv <app>`:
 
 ## Hardened runtime
 
-Detected from the `flags=0x10000(runtime)` substring in
-`codesign -dv` output. Required for Developer ID notarization. Apps
+Detected from the `runtime` entry in the CodeDirectory `flags=` list of
+`codesign -dv` output (for example `flags=0x10000(runtime)` or
+`flags=0x12a00(kill,restrict,library-validation,runtime)`). Required for Developer ID notarization. Apps
 without it can't pass Gatekeeper on macOS 10.15+ and are a meaningful
 security regression.
 
 ## Gatekeeper assessment
 
-Collected with `spctl --assess -v --type exec <app>`. The `-v` is
-required: without it `spctl` prints nothing for an accepted bundle.
-Spectra records the coarse verdict as `accepted` or `rejected` and
-leaves the field empty when `spctl` is unavailable or cannot assess the
-bundle (for example a damaged signature). The `source=` line, when
-present, is recorded as `GatekeeperSource` (`Apple System`,
-`Mac App Store`, `Notarized Developer ID`, ...).
+Spectra reports Gatekeeper in two clearly separated ways.
+
+**Signature inference (default).** The `codesign -dv --verbose=4` call
+Spectra already makes (~30 ms) names the authority chain and whether a
+notarization ticket is stapled. From that alone Spectra fills
+`GatekeeperLikely` / `GatekeeperLikelySource` and sets
+`GatekeeperMethod` to `signature`:
+
+| Signature | `GatekeeperLikely` | `GatekeeperLikelySource` |
+|---|---|---|
+| `Developer ID Application:` → `Developer ID Certification Authority` → `Apple Root CA`, ticket stapled | `accepted` | `Notarized Developer ID` |
+| `Apple Mac OS Application Signing` → `Apple Worldwide Developer Relations Certification Authority` → `Apple Root CA` | `accepted` | `Mac App Store` |
+| `Software Signing` / `macOS Software Signing` → `Apple Code Signing Certification Authority` → `Apple Root CA` | `accepted` | `Apple System` |
+| Developer ID without a stapled ticket, ad-hoc, unsigned, any other chain | empty | empty |
+
+A chain that predicts acceptance is then confirmed with a plain
+`codesign --verify <app>` (no `--deep`, no `--strict`; a Finder-metadata
+detritus complaint alone still counts as intact). It hashes every sealed
+resource, so it costs ~0.05 s for Chrome and ~8 s for Xcode; the outcome
+is cached on disk (the `seal` cache kind, 30 days) keyed by bundle path
+and CDHash, so each app version pays once. A broken seal leaves
+`GatekeeperLikely` empty and sets `GatekeeperLikelyReason` to
+`resource seal invalid` (or `signature invalid: <reason>`), shown as
+"likely not accepted: resource seal invalid (from signature; not
+assessed)". A check that times out (30 s) or is canceled is not cached
+and reads `seal not checked: <why>`, shown as "unknown".
+
+The inference never predicts `rejected` and never populates
+`GatekeeperStatus`, so it cannot fire `app-gatekeeper-rejected`, which
+needs `--assess-gatekeeper`. It does not check revocation or nested code;
+it is a prediction, shown as "likely accepted (…, from signature; not
+assessed)".
+
+**Real assessment (opt in).** `--assess-gatekeeper` on `spectra inspect`,
+`spectra snapshot`, and `spectra rules` (and `assess_gatekeeper` on the
+MCP `inspect_app` tool) runs `spctl --assess -v --type exec <app>`. The
+`-v` is required: without it `spctl` prints nothing for an accepted
+bundle. It is opt in because syspolicyd serializes assessments and can
+spend minutes on per-nested-binary notarization lookups (Chrome, Xcode),
+so Spectra runs one assessment at a time per process, under a 15 s
+timeout (a caller canceled while queued or running gets
+`GatekeeperError` `canceled`). The coarse verdict lands in `GatekeeperStatus` (`accepted` or
+`rejected`) with `GatekeeperMethod` `spctl`; the `source=` line, when
+present, is `GatekeeperSource`. A timeout or an unassessable bundle (for
+example a damaged signature) leaves `GatekeeperStatus` empty and records
+why in `GatekeeperError`.
+
+Real verdicts are cached in-process for 24 h keyed by bundle path and the
+main executable's `CDHash`, so a long-running daemon or MCP server does not
+re-ask syspolicyd. The on-disk detect cache never stores a spctl
+verdict or a timeout. Its key is content-only, so a cache hit re-reads the
+signature for the requested path (one `codesign -dv`) before predicting,
+and is re-assessed (through the in-process cache) whenever an assessment
+is requested.
 
 This is separate from code signing metadata. A bundle can expose a Team
 ID and entitlements but still be rejected by Gatekeeper because it is
@@ -138,8 +186,11 @@ until there is a stable declaration key to compare against.
 ## Implementation reference
 
 `internal/detect/detect.go`:
-- `readSigning(appPath)` — team ID + hardened runtime
-- `readGatekeeperStatus(appPath)` — Gatekeeper accepted / rejected
+- `readSigning(appPath)` — team ID, hardened runtime, authority chain,
+  stapled ticket, CDHash
+- `internal/detect/gatekeeper.go` — `inferGatekeeper` (signature
+  prediction) and `GatekeeperAssessor` (bounded, serialized, CDHash-cached
+  `spctl --assess`)
 - `readEntitlements(appPath)` — declared entitlements
 - `readPrivacyDescriptions(appPath)` — `NS*UsageDescription`
 - `scanGrantedPermissions(bundleID)` — TCC reads

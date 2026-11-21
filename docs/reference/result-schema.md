@@ -48,8 +48,14 @@ check `result_schema` before decoding JSON.
 | `Entitlements` | []string | Curated boolean entitlements set true |
 | `PrivacyDescriptions` | map[string]string | `NS*UsageDescription` keys + values |
 | `GrantedPermissions` | []string | TCC.db `auth_value >= 2` services |
-| `GatekeeperStatus` | string | `spctl --assess -v --type exec`: `accepted`, `rejected`, or empty when unavailable |
+| `GatekeeperStatus` | string | Real `spctl --assess -v --type exec` verdict: `accepted`, `rejected`, or empty when not assessed (the default; opt in with `--assess-gatekeeper`), unavailable, or timed out |
 | `GatekeeperSource` | string | `source=` line from the same assessment (e.g. `Apple System`, `Mac App Store`, `Notarized Developer ID`); empty when spctl reports none |
+| `GatekeeperLikely` | string | Verdict predicted from the `codesign -dv --verbose=4` authority chain and stapled ticket, confirmed by a cached `codesign --verify` seal check: `accepted` or empty, never `rejected`; omitted when empty. Not an assessment |
+| `GatekeeperLikelySource` | string | Policy source the signature implies (`Notarized Developer ID`, `Mac App Store`, `Apple System`); omitted when empty |
+| `GatekeeperLikelyReason` | string | Why a chain that would be likely accepted is not: `resource seal invalid`, `signature invalid: <reason>`, or `seal not checked: <why>` (unknown, not negative); omitted when empty |
+| `GatekeeperMethod` | string | `spctl` when `GatekeeperStatus` is a real verdict, `signature` when only `GatekeeperLikely` / `GatekeeperLikelyReason` is known; omitted when neither |
+| `GatekeeperError` | string | Why a requested assessment gave no verdict: `timeout`, `canceled`, `spctl unavailable`, or `no verdict: <reason>`; omitted when empty |
+| `CDHash` | string | Main executable's code-directory hash from `codesign`; with the bundle path, keys the Gatekeeper verdict and seal caches; omitted when unsigned |
 
 ## Live + structural fields
 

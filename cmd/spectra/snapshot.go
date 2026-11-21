@@ -45,6 +45,7 @@ func runSnapshot(args []string) int {
 	fs.SetOutput(os.Stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	withNetwork := fs.Bool("network", false, "Extract embedded URL hosts (slower; scans app.asar)")
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "Run the real spctl Gatekeeper assessment (slow; serialized, 15s timeout per app). Default infers it from the code signature")
 	skipApps := fs.Bool("no-apps", false, "Skip the apps inventory; capture host info only")
 	noStore := fs.Bool("no-store", false, "Do not persist the snapshot to the local database")
 	baseline := fs.Bool("baseline", false, "Save as a baseline (immutable; never auto-pruned)")
@@ -61,7 +62,7 @@ func runSnapshot(args []string) int {
 
 	opts := snapshot.Options{
 		SpectraVersion: version,
-		DetectOpts:     detect.Options{ScanNetwork: *withNetwork},
+		DetectOpts:     detect.Options{ScanNetwork: *withNetwork, AssessGatekeeper: *assessGatekeeper, SealCache: sealCache()},
 		SkipApps:       *skipApps,
 	}
 	snap := snapshot.Build(context.Background(), opts)

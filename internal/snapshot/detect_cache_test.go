@@ -1,10 +1,12 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
@@ -166,5 +168,71 @@ func TestDetectWithCacheUsesAsyncWriter(t *testing.T) {
 	}
 	if writer.Queued.Load() == 0 {
 		t.Fatal("async writer was not used")
+	}
+}
+
+// The key is content-only, so an identical copy hits the original's entry;
+// the hit must describe the bundle that was asked about.
+func TestDetectWithCacheHitRefreshesPathAndSignature(t *testing.T) {
+	dir := t.TempDir()
+	app := makeTestBundle(t, dir, "Copy", "com.copy.app", "Copy")
+	st := cache.NewShardedStore(filepath.Join(dir, "cache", "v1"), "detect")
+	stale := detect.Result{Path: "/Applications/Original.app", BundleID: "com.copy.app", CDHash: "stale", GatekeeperLikely: "accepted", GatekeeperMethod: detect.GatekeeperMethodSignature}
+	blob, _ := json.Marshal(stale)
+	if err := st.Put(detectCacheKey(app), blob); err != nil {
+		t.Fatal(err)
+	}
+	opts := hermeticDetectOpts()
+	opts.Runner = proc.NewFake().On(proc.MatchPrefix("codesign", "-dv"), proc.Response{Result: proc.Result{
+		Stderr: []byte(app + ": code object is not signed at all\n"),
+	}})
+	r, err := detectWithCache(app, opts, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path != app || r.CDHash != "" || r.GatekeeperLikely != "" || r.GatekeeperMethod != "" {
+		t.Fatalf("hit = path %q cdhash %q likely %q method %q, want the asked-about unsigned copy", r.Path, r.CDHash, r.GatekeeperLikely, r.GatekeeperMethod)
+	}
+}
+
+func TestDetectWithCacheNeverPersistsSpctlTimeout(t *testing.T) {
+	dir := t.TempDir()
+	app := makeTestBundle(t, dir, "SlowApp", "com.slow.app", "SlowApp")
+	st := cache.NewShardedStore(filepath.Join(dir, "cache", "v1"), "detect")
+
+	opts := hermeticDetectOpts()
+	opts.Runner = proc.NewFake().On(proc.MatchPrefix("spctl"), proc.Response{Err: context.DeadlineExceeded})
+	opts.AssessGatekeeper = true
+	opts.Gatekeeper = detect.NewGatekeeperAssessor(time.Second, time.Hour, nil)
+
+	r, err := detectWithCache(app, opts, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.GatekeeperError != detect.GatekeeperErrorTimeout || r.GatekeeperStatus != "" {
+		t.Fatalf("live result = status %q err %q, want timeout", r.GatekeeperStatus, r.GatekeeperError)
+	}
+	blob, ok, _ := st.Get(detectCacheKey(app))
+	if !ok {
+		t.Fatal("result was not stored")
+	}
+	var stored detect.Result
+	if err := json.Unmarshal(blob, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.GatekeeperError != "" || stored.GatekeeperStatus != "" {
+		t.Fatalf("persisted spctl outcome: status %q err %q", stored.GatekeeperStatus, stored.GatekeeperError)
+	}
+
+	// A later assessing call re-runs spctl rather than replaying the miss.
+	opts.Runner = proc.NewFake().On(proc.MatchPrefix("spctl"), proc.Response{Result: proc.Result{
+		Stderr: []byte(app + ": accepted\nsource=Notarized Developer ID\n"),
+	}})
+	r, err = detectWithCache(app, opts, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.GatekeeperStatus != "accepted" || r.GatekeeperMethod != detect.GatekeeperMethodSpctl {
+		t.Fatalf("cache hit = status %q method %q, want accepted via spctl", r.GatekeeperStatus, r.GatekeeperMethod)
 	}
 }

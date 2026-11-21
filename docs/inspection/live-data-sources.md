@@ -151,9 +151,10 @@ timeouts, so inspection cannot write or stall the target server — see
 
 | Source | Output | Privilege | Cost | Used by |
 |---|---|---|---|---|
-| `codesign -dv <app>` | signing identity + flags | user | ~100ms | `TeamID`, `HardenedRuntime` |
+| `codesign -dv --verbose=4 <app>` | signing identity, flags, authority chain, stapled ticket, CDHash | user | ~30ms | `TeamID`, `HardenedRuntime`, `CDHash`, `GatekeeperLikely`, `GatekeeperLikelySource` |
 | `codesign -d --entitlements :- <app>` | entitlements XML | user | ~100ms | `Entitlements` |
-| `spctl --assess -v --type exec <app>` | Gatekeeper status | user | ~100ms | `GatekeeperStatus`, `GatekeeperSource` |
+| `codesign --verify <app>` (only when the chain predicts acceptance) | resource seal intact | user | 0.05 s (Chrome) to ~8 s (Xcode); cached on disk per path+CDHash, 30 s cap | `GatekeeperLikely`, `GatekeeperLikelyReason` |
+| `spctl --assess -v --type exec <app>` (only with `--assess-gatekeeper`) | Gatekeeper verdict | user | 0.5 s to minutes; capped at 15 s, serialized | `GatekeeperStatus`, `GatekeeperSource`, `GatekeeperError` |
 
 ## Permissions
 

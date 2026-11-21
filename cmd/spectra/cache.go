@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/detect"
 )
 
 // cacheRegistry is the package-level registry populated at init time.
@@ -28,6 +29,15 @@ func initCacheStores() {
 		return
 	}
 	cacheStores = cache.NewStores(root, cacheRegistry)
+}
+
+// sealCache is the on-disk store behind detect's resource-seal check, or
+// nil when the cache root is unavailable.
+func sealCache() detect.SealCache {
+	if cacheStores == nil {
+		return nil
+	}
+	return cache.NewTTLStore(cacheStores.Seal, nil)
 }
 
 func runCache(args []string) int {

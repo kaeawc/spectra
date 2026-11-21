@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
@@ -222,11 +224,12 @@ func inspectAppToolDef() ToolDefinition {
 		Name:        "inspect_app",
 		Description: "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
 		InputSchema: objectSchema(map[string]interface{}{
-			"paths":       arrayStringProp(".app paths. Optional when scan_all=true."),
-			"scan_all":    boolProp("Inspect every .app under /Applications instead of listing paths."),
-			"network":     boolProp("Scan app URLs."),
-			"deep":        boolProp("Join live process, open-FD/listening-port, and connection state for each app."),
-			"include_raw": boolProp("Return raw data."),
+			"paths":             arrayStringProp(".app paths. Optional when scan_all=true."),
+			"scan_all":          boolProp("Inspect every .app under /Applications instead of listing paths."),
+			"network":           boolProp("Scan app URLs."),
+			"deep":              boolProp("Join live process, open-FD/listening-port, and connection state for each app."),
+			"assess_gatekeeper": boolProp("Run the real spctl Gatekeeper assessment (slow, 15s cap per app). Default infers it from the signature."),
+			"include_raw":       boolProp("Return raw data."),
 		}, nil),
 	}
 }
@@ -433,7 +436,7 @@ func (s *Server) appendTriageFindings(ctx context.Context, p triageParams, hasTa
 
 func (s *Server) collectTriageApp(ctx context.Context, p triageParams, evidence, next []string, rawOut map[string]interface{}) ([]string, []string) {
 	progressFrom(ctx).step(ctx, "inspecting "+p.AppPath)
-	app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(p.Network))
+	app, err := s.collect.Apps.InspectApp(p.AppPath, s.detectOptions(ctx, p.Network))
 	if err != nil {
 		evidence = append(evidence, fmt.Sprintf("app inspection failed: %v", err))
 	} else {
@@ -479,7 +482,7 @@ func (s *Server) collectTriageBundle(ctx context.Context, p triageParams, eviden
 	progressFrom(ctx).step(ctx, "building snapshot for "+p.BundleID)
 	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{
 		SpectraVersion: s.Version,
-		DetectOpts:     s.detectOptions(p.Network),
+		DetectOpts:     s.detectOptions(ctx, p.Network),
 		// Not persisted, so an aging footprint is fine here.
 		FootprintPolicy: snapshot.FootprintServeStale,
 	})
@@ -595,10 +598,13 @@ func (s *Server) toolInspectApp(ctx context.Context, raw json.RawMessage) ToolRe
 		Network    bool     `json:"network"`
 		Deep       bool     `json:"deep"`
 		IncludeRaw bool     `json:"include_raw"`
+		AssessGK   bool     `json:"assess_gatekeeper"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
 	}
+	opts := s.detectOptions(ctx, p.Network)
+	opts.AssessGatekeeper = p.AssessGK
 	if p.ScanAll {
 		p.Paths = append(p.Paths, scanAppDir("/Applications")...)
 		p.Paths = append(p.Paths, scanAppDir("/Applications/Utilities")...)
@@ -612,7 +618,10 @@ func (s *Server) toolInspectApp(ctx context.Context, raw json.RawMessage) ToolRe
 	results := make([]inspectResult, 0, len(p.Paths))
 	evidence := []string{}
 	for _, path := range p.Paths {
-		r, err := s.collect.Apps.InspectApp(path, s.detectOptions(p.Network))
+		if err := ctx.Err(); err != nil {
+			return toolError(fmt.Sprintf("inspect_app canceled after %d of %d app(s): %v", len(results), len(p.Paths), err))
+		}
+		r, err := s.collect.Apps.InspectApp(path, opts)
 		item := inspectResult{Path: path}
 		if err != nil {
 			item.Error = err.Error()
@@ -681,7 +690,7 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 	progressFrom(ctx).step(ctx, "building snapshot")
 	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{
 		SpectraVersion: s.Version,
-		DetectOpts:     s.detectOptions(p.Network),
+		DetectOpts:     s.detectOptions(ctx, p.Network),
 		SkipApps:       p.SkipApps,
 	})
 	if p.Operation == "baseline" {
@@ -1565,6 +1574,14 @@ type deepSecuritySummary struct {
 	Entitlements       []string `json:"entitlements,omitempty"`
 	GrantedPermissions []string `json:"granted_permissions,omitempty"`
 	GatekeeperStatus   string   `json:"gatekeeper_status,omitempty"`
+	GatekeeperSource   string   `json:"gatekeeper_source,omitempty"`
+	// GatekeeperLikely is a signature-based prediction, never an assessed
+	// verdict; gatekeeper_method says which one is present.
+	GatekeeperLikely       string `json:"gatekeeper_likely,omitempty"`
+	GatekeeperLikelySource string `json:"gatekeeper_likely_source,omitempty"`
+	GatekeeperLikelyReason string `json:"gatekeeper_likely_reason,omitempty"`
+	GatekeeperMethod       string `json:"gatekeeper_method,omitempty"`
+	GatekeeperError        string `json:"gatekeeper_error,omitempty"`
 }
 
 func (s *Server) deepInspectApp(ctx context.Context, appPath string, app detect.Result) deepInspectResult {
@@ -1592,12 +1609,18 @@ func (s *Server) deepInspectApp(ctx context.Context, appPath string, app detect.
 		ProcessTotals:    totalProcesses(appProcs),
 		ConnectionsByPID: groupConnectionsByPID(attributed),
 		Security: deepSecuritySummary{
-			TeamID:             app.TeamID,
-			HardenedRuntime:    app.HardenedRuntime,
-			Sandboxed:          app.Sandboxed,
-			Entitlements:       append([]string{}, app.Entitlements...),
-			GrantedPermissions: append([]string{}, app.GrantedPermissions...),
-			GatekeeperStatus:   app.GatekeeperStatus,
+			TeamID:                 app.TeamID,
+			HardenedRuntime:        app.HardenedRuntime,
+			Sandboxed:              app.Sandboxed,
+			Entitlements:           append([]string{}, app.Entitlements...),
+			GrantedPermissions:     append([]string{}, app.GrantedPermissions...),
+			GatekeeperStatus:       app.GatekeeperStatus,
+			GatekeeperSource:       app.GatekeeperSource,
+			GatekeeperLikely:       app.GatekeeperLikely,
+			GatekeeperLikelySource: app.GatekeeperLikelySource,
+			GatekeeperLikelyReason: app.GatekeeperLikelyReason,
+			GatekeeperMethod:       app.GatekeeperMethod,
+			GatekeeperError:        app.GatekeeperError,
 		},
 	}
 	if len(appProcs) == 0 {
@@ -1665,9 +1688,19 @@ func groupConnectionsByPID(conns []netstate.AttributedConnection) map[int][]nets
 	return out
 }
 
-func (s *Server) detectOptions(scanNetwork bool) detect.Options {
-	return detect.Options{ScanNetwork: scanNetwork, Now: s.collect.Clock.Now}
+func (s *Server) detectOptions(ctx context.Context, scanNetwork bool) detect.Options {
+	return detect.Options{ScanNetwork: scanNetwork, Now: s.collect.Clock.Now, Context: ctx, SealCache: sealCache()}
 }
+
+// sealCache is the on-disk store behind detect's resource-seal check, shared
+// with the CLI, or nil when the cache root is unavailable.
+var sealCache = sync.OnceValue(func() detect.SealCache {
+	root, err := cache.DefaultRoot()
+	if err != nil {
+		return nil
+	}
+	return cache.NewTTLStore(cache.NewShardedStore(root, cache.KindSeal).WithMaxAge(cache.SealMaxAge), nil)
+})
 
 func (s *Server) now() time.Time {
 	return s.collect.Clock.Now().UTC()
