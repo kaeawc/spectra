@@ -36,7 +36,9 @@ func TestCollectHostMinimallyPopulated(t *testing.T) {
 
 	// Best-effort fields: present on macOS hosts but skipped if the
 	// underlying tool returned an error (e.g. sandboxed test runner).
-	if h.OSVersion != "" && !strings.Contains(h.OSVersion, ".") {
+	// Only macOS versions always contain a dot; Linux VERSION_ID is often a
+	// bare major (Debian "12", Fedora "41").
+	if hostos.Current() == hostos.Darwin && h.OSVersion != "" && !strings.Contains(h.OSVersion, ".") {
 		t.Errorf("OSVersion %q does not look like a version string", h.OSVersion)
 	}
 	if h.CPUCores < 0 {
