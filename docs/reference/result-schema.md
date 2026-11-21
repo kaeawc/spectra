@@ -43,7 +43,7 @@ check `result_schema` before decoding JSON.
 
 | Field | Type | Source |
 |---|---|---|
-| `HardenedRuntime` | bool | `flags=0x10000(runtime)` from codesign |
+| `HardenedRuntime` | bool | `codesign -dv --verbose=4` reports a `flags=0x...(...)` line whose comma-separated flag list contains `runtime`, so single-flag `(runtime)` and multi-flag lists such as `(kill,restrict,library-validation,runtime)` both match; false when the list has no `runtime` entry or the app is unsigned |
 | `Sandboxed` | bool | `com.apple.security.app-sandbox` true |
 | `Entitlements` | []string | Curated boolean entitlements set true |
 | `PrivacyDescriptions` | map[string]string | `NS*UsageDescription` keys + values |
@@ -56,6 +56,11 @@ check `result_schema` before decoding JSON.
 | `GatekeeperMethod` | string | `spctl` when `GatekeeperStatus` is a real verdict, `signature` when only `GatekeeperLikely` / `GatekeeperLikelyReason` is known; omitted when neither |
 | `GatekeeperError` | string | Why a requested assessment gave no verdict: `timeout`, `canceled`, `spctl unavailable`, or `no verdict: <reason>`; omitted when empty |
 | `CDHash` | string | Main executable's code-directory hash from `codesign`; with the bundle path, keys the Gatekeeper verdict and seal caches; omitted when unsigned |
+
+!!! note "Change in #657"
+    Snapshots taken before #657 recorded `HardenedRuntime=false` for apps whose
+    codesign flags are a multi-flag list (Chrome, for example). Diffs against
+    those snapshots show a one-time `hardened-runtime` change for such apps.
 
 ## Live + structural fields
 
