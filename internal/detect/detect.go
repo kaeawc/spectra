@@ -835,11 +835,31 @@ func parseSigningOutput(out string) (teamID string, hardened bool) {
 				teamID = v
 			}
 		}
-		if strings.Contains(line, "flags=") && strings.Contains(line, "(runtime)") {
+		if hasCodeDirectoryFlag(line, "runtime") {
 			hardened = true
 		}
 	}
 	return teamID, hardened
+}
+
+// hasCodeDirectoryFlag reports whether a `flags=0x...(a,b,c)` list on line
+// names flag. Chrome's flags read "(kill,restrict,library-validation,runtime)",
+// so matching the literal "(runtime)" misses multi-flag lists.
+func hasCodeDirectoryFlag(line, flag string) bool {
+	_, rest, ok := strings.Cut(line, "flags=")
+	if !ok {
+		return false
+	}
+	open, closeIdx := strings.IndexByte(rest, '('), strings.IndexByte(rest, ')')
+	if open < 0 || closeIdx < open {
+		return false
+	}
+	for _, f := range strings.Split(rest[open+1:closeIdx], ",") {
+		if f == flag {
+			return true
+		}
+	}
+	return false
 }
 
 // readGatekeeperStatus runs `spctl --assess -v --type exec <appPath>`.

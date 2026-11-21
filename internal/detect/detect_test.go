@@ -1127,3 +1127,18 @@ func TestLstartLayoutParse(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSigningOutputHardenedRuntime(t *testing.T) {
+	cases := map[string]bool{
+		"CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+7 location=embedded":                                    true,
+		"CodeDirectory v=20500 size=637 flags=0x12a00(kill,restrict,library-validation,runtime) hashes=9+7 location=embedded": true,
+		"CodeDirectory v=20400 size=3757 flags=0x0(none) hashes=107+7 location=embedded":                                      false,
+		"CodeDirectory v=20400 size=254 flags=0x20002(adhoc,linker-signed) hashes=5+0 location=embedded":                      false,
+		"Identifier=com.example.runtime": false,
+	}
+	for line, want := range cases {
+		if _, got := parseSigningOutput(line + "\n"); got != want {
+			t.Errorf("hardened(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
