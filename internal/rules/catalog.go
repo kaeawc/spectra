@@ -566,27 +566,6 @@ func ruleJavaHomeMismatch() Rule {
 	}
 }
 
-// ruleStorageFootprint fires when ~/Library exceeds 5 GB (potential bloat).
-func ruleStorageFootprint() Rule {
-	const threshold = 5 * 1024 * 1024 * 1024 // 5 GiB
-	return Rule{
-		ID:       "library-storage-footprint",
-		Severity: SeverityInfo,
-		MatchFn: func(s snapshot.Snapshot) []Finding {
-			if s.Storage.UserLibraryBytes < threshold {
-				return nil
-			}
-			gb := float64(s.Storage.UserLibraryBytes) / (1024 * 1024 * 1024)
-			return []Finding{{
-				RuleID:   "library-storage-footprint",
-				Severity: SeverityInfo,
-				Message:  fmt.Sprintf("~/Library is %.1f GB — above the 5 GB alert threshold.", gb),
-				Fix:      "Run `spectra snapshot` and check LargestApps to identify top consumers.",
-			}}
-		},
-	}
-}
-
 // ruleAppNoHardenedRuntime fires for Developer ID-signed apps that lack the
 // hardened runtime entitlement. Hardened runtime is required for notarization
 // and provides exploit-mitigation controls. MAS and unsigned apps are excluded.

@@ -468,23 +468,69 @@ func TestJavaHomeMissingEnv(t *testing.T) {
 
 // --- library storage footprint ---
 
-func TestStorageFootprintFires(t *testing.T) {
+func TestStorageFootprintFiresOnReclaimableAreas(t *testing.T) {
 	s := baseSnap()
-	s.Storage = storagestate.State{UserLibraryBytes: 6 * 1024 * 1024 * 1024} // 6 GiB
+	s.TakenAt = time.Date(2026, 11, 21, 15, 0, 0, 0, time.UTC)
+	s.Storage = storagestate.State{
+		UserLibraryBytes:  500 * oneGiB,
+		AppCachesBytes:    12 * oneGiB,
+		UserFootprintAsOf: s.TakenAt.Add(-3 * time.Hour),
+		UserLibraryReclaimable: []storagestate.DirSize{
+			{Name: storagestate.AreaDerivedData, Bytes: 40 * oneGiB},
+			{Name: storagestate.AreaCoreSimulator, Bytes: 15 * oneGiB}, // under 20 GiB
+			{Name: storagestate.AreaXcodeArchives, Bytes: 90 * oneGiB}, // not reclaimable
+		},
+	}
 	findings := ruleStorageFootprint().MatchFn(s)
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 storage finding, got %d", len(findings))
 	}
-	if findings[0].Severity != SeverityInfo {
-		t.Errorf("severity = %q, want info", findings[0].Severity)
+	f := findings[0]
+	if f.Severity != SeverityLow {
+		t.Errorf("severity = %q, want low", f.Severity)
+	}
+	for _, want := range []string{"52.0 GiB", "DerivedData 40.0 GiB", "~/Library/Caches 12.0 GiB", "Measured 3h ago"} {
+		if !strings.Contains(f.Message, want) {
+			t.Errorf("message %q missing %q", f.Message, want)
+		}
+	}
+	if strings.Contains(f.Message, "CoreSimulator") || strings.Contains(f.Message, "Archives") {
+		t.Errorf("message names an area under threshold: %q", f.Message)
+	}
+	if strings.Index(f.Message, "DerivedData") > strings.Index(f.Message, "Caches") {
+		t.Errorf("offenders should be largest first: %q", f.Message)
+	}
+	if !strings.Contains(f.Fix, "spectra storage cache-triage") || !strings.Contains(f.Fix, "DerivedData") {
+		t.Errorf("fix = %q", f.Fix)
 	}
 }
 
-func TestStorageFootprintNoFire(t *testing.T) {
+func TestStorageFootprintNoFireForLargeLibraryAlone(t *testing.T) {
 	s := baseSnap()
-	s.Storage = storagestate.State{UserLibraryBytes: 2 * 1024 * 1024 * 1024} // 2 GiB
+	s.Storage = storagestate.State{UserLibraryBytes: 500 * oneGiB, AppCachesBytes: 9 * oneGiB}
 	if findings := ruleStorageFootprint().MatchFn(s); len(findings) != 0 {
-		t.Errorf("expected no finding for 2 GiB ~/Library, got %v", findings)
+		t.Errorf("a big ~/Library without big reclaimable areas must not fire, got %v", findings)
+	}
+}
+
+func TestFootprintAgeWording(t *testing.T) {
+	at := time.Date(2026, 11, 21, 15, 0, 0, 0, time.UTC)
+	cases := map[time.Duration]string{
+		10 * time.Second: "Measured just now",
+		25 * time.Minute: "Measured 25m ago",
+		5 * time.Hour:    "Measured 5h ago",
+		72 * time.Hour:   "Measured 3d ago",
+	}
+	for age, want := range cases {
+		s := baseSnap()
+		s.TakenAt = at
+		s.Storage.UserFootprintAsOf = at.Add(-age)
+		if got := footprintAge(s); got != want {
+			t.Errorf("age %v: %q, want %q", age, got, want)
+		}
+	}
+	if got := footprintAge(baseSnap()); got != "" {
+		t.Errorf("unknown age should be empty, got %q", got)
 	}
 }
 
@@ -1018,7 +1064,7 @@ func TestEvaluateSortOrder(t *testing.T) {
 		{PID: 1, MainClass: "big", VMArgs: "-Xmx12g"},   // high
 		{PID: 2, MainClass: "old", JDKVersion: "9.0.4"}, // medium
 	}
-	s.Storage = storagestate.State{UserLibraryBytes: 10 * 1024 * 1024 * 1024} // info
+	s.Storage = storagestate.State{AppCachesBytes: 12 * oneGiB} // low
 	findings := Evaluate(s, V1Catalog())
 	if len(findings) < 3 {
 		t.Fatalf("expected at least 3 findings, got %d", len(findings))

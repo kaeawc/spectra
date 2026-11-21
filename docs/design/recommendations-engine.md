@@ -243,7 +243,13 @@ Implemented rules:
   `gradle --stop`)
 - `jdk-major-version-drift`
 - `java-home-mismatch`
-- `library-storage-footprint`
+- `library-storage-footprint` (low: regenerable `~/Library` areas over
+  threshold — Xcode DerivedData ≥ 10 GiB, CoreSimulator ≥ 20 GiB, iOS
+  DeviceSupport ≥ 10 GiB, `~/Library/Caches` ≥ 10 GiB. Names each offender
+  with its size and when the footprint was measured, since `spectra rules`
+  accepts a cached footprint up to 24 h old; fix points to
+  `spectra storage cache-triage` and the per-area safe cleanup. A large
+  `~/Library` alone no longer fires)
 - `app-no-hardened-runtime`
 - `app-unsigned`
 - `app-debuggable-posture`
