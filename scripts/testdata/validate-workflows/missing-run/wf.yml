@@ -1,0 +1,10 @@
+name: fixture
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      # scripts/x.sh is only a comment
+      - run: |
+          echo start
+          ./scripts/definitely-missing.sh
