@@ -1,6 +1,8 @@
 package storagestate
 
 import (
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -298,5 +300,79 @@ func TestCollectSkipUserFootprint(t *testing.T) {
 	})
 	if s.UserLibraryBytes != 0 || !s.UserFootprintAsOf.IsZero() {
 		t.Errorf("footprint collected despite SkipUserFootprint: %+v", s)
+	}
+}
+
+// buildEquivalenceTree lays out files of various sizes, a sparse file, a
+// symlink to a large file, a hardlink pair, nested and wide directories, and
+// an unreadable directory.
+func buildEquivalenceTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for i, n := range []int{0, 1, 511, 512, 4095, 4096, 4097, 100_000, 1 << 20} {
+		writeSized(t, filepath.Join(root, "sizes", fmt.Sprintf("f%d.bin", i)), n)
+	}
+	sparse := filepath.Join(root, "sparse", "disk.img")
+	writeSized(t, sparse, 0)
+	if err := os.Truncate(sparse, 1<<30); err != nil {
+		t.Fatal(err)
+	}
+	big := filepath.Join(root, "big", "large.bin")
+	writeSized(t, big, 3<<20)
+	if err := os.MkdirAll(filepath.Join(root, "links"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(big, filepath.Join(root, "links", "to-large")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "big"), filepath.Join(root, "links", "to-dir")); err != nil {
+		t.Fatal(err)
+	}
+	orig := filepath.Join(root, "hard", "a", "orig.bin")
+	writeSized(t, orig, 200_000)
+	if err := os.MkdirAll(filepath.Join(root, "hard", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(orig, filepath.Join(root, "hard", "b", "link.bin")); err != nil {
+		t.Fatal(err)
+	}
+	writeSized(t, filepath.Join(root, "n1", "n2", "n3", "n4", "deep.bin"), 12_345)
+	// Wide enough to need several getattrlistbulk calls per directory.
+	for i := range 3000 {
+		writeSized(t, filepath.Join(root, "wide", fmt.Sprintf("entry-with-a-longish-name-%05d.dat", i)), i%7*1000)
+	}
+	writeSized(t, filepath.Join(root, "top.bin"), 9_000)
+	if os.Geteuid() != 0 {
+		locked := filepath.Join(root, "locked")
+		writeSized(t, filepath.Join(locked, "hidden.bin"), 50_000)
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	}
+	return root
+}
+
+// TestWalkTreeBulkMatchesLstat checks the platform bulk directory reader
+// against the one-lstat-per-entry path on the same tree.
+func TestWalkTreeBulkMatchesLstat(t *testing.T) {
+	root := buildEquivalenceTree(t)
+	tracked := []string{filepath.Join(root, "hard", "b"), filepath.Join(root, "links"), filepath.Join(root, "wide")}
+	slow := walkTreeWith(true, root, tracked...)
+	fast := walkTreeWith(false, root, tracked...)
+	if fast.Total != slow.Total {
+		t.Errorf("Total bulk = %d, lstat = %d", fast.Total, slow.Total)
+	}
+	if !maps.Equal(fast.Top, slow.Top) {
+		t.Errorf("Top bulk = %v\nlstat = %v", fast.Top, slow.Top)
+	}
+	if fmt.Sprint(fast.Tracked) != fmt.Sprint(slow.Tracked) {
+		t.Errorf("Tracked bulk = %v, lstat = %v", fast.Tracked, slow.Tracked)
+	}
+	if fast.SkippedDirs != slow.SkippedDirs {
+		t.Errorf("SkippedDirs bulk = %d, lstat = %d", fast.SkippedDirs, slow.SkippedDirs)
+	}
+	if slow.Total == 0 || slow.Top["big"] == 0 || slow.Top["hard"] == 0 {
+		t.Errorf("lstat walk looks empty: %+v", slow)
 	}
 }

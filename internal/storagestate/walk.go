@@ -57,6 +57,9 @@ type seenKey struct {
 type treeWalker struct {
 	root    string
 	tracked []string
+	// lstatOnly disables the platform bulk directory reader, forcing one
+	// lstat per entry. Tests use it to compare the two paths.
+	lstatOnly bool
 
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -74,6 +77,12 @@ type treeWalker struct {
 // tracked path that lies under root, all from one traversal. A missing root
 // yields a zero result.
 func walkTree(root string, tracked ...string) treeUsage {
+	return walkTreeWith(false, root, tracked...)
+}
+
+// walkTreeWith is walkTree with the bulk directory reader optionally
+// disabled.
+func walkTreeWith(lstatOnly bool, root string, tracked ...string) treeUsage {
 	root = filepath.Clean(root)
 	tracked = slices.Clone(tracked)
 	for i := range tracked {
@@ -95,7 +104,7 @@ func walkTree(root string, tracked ...string) treeUsage {
 		return res
 	}
 
-	w := &treeWalker{root: root, tracked: tracked, seen: map[seenKey]struct{}{}, res: res}
+	w := &treeWalker{root: root, tracked: tracked, lstatOnly: lstatOnly, seen: map[seenKey]struct{}{}, res: res}
 	w.cond = sync.NewCond(&w.mu)
 	w.queue = []walkDir{{path: root, tracked: w.trackedAt(root, nil)}}
 	w.pending = 1
@@ -179,16 +188,36 @@ func (w *treeWalker) trackedAt(path string, inherited []int) []int {
 }
 
 // readDir sizes the files directly inside d and queues its subdirectories.
+// It prefers the platform bulk reader and falls back to one lstat per entry
+// when that reader is unavailable for the directory.
 func (w *treeWalker) readDir(d walkDir) {
+	tracked := make([]int64, len(w.tracked))
+	total, ok := int64(0), false
+	if !w.lstatOnly {
+		total, ok = w.readDirBulk(d, tracked)
+	}
+	if !ok {
+		total = w.readDirLstat(d, tracked)
+	}
+	w.resMu.Lock()
+	w.res.Total += total
+	w.res.Top[d.top] += total
+	for i, b := range tracked {
+		w.res.Tracked[i] += b
+	}
+	w.resMu.Unlock()
+}
+
+// readDirLstat reads d with ReadDir and lstats each non-directory entry.
+func (w *treeWalker) readDirLstat(d walkDir, tracked []int64) int64 {
 	f, err := os.Open(d.path)
 	if err != nil {
 		w.addSkipped()
-		return
+		return 0
 	}
 	defer f.Close()
 
 	var total int64
-	tracked := make([]int64, len(w.tracked))
 	for {
 		entries, err := f.ReadDir(readDirBatch)
 		var dirs []walkDir
@@ -207,13 +236,7 @@ func (w *treeWalker) readDir(d walkDir) {
 			break
 		}
 	}
-	w.resMu.Lock()
-	w.res.Total += total
-	w.res.Top[d.top] += total
-	for i, b := range tracked {
-		w.res.Tracked[i] += b
-	}
-	w.resMu.Unlock()
+	return total
 }
 
 // sizeEntry sizes one non-directory entry, adding it to each tracked subtree
@@ -225,12 +248,22 @@ func (w *treeWalker) sizeEntry(e os.DirEntry, scopes []int, tracked []int64) int
 	if err != nil {
 		return 0
 	}
-	b := diskBytes(fi)
+	return w.sizeInfo(fi, scopes, tracked)
+}
+
+// sizeInfo accounts for one lstat result.
+func (w *treeWalker) sizeInfo(fi os.FileInfo, scopes []int, tracked []int64) int64 {
 	var id fileID
 	linked := false
 	if fi.Mode().IsRegular() {
 		id, linked = hardlinkID(fi)
 	}
+	return w.account(diskBytes(fi), id, linked, scopes, tracked)
+}
+
+// account adds b bytes to each tracked subtree in scopes and returns the
+// whole-tree contribution. A linked inode counts once per scope.
+func (w *treeWalker) account(b int64, id fileID, linked bool, scopes []int, tracked []int64) int64 {
 	for _, i := range scopes {
 		if !linked || w.firstSighting(seenKey{scope: i, id: id}) {
 			tracked[i] += b
