@@ -228,12 +228,54 @@ StorageState {
   }
   user_library_bytes
   app_caches_bytes
+  user_footprint_as_of          # RFC 3339; when the two above were measured
+  user_footprint_stale          # served past its 10m freshness window
+  user_footprint_skipped_dirs   # unreadable dirs left out of the totals
+  user_library_top []{ name, bytes }          # per top-level ~/Library folder
+  user_library_reclaimable []{ name, bytes }  # regenerable developer areas
   largest_apps []{ path, on_disk_bytes }   # top N
 }
 ```
 
 Sparse-file-aware (`Stat_t.Blocks * 512`) so Docker's container volume
 reports actual allocation rather than the multi-TB virtual disk size.
+Hardlinked files are counted once per (device, inode), like `du`. Symlinks
+are sized as links and never followed.
+
+The user footprint is one bounded-parallel walk of `~/Library`. The same
+traversal yields the `~/Library/Caches` subtotal, the per-folder breakdown,
+and the reclaimable areas, so nothing is walked twice:
+
+- `user_library_top` attributes every byte to its top-level folder
+  (`Developer`, `Containers`, `Group Containers`, `Application Support`,
+  `Caches`, ...), largest first. The 12 largest are named; the rest, plus
+  files directly in `~/Library`, are rolled into `other`. It sums to
+  `user_library_bytes`.
+- `user_library_reclaimable` sizes the areas that exist among
+  `Developer/Xcode/DerivedData`, `Developer/CoreSimulator`,
+  `Developer/Xcode/iOS DeviceSupport` and `Developer/Xcode/Archives`
+  (Archives is reported, not treated as safe to delete).
+- `app_caches_bytes` and each reclaimable area dedupe hardlinks only within
+  themselves, so a file linked both inside and outside a subtree always
+  counts toward it. The whole-tree total and the per-folder breakdown dedupe
+  across the tree, so an inode linked under two top-level folders is
+  attributed to one of them.
+
+The footprint is cached separately from the df/mount data: volumes for 30
+seconds, the footprint for 10 minutes. Each read names a policy:
+
+- fresh-only (the default, and required for persisted snapshots such as
+  `spectra snapshot` and MCP snapshot create/baseline): serve an entry under
+  10 minutes old, otherwise walk.
+- serve-stale (long-lived MCP storage/triage/rules tools): serve an entry up
+  to 24 hours old, marked `user_footprint_stale`, while a single background
+  walk refreshes it.
+- accept-stale (`spectra rules`): serve an entry up to 24 hours old without
+  refreshing; walk only on a full miss. The storage rule states the age.
+- refresh (`spectra storage --fresh`): always walk and store the result.
+
+`storage growth` computes `~/Library` and Caches rates from the two
+footprints' `user_footprint_as_of` times when both are set.
 
 ## PowerState
 

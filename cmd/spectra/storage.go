@@ -8,9 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/cachetriage"
 	"github.com/kaeawc/spectra/internal/dbcheck"
+	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/storagestate"
 )
 
@@ -29,14 +32,29 @@ func runStorage(args []string) int {
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	includeSnapshots := fs.Bool("snapshots", false, "Include APFS snapshots")
 	includeSpotlight := fs.Bool("spotlight", false, "Include Spotlight indexing status")
+	fresh := fs.Bool("fresh", false, "Re-walk ~/Library instead of using a footprint cached within the last 10 minutes")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	state := storagestate.Collect(storagestate.CollectOptions{
+	opts := storagestate.CollectOptions{
 		IncludeSnapshots: *includeSnapshots,
 		IncludeSpotlight: *includeSpotlight,
-	})
+	}
+	var state storagestate.State
+	if cacheStores == nil {
+		state = storagestate.Collect(opts)
+	} else {
+		// Volumes and mounts stay live; only the slow footprint walk is
+		// cached (user_footprint_as_of reports its age). --fresh re-walks
+		// and stores the result so later runs see it.
+		policy := snapshot.FootprintFreshOnly
+		if *fresh {
+			policy = snapshot.FootprintRefresh
+		}
+		footprint := snapshot.NewFootprintCache(cache.NewTTLStore(cacheStores.Storage, nil))
+		state = snapshot.CollectStorage(opts, nil, footprint, policy)
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -222,12 +240,43 @@ func printStorageState(s storagestate.State, includeSnapshots, includeSpotlight 
 		if s.AppCachesBytes > 0 {
 			fmt.Printf("  ~/Library/Caches: %s\n", humanSize(s.AppCachesBytes))
 		}
+		printFootprintAge(s)
+		printLibraryBreakdown(s)
 	}
 
 	if len(s.LargestApps) > 0 {
 		fmt.Printf("\nlargest apps (%d):\n", len(s.LargestApps))
 		for _, a := range s.LargestApps {
 			fmt.Printf("  %10s  %s\n", humanSize(a.OnDiskBytes), a.Path)
+		}
+	}
+}
+
+func printFootprintAge(s storagestate.State) {
+	if s.UserFootprintAsOf.IsZero() {
+		return
+	}
+	note := ""
+	if s.UserFootprintStale {
+		note = " (stale)"
+	}
+	if s.UserFootprintSkippedDirs > 0 {
+		note += fmt.Sprintf(", %d unreadable dirs skipped", s.UserFootprintSkippedDirs)
+	}
+	fmt.Printf("  measured at %s%s\n", s.UserFootprintAsOf.Local().Format(time.RFC3339), note)
+}
+
+func printLibraryBreakdown(s storagestate.State) {
+	if len(s.UserLibraryTop) > 0 {
+		fmt.Println("  by folder:")
+		for _, d := range s.UserLibraryTop {
+			fmt.Printf("    %10s  %s\n", humanSize(d.Bytes), d.Name)
+		}
+	}
+	if len(s.UserLibraryReclaimable) > 0 {
+		fmt.Println("  reclaimable developer data (regenerated on demand):")
+		for _, d := range s.UserLibraryReclaimable {
+			fmt.Printf("    %10s  ~/Library/%s\n", humanSize(d.Bytes), d.Name)
 		}
 	}
 }

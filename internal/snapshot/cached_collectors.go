@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/storagestate"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -44,8 +47,46 @@ func collectToolchainCached(ctx context.Context, opts toolchain.CollectOptions, 
 	return t
 }
 
-// collectStorageCached mirrors collectToolchainCached for storagestate.
-func collectStorageCached(opts storagestate.CollectOptions, ttl *cache.TTLStore) storagestate.State {
+// CollectStorage gathers storagestate.State with the volume/mount data and
+// the user footprint cached separately: ttl (may be nil) holds the former
+// for storageCacheTTL, fp (may be nil) the latter on its own longer window.
+// With both nil it is a plain live collection. With only ttl set, the
+// footprint is cached in ttl's backing store. policy governs how old a
+// cached footprint may be.
+func CollectStorage(opts storagestate.CollectOptions, ttl *cache.TTLStore, fp *FootprintCache, policy FootprintPolicy) storagestate.State {
+	return collectStorageCached(opts, ttl, fp, policy, nil)
+}
+
+func collectStorageCached(opts storagestate.CollectOptions, ttl *cache.TTLStore, fp *FootprintCache, policy FootprintPolicy, clk clock.Clock) storagestate.State {
+	if ttl == nil && fp == nil {
+		return storagestate.Collect(opts)
+	}
+	if fp == nil {
+		fp = &FootprintCache{Store: ttl, Clock: clk}
+	}
+	if opts.Home == "" {
+		opts.Home, _ = os.UserHomeDir()
+	}
+	var (
+		footprint storagestate.Footprint
+		stale     bool
+		done      = make(chan struct{})
+	)
+	go func() {
+		defer close(done)
+		footprint, stale = fp.Footprint(opts.OS, opts.Home, policy)
+	}()
+	base := opts
+	base.SkipUserFootprint = true
+	s := collectStorageBase(base, ttl)
+	<-done
+	s.ApplyFootprint(footprint, stale)
+	return s
+}
+
+// collectStorageBase serves the footprint-free part of storagestate.State
+// from ttl when fresh.
+func collectStorageBase(opts storagestate.CollectOptions, ttl *cache.TTLStore) storagestate.State {
 	if ttl == nil {
 		return storagestate.Collect(opts)
 	}
@@ -80,7 +121,9 @@ func toolchainCacheKey(opts toolchain.CollectOptions) []byte {
 
 func storageCacheKey(opts storagestate.CollectOptions) []byte {
 	parts := []string{
-		"storage",
+		// v2 entries exclude the user footprint (cached separately).
+		"storage-v2",
+		fmt.Sprint(int(hostos.Resolve(opts.OS))),
 		opts.Home,
 		strings.Join(opts.AppPaths, "|"),
 		fmt.Sprint(opts.LargestAppsN),

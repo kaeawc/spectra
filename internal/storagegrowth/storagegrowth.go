@@ -40,22 +40,29 @@ func Compute(before, after storagestate.State, beforeAt, afterAt time.Time, topN
 	}
 
 	var deltas []Delta
-	add := func(cat, label string, b, a int64) {
+	addOver := func(cat, label string, b, a int64, days float64) {
 		g := a - b
 		rep.TotalGrowthBytes += g
 		deltas = append(deltas, Delta{
 			Category: cat, Label: label,
 			BeforeBytes: b, AfterBytes: a, GrowthBytes: g,
-			BytesPerDay: perDay(g, rep.Days),
+			BytesPerDay: perDay(g, days),
 		})
 	}
+	add := func(cat, label string, b, a int64) { addOver(cat, label, b, a, rep.Days) }
 
 	beforeVols := indexVolumes(before.Volumes)
 	for _, v := range after.Volumes {
 		add("volume", v.MountPoint, beforeVols[v.MountPoint], v.UsedBytes)
 	}
-	add("user-library", "~/Library", before.UserLibraryBytes, after.UserLibraryBytes)
-	add("app-caches", "~/Library/Caches", before.AppCachesBytes, after.AppCachesBytes)
+	// The footprint may be cached, so its own measurement times give the
+	// real interval when both captures recorded them.
+	footprintDays := rep.Days
+	if !before.UserFootprintAsOf.IsZero() && !after.UserFootprintAsOf.IsZero() {
+		footprintDays = after.UserFootprintAsOf.Sub(before.UserFootprintAsOf).Hours() / 24
+	}
+	addOver("user-library", "~/Library", before.UserLibraryBytes, after.UserLibraryBytes, footprintDays)
+	addOver("app-caches", "~/Library/Caches", before.AppCachesBytes, after.AppCachesBytes, footprintDays)
 
 	beforeApps := indexApps(before.LargestApps)
 	for _, app := range after.LargestApps {

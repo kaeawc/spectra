@@ -477,7 +477,12 @@ func (s *Server) collectTriagePID(ctx context.Context, pid int, evidence, next [
 
 func (s *Server) collectTriageBundle(ctx context.Context, p triageParams, evidence []string, rawOut map[string]interface{}) []string {
 	progressFrom(ctx).step(ctx, "building snapshot for "+p.BundleID)
-	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{SpectraVersion: s.Version, DetectOpts: s.detectOptions(p.Network)})
+	snap := s.collect.Snapshots.BuildSnapshot(ctx, snapshot.Options{
+		SpectraVersion: s.Version,
+		DetectOpts:     s.detectOptions(p.Network),
+		// Not persisted, so an aging footprint is fine here.
+		FootprintPolicy: snapshot.FootprintServeStale,
+	})
 	for _, app := range snap.Apps {
 		if app.BundleID == p.BundleID {
 			evidence = append(evidence, summarizeApp(app)...)
@@ -1801,6 +1806,9 @@ func (s *Server) evaluateRules(ctx context.Context, snapshotID, config string, t
 			ThreadDumpPIDs: threadDumpPIDs,
 			// attachJVMHistory below records these JVMs as history samples.
 			JVMOpts: jvm.CollectOptions{SampleNMT: true},
+			// The snapshot itself is not persisted; the storage rule
+			// reports the footprint's age.
+			FootprintPolicy: snapshot.FootprintServeStale,
 		})
 	}
 	catalog, err := resolveRulesCatalog(config)
