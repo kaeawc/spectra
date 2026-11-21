@@ -295,6 +295,8 @@ pub struct App {
     /// Wakes the process feed for a reading now, after a signal.
     pub poke: Option<Sender<()>>,
     pub poke_rx: Option<Receiver<()>>,
+    /// The machine-wide readings the System page shows.
+    pub system: crate::system::System,
 }
 
 pub fn init() -> App {
@@ -354,6 +356,7 @@ pub fn init() -> App {
         outcome: None,
         poke: Some(poke),
         poke_rx: Some(poke_rx),
+        system: crate::system::System::new(),
     }
 }
 
@@ -477,12 +480,13 @@ impl App {
         self.open_groups.retain(|id| ids.contains(id));
     }
 
-    fn refresh_findings(&mut self) {
+    pub(crate) fn refresh_findings(&mut self) {
         let mut all: Vec<Finding> = self
             .jvms
             .iter()
             .flat_map(|j| diagnose(j, &self.history(j.pid)))
             .chain(self.proc_findings.iter().cloned())
+            .chain(crate::system_findings::diagnose(&self.system, self.now))
             .collect();
         all.sort_by_key(|f| (f.severity, f.pid));
         self.findings = all;
@@ -552,7 +556,7 @@ impl App {
     /// Re-cuts the list after a reading, a sidebar choice, a search, a sort or a group opening.
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
-        let nav = if self.nav == Nav::Overview { Nav::All } else { self.nav };
+        let nav = if matches!(self.nav, Nav::Overview | Nav::System) { Nav::All } else { self.nav };
         let kept: Vec<&Process> = self
             .procs
             .iter()
@@ -618,6 +622,7 @@ impl App {
         match link {
             Link::Process(pid) => self.open(pid),
             Link::Unidentified => self.show(Nav::Unidentified),
+            Link::System => self.show(Nav::System),
         }
     }
 
@@ -793,7 +798,7 @@ impl App {
             Some(_) => None,
             // An app page hides the list and its cursor.
             None if self.app_page.is_some() => None,
-            None if self.nav != Nav::Overview => self.cursor_target(),
+            None if !matches!(self.nav, Nav::Overview | Nav::System) => self.cursor_target(),
             None => None,
         }
     }

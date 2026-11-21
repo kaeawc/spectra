@@ -9,8 +9,11 @@ mod home;
 mod list;
 mod process;
 mod quit;
+mod system;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_system;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
@@ -65,6 +68,8 @@ fn sidebar(s: &App, k: &Kit) -> El {
     let problems = s.problems();
     let overview = place(s, Nav::Overview, "overview".into(), Some(problems).filter(|n| *n > 0), k);
     let mut sb = Sidebar::new().header(overview);
+    // The whole machine, right under the overview, whatever the process feed is doing.
+    sb = sb.child(place(s, Nav::System, "system".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
         let kinds = Category::ALL.iter().zip(s.stats.kinds).map(|(&c, n)| {
@@ -105,6 +110,8 @@ enum Page<'a> {
     /// An app, by its bundle's path.
     App(&'a str),
     Home,
+    /// The whole machine.
+    System,
     List,
 }
 
@@ -123,10 +130,10 @@ fn page_of(s: &App) -> Page<'_> {
     if let Some(path) = &s.app_page {
         return Page::App(path);
     }
-    if s.nav == Nav::Overview {
-        Page::Home
-    } else {
-        Page::List
+    match s.nav {
+        Nav::Overview => Page::Home,
+        Nav::System => Page::System,
+        _ => Page::List,
     }
 }
 
@@ -148,6 +155,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Jvm(j) => (detail::detail(s, j, &k), j.name()),
         Page::App(path) => (app_page::page(s, path, &k), s.app_name(path)),
         Page::List => (list::list(s, &k), s.nav.title().to_owned()),
+        Page::System => (system::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             let problems = s.problems();
             let title = if problems == 0 {

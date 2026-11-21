@@ -33,6 +33,31 @@ What it shows:
   (from its start time) gets no CPU or memory finding: starting up is busy and grows. JVM
   findings: heap pressure, old-generation growth, slow full GCs, metaspace pressure, no heap
   dump on OOM.
+- **Machine**, right under Overview: the whole machine, live. CPU in use (every process summed)
+  and the 1-minute load, charted over the last six minutes, with the core count. Memory pressure
+  as a colored gauge (green, amber, red), what's used, app memory, wired, file-backed and
+  compressed memory with the compressor's ratio, swap used, and swap-ins, swap-outs and
+  compressions since the last reading; free-for-new-work, compressed, compressions and swap are
+  charted. Thermal state and CPU speed limit, battery and power source. Disks with used and
+  free bars (only volumes people keep files on: no read-only system or simulator images, no
+  memory-backed file systems). Network: default route, DNS, VPN, connections, and every
+  listening port with the process holding it; a process the feed lists opens its page. Top
+  consumers: the five busiest processes by CPU and the five largest by memory, each opening
+  its page. On Linux, a part Spectra doesn't read (memory pressure, the battery) is left out
+  rather than shown blank.
+  - Readings: `spectra memory --json`, `spectra thermal --json` and `spectra load --json` every
+    5 s; `spectra power --json`, `spectra network --json` and `spectra storage --json` every 30 s,
+    on two threads of their own, each with a deadline (20 s and 60 s). `thermal` exits 3 when
+    warm and 4 when throttled, and `load` 3 or 4 when the machine is busy: those are readings,
+    not failures. `spectra storage` also sizes `~/Library`, which can take many minutes, so it
+    runs with an empty home (`/var/empty`) and only the volumes come back; one that still runs out
+    of time isn't asked again for five minutes. A failed reading keeps the last good one, and
+    the part says "Updated 40 s ago · last reading failed: …"; one that never landed says why.
+  - Findings on the Overview, each opening the Machine page: memory pressure at warning or
+    critical, swap in use and up at least 64 MB over the last minute, the CPU thermally
+    throttled, and volumes over 90% full (critical from 97%). A pressure finding clears after three
+    normal readings in a row, a volume finding once it is under 88%, and a part whose reading
+    failed or is three rounds old has no finding.
 - **All processes**, then by kind and by runtime in the sidebar, with live counts. Sort by CPU,
   memory or name; search by name, pid, bundle id or path. The table only builds the rows on
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
@@ -112,7 +137,8 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # quit, quit-list, quit-confirm, force-confirm, quit-root,
                             # quit-still, quit-ended, app, app-loading, tools, tools-root,
                             # tool-sample, tool-hang, tool-vmmap, tool-vmregions,
-                            # tool-memtrace, tool-lineage, tool-owner, tool-runtime, tool-failed
+                            # tool-memtrace, tool-lineage, tool-owner, tool-runtime, tool-failed,
+                            # system, system-pressure, system-failed, system-linux
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -131,6 +157,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
   thread, numbered so an answer lands only on the page it was for, behind a `Spectra` trait that
   tests replace with a fake. `src/tools.rs`, `src/live.rs` and `src/bundle.rs`: those commands
   and their JSON.
+- `src/system.rs`: the machine-wide readings, their threads, parsing and history;
+  `src/system_findings.rs`: the rules that turn them into findings; `src/sample_system.rs`:
+  their sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.

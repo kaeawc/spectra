@@ -58,7 +58,7 @@ pub fn feed_notice(s: &App, k: &Kit) -> Option<El> {
     }
 }
 
-fn tile(key: &str, label: &str, value: String, note: String, k: &Kit) -> El {
+pub(super) fn tile(key: &str, label: &str, value: String, note: String, k: &Kit) -> El {
     let c = &k.c;
     col()
         .key(key.to_owned())

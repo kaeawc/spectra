@@ -8,7 +8,7 @@ use crate::app::{App, Status};
 use crate::procs::Process;
 use crate::signal::{self, Signal, Target};
 
-/// ⌥⌘Q, as in Activity Monitor: opens the Quit confirmation, never sends on its own.
+/// ⌥⌘Q: opens the Quit confirmation, never sends on its own.
 pub fn shortcut() -> Chord {
     Chord::parse("mod+alt+q").expect("a valid chord")
 }

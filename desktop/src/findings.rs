@@ -27,6 +27,8 @@ pub enum Link {
     Process(u32),
     /// The list of unsigned and ad hoc signed processes.
     Unidentified,
+    /// The System page: a finding about the whole machine.
+    System,
 }
 
 #[derive(Clone, Debug)]

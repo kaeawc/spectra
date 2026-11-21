@@ -68,6 +68,8 @@ pub enum Nav {
     Runtime(Runtime),
     /// Unsigned and ad hoc signed processes, reached from their finding.
     Unidentified,
+    /// The whole machine: memory, thermal state, disks, network and the top consumers.
+    System,
 }
 
 impl Nav {
@@ -78,13 +80,14 @@ impl Nav {
             Nav::Category(c) => c.label(),
             Nav::Runtime(r) => r.label(),
             Nav::Unidentified => "Unsigned or ad hoc",
+            Nav::System => "Machine",
         }
     }
 
-    /// Whether `p` belongs in this list. The overview lists nothing.
+    /// Whether `p` belongs in this list. The overview and the System page list nothing.
     pub fn holds(self, p: &Process) -> bool {
         match self {
-            Nav::Overview => false,
+            Nav::Overview | Nav::System => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,
