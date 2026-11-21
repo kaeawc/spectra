@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/corefile"
 	"github.com/kaeawc/spectra/internal/dbinspect"
 	"github.com/kaeawc/spectra/internal/detect"
@@ -157,12 +159,29 @@ type Clock interface {
 	Now() time.Time
 }
 
+// footprintStore is the on-disk store behind the ~/Library footprint, the
+// same one the CLI uses (cache kind "storage"), or nil when the cache root is
+// unavailable. A restarted server then answers from the entry a previous
+// process or the CLI wrote instead of walking in the foreground.
+var footprintStore = sync.OnceValue(func() *cache.TTLStore {
+	root, err := cache.DefaultRoot()
+	if err != nil {
+		return nil
+	}
+	return cache.NewTTLStore(cache.NewShardedStore(root, cache.KindStorage), nil)
+})
+
+// newFootprintCache wraps store (may be nil) in a serve-stale-capable cache.
+func newFootprintCache(store *cache.TTLStore) *snapshot.FootprintCache {
+	return snapshot.NewFootprintCache(store)
+}
+
 func defaultCollectors() Collectors {
 	// The MCP server is long-lived, so one footprint cache shared by the
 	// storage and snapshot tools can serve a stale ~/Library footprint
 	// while a single background walk refreshes it. Snapshots that get
 	// persisted read it fresh-only (FootprintPolicy's zero value).
-	footprint := snapshot.NewFootprintCache(nil)
+	footprint := newFootprintCache(footprintStore())
 	return Collectors{
 		Apps:        defaultAppInspector{},
 		Processes:   defaultProcessCollector{},
