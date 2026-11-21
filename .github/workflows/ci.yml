@@ -104,6 +104,129 @@ jobs:
             echo "expected inspect to report unsupported on Linux"; exit 1
           fi
 
+  # Runs the Linux-backend tests and OS-aware smoke commands on more than
+  # Ubuntu: glibc distros with different tool builds (Debian, Fedora) and
+  # Alpine (musl, busybox base, no systemd). The binaries are static
+  # (CGO off), so they are built once on the host runner and executed inside
+  # each distro container with its own real ip/ss/ps/df; no distro needs Go.
+  # The script also runs locally against Docker.
+  linux-distros:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:24.04', 'debian:12', 'fedora:41', 'alpine:3.20']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: ./scripts/retry.sh go mod download
+      - name: Build static spectra + test binaries
+        run: ./scripts/linux-distro-ci.sh build "$RUNNER_TEMP/linux-dist"
+      - name: Pull ${{ matrix.image }}
+        run: ./scripts/retry.sh docker pull -q "${{ matrix.image }}"
+      - name: Test and smoke inside ${{ matrix.image }}
+        run: ./scripts/linux-distro-ci.sh container "${{ matrix.image }}" "$RUNNER_TEMP/linux-dist"
+
+  # End-to-end systemd install paths on a real VM: the per-user daemon as a
+  # systemd --user unit (spectra daemon install/status/uninstall) and the
+  # privileged helper as a system unit (spectra install-helper, --status,
+  # install-helper uninstall). Hosted runners have passwordless sudo, which
+  # the helper installer's sudo calls rely on.
+  linux-systemd:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: ./scripts/retry.sh go mod download
+      - name: Build spectra and spectra-helper side by side
+        run: |
+          # install-helper looks for spectra-helper next to its own executable.
+          mkdir -p "$RUNNER_TEMP/bin"
+          go build -o "$RUNNER_TEMP/bin/spectra" ./cmd/spectra/
+          go build -o "$RUNNER_TEMP/bin/spectra-helper" ./cmd/spectra-helper/
+          echo "SPECTRA=$RUNNER_TEMP/bin/spectra" >> "$GITHUB_ENV"
+      - name: Start a systemd user manager
+        run: |
+          # The runner is not a logind session, so no user manager exists;
+          # lingering starts user@UID.service and its session bus.
+          sudo loginctl enable-linger "$USER"
+          uid=$(id -u)
+          for _ in $(seq 1 30); do
+            [ -S "/run/user/$uid/bus" ] && break
+            sleep 1
+          done
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" >> "$GITHUB_ENV"
+      - name: Per-user daemon via systemd --user
+        run: |
+          set -euxo pipefail
+          unit="$HOME/.config/systemd/user/spectra-daemon.service"
+          systemctl --user is-system-running || true
+          "$SPECTRA" daemon install
+          test -f "$unit"
+          systemctl --user is-enabled spectra-daemon.service
+          for _ in $(seq 1 30); do
+            "$SPECTRA" daemon status && break
+            sleep 1
+          done
+          systemctl --user is-active spectra-daemon.service
+          # The daemon answering must be the unit's process, not a spawn.
+          main_pid=$(systemctl --user show -p MainPID --value spectra-daemon.service)
+          "$SPECTRA" daemon status --json | jq -e --argjson pid "$main_pid" '.pid == $pid'
+          # A daemon-backed command over the socket.
+          "$SPECTRA" alerts --state all --json | jq -e 'type == "array"'
+          "$SPECTRA" daemon uninstall
+          test ! -e "$unit"
+          if systemctl --user is-active --quiet spectra-daemon.service; then
+            echo "daemon unit still active after uninstall"; exit 1
+          fi
+          if "$SPECTRA" daemon status; then
+            echo "daemon still answering after uninstall"; exit 1
+          fi
+      - name: Privileged helper via systemd system unit
+        run: |
+          set -euxo pipefail
+          unit=/etc/systemd/system/spectra-helper.service
+          helper=/usr/local/lib/spectra/spectra-helper
+          sock=/var/run/spectra-helper.sock
+          "$SPECTRA" install-helper
+          test -f "$unit"
+          test -x "$helper"
+          systemctl is-enabled spectra-helper.service
+          for _ in $(seq 1 30); do
+            [ -S "$sock" ] && break
+            sleep 1
+          done
+          systemctl is-active spectra-helper.service
+          test "$(stat -c '%U:%G %a' "$sock")" = "root:spectra 660"
+          # install-helper added $USER to the spectra group, but this shell
+          # predates that; sg picks the new membership up without a re-login.
+          sg spectra -c "$SPECTRA install-helper --status"
+          "$SPECTRA" install-helper uninstall
+          test ! -e "$unit"
+          test ! -e "$helper"
+          if systemctl is-active --quiet spectra-helper.service; then
+            echo "helper unit still active after uninstall"; exit 1
+          fi
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          systemctl --user status spectra-daemon.service --no-pager || true
+          journalctl --user -u spectra-daemon.service --no-pager -n 100 || true
+          "$SPECTRA" daemon logs -n 100 || true
+          sudo systemctl status spectra-helper.service --no-pager || true
+          sudo journalctl -u spectra-helper.service --no-pager -n 100 || true
+
   # Runs the darwin/amd64 cross-compile (the macOS "build"; there is no
   # Xcode project, so no xcodebuild) and the test suite as Mach-O binaries
   # under Darling (https://darlinghq.org) on a Linux runner, via
