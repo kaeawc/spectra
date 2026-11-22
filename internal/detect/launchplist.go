@@ -71,7 +71,7 @@ func (c *launchPlistMemo) xml(path string, convert func(string) ([]byte, error))
 		return f.xml, f.err
 	}
 	if len(c.m) >= launchPlistMemoMax {
-		c.m = map[string]*launchPlistFlight{}
+		c.evictCompletedLocked()
 	}
 	f := &launchPlistFlight{version: v, done: make(chan struct{})}
 	c.m[path] = f
@@ -88,4 +88,17 @@ func (c *launchPlistMemo) xml(path string, convert func(string) ([]byte, error))
 	}
 	close(f.done)
 	return f.xml, f.err
+}
+
+// evictCompletedLocked drops finished conversions and keeps in-flight ones,
+// so a lookup that arrives while a conversion runs still joins it instead of
+// starting a second plutil. c.mu must be held.
+func (c *launchPlistMemo) evictCompletedLocked() {
+	for p, f := range c.m {
+		select {
+		case <-f.done:
+			delete(c.m, p)
+		default:
+		}
+	}
 }

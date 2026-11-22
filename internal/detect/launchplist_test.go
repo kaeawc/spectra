@@ -253,3 +253,56 @@ func TestNewDetectorScopesMemoToInjectedRunner(t *testing.T) {
 		t.Fatal("injected-runner detectors must each get their own memo")
 	}
 }
+
+// TestLaunchPlistMemoEvictionKeepsInFlight pins that reaching the bound drops
+// finished conversions only: a lookup that joins a conversion still running
+// when another path triggers eviction must not start a second plutil.
+func TestLaunchPlistMemoEvictionKeepsInFlight(t *testing.T) {
+	files := &memoFiles{infos: map[string]memoFileInfo{}}
+	memo := newLaunchPlistMemo(files.stat)
+	var done atomic.Int32
+	for i := range launchPlistMemoMax - 1 {
+		p := fmt.Sprintf("/d/%d.plist", i)
+		files.set(p, 1, 1, 1, 1)
+		if _, err := memo.xml(p, countingConvert(&done, "x", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files.set("/p.plist", 1, 1, 1, 1)
+	files.set("/q.plist", 1, 1, 1, 1)
+	var n atomic.Int32
+	release := make(chan struct{})
+	slow := func(string) ([]byte, error) {
+		n.Add(1)
+		<-release
+		return []byte("p"), nil
+	}
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		_, _ = memo.xml("/p.plist", slow)
+	}()
+	for n.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := memo.xml("/q.plist", countingConvert(&done, "q", nil)); err != nil {
+		t.Fatal(err)
+	}
+	second := make(chan struct{})
+	go func() {
+		defer close(second)
+		if got, err := memo.xml("/p.plist", slow); err != nil || string(got) != "p" {
+			t.Errorf("xml = %q, %v", got, err)
+		}
+	}()
+	time.Sleep(10 * time.Millisecond)
+	close(release)
+	<-first
+	<-second
+	if n.Load() != 1 {
+		t.Fatalf("conversions of /p.plist = %d, want 1 across eviction", n.Load())
+	}
+	if len(memo.m) > launchPlistMemoMax {
+		t.Fatalf("memo holds %d entries, want at most %d", len(memo.m), launchPlistMemoMax)
+	}
+}
