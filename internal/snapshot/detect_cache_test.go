@@ -88,7 +88,7 @@ func TestDetectWithCacheNilStoreCallsLiveDetect(t *testing.T) {
 	dir := t.TempDir()
 	app := makeTestBundle(t, dir, "TestApp", "com.test.app", "TestApp")
 	// nil store → falls through to live detect
-	r, err := detectWithCache(app, hermeticDetectOpts(), nil, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), nil, nil, false)
 	if err != nil {
 		t.Fatalf("detectWithCache(nil store): %v", err)
 	}
@@ -116,12 +116,45 @@ func TestDetectWithCacheStoresAndRetrieves(t *testing.T) {
 	}
 
 	// detectWithCache should return the sentinel without running live detect.
-	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil, false)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
 	if r.BundleID != "sentinel-bundle-id" {
 		t.Errorf("BundleID = %q, want sentinel-bundle-id (cache not hit)", r.BundleID)
+	}
+}
+
+func TestDetectWithCacheHitRefreshesStorage(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	t.Setenv("HOME", home)
+	app := makeTestBundle(t, dir, "StoreApp", "com.store.app", "StoreApp")
+	st := cache.NewShardedStore(filepath.Join(dir, "cache", "v1"), "detect")
+	key := detectCacheKey(app)
+	if key == nil {
+		t.Fatal("detectCacheKey returned nil for valid bundle")
+	}
+	stale := detect.Result{Path: app, BundleID: "com.store.app", Storage: &detect.StorageFootprint{Caches: 1, Total: 1}}
+	blob, _ := json.Marshal(stale)
+	if err := st.Put(key, blob); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	caches := filepath.Join(home, "Library", "Caches", "com.store.app")
+	if err := os.MkdirAll(caches, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(caches, "blob"), make([]byte, 10000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil, false)
+	if err != nil || r.Storage == nil || r.Storage.Caches != 1 {
+		t.Fatalf("without refresh: storage %+v err %v, want the cached footprint", r.Storage, err)
+	}
+	r, err = detectWithCache(app, hermeticDetectOpts(), st, nil, true)
+	if err != nil || r.Storage == nil || r.Storage.Caches < 10000 {
+		t.Fatalf("with refresh: storage %+v err %v, want the live footprint", r.Storage, err)
 	}
 }
 
@@ -133,7 +166,7 @@ func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	st := cache.NewShardedStore(storeDir, "detect")
 
 	// Empty cache → live detect runs and result is stored.
-	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil)
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil, false)
 	if err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
@@ -157,7 +190,7 @@ func TestDetectWithCacheUsesAsyncWriter(t *testing.T) {
 	writer := cache.NewAsyncWriter(st, 8, 1)
 	defer writer.Close()
 
-	if _, err := detectWithCache(app, hermeticDetectOpts(), st, writer); err != nil {
+	if _, err := detectWithCache(app, hermeticDetectOpts(), st, writer, false); err != nil {
 		t.Fatalf("detectWithCache: %v", err)
 	}
 	writer.Close()
@@ -186,7 +219,7 @@ func TestDetectWithCacheHitRefreshesPathAndSignature(t *testing.T) {
 	opts.Runner = proc.NewFake().On(proc.MatchPrefix("codesign", "-dv"), proc.Response{Result: proc.Result{
 		Stderr: []byte(app + ": code object is not signed at all\n"),
 	}})
-	r, err := detectWithCache(app, opts, st, nil)
+	r, err := detectWithCache(app, opts, st, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +238,7 @@ func TestDetectWithCacheNeverPersistsSpctlTimeout(t *testing.T) {
 	opts.AssessGatekeeper = true
 	opts.Gatekeeper = detect.NewGatekeeperAssessor(time.Second, time.Hour, nil)
 
-	r, err := detectWithCache(app, opts, st, nil)
+	r, err := detectWithCache(app, opts, st, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +261,7 @@ func TestDetectWithCacheNeverPersistsSpctlTimeout(t *testing.T) {
 	opts.Runner = proc.NewFake().On(proc.MatchPrefix("spctl"), proc.Response{Result: proc.Result{
 		Stderr: []byte(app + ": accepted\nsource=Notarized Developer ID\n"),
 	}})
-	r, err = detectWithCache(app, opts, st, nil)
+	r, err = detectWithCache(app, opts, st, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

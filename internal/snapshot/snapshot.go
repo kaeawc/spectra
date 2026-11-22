@@ -200,6 +200,12 @@ type Options struct {
 	// DetectStore must also be set; nil writes synchronously.
 	DetectWriter *cache.AsyncWriter
 
+	// DetectRefreshStorage re-measures each app's ~/Library footprint on a
+	// DetectStore hit instead of replaying the cached one. Callers that
+	// persist or diff per-app storage set it; the rest of the result is
+	// served from the cache.
+	DetectRefreshStorage bool
+
 	// ToolchainCache is a TTL cache for the toolchain.Toolchains JSON.
 	// Toolchains rarely change within a session; a 5-minute TTL is enough
 	// to amortize repeated rules invocations.
@@ -484,7 +490,7 @@ func collectApps(_ context.Context, opts Options) []detect.Result {
 		go func() {
 			defer wg.Done()
 			for i := range in {
-				r, err := detectWithCache(paths[i], opts.DetectOpts, opts.DetectStore, opts.DetectWriter)
+				r, err := detectWithCache(paths[i], opts.DetectOpts, opts.DetectStore, opts.DetectWriter, opts.DetectRefreshStorage)
 				out <- job{i: i, res: r, err: err}
 			}
 		}()
