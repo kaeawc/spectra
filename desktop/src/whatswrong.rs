@@ -166,20 +166,205 @@ fn family_evidence(f: &Family) -> String {
     out
 }
 
-/// The page a family opens: its app's when one of its busiest members belongs to an app, else
-/// its busiest member's, else the Machine page.
+/// Whether `p` is still the process Spectra named `command`: the same file name, allowing for
+/// the 15 or 16 characters the kernel keeps of a long one. An empty name says nothing either way.
+fn same_name(p: &Process, command: &str) -> bool {
+    let base = |s: &str| {
+        s.rsplit('/')
+            .find(|n| !n.is_empty())
+            .unwrap_or(s)
+            .to_owned()
+    };
+    if command.is_empty() {
+        return true;
+    }
+    let (a, b) = (base(&p.name()), base(command));
+    a == b || (a.len().min(b.len()) >= 15 && (a.starts_with(&b) || b.starts_with(&a)))
+}
+
+/// The listed process `pid` when it still has the name Spectra gave it.
+fn listed<'a>(procs: &'a [Process], pid: u32, command: &str) -> Option<&'a Process> {
+    procs
+        .iter()
+        .find(|p| p.pid == pid)
+        .filter(|p| same_name(p, command))
+}
+
+/// The page a family opens, going by its members still listed under the names Spectra gave,
+/// busiest first: an app family opens the app of its busiest member that belongs to one; any
+/// other family opens its busiest member, on its app's page when it belongs to one. Else the
+/// Machine page.
 fn family_action(f: &Family, procs: &[Process]) -> Action {
-    let listed = |pid: u32| procs.iter().find(|p| p.pid == pid);
-    if let Some(path) = f
+    let mut members: Vec<(&Member, &Process)> = f
         .heaviest
         .iter()
-        .find_map(|m| listed(m.pid).and_then(Process::bundle_path))
-    {
+        .filter_map(|m| listed(procs, m.pid, &m.command).map(|p| (m, p)))
+        .collect();
+    members.sort_by(|a, b| b.0.cpu_pct.total_cmp(&a.0.cpu_pct));
+    // Families that are an app and its helpers (Spectra's kinds; "app" is the samples'): open
+    // the app, even when its busiest member is a helper with no bundle of its own.
+    let app_like = matches!(
+        f.kind.as_str(),
+        "browser" | "xcode" | "simulator" | "emulator" | "app"
+    );
+    if app_like && let Some(path) = members.iter().find_map(|(_, p)| p.bundle_path()) {
         return Action::App(path.to_owned());
     }
-    match f.heaviest.iter().find(|m| listed(m.pid).is_some()) {
-        Some(m) => Action::Process(m.pid),
+    match members.first() {
+        Some((_, p)) => match p.bundle_path() {
+            Some(path) => Action::App(path.to_owned()),
+            None => Action::Process(p.pid),
+        },
         None => Action::Machine,
+    }
+}
+
+/// The name a process cause gives before its `(pid N)`.
+fn name_in(detail: &str) -> &str {
+    let Some(at) = detail.find(" (pid ") else {
+        return "";
+    };
+    let before = &detail[..at];
+    before
+        .rsplit("; ")
+        .next()
+        .unwrap_or(before)
+        .rsplit(": ")
+        .next()
+        .unwrap_or(before)
+        .trim()
+}
+
+/// The rule of the per-process finding a cause titled `title` says the same as. Holding a lot
+/// of memory is about size, not growth, so it repeats none.
+fn process_rule(title: &str) -> Option<&'static str> {
+    let t = title.to_lowercase();
+    if t.contains("cpu") {
+        Some("proc-busy-cpu")
+    } else if t.contains("memory") && (t.contains("grow") || t.contains("leak")) {
+        Some("proc-memory-growth")
+    } else {
+        None
+    }
+}
+
+/// A Go duration (`3h0m0s`, `12m0s`, `1.5s`) in seconds.
+fn go_duration(s: &str) -> Option<f64> {
+    let (mut total, mut num, mut any) = (0.0, String::new(), false);
+    for ch in s.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            num.push(ch);
+            continue;
+        }
+        let n: f64 = num.parse().ok()?;
+        num.clear();
+        total += n * match ch {
+            'h' => 3600.0,
+            'm' => 60.0,
+            's' => 1.0,
+            _ => return None,
+        };
+        any = true;
+    }
+    (any && num.is_empty()).then_some(total)
+}
+
+/// How long ago an RFC 3339 time was, from `wall` (Unix seconds).
+fn ago(stamp: &str, wall: i64) -> Option<String> {
+    crate::spawns::unix_time(stamp).map(|t| fmt_ago(wall as f64 - t))
+}
+
+/// One part of a detail in plain words, or `None` to leave it out.
+fn plain_part(part: &str, wall: i64) -> Option<String> {
+    let part = part.trim();
+    if part.is_empty()
+        || part.starts_with("next: ")
+        || part.starts_with("sample ")
+        || part.starts_with("thread summary")
+    {
+        return None;
+    }
+    if let Some(chain) = part.strip_prefix("owner chain: ") {
+        // Outermost first, ending with the process itself.
+        let mut names: Vec<&str> = chain
+            .split(" > ")
+            .map(|l| l.rfind('(').map_or(l, |i| &l[..i]).trim())
+            .filter(|n| !n.is_empty())
+            .collect();
+        names.pop();
+        let parent = names.pop()?;
+        names.reverse();
+        return Some(if names.is_empty() {
+            format!("started by {parent}")
+        } else {
+            format!("started by {parent} (under {})", names.join(", "))
+        });
+    }
+    if let Some(hint) = part.strip_prefix("hint: ") {
+        return Some(hint.to_owned());
+    }
+    if let Some(up) = part.strip_prefix("up ") {
+        let started = up
+            .split_once("(started ")
+            .and_then(|(_, r)| ago(r.trim_end_matches(')'), wall));
+        let dur = up
+            .split_whitespace()
+            .next()
+            .and_then(go_duration)
+            .map(fmt_ago);
+        return started.or(dur).map(|d| format!("running for {d}"));
+    }
+    let words: Vec<&str> = part.split(' ').collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        let w = words[i];
+        if w == "since"
+            && let Some(a) = words.get(i + 1).and_then(|t| ago(t, wall))
+        {
+            // "for 3h0m0s since <time>" says one thing twice.
+            if out.len() >= 2 && out[out.len() - 2] == "for" {
+                out.truncate(out.len() - 2);
+            }
+            out.push(format!("for the last {a}"));
+            i += 2;
+            continue;
+        }
+        out.push(match (ago(w, wall), go_duration(w)) {
+            (Some(a), _) => format!("{a} ago"),
+            (None, Some(d)) if w.chars().any(|c| c.is_ascii_alphabetic()) => fmt_ago(d),
+            _ => w.to_owned(),
+        });
+        i += 1;
+    }
+    Some(out.join(" "))
+}
+
+/// A cause's detail in plain words: times as how long ago, the owner chain as who started it,
+/// and no command lines to run, which Spectra's daemon adds for people at a terminal.
+pub fn plain(detail: &str, wall: i64) -> String {
+    let detail = match detail.find(" [probe unavailable") {
+        Some(i) => &detail[..i],
+        None => detail,
+    };
+    detail
+        .split("; ")
+        .filter_map(|p| plain_part(p, wall))
+        .map(|p| short_name(&p))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// `/System/.../mds_stores (pid 412) averaged …` as `mds_stores (pid 412) averaged …`: Spectra
+/// names a process by `ps -o comm=`, which on macOS is its whole path.
+fn short_name(part: &str) -> String {
+    let Some(at) = part.find(" (pid ") else {
+        return part.to_owned();
+    };
+    let (name, rest) = part.split_at(at);
+    match name.rfind('/') {
+        Some(slash) if name.starts_with('/') => format!("{}{rest}", &name[slash + 1..]),
+        _ => part.to_owned(),
     }
 }
 
@@ -196,8 +381,9 @@ fn machine_rules(title: &str) -> &'static [&'static str] {
 
 /// The lines to show, worst first and at most [`TOP`]: each cause in plain words with the page
 /// that shows more, and the ids of the `findings` it repeats. A process cause about the busiest
-/// member of a family already shown is the same news and is left out.
-pub fn items(r: &Report, findings: &[Finding], procs: &[Process]) -> Vec<Item> {
+/// member of a family already shown is the same news and is left out. `wall` is Unix seconds now,
+/// for saying how long ago the times in a detail were.
+pub fn items(r: &Report, findings: &[Finding], procs: &[Process], wall: i64) -> Vec<Item> {
     let ids: HashSet<String> = findings.iter().map(Finding::id).collect();
     let mut shown_pids: HashSet<u32> = HashSet::new();
     let mut out: Vec<Item> = Vec::new();
@@ -218,23 +404,26 @@ pub fn items(r: &Report, findings: &[Finding], procs: &[Process]) -> Vec<Item> {
                 continue;
             }
             shown_pids.insert(pid);
-            let rule = if c.title.contains("memory") {
-                "proc-memory-growth"
-            } else {
-                "proc-busy-cpu"
+            let name = name_in(&c.detail);
+            // A pid the list now gives a different name is another process: no link, and not
+            // the same news as that process's findings.
+            let reused = procs.iter().any(|p| p.pid == pid && !same_name(p, name));
+            let action = match listed(procs, pid, name) {
+                Some(_) => Action::Process(pid),
+                None => Action::Machine,
             };
-            let action = if procs.iter().any(|p| p.pid == pid) {
-                Action::Process(pid)
-            } else {
-                Action::Machine
-            };
-            (c.detail.clone(), action, vec![format!("{pid}/{rule}")])
+            let covers = process_rule(&c.title)
+                .filter(|_| !reused)
+                .map(|rule| format!("{pid}/{rule}"))
+                .into_iter()
+                .collect();
+            (plain(&c.detail, wall), action, covers)
         } else {
             let covers = machine_rules(&c.title)
                 .iter()
                 .map(|r| format!("0/{r}"))
                 .collect();
-            (c.detail.clone(), Action::Machine, covers)
+            (plain(&c.detail, wall), Action::Machine, covers)
         };
         covers.retain(|id| ids.contains(id));
         let fix = covers
@@ -245,7 +434,7 @@ pub fn items(r: &Report, findings: &[Finding], procs: &[Process]) -> Vec<Item> {
         out.push(Item {
             severity: severity(&c.severity),
             title: if c.title.is_empty() {
-                c.detail.clone()
+                plain(&c.detail, wall)
             } else {
                 c.title.clone()
             },
@@ -341,7 +530,7 @@ impl App {
         self.whatswrong
             .report
             .as_ref()
-            .map(|(r, _)| items(r, &self.findings, &self.procs))
+            .map(|(r, _)| items(r, &self.findings, &self.procs, (self.wall)()))
             .unwrap_or_default()
     }
 
@@ -383,10 +572,15 @@ impl App {
             self.start_whatswrong();
             changed = true;
         }
-        let age = self.right_now_age();
-        if age != self.whatswrong.shown {
-            self.whatswrong.shown = age;
-            changed = true;
+        // The age line is only redrawn while it's on screen, and only when its words change.
+        if visible {
+            let age = self.right_now_age();
+            if age != self.whatswrong.shown {
+                self.whatswrong.shown = age;
+                changed = true;
+            }
+        } else {
+            self.whatswrong.shown = None;
         }
         changed
     }
@@ -481,6 +675,8 @@ pub(crate) mod tests {
 
     pub const BUSY: &str = include_str!("../tests/fixtures/whatswrong/busy.json");
     pub const CALM: &str = include_str!("../tests/fixtures/whatswrong/calm.json");
+    /// A report with an alert from Spectra's daemon: a process on high CPU for hours.
+    pub const SUSTAINED: &str = include_str!("../tests/fixtures/whatswrong/sustained.json");
 
     fn finding(pid: u32, rule: &'static str, fix: &str) -> Finding {
         Finding {
@@ -543,7 +739,7 @@ pub(crate) mod tests {
             proc(18523, "java", 786.0, 1400.0),
             proc(12201, "java", 47.0, 2000.0),
         ];
-        let got = items(&r, &[], &procs);
+        let got = items(&r, &[], &procs, 0);
         assert_eq!(
             got.len(),
             1,
@@ -583,13 +779,156 @@ pub(crate) mod tests {
             Role::AppHelper,
         );
         assert_eq!(
-            items(&r, &[], &[helper])[0].action,
+            items(&r, &[], &[helper], 0)[0].action,
             Action::App("/Applications/Google Chrome.app".into())
         );
         assert_eq!(
-            items(&r, &[], &[])[0].action,
+            items(&r, &[], &[], 0)[0].action,
             Action::Machine,
             "nobody listed to open"
+        );
+    }
+
+    #[test]
+    fn a_family_opens_its_busiest_member_not_the_first_with_an_app() {
+        let f = Family {
+            name: "Build tools".into(),
+            heaviest: vec![
+                Member {
+                    pid: 70,
+                    command: "Code Helper".into(),
+                    cpu_pct: 20.0,
+                },
+                Member {
+                    pid: 71,
+                    command: "java".into(),
+                    cpu_pct: 400.0,
+                },
+            ],
+            ..Family::default()
+        };
+        let r = Report {
+            causes: vec![cause("medium", "Build tools uses 42% of machine CPU", "")],
+            families: vec![f],
+            ..Report::default()
+        };
+        let helper = app(
+            proc(70, "Code Helper", 20.0, 500.0),
+            "Visual Studio Code",
+            "/Applications/Visual Studio Code.app",
+            Role::AppHelper,
+        );
+        let java = proc(71, "java", 400.0, 900.0);
+        assert_eq!(
+            items(&r, &[], &[helper.clone(), java], 0)[0].action,
+            Action::Process(71),
+            "java is the busiest"
+        );
+        // An app's family opens the app, even when a child outside it is busier.
+        let mut app_family = r.clone();
+        app_family.families[0].kind = "browser".into();
+        assert_eq!(
+            items(
+                &app_family,
+                &[],
+                &[helper.clone(), proc(71, "java", 400.0, 900.0)],
+                0
+            )[0]
+            .action,
+            Action::App("/Applications/Visual Studio Code.app".into())
+        );
+        // pid 71 now belongs to something else: the busiest that still matches is the helper.
+        let other = proc(71, "zsh", 0.0, 10.0);
+        assert_eq!(
+            items(&r, &[], &[helper, other], 0)[0].action,
+            Action::App("/Applications/Visual Studio Code.app".into())
+        );
+    }
+
+    #[test]
+    fn a_pid_that_now_names_another_process_is_not_linked() {
+        let r = Report {
+            causes: vec![cause(
+                "medium",
+                "A process is using heavy CPU",
+                "rust-analyzer (pid 1300) at 138% CPU",
+            )],
+            ..Report::default()
+        };
+        let findings = vec![finding(1300, "proc-busy-cpu", "")];
+        let got = items(&r, &findings, &[proc(1300, "zsh", 0.0, 10.0)], 0);
+        assert_eq!(got[0].action, Action::Machine);
+        assert!(got[0].covers.is_empty(), "zsh's findings aren't this news");
+        let got = items(
+            &r,
+            &findings,
+            &[proc(1300, "rust-analyzer", 138.0, 900.0)],
+            0,
+        );
+        assert_eq!(got[0].action, Action::Process(1300));
+    }
+
+    #[test]
+    fn a_process_named_by_its_path_reads_by_its_name() {
+        assert_eq!(
+            plain(
+                "/System/Library/Frameworks/CoreServices.framework/Support/mds_stores (pid 412) averaged 96% CPU",
+                0
+            ),
+            "mds_stores (pid 412) averaged 96% CPU"
+        );
+        assert_eq!(
+            plain("java (pid 7) at 138% CPU", 0),
+            "java (pid 7) at 138% CPU"
+        );
+    }
+
+    #[test]
+    fn holding_memory_does_not_hide_memory_growth() {
+        let r = Report {
+            causes: vec![cause(
+                "low",
+                "A process is holding a lot of memory",
+                "java (pid 4102) at 4.1 GB RSS",
+            )],
+            ..Report::default()
+        };
+        let findings = vec![finding(4102, "proc-memory-growth", "Restart it.")];
+        let got = items(&r, &findings, &[proc(4102, "java", 4.0, 4200.0)], 0);
+        assert!(got[0].covers.is_empty(), "size isn't growth: {got:?}");
+        assert!(got[0].fix.is_empty());
+    }
+
+    #[test]
+    fn a_daemon_alert_reads_in_plain_words() {
+        let r = parse(SUSTAINED).unwrap();
+        let wall = crate::spawns::unix_time("2026-11-22T10:00:00Z").unwrap() as i64;
+        let procs = vec![proc(412, "mds_stores", 87.0, 300.0)];
+        let findings = vec![finding(412, "proc-busy-cpu", "Open it.")];
+        let got = items(&r, &findings, &procs, wall);
+        assert_eq!(got[0].title, "mds_stores sustained high CPU");
+        assert_eq!(
+            got[0].evidence,
+            "mds_stores (pid 412) averaged 87% CPU for the last 3 h; running for 5 h; \
+             started by mds (under launchd); Spotlight is re-indexing or a client keeps \
+             triggering indexing; check `mdutil -s /` and recently changed large directories"
+        );
+        assert_eq!(got[0].action, Action::Process(412));
+        assert_eq!(got[0].covers, ["412/proc-busy-cpu"]);
+        for raw in [
+            "next:",
+            "sample 412",
+            "2026-",
+            "owner chain",
+            "3h0m0s",
+            "probe",
+        ] {
+            assert!(!got[0].evidence.contains(raw), "{raw} left in");
+        }
+        // Without a start time the age Spectra gave is used.
+        assert_eq!(
+            plain("up 1h30m0s; owner chain: launchd(1) > x(9)", wall),
+            "running for 1 h; started by launchd"
         );
     }
 
@@ -626,7 +965,7 @@ pub(crate) mod tests {
             proc(1300, "rust-analyzer", 138.0, 1100.0),
             proc(4102, "java", 4.0, 4200.0),
         ];
-        let got = items(&r, &findings, &procs);
+        let got = items(&r, &findings, &procs, 0);
         assert_eq!(got.len(), TOP, "at most three");
         assert_eq!(got[0].severity, Severity::Critical);
         assert_eq!(got[0].covers, ["0/sys-memory-pressure"]);
@@ -648,7 +987,7 @@ pub(crate) mod tests {
             finding(18523, "proc-busy-cpu", "Look at it."),
             finding(7, "proc-busy-cpu", ""),
         ];
-        let got = items(&r, &findings, &[]);
+        let got = items(&r, &findings, &[], 0);
         assert_eq!(got[0].covers, ["18523/proc-busy-cpu"]);
         assert_eq!(got[0].fix, "Look at it.");
     }
@@ -659,7 +998,8 @@ pub(crate) mod tests {
             items(
                 &parse(CALM).unwrap(),
                 &[finding(0, "sys-volume-full", "")],
-                &[]
+                &[],
+                0
             )
             .is_empty()
         );
@@ -719,6 +1059,27 @@ pub(crate) mod tests {
         s.show(Nav::Overview);
         s.tick_whatswrong();
         assert!(s.whatswrong.running());
+    }
+
+    #[test]
+    fn the_age_line_redraws_only_on_the_overview_and_only_when_its_words_change() {
+        let (mut s, _) = faked(Ok(BUSY));
+        s.whatswrong.auto = false;
+        s.whatswrong.report = Some((parse(BUSY).unwrap(), 0.0));
+        s.now = 10.0;
+        assert!(s.tick_whatswrong(), "the first age drawn");
+        s.now = 10.3;
+        assert!(!s.tick_whatswrong(), "still 10 s ago");
+        s.show(Nav::All);
+        s.now = 20.0;
+        assert!(!s.tick_whatswrong(), "the Overview isn't showing");
+        s.now = 25.0;
+        assert!(!s.tick_whatswrong());
+        s.show(Nav::Overview);
+        assert!(
+            s.tick_whatswrong(),
+            "back on the Overview it is drawn again"
+        );
     }
 
     #[test]

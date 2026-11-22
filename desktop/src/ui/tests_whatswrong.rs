@@ -116,6 +116,33 @@ fn a_finding_right_now_repeats_shows_once() {
     assert!(has(&mut rt, "ww-1-fix"));
 }
 
+fn says(rt: &mut Runtime<App>, words: &str) -> bool {
+    settle(rt);
+    rt.elements()
+        .into_iter()
+        .any(|e| e.text.as_deref() == Some(words))
+}
+
+#[test]
+fn with_right_now_lines_and_no_findings_it_never_says_nothing_needs_attention() {
+    let mut rt = scene(|s| {
+        right_now_scene(s);
+        s.findings.clear();
+    });
+    assert!(has(&mut rt, "ww-0"), "Right now still lists causes");
+    assert!(!says(&mut rt, "Nothing needs attention"));
+    assert_eq!(
+        text_of(&mut rt, "findings-rest").as_deref(),
+        Some("Nothing else needs attention.")
+    );
+    // With nothing in Right now either, everything is fine.
+    let mut rt = scene(|s| {
+        right_now_clear_scene(s);
+        s.findings.clear();
+    });
+    assert!(says(&mut rt, "Nothing needs attention"));
+}
+
 #[test]
 fn nothing_wrong_is_one_short_line() {
     let mut rt = scene(right_now_clear_scene);

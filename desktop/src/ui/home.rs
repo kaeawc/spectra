@@ -331,13 +331,15 @@ pub fn home(s: &App, k: &Kit) -> El {
                 .color(c.text_faint),
         );
     }
-    if s.findings.is_empty() && s.loaded && s.proc_loaded {
+    // With lines in "Right now", "nothing needs attention" isn't true: only the rest is fine.
+    let settled = s.loaded && s.proc_loaded;
+    if s.findings.is_empty() && now.is_empty() && settled {
         list = list.child(notice(
             "Nothing needs attention",
             "Every process looks as it should.",
             k,
         ));
-    } else if findings.is_empty() && !s.findings.is_empty() {
+    } else if findings.is_empty() && (!s.findings.is_empty() || (!now.is_empty() && settled)) {
         list = list.child(
             text("Nothing else needs attention.")
                 .key("findings-rest")

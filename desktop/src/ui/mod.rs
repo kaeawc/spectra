@@ -194,7 +194,11 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Network => (network::page(s, &k), s.nav.title().to_owned()),
         Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
-            let problems = s.problems();
+            // Lines in "Right now" are something to look at too.
+            let problems = match s.problems() {
+                0 => s.right_now().len(),
+                n => n,
+            };
             let title = if problems == 0 {
                 "Nothing needs attention".to_owned()
             } else {
