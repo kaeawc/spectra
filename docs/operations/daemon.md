@@ -36,6 +36,20 @@ protocol, version, PID, start time, socket, and methods. `daemon.shutdown`
 responds before stopping. A persistent connection can receive server-to-client
 notifications for future subscriptions.
 
+## Profiling the daemon
+
+`spectra daemon profile [--kind heap|allocs|goroutine|cpu] [--seconds N] [--json]`
+calls the built-in `daemon.profile` method (`kind`, `seconds`). The daemon writes
+one Go runtime profile to `profiles/<kind>-<UTC time>-<random>.pprof` in its socket
+directory (mode 0600) and returns the path with a heap and goroutine summary.
+`heap` runs a garbage collection first so the profile is current; `cpu` records
+for `seconds` (default 10, at most 120) and only one CPU profile runs at a time.
+Nothing is collected until the method is called, it uses the same owner-only
+socket and peer-UID check as every other method, and it opens no listener. Read
+a profile with `go tool pprof <spectra binary> <file>`, and compare two heap
+profiles with `go tool pprof -base <earlier> <binary> <later>`. The daemon does
+not delete old profiles.
+
 ## Monitoring and alerts
 
 `daemon run` samples host health every 15 seconds. `--watch-interval 2s` changes
@@ -227,6 +241,15 @@ that JVM without a sample for the pass.
 Samples share the host-sample retention: the hourly prune deletes JVM samples
 older than seven days (about 2,000 rows per JVM at 5 minutes), while rules read
 only the most recent 60 per process lifetime.
+
+The watch keeps per-process history (CPU and RSS from the bulk `ps` call) in
+memory for the last 30 minutes per process, capped at 1,800 samples, so at the
+default 15-second interval a process holds about 120 samples. A process that has
+not been seen for 30 minutes is dropped at the next once-a-minute flush. Each
+flush writes only the minutes not yet written plus the newest minute (which may
+have been partial), so its cost follows the number of live processes rather than
+the daemon's uptime. The two-hour in-memory window of host samples that alerts
+evaluate is trimmed in place.
 
 The watch stores JSON samples for seven days and resolved alerts for 30 days
 in the Spectra SQLite database. `SPECTRA_WATCH_DB` overrides the database path

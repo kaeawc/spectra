@@ -399,3 +399,28 @@ func TestDaemonAssessGatekeeperForwarded(t *testing.T) {
 		}
 	}
 }
+
+func TestDaemonProfile(t *testing.T) {
+	paths, cleanup := testRunningDaemon(t, "2")
+	defer cleanup()
+	deps, _ := fakeDaemonDeps("darwin")
+	deps.discover = daemonclient.Discover
+	var out bytes.Buffer
+	if err := daemonProfile([]string{"--kind", "goroutine"}, paths, &out, deps); err != nil || !strings.Contains(out.String(), "goroutine profile written to "+filepath.Join(paths.Dir, "profiles")) {
+		t.Fatalf("text: %q, %v", out.String(), err)
+	}
+	out.Reset()
+	if err := daemonProfile([]string{"--kind", "heap", "--json"}, paths, &out, deps); err != nil || !strings.Contains(out.String(), `"kind":"heap"`) {
+		t.Fatalf("json: %q, %v", out.String(), err)
+	}
+	if err := daemonProfile([]string{"--kind", "bogus"}, paths, &out, deps); err == nil {
+		t.Fatal("invalid kind accepted")
+	}
+	if err := daemonProfile([]string{"extra"}, paths, &out, deps); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("extra arg: %v", err)
+	}
+	deps.discover = func(daemon.Paths) (*daemonclient.Client, bool) { return nil, false }
+	if err := daemonProfile(nil, paths, &out, deps); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("not running: %v", err)
+	}
+}

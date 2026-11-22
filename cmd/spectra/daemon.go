@@ -38,7 +38,7 @@ func runDaemon(args []string) int {
 
 func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: spectra daemon <run|start|stop|status|install|uninstall|print-plist|logs>")
+		fmt.Fprintln(stderr, "usage: spectra daemon <run|start|stop|status|install|uninstall|print-plist|logs|profile>")
 		return 2
 	}
 	runArgs, ok := daemonSubcommandArgs(args, stderr)
@@ -68,6 +68,8 @@ func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int 
 		actionErr = daemonPrintPlist(out, deps, runArgs)
 	case "logs":
 		actionErr = daemonLogs(args[1:], paths, out, deps)
+	case "profile":
+		actionErr = daemonProfile(args[1:], paths, out, deps)
 	default:
 		fmt.Fprintf(stderr, "unknown daemon subcommand %q\n", args[0])
 		return 2
@@ -366,6 +368,41 @@ func daemonStatus(args []string, paths daemon.Paths, out io.Writer, deps daemonD
 		return json.NewEncoder(out).Encode(st)
 	}
 	fmt.Fprintf(out, "daemon running (pid %d, socket %s, version %s)\n", st.PID, st.Socket, st.Version)
+	return nil
+}
+
+// daemonProfile asks the running daemon for one runtime profile; the
+// daemon writes it under its own directory and reports the path.
+func daemonProfile(args []string, paths daemon.Paths, out io.Writer, deps daemonDeps) error {
+	fs := flag.NewFlagSet("daemon profile", flag.ContinueOnError)
+	kind := fs.String("kind", "heap", "heap, allocs, goroutine or cpu")
+	seconds := fs.Int("seconds", 0, "CPU profile duration (kind cpu; default 10, max 120)")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: spectra daemon profile [--kind heap|allocs|goroutine|cpu] [--seconds N] [--json]")
+	}
+	c, ok := deps.discover(paths)
+	if !ok {
+		return fmt.Errorf("daemon not running")
+	}
+	defer c.Close()
+	wait := 10 * time.Second
+	if *kind == "cpu" {
+		wait += 120 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	var result daemon.ProfileResult
+	if err := c.Call(ctx, daemon.MethodProfile, daemon.ProfileParams{Kind: *kind, Seconds: *seconds}, &result); err != nil {
+		return err
+	}
+	if *jsonOut {
+		return json.NewEncoder(out).Encode(result)
+	}
+	fmt.Fprintf(out, "%s profile written to %s (heap in use %.1f MiB, %d goroutines)\n", result.Kind, result.Path, float64(result.HeapInuse)/(1<<20), result.NumGoroutine)
 	return nil
 }
 
