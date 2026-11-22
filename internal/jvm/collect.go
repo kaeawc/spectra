@@ -36,6 +36,12 @@ type CollectOptions struct {
 	// ReadLink resolves a symlink; nil means os.Readlink on Linux and
 	// disabled elsewhere. Used for the "(deleted)" /proc/<pid>/exe check.
 	ReadLink func(path string) (string, error)
+	// StaticCache holds per-process static facts (system properties, command
+	// line) keyed on pid + process start time. Nil means DefaultStaticCache.
+	StaticCache *StaticCache
+	// StartTimes maps pid to a process start-time string; nil is resolved
+	// with one `ps` call. A pid without a start time is never cached.
+	StartTimes map[int]string
 }
 
 // CollectAll discovers all running JVM processes and collects per-process
@@ -59,6 +65,17 @@ func CollectAllStatus(ctx context.Context, opts CollectOptions) (infos []Info, j
 	pids, available := discoverPIDs(run)
 	if len(pids) == 0 {
 		return nil, available
+	}
+
+	pidList := make([]int, 0, len(pids))
+	for pid := range pids {
+		pidList = append(pidList, pid)
+	}
+	if opts.StartTimes == nil {
+		opts.StartTimes = processStartTimes(run, pidList)
+		if opts.StartTimes != nil { // unknown start times must not wipe the cache
+			opts.staticCache().Prune(opts.StartTimes)
+		}
 	}
 
 	results := make([]Info, 0, len(pids))
@@ -91,6 +108,9 @@ func InspectPID(_ context.Context, pid int, opts CollectOptions) *Info {
 	if _, err := run("jcmd", fmt.Sprint(pid), "VM.version"); err != nil {
 		return nil
 	}
+	if opts.StartTimes == nil {
+		opts.StartTimes = processStartTimes(run, []int{pid})
+	}
 	info := collectOne(context.Background(), pid, "", run, opts)
 	return &info
 }
@@ -107,7 +127,8 @@ func AttributeJDKs(infos []Info, jdks []toolchain.JDKInstall) {
 func collectOne(ctx context.Context, pid int, main string, run CmdRunner, opts CollectOptions) Info {
 	info := Info{PID: pid, MainClass: main}
 
-	props := collectSysProps(pid, run)
+	static := collectStatic(pid, opts.StartTimes[pid], run, opts.staticCache())
+	props := static.sysProps
 	info.SysProps = props
 	if props != nil {
 		info.JavaHome = props["java.home"]
@@ -117,7 +138,7 @@ func collectOne(ctx context.Context, pid int, main string, run CmdRunner, opts C
 	info.Posture = virtualThreadEra(info.JDKVersion)
 	info.Diagnostics = DiagnosticsMatrix(info.JDKVersion)
 
-	info.VMFlags, info.VMArgs = collectCommandLine(pid, run)
+	info.VMFlags, info.VMArgs = static.vmFlags, static.vmArgs
 	info.ThreadCount = collectThreadCount(pid, run)
 	if gc, err := CollectGCStats(pid, run); err == nil {
 		info.GC = gc
