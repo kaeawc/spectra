@@ -329,8 +329,16 @@ the top CPU consumers.
 separately from the plain one, built once from the latest plain collection, so
 concurrent classified callers share one classification and plain callers never
 pay for it. Classification uses the on-disk classify cache. If the classifier
-fails or exceeds the 15 second cap, the call still succeeds: the remaining rows
-are left unknown and the payload carries a `warning` string.
+fails or exceeds its own 15 second cap, the call still succeeds: rows the
+classifier finished (it gets up to 2 more seconds to hand back in-flight work)
+keep their fields, the rest are left unknown, and the payload carries a
+`warning` string. A cold classified call is therefore bounded by roughly 32
+seconds: 15 for collection, 15 for classification and the 2 second grace.
+`sampled_at` stays the collection time, but the 2 second cache is measured from
+when classification finished. The daemon rebuilds its classifier every 10
+minutes to bound its in-memory memo; the on-disk classify cache stays warm.
+Subscribers of both kinds on one tick share a single collection and
+`sampled_at`.
 
 `process.subscribe` takes optional `classify` (bool) and returns
 `{"subscribed": true}`. With `classify: true` the subscriber receives classified

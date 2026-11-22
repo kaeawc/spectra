@@ -140,6 +140,7 @@ func TestClassifierTimeoutKeepsRowsWithWarning(t *testing.T) {
 		Collect: countingCollect(&collect), Timeout: 30 * time.Millisecond,
 		Classify: func(context.Context, []process.Info) error { <-block; return nil },
 	})
+	s.grace = 20 * time.Millisecond
 	snap, err := s.ListClassified(context.Background(), false)
 	if err != nil || len(snap.Processes) != 1 || snap.Warning == "" {
 		t.Fatalf("snap=%+v err=%v", snap, err)
@@ -202,5 +203,84 @@ func TestSubscribePlainOnlyNeverClassifies(t *testing.T) {
 	<-got
 	if cls.Load() != 0 {
 		t.Fatalf("classifier ran for plain-only subscribers: %d", cls.Load())
+	}
+}
+
+func TestClassifierTimeoutGraceKeepsPartialResults(t *testing.T) {
+	var collect atomic.Int32
+	s := NewService(Options{
+		Collect: countingCollect(&collect), Timeout: 30 * time.Millisecond,
+		Classify: func(ctx context.Context, procs []process.Info) error {
+			procs[0].Role = classify.RoleApp
+			<-ctx.Done()
+			time.Sleep(40 * time.Millisecond) // finishing in-flight work after the deadline
+			return ctx.Err()
+		},
+	})
+	snap, err := s.ListClassified(context.Background(), false)
+	if err != nil || snap.Warning == "" || snap.Processes[0].Role != classify.RoleApp {
+		t.Fatalf("partial results lost: %+v err=%v", snap, err)
+	}
+}
+
+func TestSlowClassificationDoesNotExpireCache(t *testing.T) {
+	var collect, cls atomic.Int32
+	clk := clock.NewFake(time.Unix(1000, 0))
+	s := NewService(Options{
+		Collect: countingCollect(&collect), Clock: clk,
+		Classify: func(ctx context.Context, p []process.Info) error {
+			clk.Advance(5 * DefaultTTL) // classification outlasts the TTL
+			return fakeClassify(&cls)(ctx, p)
+		},
+	})
+	first, _ := s.ListClassified(context.Background(), false)
+	second, _ := s.ListClassified(context.Background(), false)
+	if cls.Load() != 1 || collect.Load() != 1 || !second.SampledAt.Equal(first.SampledAt) {
+		t.Fatalf("classify=%d collect=%d: slow classification stored an expired result", cls.Load(), collect.Load())
+	}
+	if !first.SampledAt.Equal(time.Unix(1000, 0)) {
+		t.Fatalf("sampled_at moved off the collection time: %v", first.SampledAt)
+	}
+	clk.Advance(DefaultTTL)
+	_, _ = s.ListClassified(context.Background(), false)
+	if cls.Load() != 2 {
+		t.Fatalf("classified cache never expires: %d", cls.Load())
+	}
+}
+
+func TestSubscribeVariantsShareOneSnapshotPerTick(t *testing.T) {
+	var collect, cls atomic.Int32
+	s := NewService(Options{
+		Collect: countingCollect(&collect), Classify: fakeClassify(&cls),
+		Interval: 30 * time.Millisecond, TTL: time.Millisecond,
+	})
+	done := make(chan struct{})
+	defer close(done)
+	plain, class := make(chan Snapshot, 16), make(chan Snapshot, 16)
+	s.SubscribeClassified(done, false, func(_ string, p any) error { plain <- p.(Snapshot); return nil })
+	s.SubscribeClassified(done, true, func(_ string, p any) error { class <- p.(Snapshot); return nil })
+	for i := 0; i < 3; i++ {
+		a, b := <-plain, <-class
+		if !a.SampledAt.Equal(b.SampledAt) || a.Processes[0].PID != b.Processes[0].PID {
+			t.Fatalf("tick %d: variants differ: %v vs %v", i, a.SampledAt, b.SampledAt)
+		}
+	}
+}
+
+func TestClassifierRotates(t *testing.T) {
+	clk := clock.NewFake(time.Unix(1000, 0))
+	builds := 0
+	r := &rotatingClassifier{clock: clk, maxAge: time.Minute, build: func() *classify.Classifier {
+		builds++
+		return classify.New(classify.Options{})
+	}}
+	a := r.current()
+	clk.Advance(time.Minute - time.Second)
+	if r.current() != a || builds != 1 {
+		t.Fatalf("rebuilt too early: builds=%d", builds)
+	}
+	clk.Advance(time.Second)
+	if b := r.current(); b == a || builds != 2 {
+		t.Fatalf("not rebuilt after maxAge: builds=%d", builds)
 	}
 }

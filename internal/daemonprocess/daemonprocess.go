@@ -69,17 +69,51 @@ func DefaultCollect(base process.CollectOptions) CollectFunc {
 // were left unknown; it is reported as a warning, not a failed call.
 type ClassifyFunc func(ctx context.Context, procs []process.Info) error
 
-// DefaultClassify builds one classifier, reused for the life of the returned
-// func, backed by the on-disk classify cache when the cache root is available
-// (nil store otherwise), as `spectra process --classify` does.
-func DefaultClassify() ClassifyFunc {
-	opts := classify.Options{}
-	if root, err := cache.DefaultRoot(); err == nil {
-		opts.Store = cache.NewShardedStore(root, cache.KindClassify).WithMaxAge(cache.ClassifyMaxAge)
+const (
+	// ClassifierMaxAge bounds how long one classifier (whose per-executable
+	// and per-bundle memo maps never expire) is reused before a fresh one
+	// replaces it. The on-disk store keeps the replacement warm.
+	ClassifierMaxAge = 10 * time.Minute
+	// classifyGrace is how long a timed-out classification may still finish
+	// the in-flight work it returns partial results from.
+	classifyGrace = 2 * time.Second
+)
+
+// rotatingClassifier hands out a classifier that is rebuilt once it is older
+// than maxAge, bounding its memo maps and picking up updated app bundles.
+type rotatingClassifier struct {
+	build  func() *classify.Classifier
+	clock  clock.Clock
+	maxAge time.Duration
+
+	mu    sync.Mutex
+	c     *classify.Classifier
+	built time.Time
+}
+
+func (r *rotatingClassifier) current() *classify.Classifier {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if now := r.clock.Now(); r.c == nil || now.Sub(r.built) >= r.maxAge {
+		r.c, r.built = r.build(), now
 	}
-	c := classify.New(opts)
+	return r.c
+}
+
+// DefaultClassify returns a ClassifyFunc backed by the on-disk classify cache
+// when the cache root is available (nil store otherwise), as
+// `spectra process --classify` does. The classifier is reused and rebuilt
+// every ClassifierMaxAge.
+func DefaultClassify() ClassifyFunc {
+	r := &rotatingClassifier{clock: clock.System{}, maxAge: ClassifierMaxAge, build: func() *classify.Classifier {
+		opts := classify.Options{}
+		if root, err := cache.DefaultRoot(); err == nil {
+			opts.Store = cache.NewShardedStore(root, cache.KindClassify).WithMaxAge(cache.ClassifyMaxAge)
+		}
+		return classify.New(opts)
+	}}
 	return func(ctx context.Context, procs []process.Info) error {
-		return process.Classify(ctx, procs, c)
+		return process.Classify(ctx, procs, r.current())
 	}
 }
 
@@ -119,7 +153,10 @@ type subscriber struct {
 
 // slot is one cached variant (plain or classified) with its single-flight.
 type slot struct {
-	cached   Snapshot
+	cached Snapshot
+	// at is when the variant finished building; freshness is measured from
+	// it, so slow classification does not eat the TTL.
+	at       time.Time
 	valid    bool
 	inflight *call
 }
@@ -129,6 +166,7 @@ type Service struct {
 	collect  CollectFunc
 	classify ClassifyFunc
 	clsOnce  sync.Once
+	grace    time.Duration
 	clock    clock.Clock
 	ttl      time.Duration
 	timeout  time.Duration
@@ -142,7 +180,7 @@ type Service struct {
 }
 
 func NewService(opts Options) *Service {
-	s := &Service{collect: opts.Collect, classify: opts.Classify, clock: opts.Clock, ttl: opts.TTL, timeout: opts.Timeout,
+	s := &Service{collect: opts.Collect, classify: opts.Classify, grace: classifyGrace, clock: opts.Clock, ttl: opts.TTL, timeout: opts.Timeout,
 		interval: opts.Interval, subs: map[*subscriber]struct{}{}}
 	if s.collect == nil {
 		s.collect = DefaultCollect(process.CollectOptions{})
@@ -173,7 +211,7 @@ func RegisterMethods(server *daemon.Server, svc *Service) {
 // cache but joins a collection already in flight, since that one is fresh.
 // Failed collections are not cached.
 func (s *Service) List(ctx context.Context, refresh bool) (Snapshot, error) {
-	return s.get(ctx, refresh, false)
+	return s.get(ctx, refresh, false, nil)
 }
 
 // ListClassified is List with the --classify fields filled. The classified
@@ -181,16 +219,24 @@ func (s *Service) List(ctx context.Context, refresh bool) (Snapshot, error) {
 // built from the latest plain collection, so a plain caller never pays for
 // classification and a classified one never sees stale classification.
 func (s *Service) ListClassified(ctx context.Context, refresh bool) (Snapshot, error) {
-	return s.get(ctx, refresh, true)
+	return s.get(ctx, refresh, true, nil)
 }
 
-func (s *Service) get(ctx context.Context, refresh, classified bool) (Snapshot, error) {
+// classifyFrom classifies exactly plain (the subscribe loop's snapshot), so
+// both variants of a tick share one collection and sampled_at.
+func (s *Service) classifyFrom(ctx context.Context, plain Snapshot) (Snapshot, error) {
+	return s.get(ctx, false, true, &plain)
+}
+
+// get serves a variant. from, for classified only, pins the plain snapshot
+// to classify instead of fetching the latest one.
+func (s *Service) get(ctx context.Context, refresh, classified bool, from *Snapshot) (Snapshot, error) {
 	sl := &s.plain
 	if classified {
 		sl = &s.classed
 	}
 	s.mu.Lock()
-	if !refresh && sl.valid && s.clock.Now().Sub(sl.cached.SampledAt) < s.ttl {
+	if !refresh && sl.valid && (s.clock.Now().Sub(sl.at) < s.ttl || (from != nil && sl.cached.SampledAt.Equal(from.SampledAt))) {
 		snap := sl.cached
 		s.mu.Unlock()
 		return snap, nil
@@ -201,7 +247,7 @@ func (s *Service) get(ctx context.Context, refresh, classified bool) (Snapshot, 
 		sl.inflight = c
 		base := context.WithoutCancel(ctx)
 		if classified {
-			go s.runClassified(base, c, refresh)
+			go s.runClassified(base, c, refresh, from)
 		} else {
 			go s.run(base, c)
 		}
@@ -256,11 +302,16 @@ func (s *Service) run(base context.Context, c *call) {
 // runClassified classifies a copy of the latest plain snapshot (the plain
 // cache is never mutated). A collection failure fails the call; a classifier
 // error, timeout or panic keeps the rows and sets Warning.
-func (s *Service) runClassified(base context.Context, c *call, refresh bool) {
-	plain, err := s.get(base, refresh, false)
-	if err != nil {
-		s.finish(&s.classed, c, Snapshot{}, err)
-		return
+func (s *Service) runClassified(base context.Context, c *call, refresh bool, from *Snapshot) {
+	var plain Snapshot
+	if from != nil {
+		plain = *from
+	} else {
+		var err error
+		if plain, err = s.get(base, refresh, false, nil); err != nil {
+			s.finish(&s.classed, c, Snapshot{}, err)
+			return
+		}
 	}
 	procs, werr := s.classifyBounded(base, plain.Processes)
 	snap := Snapshot{SampledAt: plain.SampledAt, Processes: procs}
@@ -272,8 +323,10 @@ func (s *Service) runClassified(base context.Context, c *call, refresh bool) {
 
 // classifyBounded classifies a copy of rows on its own goroutine under the
 // timeout; a panic becomes an error. After an error the classifier's partial
-// results are returned, except on timeout where the goroutine may still be
-// writing its copy, so the untouched rows are returned instead.
+// results are returned. After the timeout the classifier gets a short grace
+// to hand back what it finished (it waits for in-flight codesign calls); only
+// if that also expires, the goroutine may still be writing its copy, so the
+// untouched rows are returned instead.
 func (s *Service) classifyBounded(base context.Context, rows []process.Info) ([]process.Info, error) {
 	ctx, cancel := context.WithTimeout(base, s.timeout)
 	defer cancel()
@@ -296,14 +349,23 @@ func (s *Service) classifyBounded(base context.Context, rows []process.Info) ([]
 	case err := <-ch:
 		return work, err
 	case <-ctx.Done():
-		return slices.Clone(rows), fmt.Errorf("timed out after %s: %w", s.timeout, ctx.Err())
+	}
+	terr := fmt.Errorf("timed out after %s: %w", s.timeout, ctx.Err())
+	select {
+	case err := <-ch:
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			terr = fmt.Errorf("%w; classifier: %w", terr, err)
+		}
+		return work, terr
+	case <-time.After(s.grace):
+		return slices.Clone(rows), terr
 	}
 }
 
 func (s *Service) finish(sl *slot, c *call, snap Snapshot, err error) {
 	s.mu.Lock()
 	if err == nil {
-		sl.cached, sl.valid = snap, true
+		sl.cached, sl.valid, sl.at = snap, true, s.clock.Now()
 		c.snap = snap
 	}
 	c.err = err
@@ -384,14 +446,16 @@ func (s *Service) loop(ctx context.Context) {
 	for {
 		wantPlain, wantClass := s.wanted()
 		var plain, class *Snapshot
-		if wantClass {
-			if snap, err := s.ListClassified(ctx, false); err == nil && !snap.SampledAt.Equal(lastClass) {
-				lastClass, class = snap.SampledAt, &snap
-			}
-		}
-		if wantPlain {
-			if snap, err := s.List(ctx, false); err == nil && !snap.SampledAt.Equal(lastPlain) {
-				lastPlain, plain = snap.SampledAt, &snap
+		if wantPlain || wantClass {
+			if base, err := s.List(ctx, false); err == nil {
+				if wantPlain && !base.SampledAt.Equal(lastPlain) {
+					lastPlain, plain = base.SampledAt, &base
+				}
+				if wantClass && !base.SampledAt.Equal(lastClass) {
+					if snap, err := s.classifyFrom(ctx, base); err == nil {
+						lastClass, class = snap.SampledAt, &snap
+					}
+				}
 			}
 		}
 		s.fanout(plain, class)
