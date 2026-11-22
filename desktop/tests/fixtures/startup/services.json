@@ -1,0 +1,244 @@
+{
+  "jobs": [
+    {
+      "label": "2BUA8C4S2C.com.1password.browser-helper",
+      "domain": "loaded",
+      "pid": 1107,
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "ai.openclaw.gateway",
+      "domain": "user",
+      "last_exit_status": 78,
+      "keep_alive": true,
+      "run_at_load": true,
+      "program_arguments": [
+        "/opt/homebrew/Cellar/node/25.6.1/bin/node",
+        "/opt/homebrew/lib/node_modules/openclaw/dist/index.js",
+        "gateway",
+        "--port",
+        "18789"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/ai.openclaw.gateway.plist",
+      "plist_mtime": "2026-02-19T23:30:28.436443652-05:00"
+    },
+    {
+      "label": "application.com.docker.docker.111017242.111017277",
+      "domain": "loaded",
+      "pid": 94984,
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.1password.1password-launcher",
+      "domain": "loaded",
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.anthropic.claudefordesktop.ShipIt",
+      "domain": "loaded",
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.apple.Finder",
+      "domain": "loaded",
+      "pid": 685,
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.apple.WindowServer",
+      "domain": "system",
+      "on_demand": true,
+      "program_arguments": [
+        "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+        "-daemon"
+      ],
+      "plist_path": "/System/Library/LaunchDaemons/com.apple.WindowServer.plist",
+      "plist_mtime": "2026-08-12T22:51:55-04:00"
+    },
+    {
+      "label": "com.apple.cfprefsd.xpc.agent",
+      "domain": "loaded",
+      "pid": 636,
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.docker.helper",
+      "domain": "loaded",
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.docker.socket",
+      "domain": "system",
+      "run_at_load": true,
+      "program": "/Library/PrivilegedHelperTools/com.docker.socket",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/com.docker.socket",
+        "me"
+      ],
+      "plist_path": "/Library/LaunchDaemons/com.docker.socket.plist",
+      "plist_mtime": "2026-01-17T22:31:53.962777441-05:00"
+    },
+    {
+      "label": "com.docker.vmnetd",
+      "domain": "system",
+      "run_at_load": true,
+      "program": "/Library/PrivilegedHelperTools/com.docker.vmnetd",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/com.docker.vmnetd"
+      ],
+      "plist_path": "/Library/LaunchDaemons/com.docker.vmnetd.plist",
+      "plist_mtime": "2026-01-17T22:31:53.901596692-05:00"
+    },
+    {
+      "label": "com.github.domt4.homebrew-autoupdate",
+      "domain": "user",
+      "last_exit_status": 1,
+      "run_at_load": true,
+      "program": "/Users/me/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist",
+      "plist_mtime": "2026-01-01T20:13:24.542173703-05:00",
+      "start_interval": 86400
+    },
+    {
+      "label": "com.github.facebook.watchman",
+      "domain": "user",
+      "pid": 1114,
+      "keep_alive": true,
+      "run_at_load": true,
+      "program_arguments": [
+        "/opt/homebrew/bin/watchman",
+        "--foreground",
+        "--logfile=/Users/me/.local/state/watchman/me-state/log",
+        "--log-level=1",
+        "--sockname=/Users/me/.local/state/watchman/me-state/sock",
+        "--statefile=/Users/me/.local/state/watchman/me-state/state",
+        "--pidfile=/Users/me/.local/state/watchman/me-state/pid"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/com.github.facebook.watchman.plist",
+      "plist_mtime": "2026-04-16T12:55:13.397329698-04:00"
+    },
+    {
+      "label": "com.google.GoogleUpdater.wake",
+      "domain": "user",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater",
+        "--wake-all",
+        "--enable-logging",
+        "--vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist",
+      "plist_mtime": "2025-05-27T11:34:05.994477786-04:00",
+      "start_interval": 3600,
+      "associated_bundle_identifiers": [
+        "com.google.GoogleUpdater"
+      ]
+    },
+    {
+      "label": "com.jetbrains.toolbox",
+      "domain": "user",
+      "run_at_load": true,
+      "program_arguments": [
+        "/Applications/JetBrains Toolbox.app/Contents/MacOS/jetbrains-toolbox",
+        "--minimize"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/com.jetbrains.toolbox.plist",
+      "plist_mtime": "2026-11-20T02:59:36.085559542-05:00"
+    },
+    {
+      "label": "com.openssh.sshd",
+      "domain": "system",
+      "on_demand": true,
+      "disabled": true,
+      "program": "/usr/libexec/sshd-keygen-wrapper",
+      "program_arguments": [
+        "sshd-keygen-wrapper"
+      ],
+      "plist_path": "/System/Library/LaunchDaemons/ssh.plist",
+      "plist_mtime": "2026-08-12T22:51:55-04:00"
+    },
+    {
+      "label": "com.valvesoftware.steam.ipctool",
+      "domain": "loaded",
+      "pid": 1610,
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "com.valvesoftware.steamclean",
+      "domain": "user",
+      "run_at_load": true,
+      "program": "/Users/me/Library/Application Support/Steam/SteamApps/steamclean",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/Steam/SteamApps/steamclean",
+        "Public"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/com.valvesoftware.steamclean.plist",
+      "plist_mtime": "2026-11-20T02:59:27.892478329-05:00",
+      "watch_paths": [
+        "/Users/me/Library/Application Support/Steam/Steam.AppBundle/Steam"
+      ]
+    },
+    {
+      "label": "dev.spectra.daemon",
+      "domain": "user",
+      "pid": 1123,
+      "keep_alive": true,
+      "run_at_load": true,
+      "program_arguments": [
+        "/Users/me/.local/bin/spectra",
+        "daemon",
+        "run"
+      ],
+      "plist_path": "/Users/me/Library/LaunchAgents/dev.spectra.daemon.plist",
+      "plist_mtime": "2026-09-29T11:15:51.836293991-04:00"
+    },
+    {
+      "label": "org.cups.cupsd",
+      "domain": "system",
+      "keep_alive": true,
+      "program_arguments": [
+        "/usr/sbin/cupsd",
+        "-l"
+      ],
+      "plist_path": "/System/Library/LaunchDaemons/org.cups.cupsd.plist",
+      "plist_mtime": "2026-08-12T22:51:55-04:00"
+    },
+    {
+      "label": "us.zoom.ZoomDaemon",
+      "domain": "system",
+      "on_demand": true,
+      "program": "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon"
+      ],
+      "plist_path": "/Library/LaunchDaemons/us.zoom.ZoomDaemon.plist",
+      "plist_mtime": "2026-09-25T09:12:15.940523573-04:00",
+      "associated_bundle_identifiers": [
+        "us.zoom.xos"
+      ]
+    },
+    {
+      "label": "us.zoom.updater",
+      "domain": "loaded",
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    },
+    {
+      "label": "us.zoom.updater.login.check",
+      "domain": "loaded",
+      "on_demand": true,
+      "plist_mtime": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "collected_at": "2026-11-22T00:51:08.4467Z"
+}

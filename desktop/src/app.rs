@@ -312,6 +312,8 @@ pub struct App {
     pub poke_rx: Option<Receiver<()>>,
     /// The machine-wide readings the System page shows.
     pub system: crate::system::System,
+    /// What starts at login or boot, for the Startup page.
+    pub startup: crate::startup::Startup,
 }
 
 pub fn init() -> App {
@@ -379,6 +381,7 @@ pub fn init() -> App {
         poke: Some(poke),
         poke_rx: Some(poke_rx),
         system: crate::system::System::new(),
+        startup: crate::startup::Startup::new(),
     }
 }
 
@@ -583,7 +586,7 @@ impl App {
     /// Re-cuts the list after a reading, a sidebar choice, a search, a sort or a group opening.
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
-        let nav = if matches!(self.nav, Nav::Overview | Nav::System) { Nav::All } else { self.nav };
+        let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Startup) { Nav::All } else { self.nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -694,6 +697,10 @@ impl App {
         self.select(None);
         self.table.clear_selection();
         self.rebuild();
+        // The Startup page reads what starts at login each time it opens.
+        if nav == Nav::Startup {
+            self.read_startup();
+        }
     }
 
     pub fn toggle_group(&mut self, id: &str) {
@@ -920,7 +927,7 @@ impl App {
             Some(_) => None,
             // An app page hides the list and its cursor.
             None if self.app_page.is_some() => None,
-            None if !matches!(self.nav, Nav::Overview | Nav::System) => self.cursor_target(),
+            None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Startup) => self.cursor_target(),
             None => None,
         }
     }

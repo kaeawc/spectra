@@ -9,9 +9,12 @@ mod home;
 mod list;
 mod process;
 mod quit;
+mod startup;
 mod system;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_startup;
 #[cfg(test)]
 mod tests_system;
 mod tools;
@@ -28,6 +31,14 @@ use card::dot;
 /// Keys nothing focused took: the sidebar toggle, Esc or Cmd-[ to go back from a page, and
 /// ⌥⌘Q to open the Quit confirmation (which a key never answers on its own).
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if s.startup.confirm.is_some() {
+        // Like Quit's: Esc cancels the Disable or Enable confirmation; nothing else answers it.
+        if ev.key == Key::Escape {
+            s.cancel_startup();
+            return true;
+        }
+        return false;
+    }
     if s.confirm.is_some() {
         // The confirmation's own controls take keys; Esc cancels it rather than going back.
         if ev.key == Key::Escape {
@@ -70,6 +81,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     let mut sb = Sidebar::new().header(overview);
     // The whole machine, right under the overview, whatever the process feed is doing.
     sb = sb.child(place(s, Nav::System, "system".into(), None, k));
+    sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
         let kinds = Category::ALL.iter().zip(s.stats.kinds).map(|(&c, n)| {
@@ -112,6 +124,8 @@ enum Page<'a> {
     Home,
     /// The whole machine.
     System,
+    /// What starts at login or boot.
+    Startup,
     List,
 }
 
@@ -133,6 +147,7 @@ fn page_of(s: &App) -> Page<'_> {
     match s.nav {
         Nav::Overview => Page::Home,
         Nav::System => Page::System,
+        Nav::Startup => Page::Startup,
         _ => Page::List,
     }
 }
@@ -156,6 +171,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::App(path) => (app_page::page(s, path, &k), s.app_name(path)),
         Page::List => (list::list(s, &k), s.nav.title().to_owned()),
         Page::System => (system::page(s, &k), s.nav.title().to_owned()),
+        Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             let problems = s.problems();
             let title = if problems == 0 {
@@ -212,6 +228,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .build(&k);
     let mut layer = Vec::new();
     quit::dialog(s, &k, &mut layer);
+    startup::dialog(s, &k, &mut layer);
     root(split, layer)
 }
 

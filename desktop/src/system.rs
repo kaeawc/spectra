@@ -1070,10 +1070,10 @@ pub mod tests {
     pub const NETWORK: &str = r#"{"default_route_iface": "en0", "default_route_gw": "172.20.0.1",
       "dns_servers": ["172.20.0.1"], "proxy": {},
       "listening_ports": [
-        {"port": 7000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "jason"},
-        {"port": 5000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "jason"},
-        {"port": 5583, "proto": "tcp", "local_addr": "127.0.0.1", "pid": 7498, "command": "qemu-syst", "user": "jason"},
-        {"port": 5583, "proto": "tcp", "local_addr": "[::1]", "pid": 7498, "command": "qemu-syst", "user": "jason"},
+        {"port": 7000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "me"},
+        {"port": 5000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "me"},
+        {"port": 5583, "proto": "tcp", "local_addr": "127.0.0.1", "pid": 7498, "command": "qemu-syst", "user": "me"},
+        {"port": 5583, "proto": "tcp", "local_addr": "[::1]", "pid": 7498, "command": "qemu-syst", "user": "me"},
         {"port": 0, "proto": "udp"},
         "not an object"
       ],

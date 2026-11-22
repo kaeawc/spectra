@@ -58,6 +58,32 @@ What it shows:
     throttled, and volumes over 90% full (critical from 97%). A pressure finding clears after three
     normal readings in a row, a volume finding once it is under 88%, and a part whose reading
     failed or is three rounds old has no finding.
+- **Startup**, under Machine: everything that launches at login or boot, and the background
+  services launchd runs, so you can see what runs without you asking. Grouped by the app it
+  belongs to (an app's login item, agents, daemons and helpers together), then items no app
+  owns, then other background services. Each row: name, kind (login item, launch agent, launch
+  daemon, background service), when it starts (at login, at boot, kept alive, on an interval, on
+  a schedule, on demand), whether it runs and its pid (opening the process's page when the list
+  has it), Disabled, and the program's path. Search by name, label, app, path or pid; "Running
+  now" keeps what runs; "Not from Apple" (on at first) hides Apple's items, and turning it off
+  reads them too. Over 200 rows, the rest are counted and the search narrows them.
+  - Read when the page opens and on Refresh: `spectra startup list --json --scope all` (with
+    `--include-apple` once Apple's items are shown) and `spectra services --json --domain all`,
+    off the UI thread with a 60 s deadline. A failed read says why with Try again, and a failed
+    refresh keeps the list from before. Sources Spectra couldn't read and unreadable plists are
+    named; a failed services read leaves the startup items and says so.
+  - Disable and Enable, for your own launch agents only (`~/Library/LaunchAgents`, not Apple's,
+    not a label two plists share): only on a press, behind a confirmation that names the item
+    and its label and says what changes. Disabling stops it starting at login or on its own until
+    you enable it, and Spectra also unloads it, so if it's loaded it's unloaded and if it's
+    running it stops. Enabling says it will start at your next login, and that it starts now only
+    when it isn't loaded. Cancel has focus, Esc cancels, and one press sends one
+    `spectra startup disable|enable --json --scope user -- <label>`. Buttons stay off until the
+    re-read shows the result, and quitting waits a moment for a change, then leaves it to finish
+    rather than stopping it half done.
+    The outcome is Spectra's own: done, refused (and why), or didn't take, and the list is read
+    again. System items say "Needs an administrator; Spectra Desktop doesn't run sudo"; login
+    items say to use System Settings › General › Login Items.
 - **All processes**, then by kind and by runtime in the sidebar, with live counts. Sort by CPU,
   memory or name; search by name, pid, bundle id or path. The table only builds the rows on
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
@@ -200,6 +226,10 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/system.rs`: the machine-wide readings, their threads, parsing and history;
   `src/system_findings.rs`: the rules that turn them into findings; `src/sample_system.rs`:
   their sample data.
+- `src/startup.rs`: the Startup page's reads and changes, their JSON, grouping and filters,
+  behind a `Runner` trait that tests replace with a fake that records what it was asked;
+  `src/sample_startup.rs`: its sample data, from fixtures captured on a Mac in
+  `tests/fixtures/startup`.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs` and `src/sample_jvm.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.
