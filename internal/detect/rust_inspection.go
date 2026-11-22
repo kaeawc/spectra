@@ -62,8 +62,8 @@ func newRustInspector(markers rustMarkerScanner, links rustLinker, sidecar rustS
 	return rustInspector{markers: markers, links: links, sidecar: sidecar}
 }
 
-func inspectRustApp(appPath, exe string, r *Result) *RustInspection {
-	ins := newRustInspector(nil, nil, nil).inspect(appPath, exe, r)
+func inspectRustApp(appPath, exe string, r *Result, markers rustMarkerScanner) *RustInspection {
+	ins := newRustInspector(markers, nil, nil).inspect(appPath, exe, r)
 	if ins == nil || ins.Kind == "none" {
 		return nil
 	}

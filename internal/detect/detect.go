@@ -506,12 +506,6 @@ type markerScanner interface {
 	ScanMarkers(exe string) binaryMarkers
 }
 
-type fileMarkerScanner struct{}
-
-func (fileMarkerScanner) ScanMarkers(exe string) binaryMarkers {
-	return scanBinaryMarkers(exe)
-}
-
 // Detect inspects the bundle at appPath and returns a Result.
 // It never returns an error for "unknown" — instead it fills the result
 // with what it found and Confidence="low".
@@ -552,11 +546,13 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	// Walk the bundle once for sizes and the .jar count; classification, the
 	// size fields, and dependency scanning all consume these instead of each
 	// re-walking the tree.
-	actualSize, apparentSize, jarCount := bundleTreeStats(appPath)
-	r.BundleSizeBytes, r.ApparentSizeBytes = actualSize, apparentSize
+	tree := bundleTreeStats(appPath)
+	jarCount := tree.jars
+	r.BundleSizeBytes, r.ApparentSizeBytes = tree.actual, tree.apparent
+	markers := newMarkerCache(scanBinaryMarkers)
 
 	// Layer 1: bundle markers. Decisive for most apps.
-	l1Decided := classifyByBundleMarkers(appPath, jarCount, &r)
+	l1Decided := classifyByBundleMarkers(appPath, jarCount, tree.libjvmDir, &r)
 
 	if !l1Decided {
 		// Browser-style framework shims (Chrome, Edge, Brave) hide their
@@ -566,7 +562,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 		classifyByLinkedLibs(exe, &r)
 		// Layer 3: Rust/Go markers can override an AppKit guess
 		// (Warp, Zed, Conductor, Ollama all link AppKit but are Rust/Go).
-		classifyByStrings(exe, &r)
+		classifyByStringsWith(exe, &r, markers)
 	}
 
 	enrichFromExe(exe, &r)
@@ -577,7 +573,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	if r.UI == "Electron" {
 		r.NativeModules = scanNativeModules(appPath)
 	}
-	r.Rust = inspectRustApp(appPath, exe, &r)
+	r.Rust = inspectRustApp(appPath, exe, &r, markers)
 
 	si := d.populateMetadata(appPath, exe, &r)
 
@@ -768,7 +764,7 @@ func scanStorage(appPath, bundleID string) *StorageFootprint {
 			if !exists(p) {
 				continue
 			}
-			n := bundleSize(p) // recursive sum (ok for non-.app dirs too)
+			n := treeBytes(p) // recursive sum (ok for non-.app dirs too)
 			if n == 0 {
 				continue
 			}
@@ -823,60 +819,6 @@ func (d detector) readArchitectures(exe string) []string {
 		arches = append(arches, "x86_64")
 	}
 	return arches
-}
-
-// bundleSizes walks appPath once and returns (actual, apparent) byte counts
-// for all regular files. actual uses Stat_t.Blocks*512 so sparse files report
-// real allocation; apparent uses fi.Size() (the logical ceiling). For
-// non-sparse files they are equal; a Docker VM disk image may show
-// apparent 60 GiB vs actual 4 GiB. Errors are ignored; partial sums are fine.
-func bundleSizes(appPath string) (actual, apparent int64) {
-	_ = filepath.WalkDir(appPath, func(_ string, d os.DirEntry, _ error) error {
-		if d == nil || d.IsDir() {
-			return nil
-		}
-		fi, _ := d.Info()
-		if fi == nil || !fi.Mode().IsRegular() {
-			return nil
-		}
-		actual += diskBytes(fi)
-		apparent += fi.Size()
-		return nil
-	})
-	return actual, apparent
-}
-
-// bundleTreeStats walks the bundle exactly once and returns the actual
-// (sparse-aware) and apparent byte totals for all regular files, plus the
-// number of .jar files under Contents/. It replaces three independent
-// full-tree walks that classification, size accounting, and dependency
-// scanning each used to run: bundleSizes(appPath) and two countJars(Contents).
-func bundleTreeStats(appPath string) (actual, apparent int64, jars int) {
-	contents := filepath.Join(appPath, "Contents")
-	_ = filepath.WalkDir(appPath, func(path string, d os.DirEntry, _ error) error {
-		if d == nil || d.IsDir() {
-			return nil
-		}
-		// Match countJars(Contents): any non-dir entry ending .jar under Contents.
-		if strings.HasSuffix(d.Name(), ".jar") && strings.HasPrefix(path, contents) {
-			jars++
-		}
-		fi, _ := d.Info()
-		if fi == nil || !fi.Mode().IsRegular() {
-			return nil
-		}
-		actual += diskBytes(fi)
-		apparent += fi.Size()
-		return nil
-	})
-	return actual, apparent, jars
-}
-
-// bundleSize returns the actual (sparse-aware) disk usage for appPath.
-// Deprecated: prefer bundleSizes when you also need apparent size.
-func bundleSize(appPath string) int64 {
-	a, _ := bundleSizes(appPath)
-	return a
 }
 
 // readSigning parses `codesign -dv --verbose=4` stderr: team identifier,
@@ -1007,7 +949,7 @@ func (d detector) readEntitlementsDetail(appPath string) (sandboxed bool, notabl
 
 // --- Layer 1 ----------------------------------------------------------------
 
-func classifyByBundleMarkers(appPath string, jarCount int, r *Result) bool {
+func classifyByBundleMarkers(appPath string, jarCount int, libjvmDir string, r *Result) bool {
 	frameworks := filepath.Join(appPath, "Contents", "Frameworks")
 	resources := filepath.Join(appPath, "Contents", "Resources")
 	contents := filepath.Join(appPath, "Contents")
@@ -1047,7 +989,7 @@ func classifyByBundleMarkers(appPath string, jarCount int, r *Result) bool {
 
 	// JVM-based apps: detect bundled JRE OR jar-heavy bundle.
 	// jarCount is precomputed by the caller's single bundle walk.
-	jvmRoot := findJVMRoot(contents)
+	jvmRoot := findJVMRoot(contents, libjvmDir)
 	if jvmRoot != "" || jarCount >= 5 {
 		return classifyJVMMarkers(appPath, contents, jvmRoot, jarCount, r)
 	}
@@ -1169,10 +1111,6 @@ func classifyByLinkedLibsWith(exe string, r *Result, cmds nodeAppCommands) {
 }
 
 // --- Layer 3: binary strings -------------------------------------------------
-
-func classifyByStrings(exe string, r *Result) {
-	classifyByStringsWith(exe, r, fileMarkerScanner{})
-}
 
 func classifyByStringsWith(exe string, r *Result, scanner markerScanner) {
 	if exe == "" {
@@ -1321,50 +1259,7 @@ func (ins nodeAppInspector) scanBinaryMarkers(exe string) (m binaryMarkers) {
 	}
 	defer f.Close()
 
-	rustNeedles := [][]byte{
-		[]byte("core::panicking"),
-		[]byte("rust_panic"),
-		[]byte("rustc/"),
-		[]byte("panicked at "),
-		[]byte("RUST_BACKTRACE"),
-	}
-	goNeedle := []byte("\xff Go buildinf:") // prefix of __go_buildinfo magic
-	wailsNeedle := []byte("github.com/wailsapp/wails")
-
-	buf := make([]byte, 1<<20) // 1MB chunks
-	overlap := 64
-	tail := make([]byte, 0, overlap)
-	// region is reused across iterations; its backing array is large enough to
-	// hold the carried-over tail plus a full chunk, so no per-read realloc.
-	region := make([]byte, 0, overlap+len(buf))
-	for {
-		n, err := f.Read(buf)
-		if n > 0 {
-			region = append(region[:0], tail...)
-			region = append(region, buf[:n]...)
-			for _, needle := range rustNeedles {
-				m.rustHits += bytes.Count(region, needle)
-			}
-			if !m.hasGoBuildID && bytes.Contains(region, goNeedle) {
-				m.hasGoBuildID = true
-			}
-			if !m.isWails && bytes.Contains(region, wailsNeedle) {
-				m.isWails = true
-			}
-			if len(region) > overlap {
-				tail = append(tail[:0], region[len(region)-overlap:]...)
-			} else {
-				tail = append(tail[:0], region...)
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			break
-		}
-	}
-	return m
+	return scanMarkersReader(f)
 }
 
 type binaryMarkers struct {
@@ -1384,27 +1279,16 @@ func isDir(p string) bool {
 }
 
 // findJVMRoot returns the path of the bundled JVM directory if any
-// (Contents/runtime, Contents/jbr, Contents/jre, or anywhere with libjvm.dylib).
-func findJVMRoot(contents string) string {
+// (Contents/runtime, Contents/jbr, Contents/jre, or the directory holding
+// libjvm.dylib, which the caller's single bundle walk already located).
+func findJVMRoot(contents, libjvmDir string) string {
 	for _, name := range []string{"runtime", "jbr", "jre", "PlugIns/jdk"} {
 		p := filepath.Join(contents, name)
 		if isDir(p) {
 			return p
 		}
 	}
-	// Fallback walk (cheap; bundles are shallow).
-	var found string
-	_ = filepath.WalkDir(contents, func(path string, d os.DirEntry, _ error) error {
-		if d == nil || d.IsDir() {
-			return nil
-		}
-		if d.Name() == "libjvm.dylib" {
-			found = filepath.Dir(path)
-			return io.EOF
-		}
-		return nil
-	})
-	return found
+	return libjvmDir
 }
 
 // scanNativeModules walks Electron's unpacked payload roots for *.node
