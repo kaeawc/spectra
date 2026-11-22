@@ -248,7 +248,7 @@ func (s *Service) Findings(ctx context.Context, pid int) (FindingsResult, error)
 	}
 	out := FindingsResult{PID: pid, Findings: []rules.Finding{}, Warnings: snap.Warnings}
 	for _, f := range rules.Evaluate(snap, s.catalog) {
-		if subjectIsPID(f.Subject, pid) {
+		if findingIsPID(f, pid) {
 			out.Findings = append(out.Findings, f)
 		}
 	}
@@ -295,13 +295,21 @@ func hasJVM(snap snapshot.Snapshot, pid int) bool {
 	return false
 }
 
-// subjectIsPID matches the rule Subject conventions that name a process:
-// "PID <n>" optionally followed by a space and detail (per-JVM rules,
-// fd-pressure), and "<name> pid <n>" (process-memory-hog).
-func subjectIsPID(subject string, pid int) bool {
+// processMemoryHogRule is the one process rule whose Subject is
+// "<command> pid <n>"; its command is arbitrary, so only the suffix is
+// trustworthy there.
+const processMemoryHogRule = "process-memory-hog"
+
+// findingIsPID reports whether f is about pid. Every other process rule
+// (per-JVM rules, fd-pressure) uses "PID <n>" optionally followed by a space
+// and detail.
+func findingIsPID(f rules.Finding, pid int) bool {
 	n := strconv.Itoa(pid)
+	if f.RuleID == processMemoryHogRule {
+		return strings.HasSuffix(f.Subject, " pid "+n)
+	}
 	prefix := "PID " + n
-	return subject == prefix || strings.HasPrefix(subject, prefix+" ") || strings.HasSuffix(subject, " pid "+n)
+	return f.Subject == prefix || strings.HasPrefix(f.Subject, prefix+" ")
 }
 
 func (s *Service) listRPC(ctx context.Context, req *daemon.Request) (any, error) {

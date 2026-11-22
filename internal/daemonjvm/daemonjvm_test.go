@@ -274,11 +274,13 @@ func TestFindingsUnknownPIDCarriesJPSWarning(t *testing.T) {
 	}
 }
 
-func pidRule(subjects ...string) rules.Rule {
-	return rules.Rule{ID: "test-rule", Severity: rules.SeverityLow, MatchFn: func(snapshot.Snapshot) []rules.Finding {
+func pidRule(subjects ...string) rules.Rule { return ruleWithID("test-rule", subjects...) }
+
+func ruleWithID(id string, subjects ...string) rules.Rule {
+	return rules.Rule{ID: id, Severity: rules.SeverityLow, MatchFn: func(snapshot.Snapshot) []rules.Finding {
 		var out []rules.Finding
 		for _, s := range subjects {
-			out = append(out, rules.Finding{RuleID: "test-rule", Severity: rules.SeverityLow, Subject: s})
+			out = append(out, rules.Finding{RuleID: id, Severity: rules.SeverityLow, Subject: s})
 		}
 		return out
 	}}
@@ -294,13 +296,16 @@ func TestFindingsFiltersToPID(t *testing.T) {
 		"PID 12 (com.example.Main)",
 		"PID 12 NMT Internal",
 		"PID 12 (com.example.Main) deadlock: a, b",
-		"java pid 12",
 		"PID 123 (com.example.Other)",
 		"PID 123",
 		"PID 12x",
-		"java pid 123",
+		"java pid 12", // the suffix form belongs to process-memory-hog only
 		"host memory",
 		"",
+	), ruleWithID(processMemoryHogRule,
+		"java pid 12",
+		"java pid 123",
+		"PID 12 helper pid 123", // command "PID 12 helper" running as pid 123
 	)}
 	s := NewService(Options{Snapshot: twoJVMSnapshot, Catalog: catalog})
 	got, err := s.Findings(context.Background(), 12)
@@ -318,7 +323,7 @@ func TestFindingsFiltersToPID(t *testing.T) {
 		t.Fatalf("pid=%d subjects=%q want %q", got.PID, subjects, want)
 	}
 	other, err := s.Findings(context.Background(), 123)
-	if err != nil || len(other.Findings) != 3 {
+	if err != nil || len(other.Findings) != 4 {
 		t.Fatalf("pid 123: %+v %v", other, err)
 	}
 }
