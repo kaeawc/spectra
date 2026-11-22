@@ -44,3 +44,30 @@ jobs:
 
       - name: Tests
         run: cargo test --locked
+
+  linux:
+    name: Build check (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: rustup show active-toolchain
+
+      # No apt packages: clippy does not link, the Wayland, X11 and fontconfig crates load their
+      # libraries at run time (dlopen), and the C/asm build scripts (psm, blake3) use the runner's gcc.
+      # A full `cargo build` would also need libxkbcommon-dev to link.
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
