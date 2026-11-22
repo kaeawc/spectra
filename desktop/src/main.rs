@@ -11,6 +11,7 @@ mod groups;
 mod inspect;
 mod jvm_tools;
 mod live;
+mod logs;
 mod proc_findings;
 mod procs;
 mod run;
@@ -18,6 +19,7 @@ mod sample;
 mod sample_jvm;
 mod sample_system;
 mod sample_activity;
+mod sample_logs;
 mod signal;
 mod spawns;
 mod sample_tree;
@@ -178,6 +180,9 @@ fn main() {
             ("tool-owner", sample::tool_owner_scene),
             ("tool-runtime", sample::tool_runtime_scene),
             ("tool-failed", sample::tool_failed_scene),
+            ("logs", sample_logs::logs_scene),
+            ("logs-empty", sample_logs::logs_empty_scene),
+            ("logs-timeout", sample_logs::logs_timeout_scene),
             ("jvm-tools", sample_jvm::jvm_tools_scene),
             ("tool-threads", sample_jvm::tool_threads_scene),
             ("tool-threads-deadlock", sample_jvm::tool_threads_deadlock_scene),

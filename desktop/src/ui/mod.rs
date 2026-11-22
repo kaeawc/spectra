@@ -8,6 +8,7 @@ mod chart;
 mod detail;
 mod home;
 mod list;
+mod logs;
 mod process;
 mod quit;
 mod startup;
@@ -20,6 +21,8 @@ mod tests_startup;
 mod tests_system;
 #[cfg(test)]
 mod tests_activity;
+#[cfg(test)]
+mod tests_logs;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};

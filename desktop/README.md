@@ -197,6 +197,22 @@ What it shows:
       `jfr stop` and `jfr summary --json <file>`, and shows what happened most. Stop runs even
       when the dump fails. Leaving the page, or quitting the app, stops the recording and keeps
       nothing.
+- **Logs** on a process page and an app page (its main process): recent entries it wrote to the
+  unified log, from `spectra logs --json --process <name> --last <window> [--level <min>] --top
+  2000`, only when you press Show logs. Pick how far back (5 min, 15 min, 1 h) and the lowest
+  level (All, Error, Fault); picking again reads again. Rows show the time, the level, the
+  subsystem and category (else the library that logged it) and the message, newest first;
+  errors (amber) and faults (red, marked with a cross) stand out. A filter narrows them by
+  message, subsystem or level.
+  - It runs apart from the tools, with a 30 s deadline, an 8 MB output cap and Cancel. The page
+    keeps the newest 500 entries. Spectra keeps the earliest 2,000 of a window; when a window
+    holds more, the page says so and suggests a shorter window or Error.
+  - The log knows processes by name. When several running processes share the page's name (five
+    `zsh`), the page says so and keeps only its own pid's entries, counting the rest.
+  - It says plainly when there are no entries, and when the query ran out of time.
+  - Follow reads the last minute every 5 s while the page is open and adds what's newer at the
+    top. Leaving the page or quitting stops it; it never reads in the background. A round that
+    fails turns Follow off and says why.
 - **Quit and Force quit**: in a process page's header, and over the list for the row under the
   cursor. An app's row acts on the app's main process ("Quit Slack"); a row of several
   processes that isn't one app (twelve `zsh`) has no action, so open it and pick one. ⌥⌘Q opens
@@ -232,6 +248,7 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # jvm-tools, tool-threads, tool-threads-deadlock, tool-histogram,
                             # tool-gc, tool-nmt, tool-nmt-off, tool-explain, tool-heapdump,
                             # tool-jfr, tool-jfr-summary,
+                            # logs, logs-empty, logs-timeout,
                             # system, system-pressure, system-failed, system-linux,
                             # activity, activity-storm, activity-unsupported, startup,
                             # startup-confirm, startup-failed, tree, tree-search
@@ -254,6 +271,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
   tests replace with a fake. `src/tools.rs`, `src/live.rs` and `src/bundle.rs`: those commands
   and their JSON; `src/jvm_tools.rs`: a JVM's tools' JSON and the sums made from it (histogram
   growth, thread groups), with fixtures captured from a real JVM in `tests/fixtures/jvm`.
+- `src/logs.rs`: a page's Logs: the `spectra logs` arguments, its JSON (a fixture captured
+  from Finder in `tests/fixtures/logs`), the level and name filters, and Follow;
+  `src/sample_logs.rs`: its sample data.
 - `src/system.rs`: the machine-wide readings, their threads, parsing and history;
   `src/system_findings.rs`: the rules that turn them into findings; `src/sample_system.rs`:
   their sample data.

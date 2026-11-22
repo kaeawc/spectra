@@ -30,6 +30,7 @@ pub fn page(s: &App, path: &str, k: &Kit) -> El {
         page = page
             .child(section("Activity, all its processes together", activity(s, path, k), k))
             .child(section("Network and energy", live(s, "ap", k), k))
+            .child(super::logs::panel(s, k))
             .child(section(
                 &format!("Processes ({})", fmt_count(procs.len() as u64)),
                 children("ap", &procs, k),

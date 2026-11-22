@@ -36,6 +36,9 @@ pub enum Tool {
     JfrStart,
     /// Writes the page's recording to a file, stops it and summarises it.
     JfrStop,
+    /// Recent unified-log entries. It goes by process name, window and level, so it isn't in
+    /// [`Tool::ALL`]: a page's Logs section runs it (`logs.rs`), apart from the one-at-a-time tools.
+    Logs,
 }
 
 /// The files a tool reads or writes, decided on the UI thread when it's pressed.
@@ -121,6 +124,7 @@ impl Tool {
             Tool::Dominators => "dominators",
             Tool::JfrStart => "jfr",
             Tool::JfrStop => "jfr-stop",
+            Tool::Logs => "logs",
         }
     }
 
@@ -146,6 +150,7 @@ impl Tool {
             Tool::Dominators => "Dominators",
             Tool::JfrStart => "Flight recording",
             Tool::JfrStop => "Stop and analyze",
+            Tool::Logs => "Logs",
         }
     }
 
@@ -174,6 +179,7 @@ impl Tool {
                 "Records JVM events until you stop it, then writes a .jfr to Downloads and summarises it. Leaving the page stops and discards it".into()
             }
             Tool::JfrStop => "Writes the recording to a file, stops it and summarises it".into(),
+            Tool::Logs => "Recent entries it wrote to the system log, newest first".into(),
         }
     }
 
@@ -182,7 +188,7 @@ impl Tool {
             Tool::Sample | Tool::Hang | Tool::Spindump => Kind::Cpu,
             Tool::Vmmap | Tool::Vmregions | Tool::Memtrace | Tool::Lsmp => Kind::Memory,
             Tool::Lineage | Tool::Owner => Kind::Relations,
-            Tool::Runtime => Kind::Runtime,
+            Tool::Runtime | Tool::Logs => Kind::Runtime,
             Tool::Threads
             | Tool::Histogram
             | Tool::Gc
@@ -216,7 +222,7 @@ impl Tool {
 
     /// Whether it has a row of its own; the rest show inside another's.
     pub fn has_row(self) -> bool {
-        !matches!(self, Tool::LeakSuspects | Tool::Dominators | Tool::JfrStop)
+        !matches!(self, Tool::LeakSuspects | Tool::Dominators | Tool::JfrStop | Tool::Logs)
     }
 
     /// What its button says before it has run.
@@ -276,6 +282,8 @@ impl Tool {
             Tool::Dominators => vec!["jvm", "dominators", "--json", hprof],
             Tool::JfrStart => vec!["jvm", "jfr", "start", "--name", name, pid],
             Tool::JfrStop => vec!["jvm", "jfr", "summary", "--json", out],
+            // It goes by name, not pid: `logs::args`.
+            Tool::Logs => return Vec::new(),
         };
         v.into_iter().map(str::to_owned).collect()
     }
@@ -293,6 +301,7 @@ impl Tool {
             // A big heap takes a while to write and to read back.
             Tool::HeapDump | Tool::LeakSuspects | Tool::Dominators => 600,
             Tool::JfrStop => 120,
+            Tool::Logs => crate::logs::DEADLINE.as_secs(),
         })
     }
 
@@ -308,6 +317,7 @@ impl Tool {
             Tool::LeakSuspects | Tool::Dominators => "Reading the heap dump…".into(),
             Tool::JfrStart => "Starting the recording…".into(),
             Tool::JfrStop => "Writing the recording and summarising it…".into(),
+            Tool::Logs => "Reading the log…".into(),
             _ => "Reading…".into(),
         }
     }
@@ -337,6 +347,7 @@ impl Tool {
                 let summary: jvm_tools::JfrSummary = read(json)?;
                 Report::Jfr(JfrReport { path: summary.path.clone(), summary })
             }
+            Tool::Logs => Report::Logs(crate::logs::parse(json)?),
             Tool::Spindump | Tool::Lsmp => return Err("Spectra Desktop doesn't run this tool.".into()),
         })
     }
@@ -363,6 +374,7 @@ pub enum Report {
     Dominators(DominatorReport),
     JfrStarted,
     Jfr(JfrReport),
+    Logs(crate::logs::LogsReport),
 }
 
 /// What the main thread was doing, as `sample` and `hang` judge it.
@@ -813,6 +825,14 @@ pub(crate) mod tests {
         let Report::Runtime(r) = Tool::Runtime.parse(RUNTIME).unwrap() else { panic!() };
         assert_eq!(r.capabilities.len(), 2);
         assert_eq!(r.runtime, "native");
+    }
+
+    #[test]
+    fn logs_parse_like_the_other_tools_but_run_from_their_own_section() {
+        let Report::Logs(r) = Tool::Logs.parse(crate::logs::tests::FINDER).unwrap() else { panic!() };
+        assert_eq!(r.entries.len(), 4);
+        assert!(!Tool::ALL.contains(&Tool::Logs) && !Tool::Logs.has_row());
+        assert_eq!(Tool::Logs.deadline(), crate::logs::DEADLINE);
     }
 
     #[test]

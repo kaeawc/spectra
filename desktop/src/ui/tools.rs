@@ -241,6 +241,8 @@ fn result(s: &App, report: &Report, k: &Kit) -> El {
         Report::Dominators(r) => jvm::dominators(r, k),
         Report::JfrStarted => el(),
         Report::Jfr(r) => jvm::recording(r, k),
+        // Shown by the page's Logs section, never in a tool row.
+        Report::Logs(_) => el(),
     }
 }
 

@@ -43,7 +43,8 @@ pub fn page(s: &App, p: &Process, k: &Kit) -> El {
     if s.ended_page().is_none() {
         page = page
             .child(section("Network and energy", super::app_page::live(s, "pd", k), k))
-            .child(super::tools::panel(s, p.pid, k));
+            .child(super::tools::panel(s, p.pid, k))
+            .child(super::logs::panel(s, k));
     }
     if let Some(j) = s.jvm(p.pid) {
         page = page.child(jvm_part(s, j, k));

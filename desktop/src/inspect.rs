@@ -16,6 +16,7 @@ use crate::app::App;
 use crate::bundle::{self, Bundle};
 use crate::jvm_tools::{self, HistogramReport, Recording, ThreadState};
 use crate::live::{self, NetPoint, Round, Series};
+use crate::logs::{LogsPage, LogsReport};
 use crate::procs::{self, Process, ProcSample, Role};
 use crate::run::{self, Ended};
 use crate::tools::{Kind, Paths, Report, Tool};
@@ -39,6 +40,12 @@ pub trait Spectra: Send + Sync {
     /// Runs `spectra <args>` and returns what it printed, stopping it at `deadline` or once
     /// `cancel` is set.
     fn run(&self, args: &[String], deadline: Duration, cancel: &AtomicBool) -> Result<String, Failure>;
+
+    /// [`Spectra::run`], stopping it once it prints more than `cap` bytes.
+    fn run_capped(&self, args: &[String], deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<String, Failure> {
+        let _ = cap;
+        self.run(args, deadline, cancel)
+    }
 }
 
 /// The real Spectra, from `SPECTRA_BIN` or `PATH`.
@@ -46,10 +53,14 @@ pub struct System;
 
 impl Spectra for System {
     fn run(&self, args: &[String], deadline: Duration, cancel: &AtomicBool) -> Result<String, Failure> {
+        self.run_capped(args, deadline, MAX_OUTPUT, cancel)
+    }
+
+    fn run_capped(&self, args: &[String], deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<String, Failure> {
         let bin = std::env::var("SPECTRA_BIN").unwrap_or_else(|_| "spectra".into());
         let mut cmd = Command::new(&bin);
         cmd.args(args);
-        let out = run::run_until(cmd, deadline, MAX_OUTPUT, cancel).map_err(|e| match e {
+        let out = run::run_until(cmd, deadline, cap, cancel).map_err(|e| match e {
             Ended::Cancelled => Failure::Cancelled,
             Ended::Failed(e) => Failure::Failed(procs::run_failure(&bin, e)),
         })?;
@@ -144,6 +155,7 @@ pub enum Landed {
     Tool { job: u64, tool: Tool, pid: u32, result: Result<Report, Failure> },
     Live { job: u64, round: Round },
     Bundle { job: u64, result: Result<Box<Bundle>, String> },
+    Logs { job: u64, result: Result<LogsReport, Failure> },
 }
 
 pub type Work = Box<dyn FnOnce() -> Landed + Send>;
@@ -172,6 +184,7 @@ pub struct Inspector {
     pub bundle: Option<BundleState>,
     bundle_job: Option<Flight>,
     pub jvm: JvmPage,
+    pub logs: LogsPage,
     /// Recording starts not yet landed, job to pid, whichever page they were for: each may have
     /// started a recording that quitting must stop.
     starts: HashMap<u64, u32>,
@@ -199,6 +212,7 @@ impl Inspector {
             bundle: None,
             bundle_job: None,
             jvm: JvmPage::default(),
+            logs: LogsPage::default(),
             starts: HashMap::new(),
             stops: HashMap::new(),
             job: 0,
@@ -232,6 +246,7 @@ impl Inspector {
         for f in [self.live.take(), self.bundle_job.take()].into_iter().flatten() {
             f.cancel.store(true, Ordering::Relaxed);
         }
+        self.logs.cancel();
     }
 
     /// Forgets the last page's work, stopping whatever of it still runs.
@@ -243,10 +258,11 @@ impl Inspector {
         self.next_live = 0.0;
         self.bundle = None;
         self.jvm = JvmPage::default();
+        self.logs = LogsPage::default();
         self.subject = subject;
     }
 
-    fn next_job(&mut self) -> (u64, Arc<AtomicBool>) {
+    pub(crate) fn next_job(&mut self) -> (u64, Arc<AtomicBool>) {
         self.job += 1;
         (self.job, Arc::new(AtomicBool::new(false)))
     }
@@ -620,6 +636,7 @@ impl App {
     /// Starts the next live round when the page is open, none is in flight and it has rested.
     pub fn tick_inspector(&mut self) {
         self.sync_inspector();
+        self.tick_logs();
         let i = &self.inspect;
         if !i.auto || i.live.is_some() || self.now < i.next_live || (i.net.off.is_some() && i.energy.off.is_some()) {
             return;
@@ -658,7 +675,7 @@ impl App {
     }
 
     /// Hands `work` to the worker; `failed` is what it lands as if it panics or can't start.
-    fn submit_inspect(&self, work: Work, failed: Landed) {
+    pub(crate) fn submit_inspect(&self, work: Work, failed: Landed) {
         match &self.inspect.exec {
             Exec::Thread => {
                 let (tx, wake) = (self.inspect.tx.clone(), self.wake.clone());
@@ -706,6 +723,10 @@ impl App {
     }
 
     pub fn land_inspected(&mut self, l: Landed) {
+        let l = match l {
+            Landed::Logs { job, result } => return self.land_logs(job, result),
+            l => l,
+        };
         let now = self.now;
         if let Landed::Tool { job, tool: Tool::JfrStop, .. } = &l {
             self.inspect.stops.remove(job);
@@ -760,6 +781,7 @@ impl App {
                     Err(why) => BundleState::Failed(why),
                 });
             }
+            Landed::Logs { .. } => {}
         }
     }
 }
