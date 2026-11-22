@@ -175,6 +175,8 @@ pub struct Inspector {
     /// Recording starts not yet landed, job to pid, whichever page they were for: each may have
     /// started a recording that quitting must stop.
     starts: HashMap<u64, u32>,
+    /// Recording stops not yet landed, job to pid: the name is fixed, so a start waits for them.
+    stops: HashMap<u64, u32>,
     job: u64,
     pub spectra: Arc<dyn Spectra>,
     pub exec: Exec,
@@ -198,6 +200,7 @@ impl Inspector {
             bundle_job: None,
             jvm: JvmPage::default(),
             starts: HashMap::new(),
+            stops: HashMap::new(),
             job: 0,
             spectra: Arc::new(System),
             exec: Exec::Thread,
@@ -416,6 +419,9 @@ impl App {
             let recording = self.inspect.jvm.recording.is_some();
             match tool {
                 Tool::LeakSuspects | Tool::Dominators if self.heap_dump_path().is_none() => return Some("Take a heap dump first".into()),
+                Tool::JfrStart if self.inspect.starts.values().chain(self.inspect.stops.values()).any(|p| p == pid) => {
+                    return Some("A recording is still starting or stopping on this JVM. Try again in a moment.".into());
+                }
                 Tool::JfrStart if recording => return Some("Already recording".into()),
                 Tool::JfrStop if !recording => return Some("Not recording".into()),
                 _ => {}
@@ -464,6 +470,7 @@ impl App {
         let (job, _) = self.inspect.next_job();
         let spectra = Arc::clone(&self.inspect.spectra);
         let pending = run::pending();
+        self.inspect.stops.insert(job, pid);
         self.submit_inspect(
             Box::new(move || {
                 let _pending = pending;
@@ -486,9 +493,15 @@ impl App {
         pids.sort_unstable();
         pids.dedup();
         let never = AtomicBool::new(false);
-        for pid in pids {
-            let _ = self.inspect.spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never);
-        }
+        let spectra = &*self.inspect.spectra;
+        std::thread::scope(|s| {
+            for pid in pids {
+                let never = &never;
+                s.spawn(move || {
+                    let _ = spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, never);
+                });
+            }
+        });
     }
 
     /// Runs `tool` on the open page's process, unless another tool is running or it can't.
@@ -524,6 +537,9 @@ impl App {
             self.inspect.starts.insert(job, pid);
         }
         // Both may run `jfr stop` after their first command ends: quitting waits for that too.
+        if tool == Tool::JfrStop {
+            self.inspect.stops.insert(job, pid);
+        }
         let pending = matches!(tool, Tool::JfrStart | Tool::JfrStop).then(run::pending);
         self.submit_inspect(
             Box::new(move || {
@@ -691,6 +707,9 @@ impl App {
 
     pub fn land_inspected(&mut self, l: Landed) {
         let now = self.now;
+        if let Landed::Tool { job, tool: Tool::JfrStop, .. } = &l {
+            self.inspect.stops.remove(job);
+        }
         if let Landed::Tool { job, tool: Tool::JfrStart, pid, result } = &l {
             self.inspect.starts.remove(job);
             // A start that got through after its run was cancelled or its page was left: nothing
@@ -1376,6 +1395,37 @@ pub(crate) mod tests {
         assert_eq!(jvm_calls(&fake, "jfr stop"), 1);
         assert_eq!(fake.calls().last().unwrap(), &STOP_7);
         assert_eq!(s.tool_refusal(Tool::JfrStart), None, "it can start again");
+    }
+
+    #[test]
+    fn a_start_is_refused_while_one_is_pending_or_its_stop_is() {
+        const WHY: &str = "A recording is still starting or stopping on this JVM. Try again in a moment.";
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        let landed = started_not_landed(&mut s);
+        s.open(900);
+        s.open(7);
+        assert_eq!(s.tool_refusal(Tool::JfrStart).as_deref(), Some(WHY), "the start hasn't landed");
+        s.run_tool(Tool::JfrStart);
+        assert_eq!(take_held(&s).len(), 0, "no second start was queued");
+        assert_eq!(jvm_calls(&fake, "jfr start"), 1);
+        // It lands as unwanted; its stop is queued and still holds the name.
+        s.land_inspected(landed);
+        assert_eq!(s.tool_refusal(Tool::JfrStart).as_deref(), Some(WHY), "a stop is pending");
+        s.run_held_inspect();
+        assert_eq!(jvm_calls(&fake, "jfr start"), 1, "only the first start ran");
+        assert_eq!(s.tool_refusal(Tool::JfrStart), None, "allowed once start and stop landed");
+    }
+
+    #[test]
+    fn quitting_with_two_pending_stops_stops_both() {
+        let (mut s, fake) = jvm_faked(Fake::all());
+        s.open(7);
+        s.inspect.starts.insert(1, 7);
+        s.inspect.starts.insert(2, 8);
+        s.stop_recording_now();
+        assert_eq!(jvm_calls(&fake, "jfr stop"), 2);
+        assert!(s.inspect.starts.is_empty());
     }
 
     #[test]
