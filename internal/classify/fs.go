@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"syscall"
 )
 
@@ -91,64 +90,4 @@ func openRegular(path string) (*os.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: ErrNotRegular}
 	}
 	return f, nil
-}
-
-// fileID is the part of a stat result that changes whenever a file is
-// replaced or rewritten, even when size and mtime are preserved (cp -p,
-// rsync, tar, touch -r): the inode, and the ctime only the kernel sets.
-type fileID struct {
-	dev, ino uint64
-	ctime    int64
-}
-
-// identity reads dev, inode and ctime from fi.Sys(). Darwin's Stat_t names
-// ctime Ctimespec and Linux's names it Ctim, and the integer widths differ;
-// reading by field name keeps one pure-Go implementation for both.
-func identity(fi fs.FileInfo) fileID {
-	v := reflect.ValueOf(fi.Sys())
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return fileID{}
-		}
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return fileID{}
-	}
-	id := fileID{dev: uintField(v, "Dev"), ino: uintField(v, "Ino")}
-	for _, name := range []string{"Ctimespec", "Ctim"} {
-		if ts := v.FieldByName(name); ts.IsValid() && ts.Kind() == reflect.Struct {
-			id.ctime = intField(ts, "Sec")*1e9 + intField(ts, "Nsec")
-			break
-		}
-	}
-	return id
-}
-
-func uintField(v reflect.Value, name string) uint64 {
-	f := v.FieldByName(name)
-	switch {
-	case !f.IsValid():
-		return 0
-	case f.CanUint():
-		return f.Uint()
-	case f.CanInt():
-		// #nosec G115 -- device numbers are opaque identity bits, not quantities
-		return uint64(f.Int())
-	}
-	return 0
-}
-
-func intField(v reflect.Value, name string) int64 {
-	f := v.FieldByName(name)
-	switch {
-	case !f.IsValid():
-		return 0
-	case f.CanInt():
-		return f.Int()
-	case f.CanUint():
-		// #nosec G115 -- timespec fields are within int64 range
-		return int64(f.Uint())
-	}
-	return 0
 }

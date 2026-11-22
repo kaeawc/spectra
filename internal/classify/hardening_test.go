@@ -282,31 +282,6 @@ type linuxStat struct {
 	Ctim     struct{ Sec, Nsec int64 }
 }
 
-func TestIdentityReadsInodeAndCtime(t *testing.T) {
-	st := &linuxStat{Dev: 7, Ino: 42}
-	st.Ctim.Sec, st.Ctim.Nsec = 3, 4
-	if got := identity(fakeInfo{sys: st}); got != (fileID{dev: 7, ino: 42, ctime: 3e9 + 4}) {
-		t.Fatalf("linux-shaped identity = %+v", got)
-	}
-	fi, err := os.Stat(os.Args[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := identity(fi); got.ino == 0 || got.ctime == 0 {
-		t.Fatalf("host identity = %+v, want inode and ctime", got)
-	}
-	if got := identity(fakeInfo{}); got != (fileID{}) {
-		t.Fatalf("no Sys identity = %+v", got)
-	}
-}
-
-type fakeInfo struct {
-	os.FileInfo
-	sys any
-}
-
-func (f fakeInfo) Sys() any { return f.sys }
-
 func TestCacheMissesOnSameSizeSameMtimeReplacement(t *testing.T) {
 	files := newFakeFS()
 	exe := "/Users/a/bin/tool"

@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/fsutil"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
 )
@@ -147,6 +148,9 @@ type exeKey struct {
 	// does not. The zero value means not in a bundle or no seal file.
 	seal sealID
 }
+
+// fileID is the inode/ctime part of an exeKey or sealID.
+type fileID = fsutil.FileID
 
 type sealID struct {
 	size, mtime int64
@@ -289,7 +293,7 @@ func (c *Classifier) prepare(p *plan) {
 		fail(fmt.Sprintf("executable is not a regular file (%s)", fi.Mode().Type()))
 		return
 	}
-	p.key = exeKey{path: p.exe, size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: identity(fi)}
+	p.key = exeKey{path: p.exe, size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: fsutil.Identity(fi)}
 	p.key.seal = c.sealIdentity(p.exe)
 	p.keyed = true
 }
@@ -311,7 +315,7 @@ func (c *Classifier) sealIdentity(exe string) sealID {
 		if err != nil {
 			return sealID{}
 		}
-		return sealID{size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: identity(fi)}
+		return sealID{size: fi.Size(), mtime: fi.ModTime().UnixNano(), id: fsutil.Identity(fi)}
 	}
 	return sealID{}
 }
@@ -468,8 +472,8 @@ func (c *Classifier) diskKey(k exeKey) []byte {
 	num := func(n int64) []byte { return []byte(strconv.FormatInt(n, 10) + "\x00") }
 	unum := func(n uint64) []byte { return []byte(strconv.FormatUint(n, 10) + "\x00") }
 	return cache.Key([]byte(cacheVersion+"\x00"), []byte(c.os.String()+"\x00"), []byte(k.path+"\x00"),
-		num(k.size), num(k.mtime), unum(k.id.dev), unum(k.id.ino), num(k.id.ctime),
-		num(k.seal.size), num(k.seal.mtime), unum(k.seal.id.dev), unum(k.seal.id.ino), num(k.seal.id.ctime))
+		num(k.size), num(k.mtime), unum(k.id.Dev), unum(k.id.Ino), num(k.id.Ctime),
+		num(k.seal.size), num(k.seal.mtime), unum(k.seal.id.Dev), unum(k.seal.id.Ino), num(k.seal.id.Ctime))
 }
 
 func (c *Classifier) finish(p plan) Result {
