@@ -90,6 +90,9 @@ one object at the end.
 
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
+`spectra daemon profile [--kind heap|allocs|goroutine|cpu] [--seconds N] [--json]`
+asks the running daemon to write a Go runtime profile into its socket directory
+and prints the path (see [Daemon](daemon.md#profiling-the-daemon)).
 `start`, `install` and `print-plist` accept `--assess-gatekeeper` and pass it to
 the `daemon run` they launch or configure.
 

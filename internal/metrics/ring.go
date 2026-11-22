@@ -8,6 +8,7 @@
 package metrics
 
 import (
+	"iter"
 	"sync"
 	"time"
 )
@@ -15,7 +16,8 @@ import (
 // DefaultRetainWindow is the in-memory per-process replay window.
 const DefaultRetainWindow = 30 * time.Minute
 
-// maxSamples is DefaultRetainWindow at 1Hz.
+// maxSamples is DefaultRetainWindow at 1Hz: the per-process sample cap
+// whatever the sampling interval.
 const maxSamples = int(DefaultRetainWindow / time.Second)
 
 // Sample is one point-in-time observation of a single process.
@@ -38,42 +40,123 @@ type Aggregate struct {
 	SampleCount int       `json:"sample_count"`
 }
 
-// RingBuffer holds the most recent samples for one PID in a circular buffer.
+// RingBuffer holds the most recent samples for one PID: at most
+// maxSamples, and none older than DefaultRetainWindow before the newest. It
+// is a circular buffer sized to what it holds, so a process sampled every
+// 15 s costs about 120 samples rather than a fixed 1 Hz array, and a
+// short-lived one a handful.
 type RingBuffer struct {
-	samples [maxSamples]Sample
-	head    int // index where next sample will be written
-	count   int // total samples stored (≤ maxSamples)
+	buf  []Sample
+	head int // index of the oldest sample
+	n    int
+	// flushed is the minute of the newest aggregate already returned by a
+	// flush; later flushes return that minute (it may have been partial)
+	// and newer ones only.
+	flushed time.Time
 }
 
-// Add inserts a sample, overwriting the oldest when the buffer is full.
+const minRingCap = 4
+
+// Add appends a sample after dropping samples beyond the count cap or older
+// than the retain window relative to it. Dropping first lets a steady
+// cadence reuse the slot it frees instead of growing the buffer.
 func (r *RingBuffer) Add(s Sample) {
-	r.samples[r.head] = s
-	r.head = (r.head + 1) % maxSamples
-	if r.count < maxSamples {
-		r.count++
+	cutoff := s.TakenAt.Add(-DefaultRetainWindow)
+	for r.n > 0 && (r.n >= maxSamples || r.buf[r.head].TakenAt.Before(cutoff)) {
+		r.buf[r.head] = Sample{}
+		r.head = (r.head + 1) % len(r.buf)
+		r.n--
 	}
+	switch {
+	case r.n == len(r.buf):
+		r.resize(min(max(minRingCap, 2*len(r.buf)), maxSamples))
+	case len(r.buf) > 16*minRingCap && r.n < len(r.buf)/4:
+		r.resize(max(minRingCap, 2*r.n)) // the cadence slowed or a gap emptied it; give back the space
+	}
+	r.buf[(r.head+r.n)%len(r.buf)] = s
+	r.n++
 }
+
+func (r *RingBuffer) resize(size int) {
+	nb := make([]Sample, size)
+	a, b := r.from(0)
+	copy(nb[copy(nb, a):], b)
+	r.buf, r.head = nb, 0
+}
+
+// from returns the logical samples [i, n) as at most two views of buf.
+func (r *RingBuffer) from(i int) ([]Sample, []Sample) {
+	if i >= r.n {
+		return nil, nil
+	}
+	start := (r.head + i) % len(r.buf)
+	end := r.head + r.n
+	if end <= len(r.buf) {
+		return r.buf[start:end], nil
+	}
+	end -= len(r.buf)
+	if start < r.head {
+		return r.buf[start:end], nil
+	}
+	return r.buf[start:], r.buf[:end]
+}
+
+func (r *RingBuffer) at(i int) Sample { return r.buf[(r.head+i)%len(r.buf)] }
+
+// Len is the number of samples held.
+func (r *RingBuffer) Len() int { return r.n }
 
 // Samples returns stored samples in chronological order (oldest first).
 func (r *RingBuffer) Samples() []Sample {
-	if r.count == 0 {
+	return r.tail(0)
+}
+
+// tail copies the newest limit samples (all when limit <= 0), oldest first.
+func (r *RingBuffer) tail(limit int) []Sample {
+	if r.n == 0 {
 		return nil
 	}
-	out := make([]Sample, r.count)
-	if r.count < maxSamples {
-		copy(out, r.samples[:r.count])
-		return out
+	i := 0
+	if limit > 0 && r.n > limit {
+		i = r.n - limit
 	}
-	// Buffer is full: oldest is at head.
-	n := copy(out, r.samples[r.head:])
-	copy(out[n:], r.samples[:r.head])
-	return out
+	a, b := r.from(i)
+	out := make([]Sample, 0, len(a)+len(b))
+	return append(append(out, a...), b...)
 }
 
 // Aggregate computes 1-minute aggregates from the stored samples.
 func (r *RingBuffer) Aggregate() []Aggregate {
-	samples := r.Samples()
-	if len(samples) == 0 {
+	return aggregate(r.from(0))
+}
+
+// aggregateSince aggregates the minutes at or after since (all when zero).
+// A backward wall-clock jump skips minutes until the clock catches up (accepted).
+func (r *RingBuffer) aggregateSince(since time.Time) []Aggregate {
+	i := 0
+	if !since.IsZero() {
+		i = r.n
+		for i > 0 && !r.at(i-1).TakenAt.UTC().Truncate(time.Minute).Before(since) {
+			i--
+		}
+	}
+	return aggregate(r.from(i))
+}
+
+func iterSamples(parts ...[]Sample) iter.Seq[Sample] {
+	return func(yield func(Sample) bool) {
+		for _, part := range parts {
+			for _, s := range part {
+				if !yield(s) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func aggregate(first, second []Sample) []Aggregate {
+	if len(first)+len(second) == 0 {
 		return nil
 	}
 	// Group by truncated minute.
@@ -82,7 +165,7 @@ func (r *RingBuffer) Aggregate() []Aggregate {
 		minute time.Time
 	}
 	groups := make(map[key]*Aggregate)
-	for _, s := range samples {
+	for s := range iterSamples(first, second) {
 		minute := s.TakenAt.UTC().Truncate(time.Minute)
 		k := key{s.PID, minute}
 		agg := groups[k]
@@ -139,16 +222,12 @@ func (c *Collector) Add(s Sample) {
 // Returns nil if pid has no data.
 func (c *Collector) Recent(pid, limit int) []Sample {
 	c.mu.RLock()
+	defer c.mu.RUnlock()
 	rb := c.pids[pid]
-	c.mu.RUnlock()
 	if rb == nil {
 		return nil
 	}
-	all := rb.Samples()
-	if limit > 0 && len(all) > limit {
-		return all[len(all)-limit:]
-	}
-	return all
+	return rb.tail(limit)
 }
 
 // PIDs returns the list of PIDs with any data.
@@ -162,22 +241,51 @@ func (c *Collector) PIDs() []int {
 	return out
 }
 
-// FlushAggregates returns all 1-minute aggregates and removes PIDs whose
-// ring buffers only contain samples older than retainWindow from RAM.
-func (c *Collector) FlushAggregates(retainWindow time.Duration) []Aggregate {
+// Len is the number of PIDs held.
+func (c *Collector) Len() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.pids)
+}
+
+// FlushAggregates returns the 1-minute aggregates not yet committed by an
+// earlier flush (plus each PID's last committed minute, which may have been
+// partial) and a commit func the caller runs once it has persisted them.
+// Without a commit (a failed save) the next flush returns the same minutes
+// again, so each completed minute is persisted once rather than on every
+// flush. PIDs whose newest sample is older than retainWindow before now are
+// removed by the flush itself, whether or not it is committed, so failing
+// saves cannot grow the map; their unsaved minutes are then lost.
+func (c *Collector) FlushAggregates(now time.Time, retainWindow time.Duration) ([]Aggregate, func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	cutoff := time.Now().UTC().Add(-retainWindow)
+	cutoff := now.UTC().Add(-retainWindow)
 	var all []Aggregate
+	marks := make(map[*RingBuffer]time.Time, len(c.pids))
 	for pid, rb := range c.pids {
-		aggs := rb.Aggregate()
+		aggs := rb.aggregateSince(rb.flushed)
 		all = append(all, aggs...)
-		// Evict PIDs whose newest sample is older than the retain window.
-		samples := rb.Samples()
-		if len(samples) > 0 && samples[len(samples)-1].TakenAt.Before(cutoff) {
+		if rb.n == 0 || rb.at(rb.n-1).TakenAt.Before(cutoff) {
 			delete(c.pids, pid)
+			continue
+		}
+		mark := rb.flushed
+		for _, a := range aggs {
+			if a.MinuteAt.After(mark) {
+				mark = a.MinuteAt
+			}
+		}
+		marks[rb] = mark
+	}
+	commit := func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for rb, mark := range marks {
+			if mark.After(rb.flushed) {
+				rb.flushed = mark
+			}
 		}
 	}
-	return all
+	return all, commit
 }

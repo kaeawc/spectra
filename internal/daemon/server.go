@@ -329,6 +329,15 @@ func (s *Server) handle(ctx context.Context, c net.Conn, mu *sync.Mutex, done <-
 		s.stopOnce.Do(func() { close(s.stop) })
 		return
 	}
+	if method == MethodProfile {
+		result, err := s.profile(ctx, done, params)
+		if err != nil {
+			s.sendError(c, mu, id, err)
+			return
+		}
+		jsonrpc.SendResponse(c, mu, id, result, nil)
+		return
+	}
 	s.mu.RLock()
 	h := s.handlers[method]
 	s.mu.RUnlock()
@@ -355,21 +364,25 @@ func (s *Server) handle(ctx context.Context, c net.Conn, mu *sync.Mutex, done <-
 	}
 	result, err := h(ctx, &Request{Method: method, Params: params, PeerUID: uid, Notify: notify, Done: done})
 	if err != nil {
-		code := CodeInternalError
-		var invalid invalidParamsError
-		if errors.As(err, &invalid) {
-			code = CodeInvalidParams
-		}
-		jsonrpc.SendResponse(c, mu, id, nil, &jsonrpc.Error{Code: code, Message: err.Error()})
+		s.sendError(c, mu, id, err)
 		return
 	}
 	jsonrpc.SendResponse(c, mu, id, result, nil)
 }
 
+func (s *Server) sendError(c net.Conn, mu *sync.Mutex, id json.RawMessage, err error) {
+	code := CodeInternalError
+	var invalid invalidParamsError
+	if errors.As(err, &invalid) {
+		code = CodeInvalidParams
+	}
+	jsonrpc.SendResponse(c, mu, id, nil, &jsonrpc.Error{Code: code, Message: err.Error()})
+}
+
 func (s *Server) status() StatusResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	methods := []string{MethodShutdown, MethodStatus}
+	methods := []string{MethodProfile, MethodShutdown, MethodStatus}
 	for method := range s.handlers {
 		methods = append(methods, method)
 	}

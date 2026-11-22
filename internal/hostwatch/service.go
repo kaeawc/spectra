@@ -99,6 +99,7 @@ type Service struct {
 	interval             time.Duration
 	cpuHistory           []float64
 	lastFlush, lastPrune time.Time
+	metricsSaveFailing   bool
 }
 
 func NewService(opts ServiceOptions) *Service {
@@ -287,13 +288,7 @@ func (s *Service) Tick(ctx context.Context) error {
 		sample.Limits["procs_per_uid"] = usage(state.ProcsUID, state.UIDLimit)
 	}
 	s.current = sample
-	s.window = append(s.window, sample)
-	cutoff := sample.At.Add(-2 * time.Hour)
-	first := 0
-	for first < len(s.window) && s.window[first].At.Before(cutoff) {
-		first++
-	}
-	s.window = append([]Sample(nil), s.window[first:]...)
+	s.appendWindowLocked(sample)
 	conditions := Evaluate(s.opts.Config, s.window)
 	events := s.engine.EvaluateSlow(sample.At, conditions)
 	s.updateSelfGuard(sample.SelfCPUPct)
@@ -331,6 +326,24 @@ func (s *Service) Tick(ctx context.Context) error {
 	s.TickSustained(ctx, s.opts.Clock.Now().UTC())
 	return nil
 }
+
+// appendWindowLocked adds sample to the two-hour evaluation window and drops
+// older samples. Reslicing keeps the dropped prefix reachable, so the window
+// is copied once that prefix dominates the backing array rather than being
+// reallocated on every tick.
+func (s *Service) appendWindowLocked(sample Sample) {
+	s.window = append(s.window, sample)
+	cutoff := sample.At.Add(-2 * time.Hour)
+	first := 0
+	for first < len(s.window) && s.window[first].At.Before(cutoff) {
+		first++
+	}
+	s.window = s.window[first:]
+	if cap(s.window) > 2*len(s.window)+64 {
+		s.window = append([]Sample(nil), s.window...)
+	}
+}
+
 func (s *Service) updateSelfGuard(cpu float64) {
 	s.cpuHistory = append(s.cpuHistory, cpu)
 	if len(s.cpuHistory) > 10 {
@@ -364,13 +377,23 @@ func (s *Service) maintenance(ctx context.Context, at time.Time) {
 		return
 	}
 	if at.Sub(s.lastFlush) >= time.Minute {
-		aggs := s.opts.Metrics.FlushAggregates(metrics.DefaultRetainWindow)
+		aggs, commit := s.opts.Metrics.FlushAggregates(at, metrics.DefaultRetainWindow)
 		rows := make([]store.ProcessMetricRow, 0, len(aggs))
 		for _, a := range aggs {
 			rows = append(rows, store.ProcessMetricRow{PID: a.PID, MinuteAt: a.MinuteAt, AvgRSSKiB: a.AvgRSSKiB, MaxRSSKiB: a.MaxRSSKiB, AvgCPUPct: a.AvgCPUPct, MaxCPUPct: a.MaxCPUPct, SampleCount: a.SampleCount})
 		}
+		// Mark the minutes written only once saved; a failed save retries them.
 		if err := s.opts.Store.SaveProcessMetrics(ctx, rows); err != nil {
-			s.opts.Logger.Warn("watch process metrics flush failed", "error", err)
+			if !s.metricsSaveFailing {
+				s.opts.Logger.Warn("watch process metrics flush failed; retrying each minute, minutes of processes gone 30 minutes are dropped", "error", err)
+				s.metricsSaveFailing = true
+			}
+		} else {
+			commit()
+			if s.metricsSaveFailing {
+				s.opts.Logger.Info("watch process metrics flush recovered")
+				s.metricsSaveFailing = false
+			}
 		}
 		s.lastFlush = at
 	}

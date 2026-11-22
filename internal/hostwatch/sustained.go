@@ -227,7 +227,8 @@ func (t *SustainedTracker) record(at time.Time, p ProcObs) {
 		if !above {
 			return
 		}
-		e = &sustainedEntry{name: p.Name, started: p.Started}
+		// Clone: p.Name may share the whole ps output's memory.
+		e = &sustainedEntry{name: strings.Clone(p.Name), started: p.Started}
 		t.entries[p.PID] = e
 	}
 	if t.staleHistory(e, at) {
