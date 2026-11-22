@@ -17,6 +17,7 @@ use crate::inspect::Inspector;
 use crate::proc_findings;
 use crate::procs::{ProcError, ProcFeed, ProcSample, Process, Role, Runtime};
 use crate::signal::{self, Attempt, Identity, Me, Signal, Signals, Target};
+use crate::tree::{Tree, View};
 
 pub const HISTORY: usize = 120;
 /// Readings kept per process: three minutes at one every 2 s.
@@ -278,6 +279,20 @@ pub struct App {
     /// The list as it stands: `nav` and the search applied, grouped and sorted.
     pub groups: Vec<Group>,
     pub rows: Vec<Row>,
+    /// Grouped or as a tree; kept while the app runs.
+    pub view: View,
+    /// The tree as it stands, `nav` applied; a tree row's `group` indexes its nodes.
+    pub tree: Tree,
+    /// Pids whose children the tree shows, kept across readings while they run.
+    pub tree_open: HashSet<u32>,
+    /// Pids closed during the current search, which otherwise opens down to every match.
+    pub tree_closed: HashSet<u32>,
+    /// The search `tree_closed` belongs to.
+    tree_query: String,
+    /// Which tree nodes the search keeps; `None` without one.
+    tree_keep: Option<Vec<bool>>,
+    /// Processes the search matched in the tree, or all of them without one.
+    pub tree_matches: usize,
 
     /// Asks `ps` about a pid and sends signals; tests swap in a recorder.
     pub signals: Arc<dyn Signals>,
@@ -345,6 +360,13 @@ pub fn init() -> App {
         open_groups: HashSet::new(),
         groups: Vec::new(),
         rows: Vec::new(),
+        view: View::Grouped,
+        tree: Tree::default(),
+        tree_open: HashSet::new(),
+        tree_closed: HashSet::new(),
+        tree_query: String::new(),
+        tree_keep: None,
+        tree_matches: 0,
         signals: Arc::new(signal::System),
         runner: Runner::Thread,
         done_tx,
@@ -451,6 +473,9 @@ impl App {
         self.refresh_findings();
         self.rebuild();
         self.prune_open_groups();
+        let index = &self.proc_index;
+        self.tree_open.retain(|pid| index.contains_key(pid));
+        self.tree_closed.retain(|pid| index.contains_key(pid));
     }
 
     /// Whatever was keyed by a pid that now belongs to another process: its JVM numbers and
@@ -464,6 +489,8 @@ impl App {
             if self.expanded.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
                 self.expanded = None;
             }
+            self.tree_open.remove(pid);
+            self.tree_closed.remove(pid);
             if self.table.cursor() == Some(format!("p:{pid}").as_str()) {
                 self.table.clear_selection();
             }
@@ -557,6 +584,10 @@ impl App {
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
         let nav = if matches!(self.nav, Nav::Overview | Nav::System) { Nav::All } else { self.nav };
+        if self.view == View::Tree {
+            self.rebuild_tree(nav, q);
+            return;
+        }
         let kept: Vec<&Process> = self
             .procs
             .iter()
@@ -564,6 +595,97 @@ impl App {
             .collect();
         self.groups = groups::group(&kept, self.sort);
         self.rows = groups::flatten(&self.groups, &self.open_groups);
+    }
+
+    /// The tree over `nav`'s processes; a search keeps its matches and the processes above them.
+    fn rebuild_tree(&mut self, nav: Nav, q: String) {
+        self.groups.clear();
+        let kept: Vec<&Process> = self.procs.iter().filter(|p| nav.holds(p)).collect();
+        self.tree = Tree::build(&kept, self.sort);
+        if q != self.tree_query {
+            self.tree_closed.clear();
+            self.tree_query = q;
+        }
+        let q = &self.tree_query;
+        if q.is_empty() {
+            self.tree_matches = self.tree.nodes.len();
+            self.tree_keep = None;
+        } else {
+            let (keep, hits) = self.tree.keep(|pid| self.process(pid).is_some_and(|p| groups::matches_query(p, q)));
+            self.tree_matches = hits;
+            self.tree_keep = Some(keep);
+        }
+        self.rows = self.tree.flatten(&self.tree_open, self.tree_keep.as_deref(), &self.tree_closed);
+    }
+
+    /// Lays the list out grouped or as a tree.
+    pub fn set_view(&mut self, view: View) {
+        if self.view != view {
+            self.view = view;
+            self.table.clear_selection();
+            self.rebuild();
+        }
+    }
+
+    /// Whether the tree shows `pid`'s children.
+    pub fn tree_is_open(&self, pid: u32) -> bool {
+        self.tree
+            .index_of(pid)
+            .is_some_and(|i| self.tree.is_open(i, &self.tree_open, self.tree_keep.as_deref(), &self.tree_closed))
+    }
+
+    /// Whether `pid` has children the tree would show: with a search, only kept ones.
+    pub fn tree_has_children(&self, pid: u32) -> bool {
+        self.tree.index_of(pid).is_some_and(|i| self.tree.has_shown_children(i, self.tree_keep.as_deref()))
+    }
+
+    /// Opens or closes `pid`'s branch in the tree.
+    pub fn toggle_tree(&mut self, pid: u32) {
+        let open = self.tree_is_open(pid);
+        self.set_tree_open(pid, !open);
+    }
+
+    fn set_tree_open(&mut self, pid: u32, open: bool) {
+        if self.tree_query.is_empty() {
+            if open {
+                self.tree_open.insert(pid);
+            } else {
+                self.tree_open.remove(&pid);
+            }
+        } else if open {
+            self.tree_closed.remove(&pid);
+        } else {
+            self.tree_closed.insert(pid);
+        }
+        self.rebuild();
+    }
+
+    /// Left and Right on the tree's cursor row: Right opens a closed branch, then steps to its
+    /// first child; Left closes an open one, then steps to the parent. Returns the row the
+    /// cursor should move to, if it moves.
+    pub fn tree_step(&mut self, right: bool) -> Option<String> {
+        let at = self.table.cursor()?.strip_prefix("p:")?.parse::<u32>().ok()?;
+        self.tree.index_of(at)?;
+        let has_children = self.tree_has_children(at);
+        // A branch whose children all ended shows no triangle: Left goes straight to the parent.
+        let open = has_children && self.tree_is_open(at);
+        let parent = self.tree.parent_of(at);
+        match (right, open) {
+            (true, false) if has_children => {
+                self.set_tree_open(at, true);
+                None
+            }
+            (true, true) => {
+                let i = self.rows.iter().position(|r| r.id == format!("p:{at}"))?;
+                self.rows.get(i + 1).filter(|r| r.depth > self.rows[i].depth).map(|r| r.id.clone())
+            }
+            (false, true) => {
+                self.set_tree_open(at, false);
+                None
+            }
+            (false, false) => parent.map(|p| format!("p:{p}")).filter(|id| self.rows.iter().any(|r| &r.id == id)),
+            _ => None,
+        }
     }
 
     /// Shows `nav` in the main pane, closing any open page.

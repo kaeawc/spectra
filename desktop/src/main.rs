@@ -17,10 +17,12 @@ mod run;
 mod sample;
 mod sample_jvm;
 mod sample_system;
+mod sample_tree;
 mod signal;
 mod system;
 mod system_findings;
 mod tools;
+mod tree;
 mod ui;
 
 use std::sync::mpsc::RecvTimeoutError;
@@ -177,6 +179,8 @@ fn main() {
             ("system-pressure", sample_system::system_pressure_scene),
             ("system-failed", sample_system::system_failed_scene),
             ("system-linux", sample_system::system_linux_scene),
+            ("tree", sample_tree::tree_scene),
+            ("tree-search", sample_tree::tree_search_scene),
         ],
         setup: Some(setup),
         poll: Some(poll),

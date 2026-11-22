@@ -65,6 +65,15 @@ What it shows:
   that tells them apart beside its name. Clicking a row or arrowing onto it only moves the
   cursor. Return or a double click opens a process's page or an app's page; on any other group
   (twelve `zsh`) it opens or closes the group. The triangle always only opens or closes it.
+- **Tree view**: Grouped | Tree over the list switches to who started whom, and the choice stays
+  while the app runs. launchd's children (and any process whose parent isn't in the list) are
+  the roots, so an app, a terminal or a daemon each heads its own branch; launchd is a row of its
+  own. Each row shows its own CPU and memory, and "With children" what its whole branch uses.
+  Siblings sort by their branch's totals, so a quiet shell running a busy build rises with it.
+  Branches open with the triangle or Right, and close with Left (which then steps to the
+  parent); what's open stays open from reading to reading while those processes run. A search
+  keeps the matches and every process above them, opened down to each match. Return or a double
+  click opens the process's page. Only the rows on screen are built, as in the grouped list.
 - **An app's page**: all its processes together (CPU, memory and threads over the last few
   minutes, summed), its network and energy while the page is open, its processes (each opens its
   page), and its bundle from `spectra --json <App.app>`, read once each time the page opens: what

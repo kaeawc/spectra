@@ -133,7 +133,7 @@ impl Default for Sort {
 impl Sort {
     /// Orders by the sort key, then always by name and an id ascending, so equal values keep
     /// their places from one reading to the next.
-    fn order(self, a: (f64, f64, &str, &str), b: (f64, f64, &str, &str)) -> Ordering {
+    pub(crate) fn order(self, a: (f64, f64, &str, &str), b: (f64, f64, &str, &str)) -> Ordering {
         let by_name = || caseless(a.2, b.2);
         let by_key = match self.key {
             SortKey::Cpu => a.0.total_cmp(&b.0),
