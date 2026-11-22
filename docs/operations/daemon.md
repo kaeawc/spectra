@@ -323,7 +323,27 @@ waiting callers get an error and nothing is cached. The rows are collected on
 demand rather than taken from the watch sampler, which keeps only aggregates and
 the top CPU consumers.
 
-`process.subscribe` takes no parameters and returns `{"subscribed": true}`. The
+`process.list` also takes `classify` (bool). When true, the rows carry the
+`spectra process --json --classify` fields (`role`, `runtime`, `app`,
+`signing`, `evidence`). The classified snapshot is cached and single-flighted
+separately from the plain one, built once from the latest plain collection, so
+concurrent classified callers share one classification and plain callers never
+pay for it. Classification uses the on-disk classify cache. If the classifier
+fails or exceeds its own 15 second cap, the call still succeeds: rows the
+classifier finished (it gets up to 2 more seconds to hand back in-flight work)
+keep their fields, the rest are left unknown, and the payload carries a
+`warning` string. A cold classified call is therefore bounded by roughly 32
+seconds: 15 for collection, 15 for classification and the 2 second grace.
+`sampled_at` stays the collection time, but the 2 second cache is measured from
+when classification finished. The daemon rebuilds its classifier every 10
+minutes to bound its in-memory memo; the on-disk classify cache stays warm.
+Subscribers of both kinds on one tick share a single collection and
+`sampled_at`.
+
+`process.subscribe` takes optional `classify` (bool) and returns
+`{"subscribed": true}`. With `classify: true` the subscriber receives classified
+payloads; the daemon classifies each tick only while at least one current
+subscriber asked for it, and plain subscribers keep receiving plain payloads. The
 connection then receives `process.update` notifications whose params are the
 same `{sampled_at, processes}` payload, once per `--watch-interval` (default 15
 seconds), starting with an immediate one when the first subscriber arrives. The
