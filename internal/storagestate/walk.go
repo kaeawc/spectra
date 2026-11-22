@@ -212,6 +212,11 @@ func (w *treeWalker) child(d walkDir, name []byte) walkDir {
 // separator, to a clean directory path: filepath.Join for such inputs,
 // without re-cleaning the path or a separate copy of name.
 func joinName(dir string, name []byte) string {
+	if dir == "." {
+		// filepath.Join drops the "./", and tracked paths are cleaned the
+		// same way, so trackedAt must see "sub", not "./sub".
+		return string(name)
+	}
 	if strings.HasSuffix(dir, "/") {
 		return dir + string(name)
 	}

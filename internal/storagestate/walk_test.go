@@ -378,9 +378,28 @@ func TestWalkTreeBulkMatchesLstat(t *testing.T) {
 }
 
 func TestJoinNameMatchesFilepathJoin(t *testing.T) {
-	for _, dir := range []string{"/", "/a", "/a/b", "rel"} {
+	for _, dir := range []string{"/", "/a", "/a/b", "rel", "."} {
 		if got, want := joinName(dir, []byte("x.log")), filepath.Join(dir, "x.log"); got != want {
 			t.Errorf("joinName(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+// TestWalkTreeDotRootTracksSubdir guards the relative-root case: tracked
+// paths are cleaned to "sub", so children of "." must be "sub", not "./sub".
+func TestWalkTreeDotRootTracksSubdir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	writeSized(t, filepath.Join("sub", "a.bin"), 10_000)
+	writeSized(t, filepath.Join("sub", "deep", "b.bin"), 5_000)
+	writeSized(t, "top.bin", 1_000)
+	want := sumRegular(t, "sub")
+	for _, lstatOnly := range []bool{false, true} {
+		u := walkTreeWorkers(lstatOnly, 2, ".", "sub")
+		if u.Tracked[0] != want || want == 0 {
+			t.Errorf("lstatOnly=%v: Tracked[sub] = %d, want %d", lstatOnly, u.Tracked[0], want)
+		}
+		if u.Top["sub"] != want {
+			t.Errorf("lstatOnly=%v: Top[sub] = %d, want %d (Top=%v)", lstatOnly, u.Top["sub"], want, u.Top)
 		}
 	}
 }
