@@ -71,6 +71,7 @@ release-check:
 	bash scripts/release-check.sh
 
 validate-workflows:
+	bash scripts/test-validate-workflows.sh
 	bash scripts/validate-workflows.sh
 
 # --- Documentation -----------------------------------------------------------

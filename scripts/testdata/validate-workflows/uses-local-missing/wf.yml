@@ -1,0 +1,7 @@
+name: fixture
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./scripts/missing-action.sh

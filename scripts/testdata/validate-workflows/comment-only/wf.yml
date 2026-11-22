@@ -1,0 +1,13 @@
+name: fixture
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      # waaagh ships skills/orchestrate/scripts/nonexistent-comment.sh; see scripts/x.sh
+      - run: echo ok # not scripts/inline-comment.sh
+      - name: other repo path
+        run: |
+          # scripts/commented-in-block.sh
+          ./skills/orchestrate/scripts/other-repo.sh
+          ./scripts/check_no_remote.sh
