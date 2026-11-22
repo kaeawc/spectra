@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/fsbulk"
 	"golang.org/x/sys/unix"
 )
 
@@ -46,14 +47,14 @@ type logEntry struct {
 // so the caller can fall back to ReadDir. A directory that cannot be opened
 // yields nothing, as under ReadDir.
 func readLogDirBulk(path, owner string) ([]string, []LogFile, bool) {
-	fd, err := openDirFD(path)
+	fd, err := fsbulk.OpenDir(path)
 	if err != nil {
 		return nil, nil, true
 	}
 	defer unix.Close(fd) //nolint:errcheck // read-only directory descriptor
 
-	bp := bulkBufPool.Get().(*[]byte)
-	defer bulkBufPool.Put(bp)
+	bp := fsbulk.GetBuf()
+	defer fsbulk.PutBuf(bp)
 	buf := *bp
 
 	r := logDirReader{
@@ -64,7 +65,7 @@ func readLogDirBulk(path, owner string) ([]string, []LogFile, bool) {
 		inLogs: strings.Contains(path, "/Logs/") || strings.HasSuffix(path, "/Logs"),
 	}
 	for first := true; ; first = false {
-		n, err := getattrlistbulkAttrs(fd, buf, logCommonAttrs, logFileAttrs)
+		n, err := fsbulk.Read(fd, buf, logCommonAttrs, logFileAttrs)
 		if err != nil || n == 0 {
 			// Like ReadDir, keep what was read before a mid-directory error.
 			return r.dirs, r.found, err == nil || !first
@@ -93,7 +94,7 @@ type logDirReader struct {
 func (r *logDirReader) batch(buf []byte, n int) error {
 	off := 0
 	for range n {
-		rec, err := nextBulkRecord(buf, off, logMinCommonLen)
+		rec, err := fsbulk.NextRecord(buf, off, logMinCommonLen)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func (r *logDirReader) entry(e *logEntry) {
 		r.found = append(r.found, LogFile{
 			Path:      joinName(r.path, e.name),
 			Owner:     r.owner,
-			SizeBytes: allocBlocks(e.alloc),
+			SizeBytes: fsbulk.AllocBlocks(e.alloc),
 			ModTime:   e.mtime,
 		})
 	}
@@ -145,7 +146,7 @@ func decodeLogRecord(rec []byte) (logEntry, error) {
 	if retCommon&unix.ATTR_CMN_NAME == 0 {
 		return logEntry{}, errBulkMalformed
 	}
-	name, err := bulkNameAt(rec, logOffNameRef)
+	name, err := fsbulk.NameAt(rec, logOffNameRef)
 	if err != nil {
 		return logEntry{}, err
 	}
@@ -166,7 +167,7 @@ func decodeLogRecord(rec []byte) (logEntry, error) {
 		e.mtime, e.hasMod = time.Unix(sec, nsec), true
 	}
 	if len(rec) >= logMinFileRecLen && retFile&unix.ATTR_FILE_ALLOCSIZE != 0 {
-		e.alloc, e.hasSize = allocAt(rec, logOffAllocSize)
+		e.alloc, e.hasSize = fsbulk.OffT(rec, logOffAllocSize)
 	}
 	return e, nil
 }
