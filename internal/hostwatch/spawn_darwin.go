@@ -2,11 +2,15 @@ package hostwatch
 
 import (
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 
@@ -35,36 +39,52 @@ func (platformSpawnBackend) List() ([]SpawnProcess, error) {
 }
 
 func (platformSpawnBackend) Argv(pid int) (string, error) {
-	raw, err := unix.SysctlRaw("kern.procargs2", pid)
+	bp := procArgsPool.Get().(*[]byte)
+	defer procArgsPool.Put(bp)
+	raw, err := readProcArgs2(pid, *bp)
 	if err != nil {
 		return "", fmt.Errorf("kern.procargs2 pid %d: %w", pid, err)
 	}
-	if len(raw) < 4 {
-		return "", fmt.Errorf("kern.procargs2 pid %d: short response", pid)
+	out, err := joinProcArgs2(raw)
+	if err != nil {
+		return "", fmt.Errorf("kern.procargs2 pid %d: %w", pid, err)
 	}
-	argc := int(binary.NativeEndian.Uint32(raw[:4]))
-	if argc <= 0 {
-		return "", nil
+	return out, nil
+}
+
+// kernProcArgs2 is KERN_PROCARGS2 from <sys/sysctl.h>.
+const kernProcArgs2 = 49
+
+// procArgsPool reuses kern.procargs2 read buffers. The kernel accepts any
+// size up to kern.argmax (1 MiB), so every call would otherwise allocate that
+// much; the joined result is a fresh string, so nothing aliases the buffer.
+var procArgsPool = sync.Pool{New: func() any {
+	n, _ := unix.SysctlUint32("kern.argmax")
+	if n == 0 {
+		n = 1 << 20
 	}
-	b := raw[4:]
-	end := strings.IndexByte(string(b), 0)
-	if end < 0 {
-		return "", fmt.Errorf("kern.procargs2 pid %d: missing executable terminator", pid)
+	b := make([]byte, n)
+	return &b
+}}
+
+// readProcArgs2 reads kern.procargs2 for pid into buf and returns the filled
+// prefix. x/sys/unix only exposes an allocating SysctlRaw, hence the direct
+// sysctl(2) call.
+func readProcArgs2(pid int, buf []byte) ([]byte, error) {
+	if len(buf) == 0 {
+		return nil, errors.New("empty buffer")
 	}
-	b = b[end+1:]
-	for len(b) > 0 && b[0] == 0 {
-		b = b[1:]
+	if pid < 0 || pid > math.MaxInt32 {
+		return nil, errors.New("pid out of range")
 	}
-	args := make([]string, 0, min(argc, 32))
-	for len(b) > 0 && len(args) < argc {
-		end = strings.IndexByte(string(b), 0)
-		if end < 0 {
-			break
-		}
-		args = append(args, string(b[:end]))
-		b = b[end+1:]
+	mib := [3]int32{unix.CTL_KERN, kernProcArgs2, int32(pid)}
+	n := uintptr(len(buf))
+	_, _, e := syscall.Syscall6(syscall.SYS___SYSCTL, uintptr(unsafe.Pointer(&mib[0])), uintptr(len(mib)),
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&n)), 0, 0)
+	if e != 0 {
+		return nil, e
 	}
-	return strings.Join(args, " "), nil
+	return buf[:n], nil
 }
 
 func (platformSpawnBackend) Limits() (int, int) {
