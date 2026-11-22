@@ -300,6 +300,9 @@ type Options struct {
 	Gatekeeper *GatekeeperAssessor
 	// SealCache persists the `codesign --verify` seal check behind an
 	// "accepted" prediction, keyed by path+CDHash. Nil re-verifies each run.
+	// Real spctl verdicts are persisted there too (under their own key
+	// schema, with the assessment time) so the 24 h verdict TTL also spans
+	// one-shot CLI runs.
 	SealCache SealCache
 	// SealTimeout bounds one seal check; zero means 30 s.
 	SealTimeout time.Duration
@@ -415,14 +418,21 @@ func (d detector) psOutput(args ...string) ([]byte, error) {
 // tool (spctl blocked on syspolicyd is the common case) stalls the whole
 // scan and anything driving it, such as the daemon or the MCP server.
 func toolContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), proc.DefaultTimeout)
+	return toolContextFrom(context.Background())
 }
 
-// stderrOf runs a tool that reports on stderr regardless of exit status
+// toolContextFrom is toolContext bounded additionally by parent, so a
+// canceled background caller kills its subprocess instead of waiting out
+// proc.DefaultTimeout.
+func toolContextFrom(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, proc.DefaultTimeout)
+}
+
+// stderrOfCtx runs a tool that reports on stderr regardless of exit status
 // (codesign -dv, spctl --assess) and returns stdout+stderr, or "" when it
-// could not run or timed out.
-func (d detector) stderrOf(name string, args ...string) string {
-	ctx, cancel := toolContext()
+// could not run, timed out, or parent was canceled.
+func (d detector) stderrOfCtx(parent context.Context, name string, args ...string) string {
+	ctx, cancel := toolContextFrom(parent)
 	defer cancel()
 	if d.opts.Runner != nil {
 		if res, err := d.opts.Runner.Run(ctx, proc.Cmd{Name: name, Args: args}); err == nil {
@@ -873,7 +883,12 @@ func bundleSize(appPath string) int64 {
 // hardened-runtime flag (flags=0x10000(runtime)), authority chain, stapled
 // notarization ticket, and CDHash. --verbose=4 costs nothing extra.
 func (d detector) readSigning(appPath string) signingInfo {
-	return parseSigningInfo(d.stderrOf("codesign", "-dv", "--verbose=4", appPath))
+	return d.readSigningCtx(context.Background(), appPath)
+}
+
+// readSigningCtx is readSigning with codesign also canceled by ctx.
+func (d detector) readSigningCtx(ctx context.Context, appPath string) signingInfo {
+	return parseSigningInfo(d.stderrOfCtx(ctx, "codesign", "-dv", "--verbose=4", appPath))
 }
 
 // ParseSigningOutput extracts the team identifier and hardened-runtime flag

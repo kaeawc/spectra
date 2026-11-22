@@ -90,6 +90,8 @@ one object at the end.
 
 `spectra daemon start|stop|status|install|uninstall|print-plist|logs` manages
 the local per-user daemon. `spectra daemon run` runs it in the foreground.
+`start`, `install` and `print-plist` accept `--assess-gatekeeper` and pass it to
+the `daemon run` they launch or configure.
 
 `spectra process --classify [--json]` adds `role` (`app`, `app_helper`,
 `system`, `shell`, `terminal`, `ai_agent`, `cli`), `runtime` (`electron`,

@@ -19,6 +19,8 @@ import (
 
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
+	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/metrics"
@@ -37,8 +39,8 @@ func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int 
 		fmt.Fprintln(stderr, "usage: spectra daemon <run|start|stop|status|install|uninstall|print-plist|logs>")
 		return 2
 	}
-	if len(args) > 1 && daemonNoArgs(args[0]) {
-		fmt.Fprintf(stderr, "daemon %s takes no arguments\n", args[0])
+	runArgs, ok := daemonSubcommandArgs(args, stderr)
+	if !ok {
 		return 2
 	}
 	paths, err := deps.paths()
@@ -51,17 +53,17 @@ func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int 
 	case "run":
 		actionErr = daemonRun(args[1:], paths, stderr)
 	case "start":
-		actionErr = daemonStart(paths, out, deps)
+		actionErr = daemonStart(paths, out, deps, runArgs)
 	case "stop":
 		actionErr = daemonStop(paths, out, deps)
 	case "status":
 		actionErr = daemonStatus(args[1:], paths, out, deps)
 	case "install":
-		actionErr = daemonInstall(paths, out, deps)
+		actionErr = daemonInstall(paths, out, deps, runArgs)
 	case "uninstall":
 		actionErr = daemonUninstall(out, deps)
 	case "print-plist":
-		actionErr = daemonPrintPlist(out, deps)
+		actionErr = daemonPrintPlist(out, deps, runArgs)
 	case "logs":
 		actionErr = daemonLogs(args[1:], paths, out, deps)
 	default:
@@ -75,13 +77,62 @@ func runDaemonWithIO(args []string, out, stderr io.Writer, deps daemonDeps) int 
 	return 0
 }
 
+// daemonSubcommandArgs validates the arguments of subcommands that take
+// none or only forwarded run flags, returning the `daemon run` argv for the
+// latter. It reports false after printing a usage error.
+func daemonSubcommandArgs(args []string, stderr io.Writer) ([]string, bool) {
+	if len(args) > 1 && daemonNoArgs(args[0]) {
+		fmt.Fprintf(stderr, "daemon %s takes no arguments\n", args[0])
+		return nil, false
+	}
+	if !daemonTakesRunFlags(args[0]) {
+		return nil, true
+	}
+	runArgs, err := daemonRunArgs(args[0], args[1:], stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return nil, false
+	}
+	return runArgs, true
+}
+
 func daemonNoArgs(command string) bool {
 	switch command {
-	case "start", "stop", "install", "uninstall", "print-plist":
+	case "stop", "uninstall":
 		return true
 	default:
 		return false
 	}
+}
+
+func daemonTakesRunFlags(command string) bool {
+	switch command {
+	case "start", "install", "print-plist":
+		return true
+	default:
+		return false
+	}
+}
+
+// daemonRunArgs parses the daemon options that start, install and
+// print-plist forward, and returns the `daemon run` argv they launch. The
+// service files and the spawn command carry the options themselves, so
+// launchd/systemd restarts keep them without a separate settings file.
+func daemonRunArgs(command string, args []string, stderr io.Writer) ([]string, error) {
+	fs := flag.NewFlagSet("daemon "+command, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "re-assess installed apps with spctl in the background, one at a time (macOS)")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() != 0 {
+		return nil, fmt.Errorf("usage: spectra daemon %s [--assess-gatekeeper]", command)
+	}
+	runArgs := []string{"daemon", "run"}
+	if *assessGatekeeper {
+		runArgs = append(runArgs, "--assess-gatekeeper")
+	}
+	return runArgs, nil
 }
 
 func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
@@ -90,11 +141,12 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	idle := fs.Duration("idle-timeout", 0, "stop after inactivity")
 	watchInterval := fs.Duration("watch-interval", 15*time.Second, "host monitoring interval")
 	noNotify := fs.Bool("no-notify", false, "disable desktop notifications")
+	assessGatekeeper := fs.Bool("assess-gatekeeper", false, "re-assess installed apps with spctl in the background, one at a time (macOS)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 || *idle < 0 || *watchInterval <= 0 {
-		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration] [--watch-interval duration] [--no-notify]")
+		return fmt.Errorf("usage: spectra daemon run [--idle-timeout duration] [--watch-interval duration] [--no-notify] [--assess-gatekeeper]")
 	}
 	if err := os.MkdirAll(filepath.Dir(paths.Log), 0o700); err != nil {
 		return fmt.Errorf("daemon log directory: %w", err)
@@ -139,13 +191,35 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 			log.Error("watch stopped", "error", err)
 		}
 	}()
+	stopGatekeeper := startGatekeeperRefresh(ctx, *assessGatekeeper, log)
 	err = server.Run(ctx)
 	cancelWatch()
+	stopGatekeeper()
 	<-watchDone
 	return err
 }
 
-func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
+// startGatekeeperRefresh runs the background spctl refresher when enabled
+// (opt-in, like --assess-gatekeeper on inspect) and returns a func that
+// stops it and waits for the in-flight assessment to end.
+func startGatekeeperRefresh(ctx context.Context, enabled bool, log logger.Logger) func() {
+	if !enabled || hostos.Current() != hostos.Darwin {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	r := daemon.NewGatekeeperRefresher(daemon.GatekeeperRefreshOptions{
+		Apps: func() []string {
+			return append(scanAppDir("/Applications"), scanAppDir("/Applications/Utilities")...)
+		},
+		Detect: detect.Options{SealCache: sealCache()},
+		Logger: log,
+	})
+	done := make(chan struct{})
+	go func() { defer close(done); r.Run(ctx) }()
+	return func() { cancel(); <-done }
+}
+
+func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps, runArgs []string) error {
 	if c, ok := deps.discover(paths); ok {
 		defer c.Close()
 		st, err := c.Status(context.Background())
@@ -161,7 +235,7 @@ func daemonStart(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	c, err := deps.ensureRunning(ctx, paths, daemonclient.SpawnOptions{Exe: exe, Args: []string{"daemon", "run"}, Wait: 5 * time.Second, LogPath: paths.Log})
+	c, err := deps.ensureRunning(ctx, paths, daemonclient.SpawnOptions{Exe: exe, Args: runArgs, Wait: 5 * time.Second, LogPath: paths.Log})
 	if err != nil {
 		return err
 	}
@@ -326,8 +400,8 @@ func daemonServicePaths(home, goos string) (string, string, string, error) {
 	}
 }
 
-func daemonInstall(paths daemon.Paths, out io.Writer, deps daemonDeps) error {
-	path, content, err := daemonServiceContent(deps)
+func daemonInstall(paths daemon.Paths, out io.Writer, deps daemonDeps, runArgs []string) error {
+	path, content, err := daemonServiceContent(deps, runArgs)
 	if err != nil {
 		return err
 	}
@@ -388,11 +462,11 @@ func daemonUninstall(out io.Writer, deps daemonDeps) error {
 	return nil
 }
 
-func daemonPrintPlist(out io.Writer, deps daemonDeps) error {
+func daemonPrintPlist(out io.Writer, deps daemonDeps, runArgs []string) error {
 	if deps.goos != "darwin" {
 		return fmt.Errorf("print-plist is macOS only")
 	}
-	_, content, err := daemonServiceContent(deps)
+	_, content, err := daemonServiceContent(deps, runArgs)
 	if err != nil {
 		return err
 	}
@@ -400,7 +474,7 @@ func daemonPrintPlist(out io.Writer, deps daemonDeps) error {
 	return err
 }
 
-func daemonServiceContent(deps daemonDeps) (string, string, error) {
+func daemonServiceContent(deps daemonDeps, runArgs []string) (string, string, error) {
 	home, err := deps.home()
 	if err != nil {
 		return "", "", fmt.Errorf("home: %w", err)
@@ -414,12 +488,12 @@ func daemonServiceContent(deps daemonDeps) (string, string, error) {
 		return "", "", err
 	}
 	if deps.goos == "darwin" {
-		return path, daemonPlist(exe, stdout, stderr), nil
+		return path, daemonPlist(exe, stdout, stderr, runArgs), nil
 	}
-	return path, daemonUnit(exe), nil
+	return path, daemonUnit(exe, runArgs), nil
 }
 
-func daemonPlist(exe, stdout, stderr string) string {
+func daemonPlist(exe, stdout, stderr string, runArgs []string) string {
 	var b bytes.Buffer
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\n")
 	for _, pair := range [][2]string{{"Label", daemonAgentLabel}, {"StandardOutPath", stdout}, {"StandardErrorPath", stderr}, {"ProcessType", "Background"}} {
@@ -428,7 +502,7 @@ func daemonPlist(exe, stdout, stderr string) string {
 		b.WriteString("</string>\n")
 	}
 	b.WriteString("<key>ProgramArguments</key><array>")
-	for _, arg := range []string{exe, "daemon", "run"} {
+	for _, arg := range append([]string{exe}, runArgs...) {
 		b.WriteString("<string>")
 		_ = xml.EscapeText(&b, []byte(arg))
 		b.WriteString("</string>")
@@ -437,7 +511,7 @@ func daemonPlist(exe, stdout, stderr string) string {
 	return b.String()
 }
 
-func daemonUnit(exe string) string {
+func daemonUnit(exe string, runArgs []string) string {
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(exe)
-	return fmt.Sprintf("[Unit]\nDescription=Spectra local daemon\n\n[Service]\nType=simple\nExecStart=\"%s\" daemon run\nRestart=on-failure\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\n\n[Install]\nWantedBy=default.target\n", escaped)
+	return fmt.Sprintf("[Unit]\nDescription=Spectra local daemon\n\n[Service]\nType=simple\nExecStart=\"%s\" %s\nRestart=on-failure\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\n\n[Install]\nWantedBy=default.target\n", escaped, strings.Join(runArgs, " "))
 }
