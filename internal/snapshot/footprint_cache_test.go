@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -232,5 +233,36 @@ func TestFootprintCacheStartReusesFreshResultFromRacingCaller(t *testing.T) {
 	<-f.done
 	if w.calls.Load() != 1 {
 		t.Fatalf("forced start must walk, walks=%d", w.calls.Load())
+	}
+}
+
+// TestBuildStorageServedFromFootprintCache checks that a snapshot reads the
+// footprint another process stored instead of walking ~/Library again.
+func TestBuildStorageServedFromFootprintCache(t *testing.T) {
+	clk := clock.NewFake(footprintT0)
+	ttl := newTTL(t, clk)
+	home := t.TempDir()
+	walk := &countingWalk{}
+	(&FootprintCache{Store: ttl, Clock: clk, Collect: walk.collect}).Footprint(hostos.Darwin, home, FootprintFreshOnly)
+	clk.Advance(time.Minute)
+
+	snap := Build(context.Background(), Options{
+		Clock:          clk,
+		SkipApps:       true,
+		SkipProcesses:  true,
+		SkipJVMs:       true,
+		SkipServices:   true,
+		FootprintCache: &FootprintCache{Store: ttl, Clock: clk, Collect: walk.collect},
+		StorageOpts: storagestate.CollectOptions{
+			Home:      home,
+			OS:        hostos.Darwin,
+			CmdRunner: func(string, ...string) ([]byte, error) { return nil, errors.New("unavailable") },
+		},
+	})
+	if n := walk.calls.Load(); n != 1 {
+		t.Fatalf("walks = %d, want 1 (snapshot should hit the cache)", n)
+	}
+	if snap.Storage.UserLibraryBytes != 1000 || !snap.Storage.UserFootprintAsOf.Equal(footprintT0) {
+		t.Errorf("storage = %+v, want the cached footprint", snap.Storage)
 	}
 }

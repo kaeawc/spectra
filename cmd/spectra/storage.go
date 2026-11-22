@@ -42,17 +42,11 @@ func runStorage(args []string) int {
 		IncludeSpotlight: *includeSpotlight,
 	}
 	var state storagestate.State
-	if cacheStores == nil {
+	if footprint, policy := cliFootprintCache(*fresh); footprint == nil {
 		state = storagestate.Collect(opts)
 	} else {
 		// Volumes and mounts stay live; only the slow footprint walk is
-		// cached (user_footprint_as_of reports its age). --fresh re-walks
-		// and stores the result so later runs see it.
-		policy := snapshot.FootprintFreshOnly
-		if *fresh {
-			policy = snapshot.FootprintRefresh
-		}
-		footprint := snapshot.NewFootprintCache(cache.NewTTLStore(cacheStores.Storage, nil))
+		// cached (user_footprint_as_of reports its age).
 		state = snapshot.CollectStorage(opts, nil, footprint, policy)
 	}
 
@@ -65,6 +59,22 @@ func runStorage(args []string) int {
 
 	printStorageState(state, *includeSnapshots, *includeSpotlight)
 	return 0
+}
+
+// cliFootprintCache returns the disk-backed ~/Library footprint cache that
+// one-shot CLI commands share (nil when the cache root is unavailable) and
+// the read policy: an entry younger than 10 minutes, else a foreground walk;
+// with fresh, always walk and store the result so later runs see it.
+// Fresh-only is also what persisted snapshots require.
+func cliFootprintCache(fresh bool) (*snapshot.FootprintCache, snapshot.FootprintPolicy) {
+	policy := snapshot.FootprintFreshOnly
+	if fresh {
+		policy = snapshot.FootprintRefresh
+	}
+	if cacheStores == nil {
+		return nil, policy
+	}
+	return snapshot.NewFootprintCache(cache.NewTTLStore(cacheStores.Storage, nil)), policy
 }
 
 func runStorageDBCheck(args []string, stdout, stderr io.Writer) int {

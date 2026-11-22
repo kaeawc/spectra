@@ -35,7 +35,7 @@ type LogFile struct {
 // keep cost bounded; per-app subtree scanning belongs in the demand-driven
 // inspect_app path, not the default snapshot.
 func CollectLogFiles(home string, osKind hostos.Kind) []LogFile {
-	w := newLogWalker(maxLogWalkWorkers)
+	w := newLogWalker(walkWorkers(maxLogWalkWorkers))
 	for _, root := range logRoots(hostos.Resolve(osKind), home) {
 		w.root(root, "")
 	}
@@ -68,10 +68,12 @@ func logRoots(osKind hostos.Kind, home string) []string {
 	}
 }
 
-// maxLogWalkWorkers bounds concurrent directory reads. ~/Library/Logs can
-// hold tens of thousands of entries (CoreSimulator device logs), and a
-// serial walk of it dominated a cached `spectra storage` run.
-const maxLogWalkWorkers = 16
+// maxLogWalkWorkers bounds concurrent directory reads, further bounded by
+// GOMAXPROCS. ~/Library/Logs can hold tens of thousands of entries
+// (CoreSimulator device logs), so a serial walk is too slow, but more
+// readers than this mostly add kernel contention (measured with
+// BenchmarkLogWalkerRealTree).
+const maxLogWalkWorkers = 4
 
 // logWalker scans log roots concurrently. Directories are read by up to
 // a bounded number of goroutines; when all are busy the caller reads the
@@ -134,13 +136,30 @@ func (w *logWalker) dir(path, owner string) {
 	}
 }
 
+// readDir records the log-shaped files in path, then walks its
+// subdirectories. It prefers the platform bulk reader (one system call per
+// batch of entries instead of one lstat each) and falls back to ReadDir.
 func (w *logWalker) readDir(path, owner string) {
+	dirs, found, ok := readLogDirBulk(path, owner)
+	if !ok {
+		dirs, found = readLogDirPortable(path, owner)
+	}
+	w.add(found...)
+	for _, d := range dirs {
+		w.dir(d, owner)
+	}
+}
+
+// readLogDirPortable is readLogDirBulk via ReadDir and one lstat per
+// log-shaped file.
+func readLogDirPortable(path, owner string) ([]string, []LogFile) {
 	entries, _ := os.ReadDir(path) // partial entries on error are still walked
+	var dirs []string
 	var found []LogFile
 	for _, e := range entries {
 		full := filepath.Join(path, e.Name())
 		if e.IsDir() {
-			w.dir(full, owner)
+			dirs = append(dirs, full)
 			continue
 		}
 		if !isLogShapedFile(full) {
@@ -152,7 +171,7 @@ func (w *logWalker) readDir(path, owner string) {
 		}
 		found = append(found, logFileFor(full, owner, fi))
 	}
-	w.add(found...)
+	return dirs, found
 }
 
 func (w *logWalker) add(files ...LogFile) {
