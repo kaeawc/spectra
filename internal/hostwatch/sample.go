@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -237,7 +236,7 @@ func (c *Collector) collectSelf(s *Sample) {
 	c.lastAt, c.lastCPU = s.At, v
 }
 func parseProcesses(out []byte, javaArgs map[int]string, s *Sample, m *metrics.Collector) int {
-	var top []ProcStat
+	top := make([]ProcStat, 0, topCPUCount)
 	count := 0
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
@@ -259,17 +258,41 @@ func parseProcesses(out []byte, javaArgs map[int]string, s *Sample, m *metrics.C
 		k.CPUPct += cpu
 		k.RSSMB += float64(rss) / 1024
 		s.Kinds[kind] = k
-		top = append(top, ProcStat{pid, name, cpu, float64(rss) / 1024})
+		top = insertTop(top, ProcStat{pid, name, cpu, float64(rss) / 1024}, topCPUCount)
 		if m != nil {
 			m.Add(metrics.Sample{TakenAt: s.At, PID: pid, RSSKiB: rss, CPUPct: cpu})
 		}
 	}
-	sort.Slice(top, func(i, j int) bool { return top[i].CPUPct > top[j].CPUPct })
-	if len(top) > 5 {
-		top = top[:5]
+	// Names are substrings of the whole ps output; the window keeps two
+	// hours of samples, so detach them rather than pin one output per tick.
+	for i := range top {
+		top[i].Name = strings.Clone(top[i].Name)
+	}
+	if len(top) == 0 {
+		top = nil // encode as before: null, not []
 	}
 	s.TopCPU = top
 	return count
+}
+
+const topCPUCount = 5
+
+// insertTop keeps top sorted by CPU, highest first, and at most n long, so a
+// tick never holds a slice of every process just to keep five.
+func insertTop(top []ProcStat, p ProcStat, n int) []ProcStat {
+	i := len(top)
+	for i > 0 && top[i-1].CPUPct < p.CPUPct {
+		i--
+	}
+	if i >= n {
+		return top
+	}
+	if len(top) < n {
+		top = append(top, ProcStat{})
+	}
+	copy(top[i+1:], top[i:len(top)-1])
+	top[i] = p
+	return top
 }
 func selfCPUTime() (time.Duration, error) {
 	var r syscall.Rusage
