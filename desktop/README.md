@@ -58,6 +58,35 @@ What it shows:
     throttled, and volumes over 90% full (critical from 97%). A pressure finding clears after three
     normal readings in a row, a volume finding once it is under 88%, and a part whose reading
     failed or is three rounds old has no finding.
+- **Activity**, right under Machine: processes starting and exiting, live, including the
+  short-lived ones the 2 s process list never sees. For when something keeps spawning and dying.
+  Newest first: time, Started or Exited, the process and its parent (each opens its page while the
+  process list has it), how long an exited one lived, and its command line when the process list
+  saw it (else the chain of parents that started it). Click a row for the whole command line,
+  every parent up to launchd, and how sure the lifetime is. Filter by name, pid or parent;
+  "Short-lived only" keeps processes that lived under 2 s. Above it, the last minute: starts,
+  exits, and the five parents that started the most ("bash · 1110 started 214 processes"), each
+  opening that process's page, with "Show only these" to filter the table to its children.
+  - Recording: `spectra spawns --json --interval 250ms --duration 10s` in rounds on a thread of
+    its own, each with a 30 s deadline, with a 1 s rest between rounds, **only while the page is
+    open** (a process page opened over it counts as leaving). "Keep recording" (off at start)
+    keeps it going on every other page, checking once a second (`--interval 1s`) because looking
+    every 250 ms costs close to half a core; it uses some CPU. Leaving the page or quitting stops
+    the round in flight. A process that starts and ends between two checks (250 ms on the page,
+    1 s in the background) can be missed, as can one in the rest between rounds; the page says
+    so under its header. Lifetimes are approximate because start times have 1 s resolution. The
+    latest 5000 events are kept.
+  - Spectra Desktop's own readings (what it starts to look at the machine) are hidden from the
+    table, the last-minute summary and the storm finding; "Show Spectra Desktop's own readings"
+    (off) brings them back. "Short-lived only" matches a start to its exit by pid and start
+    time, so a reused pid doesn't borrow another process's lifetime. A pid links to its process
+    page only when the process list has that pid under the same name.
+  - A failed round says why and the next starts 10 s later. An older Spectra without
+    `spectra spawns` gets a plain notice and is asked again a minute later.
+  - A finding on the Overview when one parent starts more than 100 processes in a minute (a
+    spawn storm), opening Activity filtered to that parent. The finding appears only while
+    recording is on (the page open, or Keep recording): with both off nothing is watching, so
+    there is nothing to find.
 - **Startup**, under Machine: everything that launches at login or boot, and the background
   services launchd runs, so you can see what runs without you asking. Grouped by the app it
   belongs to (an app's login item, agents, daemons and helpers together), then items no app
@@ -203,7 +232,9 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # jvm-tools, tool-threads, tool-threads-deadlock, tool-histogram,
                             # tool-gc, tool-nmt, tool-nmt-off, tool-explain, tool-heapdump,
                             # tool-jfr, tool-jfr-summary,
-                            # system, system-pressure, system-failed, system-linux
+                            # system, system-pressure, system-failed, system-linux,
+                            # activity, activity-storm, activity-unsupported, startup,
+                            # startup-confirm, startup-failed, tree, tree-search
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -230,6 +261,10 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
   behind a `Runner` trait that tests replace with a fake that records what it was asked;
   `src/sample_startup.rs`: its sample data, from fixtures captured on a Mac in
   `tests/fixtures/startup`.
+- `src/spawns.rs`: the Activity page's recording rounds, their JSON, the event buffer, the
+  last-minute summary and the spawn-storm rule; `src/sample_activity.rs`: its sample data.
+- `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
+  flattening it into rows; `src/sample_tree.rs`: its sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs` and `src/sample_jvm.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.

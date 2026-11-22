@@ -17,8 +17,10 @@ mod run;
 mod sample;
 mod sample_jvm;
 mod sample_system;
-mod sample_tree;
+mod sample_activity;
 mod signal;
+mod spawns;
+mod sample_tree;
 mod startup;
 mod sample_startup;
 mod system;
@@ -90,6 +92,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.stop_recording_now();
     s.inspect.cancel_all();
     system::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    s.activity.cancel();
     startup::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     run::wait_idle(Duration::from_secs(2));
 }
@@ -112,6 +115,12 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     landed |= s.land_inspect();
     // Memory, thermal, load, power, disks and network, for the System page.
     landed |= s.land_system();
+    // Processes starting and exiting: rounds run only while the Activity page is open or
+    // Keep recording is on, and stop once neither holds.
+    landed |= s.tick_activity();
+    if s.activity_wanted() {
+        tx.wake_after(STATUS_TICK);
+    }
     // What starts at login, and a Disable or Enable's answer, for the Startup page.
     landed |= s.land_startup();
     s.tick_inspector();
@@ -184,6 +193,9 @@ fn main() {
             ("system-pressure", sample_system::system_pressure_scene),
             ("system-failed", sample_system::system_failed_scene),
             ("system-linux", sample_system::system_linux_scene),
+            ("activity", sample_activity::activity_scene),
+            ("activity-storm", sample_activity::activity_storm_scene),
+            ("activity-unsupported", sample_activity::activity_unsupported_scene),
             ("startup", sample_startup::startup_scene),
             ("startup-confirm", sample_startup::startup_confirm_scene),
             ("startup-failed", sample_startup::startup_failed_scene),

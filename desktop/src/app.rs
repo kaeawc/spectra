@@ -312,6 +312,8 @@ pub struct App {
     pub poke_rx: Option<Receiver<()>>,
     /// The machine-wide readings the System page shows.
     pub system: crate::system::System,
+    /// Processes starting and exiting, for the Activity page.
+    pub activity: crate::spawns::Activity,
     /// What starts at login or boot, for the Startup page.
     pub startup: crate::startup::Startup,
 }
@@ -381,6 +383,7 @@ pub fn init() -> App {
         poke: Some(poke),
         poke_rx: Some(poke_rx),
         system: crate::system::System::new(),
+        activity: crate::spawns::Activity::new(),
         startup: crate::startup::Startup::new(),
     }
 }
@@ -517,6 +520,7 @@ impl App {
             .flat_map(|j| diagnose(j, &self.history(j.pid)))
             .chain(self.proc_findings.iter().cloned())
             .chain(crate::system_findings::diagnose(&self.system, self.now))
+            .chain(self.activity.findings((self.wall)() as f64))
             .collect();
         all.sort_by_key(|f| (f.severity, f.pid));
         self.findings = all;
@@ -586,7 +590,7 @@ impl App {
     /// Re-cuts the list after a reading, a sidebar choice, a search, a sort or a group opening.
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
-        let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Startup) { Nav::All } else { self.nav };
+        let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) { Nav::All } else { self.nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -752,6 +756,7 @@ impl App {
             Link::Process(pid) => self.open(pid),
             Link::Unidentified => self.show(Nav::Unidentified),
             Link::System => self.show(Nav::System),
+            Link::Activity(ppid) => self.show_activity_of(ppid),
         }
     }
 
@@ -927,7 +932,7 @@ impl App {
             Some(_) => None,
             // An app page hides the list and its cursor.
             None if self.app_page.is_some() => None,
-            None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Startup) => self.cursor_target(),
+            None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) => self.cursor_target(),
             None => None,
         }
     }

@@ -70,6 +70,8 @@ pub enum Nav {
     Unidentified,
     /// The whole machine: memory, thermal state, disks, network and the top consumers.
     System,
+    /// Processes starting and exiting, live.
+    Activity,
     /// What starts at login or boot, and the background services.
     Startup,
 }
@@ -83,6 +85,7 @@ impl Nav {
             Nav::Runtime(r) => r.label(),
             Nav::Unidentified => "Unsigned or ad hoc",
             Nav::System => "Machine",
+            Nav::Activity => "Activity",
             Nav::Startup => "Startup",
         }
     }
@@ -91,6 +94,7 @@ impl Nav {
     pub fn holds(self, p: &Process) -> bool {
         match self {
             Nav::Overview | Nav::System => false,
+            Nav::Activity => false,
             Nav::Startup => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),

@@ -139,6 +139,7 @@ pub fn card(s: &App, f: &Finding, k: &Kit) -> El {
         Link::Process(pid) => (format!("{} · {pid}", f.subject), format!("Open {}", f.subject)),
         Link::Unidentified => (f.subject.clone(), "Show unsigned and ad hoc processes".to_owned()),
         Link::System => (f.subject.clone(), "Show the Machine page".to_owned()),
+        Link::Activity(ppid) => (format!("{} · {ppid}", f.subject), format!("Show what {} starts", f.subject)),
     };
     // Its own handler, so pressing it opens the process rather than the card.
     let subject = text(subject)

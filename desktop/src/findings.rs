@@ -29,6 +29,8 @@ pub enum Link {
     Unidentified,
     /// The System page: a finding about the whole machine.
     System,
+    /// The Activity page, showing only this parent's children.
+    Activity(u32),
 }
 
 #[derive(Clone, Debug)]
