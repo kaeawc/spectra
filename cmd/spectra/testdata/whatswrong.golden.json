@@ -1,0 +1,150 @@
+{
+  "causes": [
+    {
+      "severity": "high",
+      "title": "CPU is thermally throttled",
+      "detail": "30% of recent samples were speed-limited (thermal state: serious)"
+    },
+    {
+      "severity": "medium",
+      "title": "Memory pressure is elevated",
+      "detail": "swap in use: 3000 MB"
+    },
+    {
+      "severity": "medium",
+      "title": "Simulator AAAAAAAA-1111-2222-3333-444444444444 uses 10% of machine CPU",
+      "detail": "160% CPU (1.6 cores busy) across 5 processes, oldest member running for 3h0m; heaviest: svc1 (pid 1001, 40%), svc2 (pid 1002, 40%), svc3 (pid 1003, 40%)"
+    },
+    {
+      "severity": "medium",
+      "title": "A process is using heavy CPU",
+      "detail": "hog (pid 77) at 120% CPU"
+    },
+    {
+      "severity": "medium",
+      "title": "Disk nearly full",
+      "detail": "95% used"
+    },
+    {
+      "severity": "low",
+      "title": "A process is holding a lot of memory",
+      "detail": "hog (pid 77) at 5.0 GB RSS"
+    }
+  ],
+  "families": [
+    {
+      "key": "simulator:AAAAAAAA-1111-2222-3333-444444444444",
+      "kind": "simulator",
+      "name": "Simulator AAAAAAAA-1111-2222-3333-444444444444",
+      "udid": "AAAAAAAA-1111-2222-3333-444444444444",
+      "members": 5,
+      "cpu_pct": 160,
+      "share_pct": 57.14285714285714,
+      "rss_kib": 0,
+      "started_at": "2026-11-22T09:00:00Z",
+      "age_seconds": 10800,
+      "heaviest": [
+        {
+          "pid": 1001,
+          "command": "svc1",
+          "cpu_pct": 40,
+          "age_seconds": 10800
+        },
+        {
+          "pid": 1002,
+          "command": "svc2",
+          "cpu_pct": 40,
+          "age_seconds": 10800
+        },
+        {
+          "pid": 1003,
+          "command": "svc3",
+          "cpu_pct": 40,
+          "age_seconds": 10800
+        }
+      ]
+    }
+  ],
+  "daemon_alerts": [
+    {
+      "id": "",
+      "key": "",
+      "severity": "critical",
+      "title": "CPU is thermally throttled",
+      "detail": "",
+      "state": "",
+      "fired_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "id": "",
+      "key": "",
+      "severity": "warning",
+      "title": "Disk nearly full",
+      "detail": "95% used",
+      "state": "",
+      "fired_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "trend": "load 4.00/3.00/2.00; memory pressure elevated in the last 5 min",
+  "signals": {
+    "load": {
+      "memory_pressure": "warn",
+      "pressure_level": 2,
+      "swap_used_mb": 3000,
+      "swap_total_mb": 4096
+    },
+    "power": {
+      "on_battery": false,
+      "battery_pct": 80,
+      "thermal_pressure": "serious",
+      "thermal_throttled": true,
+      "percent_thermal_throttled": 30,
+      "assertions": [
+        {
+          "type": "PreventUserIdleSystemSleep",
+          "pid": 5,
+          "name": "caffeinate"
+        }
+      ],
+      "energy_top_users": [
+        {
+          "pid": 77,
+          "energy_impact": 12.5,
+          "command": "hog"
+        }
+      ]
+    },
+    "top_cpu": {
+      "pid": 77,
+      "ppid": 1,
+      "uid": 0,
+      "command": "hog",
+      "full_command_line": "",
+      "rss_kib": 5242880,
+      "vsize_kib": 0,
+      "thread_count": 0,
+      "cpu_pct": 120,
+      "cpu_percent": 0,
+      "mem_percent": 0,
+      "start_time": "0001-01-01T00:00:00Z",
+      "started_at": "0001-01-01T00:00:00Z",
+      "elapsed": 3600000000000
+    },
+    "top_rss": {
+      "pid": 77,
+      "ppid": 1,
+      "uid": 0,
+      "command": "hog",
+      "full_command_line": "",
+      "rss_kib": 5242880,
+      "vsize_kib": 0,
+      "thread_count": 0,
+      "cpu_pct": 120,
+      "cpu_percent": 0,
+      "mem_percent": 0,
+      "start_time": "0001-01-01T00:00:00Z",
+      "started_at": "0001-01-01T00:00:00Z",
+      "elapsed": 3600000000000
+    }
+  }
+}
