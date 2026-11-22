@@ -329,6 +329,9 @@ type detector struct {
 	// launch memoizes launchd plist conversions for login-item
 	// attribution. Nil-tolerant: launchPlistXML converts directly.
 	launch *launchPlistMemo
+	// tcc memoizes TCC database reads for granted-permission lookups.
+	// Nil-tolerant: tccGrants queries directly.
+	tcc *tccMemo
 }
 
 // plistCache is a mutex-guarded memo of parsed plist dictionaries by path.
@@ -338,14 +341,14 @@ type plistCache struct {
 }
 
 func newDetector(opts Options) detector {
-	// The process-wide memo is only valid for the real plutil; an injected
-	// Runner may script different output for the same file, so it gets a
-	// memo scoped to this detector.
-	launch := sharedLaunchPlists
+	// The process-wide memos are only valid for the real plutil and sqlite3;
+	// an injected Runner may script different output for the same file, so
+	// it gets memos scoped to this detector.
+	launch, tcc := sharedLaunchPlists, sharedTCCGrants
 	if opts.Runner != nil {
-		launch = newLaunchPlistMemo(os.Stat)
+		launch, tcc = newLaunchPlistMemo(os.Stat), newTCCMemo(os.Stat)
 	}
-	return detector{opts: opts, plists: &plistCache{m: map[string]map[string]any{}}, launch: launch}
+	return detector{opts: opts, plists: &plistCache{m: map[string]map[string]any{}}, launch: launch, tcc: tcc}
 }
 
 // plistDict parses a plist into a key→value map, converting it via a single
@@ -1684,64 +1687,8 @@ func hasFileLike(root, sub string) bool {
 	return hit
 }
 
-// scanGrantedPermissions queries the TCC databases for which privacy
-// services have been granted to this bundle ID. We check both the
-// per-user database (under ~/Library) and the system one (under
-// /Library); the latter requires Full Disk Access for the spectra
-// binary. When auth_value is 2 (allowed) or 3 (limited / always-allow)
-// the service is included. Result is a deduped, sorted slice of
-// human-readable service names with the kTCCService prefix stripped.
-func (d detector) scanGrantedPermissions(bundleID string) []string {
-	if bundleID == "" {
-		return nil
-	}
-	dbs := []string{
-		filepath.Join(home(), "Library", "Application Support", "com.apple.TCC", "TCC.db"),
-		"/Library/Application Support/com.apple.TCC/TCC.db",
-	}
-	seen := map[string]struct{}{}
-	for _, db := range dbs {
-		if !exists(db) {
-			continue
-		}
-		// The query is parameterised via SQL string concatenation rather
-		// than CLI arg substitution because sqlite3(1) on macOS does not
-		// accept bind variables on the command line. We sanitize the
-		// bundle ID — only the limited charset reverse-DNS bundle IDs use
-		// is allowed through.
-		if !validBundleID(bundleID) {
-			return nil
-		}
-		query := fmt.Sprintf(
-			"SELECT service FROM access WHERE client = '%s' AND auth_value >= 2;",
-			bundleID,
-		)
-		out, err := d.output("sqlite3", db, query)
-		if err != nil {
-			continue // typically: SIP-protected DB, no FDA — skip silently
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			seen[strings.TrimPrefix(line, "kTCCService")] = struct{}{}
-		}
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // validBundleID returns true if s only contains characters allowed in
-// reverse-DNS bundle identifiers. Used to gate SQL-string interpolation
-// in scanGrantedPermissions where parameter binding isn't available.
+// reverse-DNS bundle identifiers.
 func validBundleID(s string) bool {
 	return bundleid.Valid(s)
 }
