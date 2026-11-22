@@ -557,9 +557,10 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	exe = followWrapper(exe)
 
 	// Walk the bundle once for sizes and the .jar count; classification, the
-	// size fields, and dependency scanning all consume these instead of each
+	// size fields, dependency scanning and the Python scan (which replays the
+	// recorded Contents listing) all consume these instead of each
 	// re-walking the tree.
-	tree := bundleTreeStats(appPath)
+	tree, contentsTree := bundleTreeStatsRecorded(appPath)
 	jarCount := tree.jars
 	r.BundleSizeBytes, r.ApparentSizeBytes = tree.actual, tree.apparent
 	markers := newMarkerCache(scanBinaryMarkers)
@@ -620,7 +621,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	}
 	spawn(func() { privacy = d.readPrivacyDescriptions(appPath) })
 	spawn(func() { deps = scanDependencies(appPath, jarCount) })
-	spawn(func() { pyApp = scanPythonApp(appPath) })
+	spawn(func() { pyApp = scanPythonApp(appPath, contentsTree) })
 	spawn(func() { helpers = scanHelpers(appPath) })
 	spawn(func() { objc = scanObjCInspection(appPath, exe, objcInput) })
 	spawn(func() { live = d.collectLive(appPath, bundleID) })

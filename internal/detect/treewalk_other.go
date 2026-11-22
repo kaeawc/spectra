@@ -10,6 +10,6 @@ func newTreeBulk(bool) treeBulk { return treeBulk{} }
 
 func (treeBulk) release() {}
 
-func (treeBulk) readDir(_ string, stack []string, _ *statBuf, _ treeVisit) ([]string, bool) {
+func (treeBulk) readDir(_ string, stack []string, _ *statBuf, _ treeVisit, _ *treeListing) ([]string, bool) {
 	return stack, false
 }
