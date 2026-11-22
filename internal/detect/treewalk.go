@@ -25,7 +25,9 @@ func walkNonDirs(root string, visit func(path, name string, regular bool, actual
 		visit(root, fi.Name(), fi.Mode().IsRegular(), diskBytes(fi), fi.Size())
 		return
 	}
-	stack := []string{root}
+	// The root is lstat'd as given (a trailing slash follows a symlinked
+	// bundle, as filepath.WalkDir does); children use the cleaned path.
+	stack := []string{filepath.Clean(root)}
 	for len(stack) > 0 {
 		dir := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -82,7 +84,7 @@ func bundleTreeStats(appPath string) bundleTree {
 	contents := root + "/Contents"
 	var t bundleTree
 	var jvmFile string
-	walkNonDirs(root, func(path, name string, regular bool, actual, apparent int64) {
+	walkNonDirs(appPath, func(path, name string, regular bool, actual, apparent int64) {
 		if strings.HasPrefix(path, contents) {
 			if strings.HasSuffix(name, ".jar") {
 				t.jars++
@@ -105,7 +107,7 @@ func bundleTreeStats(appPath string) bundleTree {
 
 // treeBytes returns the actual disk usage of all regular files under root.
 func treeBytes(root string) (actual int64) {
-	walkNonDirs(filepath.Clean(root), func(_, _ string, regular bool, a, _ int64) {
+	walkNonDirs(root, func(_, _ string, regular bool, a, _ int64) {
 		if regular {
 			actual += a
 		}

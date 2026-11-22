@@ -85,6 +85,28 @@ func TestBundleTreeStatsMatchesWalkDir(t *testing.T) {
 	}
 }
 
+func TestBundleTreeStatsSymlinkedBundleRoot(t *testing.T) {
+	target := makeBundle(t, "Real")
+	link := filepath.Join(t.TempDir(), "link.app")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	want := bundleTreeStats(target)
+	if want.actual == 0 {
+		t.Fatal("target bundle sized 0")
+	}
+	if got := bundleTreeStats(link + "/"); got != want {
+		t.Fatalf("link.app/ = %+v, want target's %+v", got, want)
+	}
+	actual, apparent, jars, jvm := refTreeStats(link)
+	if got := bundleTreeStats(link); got.actual != actual || got.apparent != apparent || got.jars != jars || got.libjvmDir != jvm {
+		t.Fatalf("link.app = %+v, WalkDir gives %d/%d/%d/%q", got, actual, apparent, jars, jvm)
+	}
+	if n := treeBytes(link + "/"); n != want.actual {
+		t.Fatalf("treeBytes(link.app/) = %d, want %d", n, want.actual)
+	}
+}
+
 func TestBundleTreeStatsNoJVM(t *testing.T) {
 	app := makeBundle(t, "NoJVM")
 	if got := bundleTreeStats(app); got.libjvmDir != "" || got.jars != 0 || got.actual == 0 {
