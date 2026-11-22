@@ -376,3 +376,20 @@ func TestWalkTreeBulkMatchesLstat(t *testing.T) {
 		t.Errorf("lstat walk looks empty: %+v", slow)
 	}
 }
+
+func TestJoinNameMatchesFilepathJoin(t *testing.T) {
+	for _, dir := range []string{"/", "/a", "/a/b", "rel"} {
+		if got, want := joinName(dir, []byte("x.log")), filepath.Join(dir, "x.log"); got != want {
+			t.Errorf("joinName(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+func TestWalkWorkersBounds(t *testing.T) {
+	if got := walkWorkers(0); got != 1 {
+		t.Errorf("walkWorkers(0) = %d, want 1", got)
+	}
+	if got := walkWorkers(1 << 20); got != runtime.GOMAXPROCS(0) {
+		t.Errorf("walkWorkers(huge) = %d, want GOMAXPROCS %d", got, runtime.GOMAXPROCS(0))
+	}
+}
