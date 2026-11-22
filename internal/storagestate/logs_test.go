@@ -1,8 +1,12 @@
 package storagestate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/kaeawc/spectra/internal/hostos"
@@ -89,5 +93,74 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// walkLogsSerial is the filepath.Walk reference the concurrent walker must match.
+func walkLogsSerial(root, owner string) []LogFile {
+	var out []LogFile
+	_ = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // mirrors the tolerant production walk
+		}
+		if fi.IsDir() || !isLogShapedFile(path) {
+			return nil
+		}
+		out = append(out, logFileFor(path, owner, fi))
+		return nil
+	})
+	return out
+}
+
+func sortedLogKeys(files []LogFile) []string {
+	keys := make([]string, 0, len(files))
+	for _, f := range files {
+		keys = append(keys, fmt.Sprintf("%s|%s|%d", f.Path, f.Owner, f.SizeBytes))
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestLogWalkerMatchesSerialWalk(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Logs")
+	for d := range 6 {
+		for f := range 5 {
+			dir := filepath.Join(root, fmt.Sprintf("dev-%d", d), "nested", fmt.Sprintf("n%d", f%2))
+			mustWrite(t, filepath.Join(dir, fmt.Sprintf("f%d.txt", f)), "log")
+			mustWrite(t, filepath.Join(dir, fmt.Sprintf("f%d.log", f)), "log")
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	mustWrite(t, filepath.Join(outside, "hidden.log"), "x")
+	if err := os.Symlink(outside, filepath.Join(root, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	want := sortedLogKeys(walkLogsSerial(root, "App"))
+	for _, workers := range []int{1, 4, 16} {
+		w := newLogWalker(workers)
+		w.root(root, "App")
+		got := sortedLogKeys(w.wait())
+		if !slices.Equal(got, want) {
+			t.Fatalf("workers=%d: got %d files, want %d\ngot  %v\nwant %v", workers, len(got), len(want), got, want)
+		}
+		for _, k := range got {
+			if strings.Contains(k, "hidden.log") {
+				t.Fatalf("workers=%d followed a symlinked directory: %s", workers, k)
+			}
+		}
+	}
+}
+
+func TestLogWalkerRootFileAndMissingRoot(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "single.log")
+	mustWrite(t, file, "x")
+	w := newLogWalker(2)
+	w.root(file, "")
+	w.root(filepath.Join(dir, "missing"), "")
+	got := w.wait()
+	if len(got) != 1 || got[0].Path != file {
+		t.Fatalf("got %+v, want only %s", got, file)
 	}
 }

@@ -131,6 +131,10 @@ func Collect(opts CollectOptions) State {
 	osKind := hostos.Resolve(opts.OS)
 
 	var s State
+	// The log scan touches only the filesystem and is independent of the
+	// subprocess-bound mount/df collection, so the two overlap.
+	logsDone := make(chan []LogFile, 1)
+	go func() { logsDone <- CollectLogFiles(opts.Home, osKind) }()
 	if osKind != hostos.Linux {
 		if mounts, err := collectMounts(run); err == nil {
 			s.Mounts = mounts
@@ -151,7 +155,7 @@ func Collect(opts CollectOptions) State {
 	if len(opts.AppPaths) > 0 {
 		s.LargestApps = topApps(opts.AppPaths, opts.LargestAppsN)
 	}
-	s.LogFiles = CollectLogFiles(opts.Home, osKind)
+	s.LogFiles = <-logsDone
 	return s
 }
 

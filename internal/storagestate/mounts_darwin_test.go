@@ -3,8 +3,11 @@
 package storagestate
 
 import (
+	"fmt"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -69,4 +72,51 @@ func statfsFixture(mountPoint, device, fsType string, flags uint32) unix.Statfs_
 	copy(raw.Mntfromname[:], device)
 	copy(raw.Fstypename[:], fsType)
 	return raw
+}
+
+func TestConvertStatfsAllRunsDiskutilConcurrentlyInOrder(t *testing.T) {
+	const n = 12
+	raw := make([]unix.Statfs_t, n)
+	for i := range raw {
+		raw[i] = statfsFixture(fmt.Sprintf("/Volumes/conc-%d", i), fmt.Sprintf("/dev/disk-conc-test-%d", i), "apfs", unix.MNT_LOCAL)
+	}
+	var (
+		mu       sync.Mutex
+		inFlight int
+		peak     int
+		overlap  = make(chan struct{})
+		once     sync.Once
+	)
+	run := func(string, ...string) ([]byte, error) {
+		mu.Lock()
+		inFlight++
+		peak = max(peak, inFlight)
+		if inFlight >= 2 {
+			once.Do(func() { close(overlap) })
+		}
+		mu.Unlock()
+		// A serial loop never overlaps, so it falls through after the timeout
+		// and the peak assertion below fails instead of hanging.
+		select {
+		case <-overlap:
+		case <-time.After(2 * time.Second):
+		}
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return []byte(`<?xml version="1.0"?><plist version="1.0"><dict><key>VolumeRole</key><string>Data</string></dict></plist>`), nil
+	}
+
+	mounts := convertStatfsAll(raw, run)
+	if peak < 2 || peak > maxDiskutilWorkers {
+		t.Fatalf("peak concurrent diskutil calls = %d, want 2..%d", peak, maxDiskutilWorkers)
+	}
+	if len(mounts) != n {
+		t.Fatalf("len = %d, want %d", len(mounts), n)
+	}
+	for i, m := range mounts {
+		if want := fmt.Sprintf("/Volumes/conc-%d", i); m.MountPoint != want || m.APFSRole != "data" {
+			t.Fatalf("mounts[%d] = %q role %q, want %q role data", i, m.MountPoint, m.APFSRole, want)
+		}
+	}
 }
