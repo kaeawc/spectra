@@ -24,8 +24,10 @@ import (
 // `codesign -dv`; the seal check is cached) and, when opts.AssessGatekeeper
 // is set, re-assesses through the in-process verdict cache.
 //
-// When refreshStorage is set a hit also re-measures the app's ~/Library
-// footprint, which the content-only key cannot track.
+// A hit also recollects the runtime fields (processes, uptime, login items,
+// TCC grants), which describe the running system, not the bundle. When
+// refreshStorage is set it re-measures the app's ~/Library footprint too,
+// which the content-only key cannot track either.
 //
 // store may be nil, in which case the function falls through to a live Detect.
 func detectWithCache(appPath string, opts detect.Options, store *cache.ShardedStore, writer *cache.AsyncWriter, refreshStorage bool) (detect.Result, error) {
@@ -39,6 +41,7 @@ func detectWithCache(appPath string, opts detect.Options, store *cache.ShardedSt
 			var r detect.Result
 			if err := json.Unmarshal(blob, &r); err == nil {
 				detect.RefreshSignature(&r, appPath, opts)
+				detect.RefreshLive(&r, appPath, opts)
 				if refreshStorage {
 					detect.RefreshStorage(&r, appPath)
 				}

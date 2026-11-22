@@ -158,6 +158,72 @@ func TestDetectWithCacheHitRefreshesStorage(t *testing.T) {
 	}
 }
 
+// TestDetectWithCacheHitRefreshesLiveFields checks that a hit never replays
+// the cached processes, uptime, login items or TCC grants: they describe the
+// running system, which the content-only key does not follow.
+func TestDetectWithCacheHitRefreshesLiveFields(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	t.Setenv("HOME", home) // the user TCC.db path follows $HOME
+	app := makeTestBundle(t, dir, "LiveFields", "com.livefields.app", "LiveFields")
+	st := cache.NewShardedStore(filepath.Join(dir, "cache", "v1"), "detect")
+	key := detectCacheKey(app)
+	if key == nil {
+		t.Fatal("detectCacheKey returned nil for valid bundle")
+	}
+	oldStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	stale := detect.Result{
+		Path: app, BundleID: "com.livefields.app",
+		RunningProcesses:   []detect.ProcessInfo{{PID: 1, RSSKiB: 1, Command: "Contents/MacOS/Old", StartTime: oldStart}},
+		AppStartedAt:       &oldStart,
+		AppUptimeSeconds:   1,
+		LoginItems:         []detect.LoginItem{{Label: "com.livefields.stale"}},
+		GrantedPermissions: []string{"Stale"},
+	}
+	blob, _ := json.Marshal(stale)
+	if err := st.Put(key, blob); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	agents := filepath.Join(home, "Library", "LaunchAgents")
+	tccDir := filepath.Join(home, "Library", "Application Support", "com.apple.TCC")
+	for _, d := range []string{agents, tccDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(agents, "com.livefields.helper.plist"), []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tccDir, "TCC.db"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 16, 11, 0, 0, 0, time.UTC)
+	runner := proc.NewFake().
+		On(proc.MatchPrefix("ps"), proc.Response{Result: proc.Result{
+			Stdout: []byte("4242 9000 Mon Nov 16 10:00:00 2026 " + app + "/Contents/MacOS/LiveFields\n"),
+		}}).
+		On(proc.MatchPrefix("sqlite3"), proc.Response{Result: proc.Result{Stdout: []byte("kTCCServiceCamera\n")}})
+	opts := detect.Options{OS: hostos.Darwin, Runner: runner, Home: home, Now: func() time.Time { return now }}
+
+	r, err := detectWithCache(app, opts, st, nil, false)
+	if err != nil {
+		t.Fatalf("detectWithCache: %v", err)
+	}
+	if len(r.RunningProcesses) != 1 || r.RunningProcesses[0].PID != 4242 || r.RunningProcesses[0].RSSKiB != 9000 {
+		t.Errorf("RunningProcesses = %+v, want the live pid 4242", r.RunningProcesses)
+	}
+	if r.AppUptimeSeconds != 3600 || r.AppStartedAt == nil || r.AppStartedAt.Equal(oldStart) {
+		t.Errorf("uptime = %d started %v, want 3600s from the live process", r.AppUptimeSeconds, r.AppStartedAt)
+	}
+	if len(r.LoginItems) != 1 || r.LoginItems[0].Label != "com.livefields.helper" {
+		t.Errorf("LoginItems = %+v, want the live com.livefields.helper", r.LoginItems)
+	}
+	if len(r.GrantedPermissions) != 1 || r.GrantedPermissions[0] != "Camera" {
+		t.Errorf("GrantedPermissions = %v, want [Camera]", r.GrantedPermissions)
+	}
+}
+
 func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	dir := t.TempDir()
 	app := makeTestBundle(t, dir, "LiveApp", "com.live.app", "LiveApp")

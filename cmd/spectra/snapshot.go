@@ -103,8 +103,9 @@ func withCLIFootprintCache(opts *snapshot.Options, fresh bool) {
 
 // withCLIDetectCache serves per-app inspection from the persistent detect
 // cache the rules path uses, so an unchanged bundle is not re-walked, re-hashed
-// and re-classified on every snapshot. The app's ~/Library footprint is still
-// measured live on a hit because snapshots are persisted and diffed. The
+// and re-classified on every snapshot. A hit always recollects processes,
+// uptime, login items and TCC grants; the app's ~/Library footprint is also
+// measured live here because snapshots are persisted and diffed. The
 // cache key does not cover --network, so network scans bypass it. The
 // returned func flushes pending cache writes.
 func withCLIDetectCache(opts *snapshot.Options, network bool) func() {

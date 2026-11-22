@@ -591,9 +591,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 		pyApp      *PythonApp
 		helpers    *Helpers
 		objc       *ObjCInspection
-		loginItems []LoginItem
-		running    []ProcessInfo
-		granted    []string
+		live       liveState
 		gatekeeper gatekeeperVerdict
 		likely     gatekeeperLikely
 		cdHash     = r.CDHash
@@ -612,9 +610,7 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	spawn(func() { pyApp = scanPythonApp(appPath) })
 	spawn(func() { helpers = scanHelpers(appPath) })
 	spawn(func() { objc = scanObjCInspection(appPath, exe, objcInput) })
-	spawn(func() { loginItems = d.scanLoginItems(appPath, bundleID) })
-	spawn(func() { running = d.scanRunningProcesses(appPath) })
-	spawn(func() { granted = d.scanGrantedPermissions(bundleID) })
+	spawn(func() { live = d.collectLive(appPath, bundleID) })
 	spawn(func() { likely = d.likelyGatekeeper(appPath, si) })
 	if opts.AssessGatekeeper {
 		spawn(func() { gatekeeper = d.assessGatekeeper(appPath, cdHash) })
@@ -629,14 +625,48 @@ func DetectWith(appPath string, opts Options) (Result, error) {
 	r.PythonApp = pyApp
 	r.Helpers = helpers
 	r.ObjC = objc
-	r.LoginItems = loginItems
-	r.RunningProcesses = running
-	r.AppStartedAt, r.AppUptimeSeconds = appUptime(running, detectNow(opts))
-	r.GrantedPermissions = granted
+	live.apply(&r, detectNow(opts))
 	applyGatekeeperLikely(&r, likely)
 	applyGatekeeperVerdict(&r, gatekeeper)
 	r.NetworkEndpoints = endpoints
 	return r, nil
+}
+
+// liveState is the part of a Result that reflects the running system rather
+// than the bundle: processes, login items and TCC grants. A cached Result
+// replays everything else but must recollect this.
+type liveState struct {
+	loginItems []LoginItem
+	running    []ProcessInfo
+	granted    []string
+}
+
+// collectLive gathers the live fields concurrently.
+func (d detector) collectLive(appPath, bundleID string) liveState {
+	var l liveState
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); l.loginItems = d.scanLoginItems(appPath, bundleID) }()
+	go func() { defer wg.Done(); l.running = d.scanRunningProcesses(appPath) }()
+	go func() { defer wg.Done(); l.granted = d.scanGrantedPermissions(bundleID) }()
+	wg.Wait()
+	return l
+}
+
+func (l liveState) apply(r *Result, now time.Time) {
+	r.LoginItems = l.loginItems
+	r.RunningProcesses = l.running
+	r.AppStartedAt, r.AppUptimeSeconds = appUptime(l.running, now)
+	r.GrantedPermissions = l.granted
+}
+
+// RefreshLive recollects r's runtime fields for the bundle at appPath —
+// running processes and app uptime, login items, and TCC grants — with the
+// collectors DetectWith uses. Content-keyed caches of Result call it on every
+// hit, since none of these follow the bundle's content.
+func RefreshLive(r *Result, appPath string, opts Options) {
+	d := newDetector(opts)
+	d.collectLive(appPath, r.BundleID).apply(r, detectNow(opts))
 }
 
 func detectNow(opts Options) time.Time {
