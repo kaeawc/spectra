@@ -47,8 +47,12 @@ for `seconds` (default 10, at most 120) and only one CPU profile runs at a time.
 Nothing is collected until the method is called, it uses the same owner-only
 socket and peer-UID check as every other method, and it opens no listener. Read
 a profile with `go tool pprof <spectra binary> <file>`, and compare two heap
-profiles with `go tool pprof -base <earlier> <binary> <later>`. After each write the
-daemon keeps the newest 20 profiles in that directory and deletes older ones.
+profiles with `go tool pprof -base <earlier> <binary> <later>`. A profile is written
+under a `.pprof.partial` name and renamed when complete; a failed write (for
+example a full disk) removes it and returns the error. After each write the
+daemon keeps the newest 20 `.pprof` files in that directory and deletes older
+ones; it never touches `.partial` files, so one left by a crash mid-capture
+stays until removed by hand.
 
 ## Monitoring and alerts
 
@@ -248,7 +252,10 @@ default 15-second interval a process holds about 120 samples. A process that has
 not been seen for 30 minutes is dropped at the next once-a-minute flush. Each
 flush writes only the minutes not yet written plus the newest minute (which may
 have been partial), so its cost follows the number of live processes rather than
-the daemon's uptime. The two-hour in-memory window of host samples that alerts
+the daemon's uptime. Minutes whose database write fails are retried at the next
+flush while the process's samples are in memory; a process dropped after 30
+minutes takes its unwritten minutes with it, and the failure is logged once per
+run of failed flushes. The two-hour in-memory window of host samples that alerts
 evaluate is trimmed in place.
 
 The watch stores JSON samples for seven days and resolved alerts for 30 days

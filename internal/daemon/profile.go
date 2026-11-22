@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -26,6 +27,10 @@ const (
 	// keepProfiles is how many profiles stay in <Dir>/profiles; older ones
 	// are removed after each write.
 	keepProfiles = 20
+	// partialSuffix marks a capture still being written. Pruning ignores
+	// it, so a concurrent capture's prune never deletes an active one; a
+	// file left by a crash mid-capture stays until removed by hand.
+	partialSuffix = ".partial"
 )
 
 // ProfileParams selects the profile. Kind is heap, allocs, goroutine or cpu;
@@ -62,12 +67,15 @@ func (s *Server) profile(ctx context.Context, done <-chan struct{}, raw json.Raw
 		return ProfileResult{}, fmt.Errorf("daemon.profile: create directory: %w", err)
 	}
 	stamp := s.opts.Clock.Now().UTC().Format("20060102T150405.000Z")
-	// CreateTemp makes the file 0600 and keeps same-millisecond requests apart.
-	f, err := os.CreateTemp(dir, p.Kind+"-"+stamp+"-*.pprof")
+	// CreateTemp makes the file 0600 and keeps same-millisecond requests
+	// apart. The capture is written under a staging name that pruning
+	// ignores and renamed once complete.
+	f, err := os.CreateTemp(dir, p.Kind+"-"+stamp+"-*.pprof"+partialSuffix)
 	if err != nil {
 		return ProfileResult{}, fmt.Errorf("daemon.profile: create file: %w", err)
 	}
-	path := f.Name()
+	staging := f.Name()
+	path := strings.TrimSuffix(staging, partialSuffix)
 	if p.Kind == "cpu" {
 		err = writeCPUProfile(ctx, done, f, time.Duration(p.Seconds)*time.Second)
 	} else {
@@ -79,8 +87,11 @@ func (s *Server) profile(ctx context.Context, done <-chan struct{}, raw json.Raw
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil {
+		err = os.Rename(staging, path)
+	}
 	if err != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(staging)
 		return ProfileResult{}, fmt.Errorf("daemon.profile: %w", err)
 	}
 	if err := pruneProfiles(dir, keepProfiles); err != nil {
@@ -116,12 +127,39 @@ func parseProfileParams(raw json.RawMessage) (ProfileParams, error) {
 	return p, nil
 }
 
-func writeCPUProfile(ctx context.Context, done <-chan struct{}, f *os.File, d time.Duration) error {
+// firstErrWriter records the first write error: the runtime's CPU profile
+// writer discards them, so a full disk would otherwise go unnoticed.
+type firstErrWriter struct {
+	w   io.Writer
+	mu  sync.Mutex
+	err error
+}
+
+func (f *firstErrWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if err != nil {
+		f.mu.Lock()
+		if f.err == nil {
+			f.err = err
+		}
+		f.mu.Unlock()
+	}
+	return n, err
+}
+
+func (f *firstErrWriter) Err() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.err
+}
+
+func writeCPUProfile(ctx context.Context, done <-chan struct{}, w io.Writer, d time.Duration) error {
 	if !cpuProfileMu.TryLock() {
 		return fmt.Errorf("a CPU profile is already running")
 	}
 	defer cpuProfileMu.Unlock()
-	if err := pprof.StartCPUProfile(f); err != nil {
+	fw := &firstErrWriter{w: w}
+	if err := pprof.StartCPUProfile(fw); err != nil {
 		return err
 	}
 	timer := time.NewTimer(d)
@@ -131,12 +169,13 @@ func writeCPUProfile(ctx context.Context, done <-chan struct{}, f *os.File, d ti
 	case <-ctx.Done():
 	case <-done:
 	}
-	pprof.StopCPUProfile()
-	return nil
+	pprof.StopCPUProfile() // flushes the remaining profile before returning
+	return fw.Err()
 }
 
 // pruneProfiles removes all but the newest keep .pprof files in dir, newest
-// by modification time (then name).
+// by modification time (then name). Staging .pprof.partial files are not
+// counted or removed.
 func pruneProfiles(dir string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

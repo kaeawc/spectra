@@ -193,3 +193,59 @@ func TestProfilePrunesOldest(t *testing.T) {
 		t.Fatal("newer old profile removed")
 	}
 }
+
+// A capture still being written (staging .partial name) survives a prune run
+// by a concurrent capture, however old it looks.
+func TestPruneKeepsActiveCapture(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Hour)
+	active := filepath.Join(dir, "cpu-active.pprof"+partialSuffix)
+	for i, name := range []string{"cpu-active.pprof" + partialSuffix, "heap-a.pprof", "heap-b.pprof", "heap-c.pprof"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := old.Add(time.Duration(i) * time.Second) // the active capture is oldest
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pruneProfiles(dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active capture pruned: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Fatalf("kept %d files, want the active capture and heap-c", len(entries))
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// A write error inside the runtime's CPU profile writer is reported, and the
+// RPC leaves no file behind.
+func TestCPUProfileWriteErrorReported(t *testing.T) {
+	err := writeCPUProfile(context.Background(), nil, failingWriter{}, 50*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "no space") {
+		t.Fatalf("err = %v, want the write error", err)
+	}
+}
+
+func TestProfileSuccessLeavesNoStaging(t *testing.T) {
+	p := testPaths(t)
+	s := New(Options{Paths: p})
+	res, err := s.profile(context.Background(), nil, json.RawMessage(`{"kind":"heap"}`))
+	if err != nil || !strings.HasSuffix(res.Path, ".pprof") {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(p.Dir, "profiles"))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), partialSuffix) {
+			t.Fatalf("staging file left: %s", e.Name())
+		}
+	}
+}
