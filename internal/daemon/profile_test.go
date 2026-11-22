@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -141,5 +142,54 @@ func TestProfileOverSocket(t *testing.T) {
 	var rpcErr jsonrpc.Error
 	if err := json.Unmarshal(call(`{"jsonrpc":"2.0","id":3,"method":"daemon.profile","params":{"kind":"nope"}}`)["error"], &rpcErr); err != nil || rpcErr.Code != CodeInvalidParams {
 		t.Fatalf("invalid kind error = %+v, %v", rpcErr, err)
+	}
+}
+
+// After a write only the newest keepProfiles profiles remain; other files
+// in the directory are left alone.
+func TestProfilePrunesOldest(t *testing.T) {
+	p := testPaths(t)
+	dir := filepath.Join(p.Dir, "profiles")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	for i := 0; i < keepProfiles+5; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("heap-old-%02d.pprof", i))
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := old.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Paths: p})
+	res, err := s.profile(context.Background(), nil, json.RawMessage(`{"kind":"goroutine"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if len(names) != keepProfiles+1 || !names[filepath.Base(res.Path)] || !names["notes.txt"] {
+		t.Fatalf("kept %d files: %v", len(names), names)
+	}
+	// The six oldest (00..05) went: 25 old + 1 new = 26, keep 20.
+	for i := 0; i < 6; i++ {
+		if names[fmt.Sprintf("heap-old-%02d.pprof", i)] {
+			t.Fatalf("old profile %02d kept", i)
+		}
+	}
+	if !names["heap-old-06.pprof"] {
+		t.Fatal("newer old profile removed")
 	}
 }

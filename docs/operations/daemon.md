@@ -47,8 +47,8 @@ for `seconds` (default 10, at most 120) and only one CPU profile runs at a time.
 Nothing is collected until the method is called, it uses the same owner-only
 socket and peer-UID check as every other method, and it opens no listener. Read
 a profile with `go tool pprof <spectra binary> <file>`, and compare two heap
-profiles with `go tool pprof -base <earlier> <binary> <later>`. The daemon does
-not delete old profiles.
+profiles with `go tool pprof -base <earlier> <binary> <later>`. After each write the
+daemon keeps the newest 20 profiles in that directory and deletes older ones.
 
 ## Monitoring and alerts
 

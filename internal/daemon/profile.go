@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +23,9 @@ const MethodProfile = "daemon.profile"
 const (
 	defaultCPUProfileSeconds = 10
 	maxCPUProfileSeconds     = 120
+	// keepProfiles is how many profiles stay in <Dir>/profiles; older ones
+	// are removed after each write.
+	keepProfiles = 20
 )
 
 // ProfileParams selects the profile. Kind is heap, allocs, goroutine or cpu;
@@ -78,6 +83,9 @@ func (s *Server) profile(ctx context.Context, done <-chan struct{}, raw json.Raw
 		_ = os.Remove(path)
 		return ProfileResult{}, fmt.Errorf("daemon.profile: %w", err)
 	}
+	if err := pruneProfiles(dir, keepProfiles); err != nil {
+		s.opts.Logger.Warn("daemon.profile: prune old profiles", "error", err)
+	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return ProfileResult{Kind: p.Kind, Path: path, Seconds: p.Seconds, HeapAlloc: ms.HeapAlloc, HeapInuse: ms.HeapInuse, HeapObjects: ms.HeapObjects, Sys: ms.Sys, NumGC: ms.NumGC, NumGoroutine: runtime.NumGoroutine()}, nil
@@ -125,4 +133,44 @@ func writeCPUProfile(ctx context.Context, done <-chan struct{}, f *os.File, d ti
 	}
 	pprof.StopCPUProfile()
 	return nil
+}
+
+// pruneProfiles removes all but the newest keep .pprof files in dir, newest
+// by modification time (then name).
+func pruneProfiles(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	type profile struct {
+		name string
+		mod  time.Time
+	}
+	var profiles []profile
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".pprof") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // removed meanwhile
+		}
+		profiles = append(profiles, profile{e.Name(), info.ModTime()})
+	}
+	if len(profiles) <= keep {
+		return nil
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		if !profiles[i].mod.Equal(profiles[j].mod) {
+			return profiles[i].mod.After(profiles[j].mod)
+		}
+		return profiles[i].name > profiles[j].name
+	})
+	var firstErr error
+	for _, p := range profiles[keep:] {
+		if err := os.Remove(filepath.Join(dir, p.name)); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
