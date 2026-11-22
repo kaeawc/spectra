@@ -15,13 +15,15 @@ import (
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
+	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
 func countingCollect(calls *atomic.Int32) CollectFunc {
-	return func(context.Context) []process.Info {
+	return func(context.Context) ([]process.Info, error) {
 		n := calls.Add(1)
-		return []process.Info{{PID: int(n), RSSKiB: 10}}
+		return []process.Info{{PID: int(n), RSSKiB: 10}}, nil
 	}
 }
 
@@ -60,10 +62,10 @@ func TestListRefreshBypassesCache(t *testing.T) {
 func TestListSingleFlight(t *testing.T) {
 	var calls atomic.Int32
 	release := make(chan struct{})
-	s, _ := newClockSvc(func(context.Context) []process.Info {
+	s, _ := newClockSvc(func(context.Context) ([]process.Info, error) {
 		calls.Add(1)
 		<-release
-		return nil
+		return []process.Info{{PID: 1}}, nil
 	})
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -89,11 +91,11 @@ func TestListHungCollectorTimesOutAndReleases(t *testing.T) {
 	defer close(block)
 	var hang atomic.Bool
 	hang.Store(true)
-	s := NewService(Options{Timeout: 30 * time.Millisecond, Clock: clock.NewFake(time.Unix(1, 0)), Collect: func(context.Context) []process.Info {
+	s := NewService(Options{Timeout: 30 * time.Millisecond, Clock: clock.NewFake(time.Unix(1, 0)), Collect: func(context.Context) ([]process.Info, error) {
 		if hang.Load() {
 			<-block
 		}
-		return []process.Info{{PID: 1}}
+		return []process.Info{{PID: 1}}, nil
 	}})
 	if _, err := s.List(context.Background(), false); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v, want deadline", err)
@@ -107,7 +109,7 @@ func TestListHungCollectorTimesOutAndReleases(t *testing.T) {
 
 func TestListPanicReturnsErrorToAllWaiters(t *testing.T) {
 	gate := make(chan struct{})
-	s, _ := newClockSvc(func(context.Context) []process.Info {
+	s, _ := newClockSvc(func(context.Context) ([]process.Info, error) {
 		<-gate
 		panic("boom")
 	})
@@ -127,7 +129,7 @@ func TestListPanicReturnsErrorToAllWaiters(t *testing.T) {
 func TestListCancelledCallerReturns(t *testing.T) {
 	block := make(chan struct{})
 	defer close(block)
-	s, _ := newClockSvc(func(context.Context) []process.Info { <-block; return nil })
+	s, _ := newClockSvc(func(context.Context) ([]process.Info, error) { <-block; return nil, nil })
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
 	if _, err := s.List(ctx, false); !errors.Is(err, context.Canceled) {
@@ -144,7 +146,7 @@ func TestPayloadMatchesCLIRows(t *testing.T) {
 			{PID: 2, PPID: 1, Command: "b", FullCommandLine: "b", RSSKiB: 900, ThreadCount: 4, VSZBytes: 7, OpenFDs: 3},
 		}
 	}
-	s, _ := newClockSvc(func(context.Context) []process.Info { return in() })
+	s, _ := newClockSvc(func(context.Context) ([]process.Info, error) { return in(), nil })
 	snap, err := s.List(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -216,8 +218,8 @@ func TestMethodsOverDaemonSocket(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	paths := daemon.Paths{Dir: dir, Socket: filepath.Join(dir, "d.sock"), Lock: filepath.Join(dir, "d.lock"), PID: filepath.Join(dir, "d.pid")}
 	server := daemon.New(daemon.Options{Paths: paths, Version: "test"})
-	svc := NewService(Options{Interval: 10 * time.Millisecond, TTL: time.Millisecond, Collect: func(context.Context) []process.Info {
-		return []process.Info{{PID: 1, RSSKiB: 1}, {PID: 2, RSSKiB: 2}}
+	svc := NewService(Options{Interval: 10 * time.Millisecond, TTL: time.Millisecond, Collect: func(context.Context) ([]process.Info, error) {
+		return []process.Info{{PID: 1, RSSKiB: 1}, {PID: 2, RSSKiB: 2}}, nil
 	}})
 	RegisterMethods(server, svc)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -274,5 +276,85 @@ func TestMethodsOverDaemonSocket(t *testing.T) {
 	}
 	if svc.Subscribers() != 0 {
 		t.Fatal("subscriber not removed on disconnect")
+	}
+}
+
+type blockingRunner struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (r *blockingRunner) Run(ctx context.Context, _ proc.Cmd) (proc.Result, error) {
+	close(r.started)
+	<-ctx.Done()
+	close(r.cancelled)
+	return proc.Result{}, ctx.Err()
+}
+
+// The default collector must hand ctx to its ps runner so the timeout kills it.
+func TestDefaultCollectCancelsRunnerOnTimeout(t *testing.T) {
+	r := &blockingRunner{started: make(chan struct{}), cancelled: make(chan struct{})}
+	s := NewService(Options{Timeout: 50 * time.Millisecond, Collect: DefaultCollect(process.CollectOptions{OS: hostos.Darwin, Runner: r})})
+	if _, err := s.List(context.Background(), false); err == nil {
+		t.Fatal("want timeout error")
+	}
+	select {
+	case <-r.started:
+	default:
+		t.Fatal("runner never ran")
+	}
+	select {
+	case <-r.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner ctx was not cancelled on timeout")
+	}
+}
+
+func TestEmptyCollectionIsErrorNotCached(t *testing.T) {
+	var calls atomic.Int32
+	var fail atomic.Bool
+	fail.Store(true)
+	s, clk := newClockSvc(func(context.Context) ([]process.Info, error) {
+		calls.Add(1)
+		if fail.Load() {
+			return nil, ErrNoProcesses
+		}
+		return []process.Info{{PID: 1}}, nil
+	})
+	if _, err := s.List(context.Background(), false); !errors.Is(err, ErrNoProcesses) {
+		t.Fatalf("err=%v", err)
+	}
+	fail.Store(false)
+	clk.Advance(time.Millisecond)
+	snap, err := s.List(context.Background(), false)
+	if err != nil || len(snap.Processes) != 1 || calls.Load() != 2 {
+		t.Fatalf("failure was cached: %+v %v calls=%d", snap, err, calls.Load())
+	}
+	// DefaultCollect maps zero rows to the error.
+	empty := DefaultCollect(process.CollectOptions{OS: hostos.Darwin, Runner: proc.NewFake()})
+	if _, err := empty(context.Background()); err == nil {
+		t.Fatal("zero rows must be an error")
+	}
+}
+
+func TestSubscribeSkipsFailedTicks(t *testing.T) {
+	var calls atomic.Int32
+	s := NewService(Options{Interval: 10 * time.Millisecond, TTL: time.Millisecond, Collect: func(context.Context) ([]process.Info, error) {
+		if calls.Add(1) <= 2 {
+			return nil, ErrNoProcesses
+		}
+		return []process.Info{{PID: 9}}, nil
+	}})
+	done := make(chan struct{})
+	defer close(done)
+	got := make(chan Snapshot, 8)
+	s.Subscribe(done, func(_ string, p any) error { got <- p.(Snapshot); return nil })
+	select {
+	case snap := <-got:
+		if len(snap.Processes) != 1 || calls.Load() < 3 {
+			t.Fatalf("pushed empty/failed update: %+v calls=%d", snap, calls.Load())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no update")
 	}
 }

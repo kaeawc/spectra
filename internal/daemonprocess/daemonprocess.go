@@ -9,6 +9,7 @@ package daemonprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/clock"
 	"github.com/kaeawc/spectra/internal/daemon"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -33,8 +35,31 @@ const (
 	DefaultInterval = 15 * time.Second
 )
 
-// CollectFunc collects every process. It should honor ctx.
-type CollectFunc func(ctx context.Context) []process.Info
+// CollectFunc collects every process. It should honor ctx. An error means the
+// collection failed and must not be served or cached.
+type CollectFunc func(ctx context.Context) ([]process.Info, error)
+
+// ErrNoProcesses reports an empty collection, which on a live host means ps
+// (or procfs) failed rather than that nothing is running.
+var ErrNoProcesses = errors.New("process list: collection returned no processes")
+
+// DefaultCollect runs process.CollectAll with a ctx-killable runner, so a
+// timed-out collection kills its ps children. base supplies test seams.
+func DefaultCollect(base process.CollectOptions) CollectFunc {
+	if base.Runner == nil {
+		base.Runner = proc.Default
+	}
+	return func(ctx context.Context) ([]process.Info, error) {
+		procs := process.CollectAll(ctx, base)
+		if len(procs) == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, ErrNoProcesses
+		}
+		return procs, nil
+	}
+}
 
 // Snapshot is the process.list result and the process.update payload.
 // Processes holds the rows `spectra process --json` prints, in its default
@@ -83,9 +108,7 @@ func NewService(opts Options) *Service {
 	s := &Service{collect: opts.Collect, clock: opts.Clock, ttl: opts.TTL, timeout: opts.Timeout,
 		interval: opts.Interval, subs: map[*subscriber]struct{}{}}
 	if s.collect == nil {
-		s.collect = func(ctx context.Context) []process.Info {
-			return process.CollectAll(ctx, process.CollectOptions{})
-		}
+		s.collect = DefaultCollect(process.CollectOptions{})
 	}
 	if s.clock == nil {
 		s.clock = clock.System{}
@@ -152,7 +175,8 @@ func (s *Service) run(base context.Context, c *call) {
 				ch <- result{err: fmt.Errorf("process list: collector panicked: %v", r)}
 			}
 		}()
-		ch <- result{procs: s.collect(ctx)}
+		procs, err := s.collect(ctx)
+		ch <- result{procs: procs, err: err}
 	}()
 	var r result
 	select {
@@ -165,9 +189,6 @@ func (s *Service) run(base context.Context, c *call) {
 	var snap Snapshot
 	if r.err == nil {
 		procs := r.procs
-		if procs == nil {
-			procs = []process.Info{}
-		}
 		sortByRSS(procs)
 		snap = Snapshot{SampledAt: s.clock.Now(), Processes: procs}
 	}
