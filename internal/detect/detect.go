@@ -738,6 +738,14 @@ func readTauriVersionWith(appPath string, files nodeAppFS) string {
 	return ""
 }
 
+// RefreshStorage re-measures r's ~/Library footprint for the bundle at
+// appPath. Content-keyed caches of Result call it on a hit when they need
+// the footprint live: it changes as the app runs, while the cache key only
+// changes with the bundle.
+func RefreshStorage(r *Result, appPath string) {
+	r.Storage = scanStorage(appPath, r.BundleID)
+}
+
 // scanStorage measures user-data sizes under ~/Library for this bundle.
 // macOS apps spread state across half a dozen locations; we sum them so
 // callers can see the real on-disk cost. Apps register state under both
