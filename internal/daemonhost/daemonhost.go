@@ -44,10 +44,12 @@ const (
 	DefaultWhatswrongStale = 5 * time.Minute
 	// DefaultTimeout bounds one shared collection.
 	DefaultTimeout = 20 * time.Second
-	// DefaultPowerTimeout bounds a power collection below the 20 second
-	// budget desktop clients allow a call, so a cold call under heavy load
-	// fails with a clear timeout instead of outliving the client.
-	DefaultPowerTimeout = 15 * time.Second
+	// DefaultPowerTimeout and DefaultWhatswrongTimeout bound the slow
+	// collections below the 20 second budget desktop clients allow a call,
+	// so a cold call under heavy load fails with a clear timeout instead of
+	// outliving the client.
+	DefaultPowerTimeout      = 15 * time.Second
+	DefaultWhatswrongTimeout = 15 * time.Second
 )
 
 // CollectFunc collects one reply payload. It should honor ctx so a timed-out
@@ -65,8 +67,8 @@ type Options struct {
 	Whatswrong CollectFunc
 
 	Clock clock.Clock
-	// Timeout bounds every collection when positive; otherwise power uses
-	// DefaultPowerTimeout and the rest DefaultTimeout.
+	// Timeout bounds every collection when positive; otherwise power and
+	// whatswrong use their 15 second defaults and the rest DefaultTimeout.
 	Timeout time.Duration
 	// TTLs and stale windows override the per-method defaults when positive.
 	MemoryTTL, ThermalTTL, PowerTTL, NetworkTTL, WhatswrongTTL time.Duration
@@ -106,7 +108,7 @@ func NewService(opts Options) *Service {
 			ttl(opts.PowerStale, DefaultPowerStale), DefaultPowerTimeout),
 		MethodNetwork: mk(MethodNetwork, pick(opts.Network, DefaultNetwork), ttl(opts.NetworkTTL, DefaultNetworkTTL), 0, DefaultTimeout),
 		MethodWhatswrong: mk(MethodWhatswrong, pick(opts.Whatswrong, DefaultWhatswrong(nil)), ttl(opts.WhatswrongTTL, DefaultWhatswrongTTL),
-			ttl(opts.WhatswrongStale, DefaultWhatswrongStale), DefaultTimeout),
+			ttl(opts.WhatswrongStale, DefaultWhatswrongStale), DefaultWhatswrongTimeout),
 	}}
 }
 

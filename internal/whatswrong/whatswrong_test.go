@@ -108,3 +108,38 @@ func TestLocalWatchEnriches(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 }
+
+func TestCollectSurvivesProbePanic(t *testing.T) {
+	deps := Deps{
+		Load:  func(context.Context) sysload.Load { panic("bad sysctl output") },
+		Power: func(context.Context) sysinfo.PowerState { panic("bad pmset output") },
+		Procs: func(context.Context) []process.Info { return []process.Info{{PID: 2, Command: "busy", CPUPct: 190}} },
+	}
+	r := Collect(context.Background(), deps)
+	if r.Signals.Load.MemoryPressure != "unknown" || len(r.Causes) != 1 || r.Signals.TopCPU == nil {
+		t.Fatalf("report = %+v", r)
+	}
+	deps.Procs = func(context.Context) []process.Info { panic("bad ps output") }
+	if r := Collect(context.Background(), deps); r.Signals.TopCPU != nil || len(r.Causes) != 0 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestCollectDropsOwnProbeChildren(t *testing.T) {
+	deps := Deps{
+		Load:  func(context.Context) sysload.Load { return sysload.Load{} },
+		Power: func(context.Context) sysinfo.PowerState { return sysinfo.PowerState{} },
+		Procs: func(context.Context) []process.Info {
+			return []process.Info{
+				{PID: 10, PPID: 1, Command: "spectra", CPUPct: 5},
+				{PID: 11, PPID: 10, Command: "top", CPUPct: 150},
+				{PID: 12, PPID: 1, Command: "busy", CPUPct: 90},
+			}
+		},
+		SelfPID: func() int { return 10 },
+	}
+	r := Collect(context.Background(), deps)
+	if r.Signals.TopCPU == nil || r.Signals.TopCPU.Command != "busy" || len(r.Causes) != 1 || !strings.Contains(r.Causes[0].Detail, "busy") {
+		t.Fatalf("report = %+v", r)
+	}
+}

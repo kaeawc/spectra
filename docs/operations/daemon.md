@@ -389,7 +389,7 @@ takes optional `refresh` (bool) and returns exactly the JSON the matching CLI
 command prints with `--json`. Each method has its own cache; concurrent callers
 share one collection, a caller that disconnects does not cancel it for the
 others, and `refresh: true` skips the cache but joins a collection already in
-flight. A collection is capped at 20 seconds (15 for `power.current`), its child
+flight. A collection is capped at 20 seconds (15 for `power.current` and `whatswrong.current`), its child
 processes are killed at the cap, and a timeout, collector error, or collector
 panic is returned to the waiting callers and never cached. On Linux each method
 returns what the CLI returns there, or the same unsupported error, except for
@@ -444,4 +444,6 @@ The `spectra whatswrong --json` object (ranked `causes`, process `families`,
 answer. The daemon fills `daemon_alerts` and `trend` from its own monitoring
 state, as the CLI does when it finds a running daemon. A cold call runs the
 same probes as the CLI (memory pressure, `pmset` and `top`, the process list,
-and XPC attribution of a busy service) and is capped at 20 seconds.
+and XPC attribution of a busy service) and is capped at 15 seconds. The
+process list leaves out the daemon's own probe subprocesses, such as the `top`
+that runs alongside it.

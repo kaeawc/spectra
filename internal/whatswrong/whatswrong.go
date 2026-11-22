@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -55,6 +56,10 @@ type Deps struct {
 	Connect func(context.Context) (WatchClient, bool)
 	Now     func() time.Time
 	CPUs    func() int // logical CPU count; nil or 0 means unknown
+	// SelfPID names the collecting process. Its direct children (the
+	// concurrent top, pmset, and sysctl probes) are dropped from Procs so
+	// they never rank as causes. Nil keeps every process.
+	SelfPID func() int
 	XPC     XPCAttributeFunc
 	Logger  logger.Logger
 }
@@ -68,9 +73,10 @@ func DefaultDeps() Deps {
 		Procs: func(ctx context.Context) []process.Info {
 			return process.CollectAll(ctx, process.CollectOptions{})
 		},
-		Now:  time.Now,
-		CPUs: runtime.NumCPU,
-		XPC:  DefaultXPCAttribute,
+		Now:     time.Now,
+		CPUs:    runtime.NumCPU,
+		SelfPID: os.Getpid,
+		XPC:     DefaultXPCAttribute,
 	}
 }
 
@@ -99,7 +105,7 @@ func Collect(ctx context.Context, deps Deps) Report {
 	if log == nil {
 		log = logger.Discard()
 	}
-	sig := collectSignals(ctx, deps)
+	sig := collectSignals(ctx, log, deps)
 	causes := RankCauses(sig)
 	causes = appendXPCCauses(ctx, log, causes, sig.Procs, deps.XPC)
 	alerts, trend := enrich(ctx, log, deps)
@@ -120,13 +126,27 @@ func Collect(ctx context.Context, deps Deps) Report {
 	return r
 }
 
-func collectSignals(ctx context.Context, deps Deps) Signals {
-	var sig Signals
+// collectSignals runs the probes concurrently. A probe that panics leaves its
+// zero value (memory pressure "unknown"), as a failed probe does, and is
+// logged rather than taking down the caller.
+func collectSignals(ctx context.Context, log logger.Logger, deps Deps) Signals {
+	sig := Signals{Load: sysload.Load{MemoryPressure: "unknown"}}
 	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { defer wg.Done(); sig.Load = deps.Load(ctx) }()
-	go func() { defer wg.Done(); sig.Power = deps.Power(ctx) }()
-	go func() { defer wg.Done(); sig.Procs = deps.Procs(ctx) }()
+	probe := func(name string, f func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Debug("whatswrong probe panicked", "probe", name, "panic", r)
+				}
+			}()
+			f()
+		}()
+	}
+	probe("load", func() { sig.Load = deps.Load(ctx) })
+	probe("power", func() { sig.Power = deps.Power(ctx) })
+	probe("procs", func() { sig.Procs = withoutChildrenOf(deps.Procs(ctx), deps.SelfPID) })
 	wg.Wait()
 	if deps.CPUs != nil {
 		sig.Cores = deps.CPUs()
@@ -135,6 +155,25 @@ func collectSignals(ctx context.Context, deps Deps) Signals {
 		sig.Now = deps.Now()
 	}
 	return sig
+}
+
+// withoutChildrenOf drops the direct children of self(), the collector's own
+// probe subprocesses that the process listing can catch mid-run.
+func withoutChildrenOf(procs []process.Info, self func() int) []process.Info {
+	if self == nil {
+		return procs
+	}
+	pid := self()
+	if pid <= 0 {
+		return procs
+	}
+	var out []process.Info
+	for _, p := range procs {
+		if p.PPID != pid {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // enrich reads the daemon's active alerts and recent trend; any failure or

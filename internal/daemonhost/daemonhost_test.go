@@ -427,6 +427,9 @@ func TestPowerTimeoutBelowClientBudget(t *testing.T) {
 	if got := s.methods[MethodPower].timeout; got != DefaultPowerTimeout {
 		t.Fatalf("power timeout = %s", got)
 	}
+	if got := s.methods[MethodWhatswrong].timeout; got != DefaultWhatswrongTimeout || got >= 20*time.Second {
+		t.Fatalf("whatswrong timeout = %s", got)
+	}
 	if got := NewService(Options{Timeout: time.Second}).methods[MethodPower].timeout; got != time.Second {
 		t.Fatalf("override timeout = %s", got)
 	}
