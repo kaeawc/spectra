@@ -316,6 +316,8 @@ pub struct App {
     pub activity: crate::spawns::Activity,
     /// What starts at login or boot, for the Startup page.
     pub startup: crate::startup::Startup,
+    /// "Right now" on the Overview: Spectra's look at why the machine may be slow.
+    pub whatswrong: crate::whatswrong::WhatsWrong,
 }
 
 pub fn init() -> App {
@@ -385,6 +387,7 @@ pub fn init() -> App {
         system: crate::system::System::new(),
         activity: crate::spawns::Activity::new(),
         startup: crate::startup::Startup::new(),
+        whatswrong: crate::whatswrong::WhatsWrong::new(),
     }
 }
 

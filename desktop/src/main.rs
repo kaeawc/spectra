@@ -30,6 +30,8 @@ mod system_findings;
 mod tools;
 mod tree;
 mod ui;
+mod whatswrong;
+mod sample_whatswrong;
 
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -63,6 +65,8 @@ fn setup(s: &mut App, wake: rune::Waker) {
         system::spawn(tx, wake.clone());
     }
     s.wake = Some(wake.clone());
+    // "Right now" on the Overview looks while the Overview shows.
+    s.whatswrong.auto = true;
     if s.me.uid.is_none() {
         s.me.uid = signal::my_uid();
     }
@@ -96,6 +100,8 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     system::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     s.activity.cancel();
     startup::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    s.whatswrong.auto = false;
+    s.whatswrong.cancel();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -125,6 +131,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     }
     // What starts at login, and a Disable or Enable's answer, for the Startup page.
     landed |= s.land_startup();
+    // "Right now": a look when the Overview opens, then every 30 s while it shows.
+    landed |= s.tick_whatswrong();
+    if s.overview_visible() {
+        tx.wake_after(STATUS_TICK);
+    }
     s.tick_inspector();
     // A hung Spectra sends nothing, so look again on a timer to say the numbers are getting old;
     // an open page also looks for its next live round.
@@ -206,6 +217,8 @@ fn main() {
             ("startup-failed", sample_startup::startup_failed_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
+            ("right-now", sample_whatswrong::right_now_scene),
+            ("right-now-clear", sample_whatswrong::right_now_clear_scene),
         ],
         setup: Some(setup),
         poll: Some(poll),

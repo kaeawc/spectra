@@ -23,6 +23,8 @@ mod tests_system;
 mod tests_activity;
 #[cfg(test)]
 mod tests_logs;
+#[cfg(test)]
+mod tests_whatswrong;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};

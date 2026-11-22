@@ -33,6 +33,17 @@ What it shows:
   (from its start time) gets no CPU or memory finding: starting up is busy and grows. JVM
   findings: heap pressure, old-generation growth, slow full GCs, metaspace pressure, no heap
   dump on OOM.
+  - **Right now**, at the top: why this Mac may be slow at this moment, from
+    `spectra whatswrong --json`. Up to three causes, worst first, each with its evidence in plain
+    words and a link to the page that shows more: a process's page, an app's page when a busy
+    group (a browser, an editor and what it runs) belongs to an app, or the Machine page for
+    memory pressure, swap and heat. A group's busiest process is not listed again on its own. A
+    cause that says what a finding already says shows once, up here, with that finding's fix,
+    and the finding leaves the list below. When nothing stands out it says so in one line. It
+    asks Spectra when the Overview opens and then at most every 30 s while the Overview is on
+    screen, off the UI thread with a 20 s deadline and a cap on what it may print; another page,
+    or quitting, stops a look in flight. The line above it says how old the answer is ("Checked
+    12 s ago"), and a failed look keeps the last answer and says why.
 - **Machine**, right under Overview: the whole machine, live. CPU in use (every process summed)
   and the 1-minute load, charted over the last six minutes, with the core count. Memory pressure
   as a colored gauge (green, amber, red), what's used, app memory, wired, file-backed and

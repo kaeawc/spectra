@@ -1,12 +1,16 @@
 //! The overview: the machine in three numbers, then every finding, worst first.
 
-use rune::{El, col, el, row, text};
+use std::collections::HashSet;
+
+use rune::{Cursor, El, col, el, row, text};
 use rune_kit::Kit;
 
-use super::card::{card, notice};
+use super::card::{card, dot, notice};
 use crate::app::App;
-use crate::groups::Category;
+use crate::findings::Finding;
+use crate::groups::{Category, Nav};
 use crate::procs::{ProcError, fmt_count, fmt_mem};
+use crate::whatswrong::{Action, Item};
 
 /// A boxed message that sits above other content.
 pub fn callout(key: &str, title: &str, body: &str, k: &Kit) -> El {
@@ -167,12 +171,143 @@ pub fn feed_status(s: &App, k: &Kit) -> Option<El> {
     )
 }
 
+/// Where a "Right now" line's link goes, and what it says.
+fn action_link(s: &App, action: &Action) -> (String, String) {
+    match action {
+        Action::Process(pid) => {
+            let name = s.process(*pid).map_or_else(|| format!("pid {pid}"), |p| p.name().into_owned());
+            (format!("{name} · {pid}"), format!("Open {name}"))
+        }
+        Action::App(path) => {
+            let name = s.app_name(path);
+            (name.clone(), format!("Open {name}"))
+        }
+        Action::Machine => ("Machine".into(), "Show the Machine page".into()),
+    }
+}
+
+fn right_now_item(s: &App, i: usize, item: &Item, k: &Kit) -> El {
+    let c = &k.c;
+    let key = format!("ww-{i}");
+    let (subject, label) = action_link(s, &item.action);
+    let action = item.action.clone();
+    let link = text(subject)
+        .key(format!("{key}-open"))
+        .role("link")
+        .label(label)
+        .cursor(Cursor::Pointer)
+        .font(k.ty.small)
+        .color(c.text_accent)
+        .on_press(move |s: &mut App| match &action {
+            Action::Process(pid) => s.open(*pid),
+            Action::App(path) => s.open_app(path),
+            Action::Machine => s.show(Nav::System),
+        });
+    let mut words = col()
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
+        .gap(2.0)
+        .child(
+            text(item.title.clone())
+                .key(format!("{key}-title"))
+                .font(k.ty.ui_medium)
+                .color(c.text_base),
+        );
+    if !item.evidence.is_empty() {
+        words = words.child(
+            text(item.evidence.clone())
+                .key(format!("{key}-evidence"))
+                .font(k.ty.small)
+                .color(c.text_muted)
+                .wrap(),
+        );
+    }
+    if !item.fix.is_empty() {
+        words = words.child(
+            text(item.fix.clone())
+                .key(format!("{key}-fix"))
+                .font(k.ty.small)
+                .color(c.text_base)
+                .wrap(),
+        );
+    }
+    row()
+        .key(key)
+        .w_full()
+        .gap(10.0)
+        .center_y()
+        .py(10.0)
+        .px(16.0)
+        .radius(k.radius.md)
+        .fill(c.layer_01)
+        .border(1.0, c.border_weak)
+        .child(dot(item.severity, k))
+        .child(words)
+        .child(link)
+}
+
+/// "Right now": why this Mac may be slow at this moment, from Spectra's last look, with how old
+/// that look is. Nothing until the first look starts.
+fn right_now(s: &App, items: &[Item], k: &Kit) -> Option<El> {
+    let c = &k.c;
+    let w = &s.whatswrong;
+    if w.report.is_none() && !w.running() && w.error.is_none() {
+        return None;
+    }
+    let mut head = row().w_full().gap(8.0).center_y().child(
+        text("Right now")
+            .key("right-now-title")
+            .font(k.ty.small_medium)
+            .color(c.text_muted),
+    );
+    if let Some(age) = s.right_now_age() {
+        head = head.child(el().grow(1.0)).child(
+            text(age.clone())
+                .key("right-now-age")
+                .role("status")
+                .font(k.ty.small)
+                .color(c.text_faint)
+                .truncate()
+                .shrink()
+                .min_w(0.0)
+                .help_when_truncated(age),
+        );
+    }
+    let mut section = col().key("right-now").w_full().gap(8.0).child(head);
+    let line = |key: &str, words: String| text(words).key(key.to_owned()).font(k.ty.small).color(c.text_muted).wrap();
+    match (&w.report, &w.error) {
+        (None, Some(e)) => {
+            section = section.child(line("right-now-error", format!("Couldn't check what's slowing this Mac: {e}")));
+        }
+        (None, None) => {
+            section = section.child(line("right-now-checking", "Asking Spectra what's slowing this Mac down…".into()));
+        }
+        (Some(_), _) if items.is_empty() => {
+            section = section.child(line("right-now-clear", "Nothing is slowing this Mac down right now.".into()));
+        }
+        (Some(_), _) => {
+            section = items
+                .iter()
+                .enumerate()
+                .fold(section, |sec, (i, item)| sec.child(right_now_item(s, i, item, k)));
+        }
+    }
+    Some(section)
+}
+
 pub fn home(s: &App, k: &Kit) -> El {
     let c = &k.c;
-    let findings = &s.findings;
+    let now = s.right_now();
+    // A finding "Right now" already says is shown there, once.
+    let covered: HashSet<&str> = now.iter().flat_map(|i| i.covers.iter().map(String::as_str)).collect();
+    let findings: Vec<&Finding> = s.findings.iter().filter(|f| !covered.contains(f.id().as_str())).collect();
     let mut list = col().key("findings").w_full().padding(24.0).gap(10.0);
     if let Some(n) = feed_notice(s, k) {
         list = list.child(n);
+    }
+    if let Some(section) = right_now(s, &now, k) {
+        list = list.child(section);
     }
     if s.has_processes() {
         if let Some(status) = feed_status(s, k) {
@@ -196,12 +331,19 @@ pub fn home(s: &App, k: &Kit) -> El {
                 .color(c.text_faint),
         );
     }
-    if findings.is_empty() && s.loaded && s.proc_loaded {
+    if s.findings.is_empty() && s.loaded && s.proc_loaded {
         list = list.child(notice(
             "Nothing needs attention",
             "Every process looks as it should.",
             k,
         ));
+    } else if findings.is_empty() && !s.findings.is_empty() {
+        list = list.child(
+            text("Nothing else needs attention.")
+                .key("findings-rest")
+                .font(k.ty.small)
+                .color(c.text_faint),
+        );
     }
     findings
         .iter()
