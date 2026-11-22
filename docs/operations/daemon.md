@@ -362,7 +362,8 @@ and `refresh: true` skips the cache but joins a collection already in flight.
 A collection is capped at 20 seconds, its child processes are killed at the
 cap, and a timeout, collector error, or collector panic is returned to the
 waiting callers and never cached. On Linux each method returns what the CLI
-returns there, or the same unsupported error.
+returns there, or the same unsupported error, except for the `network.current`
+proxy fields described below.
 
 ### `memory.current`
 
@@ -389,3 +390,8 @@ hit the cache.
 
 The `spectra network --json` object (interfaces, DNS, routes, VPN and proxy
 state). Cached for 10 seconds.
+
+On macOS the proxy fields come from system-wide `scutil` settings and match the
+CLI. On Linux they come from the daemon's own environment (`http_proxy`,
+`https_proxy`, `all_proxy` as of daemon start), not the caller's shell, so they
+can differ from `spectra network --json`.
