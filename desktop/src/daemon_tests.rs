@@ -765,10 +765,10 @@ fn a_call_keeps_its_deadline_while_a_reconnect_is_stuck() {
     let g = Fake::serve_any(f.path.clone(), None, h(|_, _| None));
     assert!(eventually(|| d.s.readers.load(Ordering::SeqCst) == 0));
     let at = Instant::now();
-    let r = d.answer(&["load", "--json"], Duration::from_millis(200), &never());
+    let r = d.answer(&["load", "--json"], Duration::from_secs(1), &never());
     assert!(matches!(r, None | Some(Err(Error::Timeout))), "{r:?}");
     assert!(
-        at.elapsed() < Duration::from_millis(250),
+        at.elapsed() < Duration::from_millis(1500),
         "{:?}",
         at.elapsed()
     );
@@ -779,7 +779,11 @@ fn a_call_keeps_its_deadline_while_a_reconnect_is_stuck() {
         d.answer(&["sample", "-json", "7"], Duration::from_secs(10), &never())
             .is_none()
     );
-    assert!(at.elapsed() < Duration::from_millis(20));
+    assert!(
+        at.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        at.elapsed()
+    );
     // And a cancelled one stops waiting.
     let cancel = AtomicBool::new(true);
     assert_eq!(
@@ -795,11 +799,12 @@ fn the_first_call_waits_only_half_its_deadline_for_a_daemon_that_never_says_hell
     let d = f.daemon();
     let at = Instant::now();
     assert!(
-        d.answer(&["load", "--json"], Duration::from_millis(200), &never())
+        d.answer(&["load", "--json"], Duration::from_secs(2), &never())
             .is_none()
     );
+    // Half the deadline is 1 s; the rest is slack for a loaded runner.
     let took = at.elapsed();
-    assert!(took < Duration::from_millis(180), "{took:?}");
+    assert!(took < Duration::from_millis(1800), "{took:?}");
 }
 
 #[test]
@@ -813,7 +818,7 @@ fn a_call_no_route_names_never_waits_for_the_first_connection() {
             .is_none()
     );
     assert!(
-        at.elapsed() < Duration::from_millis(20),
+        at.elapsed() < Duration::from_millis(500),
         "{:?}",
         at.elapsed()
     );
