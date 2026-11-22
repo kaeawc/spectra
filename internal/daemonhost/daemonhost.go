@@ -1,7 +1,9 @@
 // Package daemonhost serves the host facts a desktop Machine page polls
-// (memory, thermal, power, network) from the local daemon, so clients skip a
-// CLI spawn per poll. Each method returns exactly the JSON the matching
-// `spectra <cmd> --json` prints, behind a short per-method TTL cache.
+// (memory, thermal, power, network, whatswrong) from the local daemon, so
+// clients skip a CLI spawn per poll. Each method returns exactly the JSON the
+// matching `spectra <cmd> --json` prints, behind a short per-method TTL cache.
+// The slow methods (power, whatswrong) also serve a recent stale value at once
+// while one background collection refreshes it.
 package daemonhost
 
 import (
@@ -19,6 +21,7 @@ import (
 	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/thermal"
+	"github.com/kaeawc/spectra/internal/whatswrong"
 )
 
 const (
@@ -26,13 +29,27 @@ const (
 	MethodThermal = "thermal.current"
 	MethodPower   = "power.current"
 	MethodNetwork = "network.current"
+	// MethodWhatswrong serves `spectra whatswrong --json`.
+	MethodWhatswrong = "whatswrong.current"
 
-	DefaultMemoryTTL  = 2 * time.Second
-	DefaultThermalTTL = 5 * time.Second
-	DefaultPowerTTL   = 5 * time.Second
-	DefaultNetworkTTL = 10 * time.Second
+	DefaultMemoryTTL     = 2 * time.Second
+	DefaultThermalTTL    = 5 * time.Second
+	DefaultPowerTTL      = 5 * time.Second
+	DefaultNetworkTTL    = 10 * time.Second
+	DefaultWhatswrongTTL = 15 * time.Second
+	// DefaultPowerStale and DefaultWhatswrongStale are how long past its TTL
+	// a value is still served immediately while a background refresh runs.
+	// Older values are recollected while the caller waits.
+	DefaultPowerStale      = 2 * time.Minute
+	DefaultWhatswrongStale = 5 * time.Minute
 	// DefaultTimeout bounds one shared collection.
 	DefaultTimeout = 20 * time.Second
+	// DefaultPowerTimeout and DefaultWhatswrongTimeout bound the slow
+	// collections below the 20 second budget desktop clients allow a call,
+	// so a cold call under heavy load fails with a clear timeout instead of
+	// outliving the client.
+	DefaultPowerTimeout      = 15 * time.Second
+	DefaultWhatswrongTimeout = 15 * time.Second
 )
 
 // CollectFunc collects one reply payload. It should honor ctx so a timed-out
@@ -45,14 +62,20 @@ type Options struct {
 	Thermal CollectFunc
 	Power   CollectFunc
 	Network CollectFunc
+	// Whatswrong defaults to DefaultWhatswrong(nil), which skips host-watch
+	// enrichment; the daemon passes its host-watch service.
+	Whatswrong CollectFunc
 
-	Clock   clock.Clock
+	Clock clock.Clock
+	// Timeout bounds every collection when positive; otherwise power and
+	// whatswrong use their 15 second defaults and the rest DefaultTimeout.
 	Timeout time.Duration
-	// TTLs override the per-method defaults when positive.
-	MemoryTTL, ThermalTTL, PowerTTL, NetworkTTL time.Duration
+	// TTLs and stale windows override the per-method defaults when positive.
+	MemoryTTL, ThermalTTL, PowerTTL, NetworkTTL, WhatswrongTTL time.Duration
+	PowerStale, WhatswrongStale                                time.Duration
 }
 
-// Service owns the four per-method caches.
+// Service owns the per-method caches.
 type Service struct {
 	methods map[string]*cached
 }
@@ -62,10 +85,6 @@ func NewService(opts Options) *Service {
 	clk := opts.Clock
 	if clk == nil {
 		clk = clock.System{}
-	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
 	}
 	pick := func(f, def CollectFunc) CollectFunc {
 		if f != nil {
@@ -79,14 +98,17 @@ func NewService(opts Options) *Service {
 		}
 		return def
 	}
-	mk := func(name string, f CollectFunc, t time.Duration) *cached {
-		return &cached{name: name, collect: f, ttl: t, timeout: timeout, clock: clk}
+	mk := func(name string, f CollectFunc, t, stale, timeout time.Duration) *cached {
+		return &cached{name: name, collect: f, ttl: t, stale: stale, timeout: ttl(opts.Timeout, timeout), clock: clk}
 	}
 	return &Service{methods: map[string]*cached{
-		MethodMemory:  mk(MethodMemory, pick(opts.Memory, DefaultMemory), ttl(opts.MemoryTTL, DefaultMemoryTTL)),
-		MethodThermal: mk(MethodThermal, pick(opts.Thermal, DefaultThermal(nil)), ttl(opts.ThermalTTL, DefaultThermalTTL)),
-		MethodPower:   mk(MethodPower, pick(opts.Power, DefaultPower), ttl(opts.PowerTTL, DefaultPowerTTL)),
-		MethodNetwork: mk(MethodNetwork, pick(opts.Network, DefaultNetwork), ttl(opts.NetworkTTL, DefaultNetworkTTL)),
+		MethodMemory:  mk(MethodMemory, pick(opts.Memory, DefaultMemory), ttl(opts.MemoryTTL, DefaultMemoryTTL), 0, DefaultTimeout),
+		MethodThermal: mk(MethodThermal, pick(opts.Thermal, DefaultThermal(nil)), ttl(opts.ThermalTTL, DefaultThermalTTL), 0, DefaultTimeout),
+		MethodPower: mk(MethodPower, pick(opts.Power, DefaultPower), ttl(opts.PowerTTL, DefaultPowerTTL),
+			ttl(opts.PowerStale, DefaultPowerStale), DefaultPowerTimeout),
+		MethodNetwork: mk(MethodNetwork, pick(opts.Network, DefaultNetwork), ttl(opts.NetworkTTL, DefaultNetworkTTL), 0, DefaultTimeout),
+		MethodWhatswrong: mk(MethodWhatswrong, pick(opts.Whatswrong, DefaultWhatswrong(nil)), ttl(opts.WhatswrongTTL, DefaultWhatswrongTTL),
+			ttl(opts.WhatswrongStale, DefaultWhatswrongStale), DefaultWhatswrongTimeout),
 	}}
 }
 
@@ -122,8 +144,9 @@ func DefaultThermal(c *thermal.Collector) CollectFunc {
 }
 
 // DefaultPower matches `spectra power --json` (the baseline mode) with
-// ctx-killable pmset/top children. Its `top -l 2 -s 1` makes a cold call take
-// over a second.
+// ctx-killable pmset/top children. Its `top -l 2 -s 1` walks every process
+// twice a second apart, so a cold call takes 2-3 seconds on an idle Mac and
+// can pass 15 under heavy load with thousands of processes.
 func DefaultPower(ctx context.Context) (any, error) {
 	return PowerFrom(func(ctx context.Context) sysinfo.PowerState {
 		return sysinfo.CollectPower(proc.BoundedRunner(ctx))
@@ -142,7 +165,25 @@ func DefaultNetwork(ctx context.Context) (any, error) {
 	return netstate.Collect(netstate.ContextRunner(ctx)), nil
 }
 
-// RegisterMethods registers the four methods on server.
+// DefaultWhatswrong matches `spectra whatswrong --json`. A non-nil watch
+// supplies the daemon alerts and trend in-process, as the CLI gets them from
+// a running daemon; nil leaves them out, as `--no-daemon` does.
+func DefaultWhatswrong(watch whatswrong.LocalWatchSource) CollectFunc {
+	deps := whatswrong.DefaultDeps()
+	if watch != nil {
+		deps.Connect = whatswrong.LocalWatch(watch)
+	}
+	return WhatswrongFrom(deps)
+}
+
+// WhatswrongFrom builds the whatswrong collector from explicit deps, for tests.
+func WhatswrongFrom(deps whatswrong.Deps) CollectFunc {
+	return func(ctx context.Context) (any, error) {
+		return whatswrong.Collect(ctx, deps), nil
+	}
+}
+
+// RegisterMethods registers every method on server.
 func RegisterMethods(server *daemon.Server, svc *Service) {
 	for name, m := range svc.methods {
 		server.Register(name, m.rpc)
@@ -162,6 +203,9 @@ type cached struct {
 	name    string
 	collect CollectFunc
 	ttl     time.Duration
+	// stale is how long past ttl a value is still served while a background
+	// refresh runs; zero disables stale-while-revalidate.
+	stale   time.Duration
 	timeout time.Duration
 	clock   clock.Clock
 
@@ -178,22 +222,25 @@ type call struct {
 	err   error
 }
 
-// get serves from cache while younger than the TTL. Concurrent callers share
-// one collection detached from any single caller's cancellation but bounded by
-// the timeout; refresh skips the cache yet joins a collection in flight.
+// get serves from cache while younger than the TTL, and within the stale
+// window past it returns the old value at once while starting a background
+// refresh. Concurrent callers share one collection detached from any single
+// caller's cancellation but bounded by the timeout; refresh skips the cache
+// yet joins a collection in flight.
 func (c *cached) get(ctx context.Context, refresh bool) (any, error) {
 	c.mu.Lock()
-	if !refresh && c.valid && c.clock.Now().Sub(c.at) < c.ttl {
-		v := c.value
-		c.mu.Unlock()
-		return v, nil
+	if !refresh && c.valid {
+		age := c.clock.Now().Sub(c.at)
+		if age < c.ttl+c.stale {
+			if age >= c.ttl {
+				c.startLocked(ctx)
+			}
+			v := c.value
+			c.mu.Unlock()
+			return v, nil
+		}
 	}
-	cl := c.inflight
-	if cl == nil {
-		cl = &call{done: make(chan struct{})}
-		c.inflight = cl
-		go c.run(context.WithoutCancel(ctx), cl)
-	}
+	cl := c.startLocked(ctx)
 	c.mu.Unlock()
 	select {
 	case <-cl.done:
@@ -201,6 +248,16 @@ func (c *cached) get(ctx context.Context, refresh bool) (any, error) {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%s: %w", c.name, ctx.Err())
 	}
+}
+
+// startLocked returns the collection in flight, starting one if none is.
+// c.mu must be held.
+func (c *cached) startLocked(ctx context.Context) *call {
+	if c.inflight == nil {
+		c.inflight = &call{done: make(chan struct{})}
+		go c.run(context.WithoutCancel(ctx), c.inflight)
+	}
+	return c.inflight
 }
 
 type result struct {

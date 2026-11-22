@@ -53,3 +53,17 @@ func TestDaemonHostThermalMatchesCLIJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestDaemonHostWhatswrongMatchesCLIJSON(t *testing.T) {
+	var cli, errb bytes.Buffer
+	if rc := runWhatswrongWithIO([]string{"--json"}, &cli, &errb, pinDeps()); rc != 0 {
+		t.Fatalf("exit %d: %s", rc, errb.String())
+	}
+	got, err := daemonhost.WhatswrongFrom(pinDeps())(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := indented(t, got); cli.String() != want {
+		t.Fatalf("daemon payload differs from CLI JSON\ncli:\n%s\ndaemon:\n%s", cli.String(), want)
+	}
+}

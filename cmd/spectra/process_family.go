@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/whatswrong"
 )
 
 // emitProcessFamilies renders `spectra process --group-by family`.
@@ -58,6 +59,6 @@ func printProcessFamilies(w io.Writer, fams []process.Family) {
 			age = formatDuration(f.Age)
 		}
 		fmt.Fprintf(w, "%-48s  %-6d  %-9s  %-6s  %-9s  %s\n", truncate(f.Name, 48), f.Members,
-			fmt.Sprintf("%.1f%%", f.CPUPct), fmt.Sprintf("%.0f%%", f.SharePct), age, formatMembers(f.Heaviest))
+			fmt.Sprintf("%.1f%%", f.CPUPct), fmt.Sprintf("%.0f%%", f.SharePct), age, whatswrong.FormatMembers(f.Heaviest))
 	}
 }

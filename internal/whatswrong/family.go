@@ -1,4 +1,4 @@
-package main
+package whatswrong
 
 import (
 	"fmt"
@@ -26,13 +26,13 @@ const (
 // which case the share of listed-process CPU is reported instead). Findings
 // are appended before single-process ones so the stable severity sort ranks
 // them above those.
-func appendFamilyCauses(causes []slowCause, fams []process.Family, cores int) []slowCause {
+func appendFamilyCauses(causes []Cause, fams []process.Family, cores int) []Cause {
 	for _, f := range fams {
 		severity, ok := familySeverity(f, cores)
 		if !ok {
 			continue
 		}
-		causes = append(causes, slowCause{
+		causes = append(causes, Cause{
 			Severity: severity,
 			Title:    familyTitle(f, cores),
 			Detail:   familyDetail(f),
@@ -76,16 +76,16 @@ func familyDetail(f process.Family) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%.0f%% CPU (%.1f cores busy) across %d processes", f.CPUPct, f.CPUPct/100, f.Members)
 	if f.Age > 0 {
-		fmt.Fprintf(&b, ", oldest member running for %s", formatDuration(f.Age))
+		fmt.Fprintf(&b, ", oldest member running for %s", formatAge(f.Age))
 	}
 	if len(f.Heaviest) > 0 {
 		b.WriteString("; heaviest: ")
-		b.WriteString(formatMembers(f.Heaviest))
+		b.WriteString(FormatMembers(f.Heaviest))
 	}
 	return b.String()
 }
 
-func formatMembers(ms []process.Member) string {
+func FormatMembers(ms []process.Member) string {
 	parts := make([]string, 0, len(ms))
 	for _, m := range ms {
 		parts = append(parts, fmt.Sprintf("%s (pid %d, %.0f%%)", m.Command, m.PID, m.CPUPct))
@@ -96,4 +96,18 @@ func formatMembers(ms []process.Member) string {
 // slowFamilies groups the process list; now may be zero.
 func slowFamilies(procs []process.Info, now time.Time) []process.Family {
 	return process.GroupFamilies(procs, now, 0)
+}
+
+// formatAge is the CLI's compact duration format (e.g. 3h0m).
+func formatAge(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 }

@@ -1,10 +1,11 @@
-package main
+package whatswrong
 
 import (
 	"context"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/logger"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/xpcattr"
 )
@@ -19,10 +20,10 @@ const (
 	xpcTimeout        = 4 * time.Second
 )
 
-// xpcAttributeFunc captures an attribution for a busy pid.
-type xpcAttributeFunc func(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error)
+// XPCAttributeFunc captures an attribution for a busy pid.
+type XPCAttributeFunc func(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error)
 
-func defaultXPCAttribute(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error) {
+func DefaultXPCAttribute(ctx context.Context, pid int, procs []process.Info) (xpcattr.Attribution, error) {
 	return xpcattr.Capture(ctx, xpcattr.Options{
 		PID:      pid,
 		Duration: xpcSampleDuration,
@@ -35,7 +36,7 @@ func defaultXPCAttribute(ctx context.Context, pid int, procs []process.Info) (xp
 // It samples only on macOS, only for a service already over xpcBusyCPUPct,
 // and never longer than xpcTimeout; any failure leaves the causes unchanged.
 // A nil attribute disables it.
-func appendXPCCauses(causes []slowCause, procs []process.Info, attribute xpcAttributeFunc) []slowCause {
+func appendXPCCauses(ctx context.Context, log logger.Logger, causes []Cause, procs []process.Info, attribute XPCAttributeFunc) []Cause {
 	if attribute == nil || hostos.Current() != hostos.Darwin {
 		return causes
 	}
@@ -43,11 +44,11 @@ func appendXPCCauses(causes []slowCause, procs []process.Info, attribute xpcAttr
 	if !ok || top.CPUPct < xpcBusyCPUPct || !xpcattr.LooksLikeService(top) {
 		return causes
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), xpcTimeout)
+	ctx, cancel := context.WithTimeout(ctx, xpcTimeout)
 	defer cancel()
 	a, err := attribute(ctx, top.PID, procs)
 	if err != nil {
-		cliLogger.Debug("whatswrong xpc attribution unavailable", "error", err)
+		log.Debug("whatswrong xpc attribution unavailable", "error", err)
 		return causes
 	}
 	if a.Name == "" {
@@ -57,5 +58,5 @@ func appendXPCCauses(causes []slowCause, procs []process.Info, attribute xpcAttr
 	if summary == "" {
 		return causes
 	}
-	return append(causes, slowCause{Severity: "medium", Title: "A busy service is being driven by another process", Detail: summary})
+	return append(causes, Cause{Severity: "medium", Title: "A busy service is being driven by another process", Detail: summary})
 }
