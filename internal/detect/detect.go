@@ -326,6 +326,9 @@ type detector struct {
 	// which lets DetectWith's concurrent sub-detections use the same detector
 	// safely. Nil-tolerant: plistDict handles an unset cache.
 	plists *plistCache
+	// launch memoizes launchd plist conversions for login-item
+	// attribution. Nil-tolerant: launchPlistXML converts directly.
+	launch *launchPlistMemo
 }
 
 // plistCache is a mutex-guarded memo of parsed plist dictionaries by path.
@@ -335,7 +338,14 @@ type plistCache struct {
 }
 
 func newDetector(opts Options) detector {
-	return detector{opts: opts, plists: &plistCache{m: map[string]map[string]any{}}}
+	// The process-wide memo is only valid for the real plutil; an injected
+	// Runner may script different output for the same file, so it gets a
+	// memo scoped to this detector.
+	launch := sharedLaunchPlists
+	if opts.Runner != nil {
+		launch = newLaunchPlistMemo(os.Stat)
+	}
+	return detector{opts: opts, plists: &plistCache{m: map[string]map[string]any{}}, launch: launch}
 }
 
 // plistDict parses a plist into a key→value map, converting it via a single
@@ -1837,7 +1847,7 @@ func bundleIDPrefix(bundleID string) string {
 // includes the app bundle path. We use the converted XML form to keep
 // this regex-friendly without requiring a plist parser.
 func (d detector) plistMentionsAppPath(plistPath, appPath string) bool {
-	out, err := d.output("plutil", "-convert", "xml1", "-o", "-", plistPath)
+	out, err := d.launchPlistXML(plistPath)
 	if err != nil {
 		return false
 	}
@@ -1849,7 +1859,7 @@ func (d detector) plistMentionsAppPath(plistPath, appPath string) bool {
 // It reads the plist once and checks both RunAtLoad and KeepAlive so the
 // caller gets both flags from a single plutil invocation.
 func (d detector) parsePlistLaunchFlags(plistPath string) (runAtLoad, keepAlive bool) {
-	out, err := d.output("plutil", "-convert", "xml1", "-o", "-", plistPath)
+	out, err := d.launchPlistXML(plistPath)
 	if err != nil {
 		return
 	}
