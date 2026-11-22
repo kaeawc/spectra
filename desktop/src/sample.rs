@@ -165,6 +165,7 @@ impl P {
 const SLACK: (&str, &str, &str) = ("Slack", "/Applications/Slack.app", "com.tinyspeck.slackmacgap");
 const SAFARI: (&str, &str, &str) = ("Safari", "/Applications/Safari.app", "com.apple.Safari");
 const CODE: (&str, &str, &str) = ("Visual Studio Code", "/Applications/Visual Studio Code.app", "com.microsoft.VSCode");
+const XCODE: (&str, &str, &str) = ("Xcode", "/Applications/Xcode.app", "com.apple.dt.Xcode");
 const NOTES_LITE: (&str, &str, &str) = ("Notes Lite", "/Users/user/Applications/Notes Lite.app", "com.example.noteslite");
 const BURROW: (&str, &str, &str) = ("Burrow VPN", "/Applications/Burrow VPN.app", "net.burrow.vpn");
 const ITERM: (&str, &str, &str) = ("iTerm", "/Applications/iTerm.app", "com.googlecode.iterm2");
@@ -249,6 +250,18 @@ fn sample_procs() -> Vec<P> {
             .signed(DeveloperId, "UBF8T346G9")
             .at("/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)", "--type=renderer")
             .load(4.0, 344.0, 19),
+        p(1400, 1, "Xcode", AppRole, Native)
+            .app(XCODE.0, XCODE.1, XCODE.2)
+            .at("/Applications/Xcode.app/Contents/MacOS/Xcode", "")
+            .load(0.3, 410.0, 40),
+        p(1401, 1400, "SourceKitService", AppHelper, Native)
+            .app(XCODE.0, XCODE.1, XCODE.2)
+            .at("/Applications/Xcode.app/Contents/SharedFrameworks/SourceKit.framework/XPCServices/SourceKitService.xpc/Contents/MacOS/SourceKitService", "")
+            .load(0.4, 380.0, 12),
+        p(1402, 1400, "XCBBuildService", AppHelper, Native)
+            .app(XCODE.0, XCODE.1, XCODE.2)
+            .at("/Applications/Xcode.app/Contents/SharedFrameworks/XCBuild.framework/PlugIns/XCBBuildService.bundle/Contents/MacOS/XCBBuildService", "")
+            .load(0.2, 150.0, 9),
         p(930, 1, "Notes Lite", AppRole, Native)
             .app(NOTES_LITE.0, NOTES_LITE.1, NOTES_LITE.2)
             .signed(Adhoc, "")

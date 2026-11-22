@@ -1,27 +1,26 @@
 //! Sample "Right now" for the Overview's headless scenes and tests: what Spectra says about the
-//! sample machine (a busy editor and elevated memory pressure), and a machine with nothing
+//! sample machine (a busy Xcode and elevated memory pressure), and a machine with nothing
 //! wrong. The shape is `spectra whatswrong --json`'s (tests/fixtures/whatswrong holds a real one).
 
 use crate::app::App;
 use crate::sample::sample_scene;
 use crate::whatswrong::parse;
 
-/// The sample machine as Spectra sees it: the editor's family (rust-analyzer is its busiest
-/// member, so the heavy-CPU line about it is the same news), and memory pressure.
+/// The sample machine as Spectra sees it: Xcode's family (SourceKitService is its busiest member), and memory pressure.
 pub const SAMPLE: &str = r#"{
   "causes": [
     {"severity": "medium", "title": "Memory pressure is elevated", "detail": "swap in use: 1843 MB"},
-    {"severity": "medium", "title": "Visual Studio Code uses 16% of machine CPU",
-     "detail": "158% CPU (1.6 cores busy) across 5 processes; heaviest: rust-analyzer (pid 1300, 138%), Code Helper (Plugin) (pid 921, 12%)"},
+    {"severity": "medium", "title": "Xcode uses 16% of machine CPU",
+     "detail": "158% CPU (1.6 cores busy) across 3 processes; heaviest: SourceKitService (pid 1401, 138%), XCBBuildService (pid 1402, 12%)"},
     {"severity": "medium", "title": "A process is using heavy CPU", "detail": "rust-analyzer (pid 1300) at 138% CPU"}
   ],
   "families": [
-    {"key": "app:Visual Studio Code", "kind": "app", "name": "Visual Studio Code", "members": 5,
+    {"key": "xcode", "kind": "xcode", "name": "Xcode", "members": 3,
      "cpu_pct": 157.6, "share_pct": 62.0, "rss_kib": 2412544, "age_seconds": 5400,
      "heaviest": [
-       {"pid": 1300, "command": "rust-analyzer", "cpu_pct": 138.0},
-       {"pid": 921, "command": "Code Helper (Plugin)", "cpu_pct": 11.5},
-       {"pid": 922, "command": "Code Helper (Renderer)", "cpu_pct": 4.0}
+       {"pid": 1401, "command": "SourceKitService", "cpu_pct": 138.0},
+       {"pid": 1402, "command": "XCBBuildService", "cpu_pct": 11.5},
+       {"pid": 1400, "command": "Xcode", "cpu_pct": 4.0}
      ]}
   ],
   "trend": "load 6.10/5.20/4.80; memory pressure elevated in the last 5 min"

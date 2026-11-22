@@ -86,7 +86,7 @@ fn the_overview_leads_with_a_summary_and_findings() {
     for key in ["summary-procs", "summary-cpu", "summary-memory", "findings-title"] {
         assert!(rt.find(key).is_some(), "the overview shows {key}");
     }
-    assert_eq!(text_of(&rt, "summary-procs-value").as_deref(), Some("52"));
+    assert_eq!(text_of(&rt, "summary-procs-value").as_deref(), Some("55"));
     assert!(rt.find("subject-941-proc-invalid-signature").is_some());
     assert!(rt.find("too-old").is_none());
     assert!(rt.find("feed-status").is_none(), "fresh numbers need no status");

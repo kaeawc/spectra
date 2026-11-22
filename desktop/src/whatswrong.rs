@@ -201,11 +201,11 @@ fn family_action(f: &Family, procs: &[Process]) -> Action {
         .filter_map(|m| listed(procs, m.pid, &m.command).map(|p| (m, p)))
         .collect();
     members.sort_by(|a, b| b.0.cpu_pct.total_cmp(&a.0.cpu_pct));
-    // Families that are an app and its helpers (Spectra's kinds; "app" is the samples'): open
+    // Families that are an app and its helpers (Spectra's kinds): open
     // the app, even when its busiest member is a helper with no bundle of its own.
     let app_like = matches!(
         f.kind.as_str(),
-        "browser" | "xcode" | "simulator" | "emulator" | "app"
+        "browser" | "xcode" | "simulator" | "emulator"
     );
     if app_like && let Some(path) = members.iter().find_map(|(_, p)| p.bundle_path()) {
         return Action::App(path.to_owned());
@@ -274,6 +274,45 @@ fn ago(stamp: &str, wall: i64) -> Option<String> {
     crate::spawns::unix_time(stamp).map(|t| fmt_ago(wall as f64 - t))
 }
 
+/// Spectra's hint for a known offender, or any other, as words with no shell command: a known
+/// text becomes a short sentence of what is going on and what to look for; an unknown one loses
+/// every parenthesised group and clause that holds a backticked command, and never shows a
+/// backtick. `None` when nothing is left.
+fn plain_hint(hint: &str) -> Option<String> {
+    if hint.contains("unified log") {
+        return Some(
+            "Something keeps reading the system log; look for an app or tool streaming logs".into(),
+        );
+    }
+    if hint.contains("Spotlight is re-indexing") {
+        return Some(
+            "Spotlight is re-indexing; recently changed big folders are the usual cause".into(),
+        );
+    }
+    // Drop (...) groups that hold a command.
+    let mut kept = String::new();
+    let mut rest = hint;
+    while let Some(open) = rest.find('(') {
+        let Some(close) = rest[open..].find(')').map(|c| open + c) else {
+            break;
+        };
+        kept.push_str(&rest[..open]);
+        if !rest[open..=close].contains('`') {
+            kept.push_str(&rest[open..=close]);
+        }
+        rest = &rest[close + 1..];
+    }
+    kept.push_str(rest);
+    let clauses: Vec<&str> = kept
+        .split("; ")
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && !c.contains('`'))
+        .collect();
+    let out = clauses.join("; ").replace('`', "");
+    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!out.is_empty()).then_some(out)
+}
+
 /// One part of a detail in plain words, or `None` to leave it out.
 fn plain_part(part: &str, wall: i64) -> Option<String> {
     let part = part.trim();
@@ -301,7 +340,7 @@ fn plain_part(part: &str, wall: i64) -> Option<String> {
         });
     }
     if let Some(hint) = part.strip_prefix("hint: ") {
-        return Some(hint.to_owned());
+        return plain_hint(hint);
     }
     if let Some(up) = part.strip_prefix("up ") {
         let started = up
@@ -347,8 +386,26 @@ pub fn plain(detail: &str, wall: i64) -> String {
         Some(i) => &detail[..i],
         None => detail,
     };
-    detail
-        .split("; ")
+    // A hint can hold "; " itself: the parts after it that are not another field are its tail.
+    let mut parts: Vec<String> = Vec::new();
+    let mut in_hint = false;
+    for p in detail.split("; ") {
+        let other = ["owner chain: ", "up ", "next: ", "sample ", "thread summary"]
+            .iter()
+            .any(|f| p.trim().starts_with(f));
+        match parts.last_mut() {
+            Some(last) if in_hint && !other => {
+                last.push_str("; ");
+                last.push_str(p);
+            }
+            _ => {
+                in_hint = p.trim().starts_with("hint: ");
+                parts.push(p.to_owned());
+            }
+        }
+    }
+    parts
+        .iter()
         .filter_map(|p| plain_part(p, wall))
         .map(|p| short_name(&p))
         .collect::<Vec<_>>()
@@ -913,8 +970,8 @@ pub(crate) mod tests {
         assert_eq!(
             got[0].evidence,
             "mds_stores (pid 412) averaged 87% CPU for the last 3 h; running for 5 h; \
-             started by mds (under launchd); Spotlight is re-indexing or a client keeps \
-             triggering indexing; check `mdutil -s /` and recently changed large directories"
+             started by mds (under launchd); Spotlight is re-indexing; recently changed big \
+             folders are the usual cause"
         );
         assert_eq!(got[0].action, Action::Process(412));
         assert_eq!(got[0].covers, ["412/proc-busy-cpu"]);
@@ -1146,5 +1203,39 @@ pub(crate) mod tests {
             .run(&args(), DEADLINE, &AtomicBool::new(false))
             .unwrap();
         parse(&out).unwrap();
+    }
+
+    #[test]
+    fn known_offender_hints_are_plain_sentences() {
+        let log = "hint: sustained load usually means a client is polling or streaming the unified log (`log stream`, `log show`, OSLogStore); look for those clients";
+        assert_eq!(
+            plain(&format!("diagnosticd (pid 9) averaged 80% CPU; {log}"), 0),
+            "diagnosticd (pid 9) averaged 80% CPU; Something keeps reading the system log; look for an app or tool streaming logs"
+        );
+        let spot = "hint: Spotlight is re-indexing or a client keeps triggering indexing; check `mdutil -s /` and recently changed large directories; next: sample 412 10";
+        assert_eq!(
+            plain(spot, 0),
+            "Spotlight is re-indexing; recently changed big folders are the usual cause"
+        );
+    }
+
+    #[test]
+    fn an_unknown_hint_never_shows_a_backtick() {
+        let got = plain("hint: restart it (`kill -9 1`) soon; run `foo --bar` first; then wait", 0);
+        assert_eq!(got, "restart it soon; then wait");
+        assert_eq!(plain("hint: run `foo` now", 0), "");
+        assert_eq!(plain("hint: a `b` c", 0), "");
+    }
+
+    #[test]
+    fn parts_around_a_hint_are_unchanged() {
+        let got = plain(
+            "x (pid 5) averaged 90% CPU; up 1h30m0s; owner chain: launchd(1) > mds(2) > x(5); hint: Spotlight is re-indexing or a client; check `mdutil -s /`; sample top of stack: a",
+            0,
+        );
+        assert_eq!(
+            got,
+            "x (pid 5) averaged 90% CPU; running for 1 h; started by mds (under launchd); Spotlight is re-indexing; recently changed big folders are the usual cause"
+        );
     }
 }

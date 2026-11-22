@@ -68,21 +68,21 @@ fn right_now_sits_above_the_numbers_with_its_age_and_one_line_per_cause() {
     );
     assert_eq!(
         text_of(&mut rt, "ww-1-title").as_deref(),
-        Some("Visual Studio Code uses 16% of machine CPU")
+        Some("Xcode uses 16% of machine CPU")
     );
     assert_eq!(
         text_of(&mut rt, "ww-1-evidence").as_deref(),
         Some(
-            "1.6 cores busy across 5 processes, holding 2.3 GB; busiest: rust-analyzer at 138%, Code Helper (Plugin) at 12%."
+            "1.6 cores busy across 3 processes, holding 2.3 GB; busiest: SourceKitService at 138%, XCBBuildService at 12%."
         )
     );
-    assert!(
-        !has(&mut rt, "ww-2"),
-        "rust-analyzer's heavy CPU is the editor's line already"
+    assert_eq!(
+        text_of(&mut rt, "ww-2-title").as_deref(),
+        Some("A process is using heavy CPU")
     );
     assert_eq!(
         text_of(&mut rt, "ww-1-open").as_deref(),
-        Some("Visual Studio Code")
+        Some("Xcode")
     );
     assert_eq!(text_of(&mut rt, "ww-0-open").as_deref(), Some("Machine"));
 }
@@ -93,7 +93,7 @@ fn each_line_opens_the_page_that_shows_more() {
     press(&mut rt, "ww-1-open");
     assert_eq!(
         rt.state.app_page.as_deref(),
-        Some("/Applications/Visual Studio Code.app")
+        Some("/Applications/Xcode.app")
     );
     let mut rt = scene(right_now_scene);
     press(&mut rt, "ww-0-open");
@@ -107,13 +107,13 @@ fn a_finding_right_now_repeats_shows_once() {
     assert!(has(&mut plain, busy), "the sample's rust-analyzer is busy");
     assert!(!has(&mut plain, "right-now"), "no look yet, no section");
     let mut rt = scene(right_now_scene);
-    assert!(!has(&mut rt, busy), "the editor's line says it");
+    assert!(!has(&mut rt, busy), "the heavy-CPU line says it");
     assert_eq!(
-        rt.state.right_now()[1].covers,
+        rt.state.right_now()[2].covers,
         ["1300/proc-busy-cpu"],
         "and carries its fix"
     );
-    assert!(has(&mut rt, "ww-1-fix"));
+    assert!(has(&mut rt, "ww-2-fix"));
 }
 
 fn says(rt: &mut Runtime<App>, words: &str) -> bool {
