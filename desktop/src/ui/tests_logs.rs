@@ -214,6 +214,33 @@ fn follow_reads_a_short_window_while_the_page_is_open_and_stops_when_it_closes()
 }
 
 #[test]
+fn follow_reads_nothing_while_the_window_is_hidden_and_goes_on_once_shown() {
+    let (mut rt, fake) = page(1300, Ok(ANALYZER_LOGS));
+    rt.update(|s, _| s.inspect.auto = true);
+    press(&mut rt, "logs-follow");
+    run_held(&mut rt);
+    let logs = |f: &Fake| f.calls().iter().filter(|c| c[0] == "logs").count();
+    assert_eq!(logs(&fake), 1);
+    rt.update(|s, _| s.visible = false);
+    for _ in 0..5 {
+        rt.update(|s, _| {
+            s.now += FOLLOW_REST + 1.0;
+            s.tick_live();
+            s.tick_logs();
+        });
+        run_held(&mut rt);
+    }
+    assert_eq!(logs(&fake), 1, "no Follow round while hidden");
+    assert!(rt.state.inspect.logs.follow, "Follow stays on");
+    rt.update(|s, _| {
+        s.visible = true;
+        s.tick_live();
+    });
+    run_held(&mut rt);
+    assert_eq!(logs(&fake), 2, "shown again, the next round runs");
+}
+
+#[test]
 fn cancel_stops_the_query_and_its_answer_is_dropped() {
     let (mut rt, _) = page(1300, Ok(ANALYZER_LOGS));
     press(&mut rt, "logs-run");

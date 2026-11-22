@@ -25,6 +25,11 @@ pub const PROC_HISTORY: usize = 90;
 /// How long each feed rests after a reading lands before the next. JVM readings take Spectra
 /// about 17 s; process readings about 0.2 s.
 pub const REFRESH: Duration = Duration::from_secs(2);
+/// How long the JVM feed rests between readings while no JVM's page is open. A reading runs a
+/// JDK tool against every JVM: about 17 s and as many CPU-seconds with a dozen JVMs.
+pub const JVM_REST: Duration = Duration::from_secs(30);
+/// How long to wait before asking a Spectra that's too old again, in case it was updated.
+pub const RETRY_OLD: Duration = Duration::from_secs(30);
 /// How old the process numbers may get, in seconds, before the app says when they're from.
 pub const STALE_AFTER: f64 = 3.0 * REFRESH.as_secs_f64();
 /// How long, in seconds of readings, a process asked to quit may take before the app says it
@@ -32,6 +37,21 @@ pub const STALE_AFTER: f64 = 3.0 * REFRESH.as_secs_f64();
 pub const STILL_AFTER: f64 = 5.0;
 
 pub type Feed = Result<Vec<Jvm>, String>;
+
+/// When each feed reads next. The window asks for every reading, one at a time, and asks for
+/// none while it's hidden; the feed threads only answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Feeds {
+    /// A process reading was asked for and hasn't landed.
+    pub proc_out: bool,
+    /// The window clock at which the next process reading is due.
+    pub proc_next: f64,
+    /// A reading was asked for (after a Quit) while one was out: ask again once it lands.
+    pub proc_again: bool,
+    pub jvm_out: bool,
+    /// When the last JVM reading landed; `None` before the first.
+    pub jvm_landed: Option<f64>,
+}
 
 /// A reading pinned by "Pin baseline", and which reading it was, so the timeline can mark it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -247,6 +267,12 @@ pub struct App {
     pub error: Option<String>,
     pub feed: Option<Receiver<Feed>>,
     pub feed_tx: Option<Sender<Feed>>,
+    /// Asks the JVM feed for a reading.
+    pub jvm_go: Option<Sender<()>>,
+    pub jvm_go_rx: Option<Receiver<()>>,
+    pub feeds: Feeds,
+    /// Whether the window is on screen; the feeds rest while it isn't.
+    pub visible: bool,
 
     pub procs: Vec<Process>,
     proc_index: HashMap<u32, usize>,
@@ -307,9 +333,10 @@ pub struct App {
     pub confirm: Option<Confirm>,
     /// The last Quit or Force quit, until another replaces it or it's dismissed.
     pub outcome: Option<Outcome>,
-    /// Wakes the process feed for a reading now, after a signal.
-    pub poke: Option<Sender<()>>,
-    pub poke_rx: Option<Receiver<()>>,
+    /// Asks the process feed for a reading: `true` for one taken now, after a signal, rather
+    /// than the daemon's shared snapshot.
+    pub poke: Option<Sender<bool>>,
+    pub poke_rx: Option<Receiver<bool>>,
     /// The machine-wide readings the System page shows.
     pub system: crate::system::System,
     /// Processes starting and exiting, for the Activity page.
@@ -328,6 +355,7 @@ pub fn init() -> App {
     let (tx, rx) = channel();
     let (ptx, prx) = channel();
     let (poke, poke_rx) = channel();
+    let (jvm_go, jvm_go_rx) = channel();
     let (done_tx, done_rx) = channel();
     let mut table = TableState::new().key("procs");
     table.set_sort("cpu", SortDir::Descending);
@@ -349,6 +377,10 @@ pub fn init() -> App {
         error: None,
         feed: Some(rx),
         feed_tx: Some(tx),
+        jvm_go: Some(jvm_go),
+        jvm_go_rx: Some(jvm_go_rx),
+        feeds: Feeds::default(),
+        visible: true,
         procs: Vec::new(),
         proc_index: HashMap::new(),
         tracks: HashMap::new(),
@@ -410,6 +442,8 @@ pub fn fmt_ago(secs: f64) -> String {
 impl App {
     pub fn land(&mut self, feed: Feed) {
         self.loaded = true;
+        self.feeds.jvm_out = false;
+        self.feeds.jvm_landed = Some(self.now);
         match feed {
             Ok(jvms) => {
                 self.error = None;
@@ -438,6 +472,12 @@ impl App {
     /// keeps everything from the last good one and says so.
     pub fn land_procs(&mut self, feed: ProcFeed) {
         self.proc_loaded = true;
+        self.feeds.proc_out = false;
+        let rest = if matches!(feed, Err(ProcError::TooOld(_))) { RETRY_OLD } else { REFRESH };
+        self.feeds.proc_next = self.now + rest.as_secs_f64();
+        if std::mem::take(&mut self.feeds.proc_again) {
+            self.ask_procs(true);
+        }
         let procs = match feed {
             Ok(procs) if procs.is_empty() => {
                 self.proc_error = Some(ProcError::Failed("Spectra listed no processes.".into()));
@@ -1132,10 +1172,79 @@ impl App {
         }
     }
 
-    fn poke_feed(&self) {
-        if let Some(poke) = &self.poke {
-            let _ = poke.send(());
+    /// A process reading now, after a signal: at once, or as soon as the one out lands.
+    fn poke_feed(&mut self) {
+        if self.feeds.proc_out {
+            self.feeds.proc_again = true;
+        } else {
+            self.ask_procs(true);
         }
+    }
+
+    /// Asks for a process reading: `fresh` for one taken now, not the shared snapshot.
+    fn ask_procs(&mut self, fresh: bool) {
+        if let Some(poke) = &self.poke
+            && poke.send(fresh).is_ok()
+        {
+            self.feeds.proc_out = true;
+        }
+    }
+
+    /// Whether the window is on screen: not hidden, minimised, or covered whole (another Space
+    /// included, where the system reports it). Every recurring feed rests while it isn't, except
+    /// Activity's "Keep recording".
+    pub fn window_shown(&self) -> bool {
+        self.visible
+    }
+
+    /// Whether the JVM feed is worth reading: before the process list says otherwise, while the
+    /// list has a JVM, or while the last JVM reading found one.
+    pub fn jvm_wanted(&self) -> bool {
+        let jvm = Runtime::ALL.iter().position(|r| *r == Runtime::Jvm).map_or(0, |i| self.stats.runtimes[i]);
+        !self.has_processes() || jvm > 0 || !self.jvms.is_empty()
+    }
+
+    /// How long the JVM feed rests after a reading: briefly while a JVM's page is open.
+    fn jvm_rest(&self) -> Duration {
+        if self.selected.is_some_and(|pid| self.jvm(pid).is_some()) { REFRESH } else { JVM_REST }
+    }
+
+    /// An open page's live rounds, which rest while the window isn't shown.
+    pub fn tick_live(&mut self) {
+        if self.window_shown() {
+            self.tick_inspector();
+        } else {
+            self.sync_inspector();
+        }
+    }
+
+    /// Asks each feed for its next reading once it's due, and none while the window is hidden.
+    /// Returns when the next one falls due, for the window to look again then.
+    pub fn tick_feeds(&mut self) -> Option<f64> {
+        if !self.window_shown() {
+            return None;
+        }
+        let mut due: Option<f64> = None;
+        if !self.feeds.proc_out {
+            if self.now >= self.feeds.proc_next {
+                self.ask_procs(false);
+            } else {
+                due = Some(self.feeds.proc_next);
+            }
+        }
+        if self.jvm_wanted() && !self.feeds.jvm_out {
+            let next = self.feeds.jvm_landed.map_or(0.0, |t| t + self.jvm_rest().as_secs_f64());
+            if self.now >= next {
+                if let Some(go) = &self.jvm_go
+                    && go.send(()).is_ok()
+                {
+                    self.feeds.jvm_out = true;
+                }
+            } else {
+                due = Some(due.map_or(next, |d| d.min(next)));
+            }
+        }
+        due
     }
 
     /// Asks `ps`, off the UI thread, whether a process still listed after its signal has in fact
@@ -1207,6 +1316,131 @@ mod tests {
     fn started(mut p: Process, at: &str) -> Process {
         p.started_at = at.into();
         p
+    }
+
+    /// How many readings each feed was asked for since the last look.
+    fn asked(s: &App) -> (usize, usize) {
+        fn n<T>(rx: &Option<Receiver<T>>) -> usize {
+            rx.as_ref().map_or(0, |rx| rx.try_iter().count())
+        }
+        (n(&s.poke_rx), n(&s.jvm_go_rx))
+    }
+
+    #[test]
+    fn a_reading_after_a_signal_is_taken_now_and_the_cadence_reads_the_snapshot() {
+        let mut s = init();
+        let fresh = |s: &App| s.poke_rx.as_ref().unwrap().try_iter().collect::<Vec<_>>();
+        s.tick_feeds();
+        assert_eq!(fresh(&s), vec![false], "every {REFRESH:?}, the daemon's snapshot");
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
+        s.poke_feed();
+        assert_eq!(fresh(&s), vec![true], "after a Quit, one taken now");
+        // Asked while one is out, the follow-up is taken now too.
+        s.poke_feed();
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
+        assert_eq!(fresh(&s), vec![true]);
+    }
+
+    fn jvm_proc(pid: u32) -> Process {
+        Process { runtime: Runtime::Jvm, ..proc(pid, "java", 1.0, 1.0) }
+    }
+
+    /// What landing a saved feed costs: `PERF_PROCS_JSON=<file> cargo test --release -- --ignored land_cost --nocapture`.
+    #[test]
+    #[ignore]
+    fn land_cost() {
+        let Ok(path) = std::env::var("PERF_PROCS_JSON") else { return };
+        let procs = crate::procs::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut s = init();
+        let t = std::time::Instant::now();
+        for _ in 0..20 {
+            s.land_procs(Ok(procs.clone()));
+        }
+        println!("land_procs of {} processes: {:?}", procs.len(), t.elapsed() / 20);
+    }
+
+    #[test]
+    fn no_reading_is_asked_for_while_the_window_is_hidden() {
+        let mut s = init();
+        s.visible = false;
+        for t in 0..100 {
+            s.now = f64::from(t);
+            assert_eq!(s.tick_feeds(), None);
+        }
+        assert_eq!(asked(&s), (0, 0), "nothing ran while hidden");
+        // Back on screen, both read at once.
+        s.visible = true;
+        s.tick_feeds();
+        assert_eq!(asked(&s), (1, 1));
+    }
+
+    #[test]
+    fn each_feed_has_one_reading_out_and_rests_after_it_lands() {
+        let mut s = init();
+        s.tick_feeds();
+        assert_eq!(asked(&s), (1, 1));
+        s.now = 5.0;
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 0), "nothing more while both are out");
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
+        s.now = 6.0;
+        assert_eq!(s.tick_feeds(), Some(5.0 + REFRESH.as_secs_f64()), "due a rest after it landed");
+        assert_eq!(asked(&s), (0, 0));
+        s.now = 7.0;
+        s.tick_feeds();
+        assert_eq!(asked(&s), (1, 0));
+    }
+
+    #[test]
+    fn the_jvm_feed_rests_longer_unless_a_jvms_page_is_open() {
+        let mut s = init();
+        s.land_procs(Ok(vec![jvm_proc(7), proc(8, "b", 0.0, 1.0)]));
+        s.tick_feeds();
+        asked(&s);
+        s.land(Ok(vec![data::Jvm { pid: 7, ..data::Jvm::default() }]));
+        s.feeds.proc_out = true;
+        s.now = REFRESH.as_secs_f64();
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 0), "off its page the JVM feed rests {JVM_REST:?}");
+        s.now = JVM_REST.as_secs_f64();
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 1));
+        s.land(Ok(vec![data::Jvm { pid: 7, ..data::Jvm::default() }]));
+        s.open(7);
+        s.now += REFRESH.as_secs_f64();
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 1), "on its page it reads every {REFRESH:?}");
+    }
+
+    #[test]
+    fn the_jvm_feed_stops_once_neither_feed_shows_a_jvm() {
+        let mut s = init();
+        s.tick_feeds();
+        assert_eq!(asked(&s), (1, 1), "before the list lands it looks");
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
+        s.land(Ok(Vec::new()));
+        assert!(!s.jvm_wanted());
+        s.feeds.proc_out = true;
+        s.now = 1000.0;
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 0));
+        // A JVM starts.
+        s.land_procs(Ok(vec![jvm_proc(9)]));
+        s.feeds.proc_out = true;
+        s.tick_feeds();
+        assert_eq!(asked(&s), (0, 1));
+    }
+
+    #[test]
+    fn a_reading_asked_for_while_one_is_out_follows_it() {
+        let mut s = init();
+        s.tick_feeds();
+        asked(&s);
+        s.poke_feed();
+        assert_eq!(asked(&s), (0, 0), "one at a time");
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
+        assert_eq!(asked(&s), (1, 0), "asked again as soon as it landed");
+        assert!(s.feeds.proc_out);
     }
 
     #[test]

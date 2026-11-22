@@ -556,7 +556,9 @@ impl App {
     }
 
     /// Lands finished looks, stops one in flight once the Overview is off screen, and starts the
-    /// next when the Overview is on screen and it's due. True when anything shown changed.
+    /// next when the Overview is on screen and it's due. While the window is hidden a look in
+    /// flight may finish, but none starts and the age line isn't redrawn. True when anything
+    /// shown changed.
     pub fn tick_whatswrong(&mut self) -> bool {
         let mut changed = false;
         while let Ok(l) = self.whatswrong.rx.try_recv() {
@@ -567,13 +569,14 @@ impl App {
             self.whatswrong.cancel();
             changed = true;
         }
+        let shown = self.window_shown();
         let w = &self.whatswrong;
-        if visible && w.auto && !w.running() && self.now >= w.next {
+        if shown && visible && w.auto && !w.running() && self.now >= w.next {
             self.start_whatswrong();
             changed = true;
         }
         // The age line is only redrawn while it's on screen, and only when its words change.
-        if visible {
+        if visible && shown {
             let age = self.right_now_age();
             if age != self.whatswrong.shown {
                 self.whatswrong.shown = age;
@@ -1100,6 +1103,28 @@ pub(crate) mod tests {
                 "Checked 40 s ago · the last check failed: spectra took longer than 20 s and was stopped"
             )
         );
+    }
+
+    #[test]
+    fn no_look_starts_while_the_window_is_hidden_and_one_starts_once_shown() {
+        let (mut s, fake) = faked(Ok(BUSY));
+        s.now = 100.0;
+        s.tick_whatswrong();
+        // A look in flight when the window hides may finish.
+        s.visible = false;
+        s.tick_whatswrong();
+        s.run_held_whatswrong();
+        s.tick_whatswrong();
+        assert!(s.whatswrong.report.is_some(), "the look in flight landed");
+        for t in 101..200 {
+            s.now = f64::from(t);
+            assert!(!s.tick_whatswrong(), "nothing drawn while hidden");
+            assert!(!s.whatswrong.running(), "no look starts while hidden");
+        }
+        assert_eq!(fake.calls().len(), 1);
+        s.visible = true;
+        assert!(s.tick_whatswrong());
+        assert!(s.whatswrong.running(), "overdue, so it looks at once");
     }
 
     #[test]

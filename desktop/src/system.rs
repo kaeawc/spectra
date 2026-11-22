@@ -29,6 +29,9 @@ const FAST_DEADLINE: Duration = Duration::from_secs(20);
 const SLOW_DEADLINE: Duration = Duration::from_secs(60);
 /// Slow rounds the disk reading sits out after one that ran out of time: about five minutes.
 const STORAGE_BACKOFF: u32 = 9;
+/// Slow rounds the disk reading sits out after one that landed: free space barely moves, and one
+/// reading can take most of a minute, so it's read about every five minutes.
+const STORAGE_REST: u32 = 9;
 /// The most a reading may print.
 const MAX_OUTPUT: usize = 8 << 20;
 /// `spectra storage` also sizes the home folder's Library, which can take many minutes. Only the
@@ -575,6 +578,8 @@ pub fn fetch(bin: &str, kind: Kind, deadline: Duration) -> (Reading, bool) {
 
 /// Set when the app quits: every reading in flight is killed, and the reading threads end.
 pub static CANCEL: AtomicBool = AtomicBool::new(false);
+/// Set while the window is hidden: the reading threads wait instead of starting a round.
+pub static PAUSED: AtomicBool = AtomicBool::new(false);
 
 /// [`fetch`], also killing the reading once `cancel` is set.
 pub fn fetch_until(
@@ -654,6 +659,9 @@ fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner)
             let (tx, wake) = (job_tx, job_wake);
             let mut skip_storage = 0;
             loop {
+                while PAUSED.load(Ordering::SeqCst) && !CANCEL.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
                 for &kind in kinds {
                     if CANCEL.load(Ordering::SeqCst) {
                         return;
@@ -663,8 +671,8 @@ fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner)
                         continue;
                     }
                     let (reading, timed_out) = fetch(&bin, kind, deadline);
-                    if kind == Kind::Storage && timed_out {
-                        skip_storage = STORAGE_BACKOFF;
+                    if kind == Kind::Storage {
+                        skip_storage = if timed_out { STORAGE_BACKOFF } else { STORAGE_REST };
                     }
                     if tx.send(reading).is_err() {
                         return;

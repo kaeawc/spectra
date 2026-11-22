@@ -5,6 +5,7 @@
 
 mod app;
 mod bundle;
+mod daemon;
 mod data;
 mod findings;
 mod groups;
@@ -37,14 +38,11 @@ mod ui;
 mod whatswrong;
 mod sample_whatswrong;
 
-use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use app::{App, REFRESH};
+use app::App;
 use rune::{AppSpec, Chrome, Tx};
 
-/// How long to wait before asking a Spectra that's too old again, in case it was updated.
-const RETRY_OLD: Duration = Duration::from_secs(30);
 /// How often the "Updated … ago" status is looked at while nothing lands.
 const STATUS_TICK: Duration = Duration::from_secs(1);
 
@@ -53,15 +51,18 @@ fn setup(s: &mut App, wake: rune::Waker) {
     if rune::tooling::headless_run().is_some() && s.proc_loaded {
         return;
     }
-    if let Some(tx) = s.feed_tx.take() {
+    // Calls Spectra's daemon already answers go to it instead of a new process.
+    daemon::install();
+    // Each feed reads once per ask; the window asks after the last reading rested, and not
+    // while it's hidden.
+    if let (Some(tx), Some(go)) = (s.feed_tx.take(), s.jvm_go_rx.take()) {
         let wake = wake.clone();
         std::thread::spawn(move || {
-            loop {
+            while go.recv().is_ok() {
                 if tx.send(data::fetch()).is_err() {
                     return;
                 }
                 wake();
-                std::thread::sleep(REFRESH);
             }
         });
     }
@@ -75,23 +76,20 @@ fn setup(s: &mut App, wake: rune::Waker) {
         s.me.uid = signal::my_uid();
     }
     if let (Some(tx), Some(poke)) = (s.proc_tx.take(), s.poke_rx.take()) {
-        // One call at a time: the next starts only after the last one landed, or at once when
-        // a Quit was just sent.
+        // One call at a time: the window asks for the next only after the last one landed, every
+        // couple of seconds while it's shown. The daemon answers from its shared snapshot, or with
+        // one taken now after a Quit or Kill.
         std::thread::spawn(move || {
-            loop {
-                let feed = procs::fetch();
-                let too_old = matches!(feed, Err(procs::ProcError::TooOld(_)));
+            while let Ok(fresh) = poke.recv() {
+                let feed = if fresh { daemon::fresh(procs::fetch) } else { procs::fetch() };
                 if tx.send(feed).is_err() {
                     return;
                 }
                 wake();
-                match poke.recv_timeout(if too_old { RETRY_OLD } else { REFRESH }) {
-                    Err(RecvTimeoutError::Disconnected) => return,
-                    _ => while poke.try_recv().is_ok() {},
-                }
             }
         });
     }
+    s.tick_feeds();
 }
 
 /// Quitting stops every Spectra job the pages started (a memtrace can run 20 s), and waits a
@@ -127,8 +125,7 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     landed |= s.land_work();
     // An open page's tools, live readings and bundle, and its next live round once it's due.
     landed |= s.land_inspect();
-    // Memory, thermal, load, power, disks and network, for the System page.
-    landed |= s.land_system();
+    landed |= land_machine(s);
     // Processes starting and exiting: rounds run only while the Activity page is open or
     // Keep recording is on, and stop once neither holds.
     landed |= s.tick_activity();
@@ -147,13 +144,17 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     // A folder's size or Time Machine's snapshots, for the Storage page; while a folder is
     // being measured, the page's "started … ago" keeps counting (tick_storage says when it changed).
     landed |= s.tick_storage();
-    if s.overview_visible() || s.storage.busy() {
+    if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
         tx.wake_after(STATUS_TICK);
     }
-    s.tick_inspector();
+    // An open page's live rounds rest while the window is hidden.
+    s.tick_live();
+    if let Some(due) = s.tick_feeds() {
+        tx.wake_at(due);
+    }
     // A hung Spectra sends nothing, so look again on a timer to say the numbers are getting old;
     // an open page also looks for its next live round.
-    if s.has_processes() || s.on_page() || s.nav == groups::Nav::System {
+    if s.window_shown() && (s.has_processes() || s.on_page() || s.nav == groups::Nav::System) {
         tx.wake_after(STATUS_TICK);
     }
     let now_status = (s.feed_status(), s.system.statuses(s.now));
@@ -162,6 +163,40 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
         s.refresh_findings();
     }
     landed || now_status != status
+}
+
+/// Memory, thermal, load, power, disks and network. The System page shows them all, the Network
+/// page its listening ports and the Storage page its disks; elsewhere they show only through the
+/// findings they change, so a reading that changes nothing on screen redraws nothing.
+fn land_machine(s: &mut App) -> bool {
+    let findings = finding_keys(&s.findings);
+    let shown = shown_reading(s);
+    s.land_system()
+        && (s.nav == groups::Nav::System || shown_reading(s) != shown || finding_keys(&s.findings) != findings)
+}
+
+/// The machine reading the page on screen draws from: when it last landed and what failed since.
+fn shown_reading(s: &App) -> Option<(Option<f64>, Option<system::Fail>)> {
+    match s.nav {
+        groups::Nav::Network => Some((s.system.network.updated, s.system.network.error.clone())),
+        groups::Nav::Storage => Some((s.system.storage.updated, s.system.storage.error.clone())),
+        _ => None,
+    }
+}
+
+/// What a finding shows, to tell whether a reading changed any.
+fn finding_keys(findings: &[findings::Finding]) -> Vec<(&'static str, u32, String, String)> {
+    findings.iter().map(|f| (f.rule, f.pid, f.title.clone(), f.detail.clone())).collect()
+}
+
+/// The window going off screen rests every feed and the machine readings; coming back reads
+/// at once.
+fn on_visibility(s: &mut App, shown: bool, tx: &mut Tx) {
+    s.visible = shown;
+    system::PAUSED.store(!shown, std::sync::atomic::Ordering::SeqCst);
+    if shown {
+        tx.wake_after(Duration::ZERO);
+    }
 }
 
 fn main() {
@@ -246,5 +281,31 @@ fn main() {
         on_key: Some(ui::on_key),
         ..AppSpec::new("Spectra", (1100.0, 700.0), app::init, ui::view)
     };
-    rune::App::new(spec).chrome(chrome).on_quit(on_quit).run();
+    rune::App::new(spec).chrome(chrome).on_quit(on_quit).on_visibility(on_visibility).run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use groups::Nav;
+    use system::{Network, Reading};
+
+    #[test]
+    fn a_machine_reading_redraws_the_page_that_shows_it() {
+        let mut s = app::init();
+        let tx = s.system.tx.clone().expect("no reading thread in a test");
+        let lands = |s: &mut App, nav: Nav, r: Reading| {
+            s.nav = nav;
+            s.now += 1.0;
+            tx.send(r).unwrap();
+            land_machine(s)
+        };
+        assert!(lands(&mut s, Nav::Network, Reading::Network(Ok(Network::default()))));
+        assert!(lands(&mut s, Nav::Storage, Reading::Storage(Ok(Vec::new()))));
+        assert!(lands(&mut s, Nav::System, Reading::Network(Ok(Network::default()))));
+        // A page that doesn't show it, with no finding changed: nothing to redraw.
+        assert!(!lands(&mut s, Nav::All, Reading::Network(Ok(Network::default()))));
+        assert!(!lands(&mut s, Nav::Network, Reading::Storage(Ok(Vec::new()))));
+        assert!(!lands(&mut s, Nav::Storage, Reading::Network(Ok(Network::default()))));
+    }
 }

@@ -335,6 +335,8 @@ pub struct Storage {
     pub tm_error: Option<String>,
     tm_cancel: Arc<AtomicBool>,
     tm_job: u64,
+    /// The page opened while the window was hidden: Time Machine is read once it's shown.
+    tm_wanted: bool,
     job: u64,
     /// The "started … ago" last shown while measuring, so a tick redraws only when it changes.
     shown: Option<String>,
@@ -358,6 +360,7 @@ impl Storage {
             tm_error: None,
             tm_cancel: Arc::new(AtomicBool::new(false)),
             tm_job: 0,
+            tm_wanted: false,
             job: 0,
             shown: None,
             tx,
@@ -444,13 +447,19 @@ fn submit(
 }
 
 impl App {
-    /// The page opened: reads the Time Machine snapshots (quick). Nothing is measured until a
-    /// press asks for it.
+    /// The page opened: reads the Time Machine snapshots (quick), or once the window is shown
+    /// when it's hidden. Nothing is measured until a press asks for it.
     pub fn open_storage(&mut self) {
+        let shown = self.window_shown();
         let st = &mut self.storage;
         if st.tm_reading {
             return;
         }
+        if !shown {
+            st.tm_wanted = true;
+            return;
+        }
+        st.tm_wanted = false;
         st.tm_reading = true;
         st.tm_job += 1;
         let job = st.tm_job;
@@ -549,6 +558,7 @@ impl App {
         }
         st.tm_cancel.store(true, Ordering::SeqCst);
         st.tm_reading = false;
+        st.tm_wanted = false;
     }
 
     /// Stops the measurement on its way, keeping what was measured before.
@@ -559,9 +569,19 @@ impl App {
     }
 
     /// Lands what finished, and says whether anything shown changed: a landing, or the
-    /// "started … ago" of a measurement on its way now reading differently.
+    /// "started … ago" of a measurement on its way now reading differently. While the window is
+    /// hidden a measurement may finish, but nothing new starts and the age isn't redrawn; a
+    /// Time Machine read the page asked for while hidden starts once it's shown.
     pub fn tick_storage(&mut self) -> bool {
         let mut changed = self.land_storage();
+        if !self.window_shown() {
+            self.storage.shown = None;
+            return changed;
+        }
+        if self.storage.tm_wanted {
+            self.open_storage();
+            changed = true;
+        }
         let age = self
             .storage
             .measuring
@@ -918,6 +938,41 @@ pub(crate) mod tests {
         assert!(s.tick_storage(), "a second later it reads differently");
         s.now = 101.2;
         assert!(!s.tick_storage());
+    }
+
+    #[test]
+    fn while_hidden_a_walk_may_finish_but_nothing_new_starts_and_the_age_rests() {
+        let fake = Arc::new(Fake::new());
+        let mut s = app(fake.clone());
+        s.now = 100.0;
+        s.measure_storage("/Users/me/Library");
+        s.visible = false;
+        // The page opening while hidden waits to read Time Machine.
+        s.show(crate::groups::Nav::Storage);
+        assert!(s.tick_storage(), "the walk on its way lands");
+        assert!(s.storage.results.contains_key("/Users/me/Library"));
+        s.storage.measuring = Some(Measuring::shown("/Users/me", 100.0));
+        for t in 101..110 {
+            s.now = f64::from(t);
+            assert!(!s.tick_storage(), "the age isn't redrawn while hidden");
+        }
+        assert_eq!(
+            fake.calls().iter().filter(|c| c[0] != "du").count(),
+            0,
+            "Time Machine isn't read while hidden"
+        );
+        // Shown again, Time Machine is read and the age is drawn.
+        s.visible = true;
+        assert!(s.tick_storage());
+        assert_eq!(fake.calls().iter().filter(|c| c[0] != "du").count(), 1);
+        s.land_storage();
+        assert!(s.storage.tm.is_some());
+        s.tick_storage();
+        assert_eq!(
+            fake.calls().iter().filter(|c| c[0] != "du").count(),
+            1,
+            "read once"
+        );
     }
 
     #[test]

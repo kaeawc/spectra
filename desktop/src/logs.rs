@@ -517,10 +517,11 @@ impl App {
     }
 
     /// Starts the next Follow round when it's due: Follow is on, the page has an answer and
-    /// nothing is in flight. Runs only while the page is open.
+    /// nothing is in flight. Runs only while the page is open and the window is shown.
     pub fn tick_logs(&mut self) {
         let page = &self.inspect.logs;
         if self.inspect.auto
+            && self.window_shown()
             && page.follow
             && page.flight.is_none()
             && page.report().is_some()

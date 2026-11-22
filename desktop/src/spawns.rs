@@ -554,7 +554,7 @@ fn descends_from(s: &App, pid: u32, ancestor: u32) -> bool {
 impl App {
     /// Whether the Activity page is on screen, with no process page over it.
     pub fn activity_open(&self) -> bool {
-        self.nav == Nav::Activity && !self.on_page()
+        self.window_shown() && self.nav == Nav::Activity && !self.on_page()
     }
 
     /// Whether rounds should run now: the page is open or "Keep recording" is on.
@@ -1069,6 +1069,18 @@ pub mod tests {
         s.activity.cancel();
         wait_for("quit cancels", || fake.cancelled.load(Ordering::SeqCst));
         assert!(!s.activity.recording());
+    }
+
+    #[test]
+    fn a_hidden_window_stops_the_page_but_not_keep_recording() {
+        let (mut s, _fake) = faked(None);
+        s.show(Nav::Activity);
+        assert!(s.activity_wanted());
+        s.visible = false;
+        assert!(!s.activity_wanted(), "nobody can see the page");
+        s.toggle_keep_recording();
+        assert!(s.activity_wanted(), "keep recording is the one deliberate exception");
+        assert!(!s.activity_open(), "and it looks at the background interval");
     }
 
     #[test]

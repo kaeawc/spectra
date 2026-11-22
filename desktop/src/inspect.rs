@@ -993,6 +993,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn no_live_round_starts_while_the_window_is_hidden() {
+        let (mut s, _) = faked(Fake::all());
+        s.open(7);
+        s.now = 10.0;
+        s.visible = false;
+        for _ in 0..5 {
+            s.tick_live();
+            s.now += live::REST;
+        }
+        assert_eq!(held(&s), 0, "hidden: no rounds");
+        s.visible = true;
+        s.tick_live();
+        assert_eq!(held(&s), 1, "shown again: a round at once");
+    }
+
+    #[test]
     fn live_rounds_run_one_at_a_time_while_the_page_is_open() {
         let (mut s, fake) = faked(Fake::all());
         s.open(7);

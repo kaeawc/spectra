@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-/// How often a running command is checked on.
+/// How often a running command is checked on at first; the wait doubles up to [`CHECK_MAX`],
+/// so a 17 s reading wakes its thread about 90 times instead of 700.
 const CHECK: Duration = Duration::from_millis(25);
+const CHECK_MAX: Duration = Duration::from_millis(200);
 
 /// Commands started here that haven't finished stopping or exiting.
 static RUNNING: AtomicUsize = AtomicUsize::new(0);
@@ -99,6 +101,18 @@ pub enum Ended {
     Cancelled,
 }
 
+/// The daemon's answer as the CLI's output: what it would have printed, exit status 0.
+fn daemon_output(answer: Result<String, crate::daemon::Error>, deadline: Duration, cap: usize) -> Result<Output, Ended> {
+    use std::os::unix::process::ExitStatusExt;
+    match answer {
+        Ok(s) if s.len() > cap => Err(Ended::Failed(RunError::TooLarge(cap))),
+        Ok(s) => Ok(Output { status: ExitStatus::from_raw(0), stdout: s.into_bytes(), stderr: Vec::new() }),
+        Err(crate::daemon::Error::Cancelled) => Err(Ended::Cancelled),
+        Err(crate::daemon::Error::Timeout) => Err(Ended::Failed(RunError::Timeout(deadline))),
+        Err(e) => Err(Ended::Failed(RunError::Io(format!("Spectra's daemon: {}", e.why())))),
+    }
+}
+
 /// Reads a pipe on its own thread until it closes, keeping at most `cap` bytes. Past the cap it
 /// says so at once and keeps draining, so the child never blocks on a full pipe.
 fn drain(mut pipe: impl Read + Send + 'static, cap: usize) -> Receiver<Result<Vec<u8>, RunError>> {
@@ -148,6 +162,15 @@ pub fn run(cmd: Command, deadline: Duration, cap: usize) -> Result<Output, RunEr
 /// own, and stopping it stops that group: its children go too, and nothing else.
 pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<Output, Ended> {
     let _running = Running::new();
+    let start = Instant::now();
+    // A call Spectra's daemon answers starts no process.
+    if let Some(answer) = crate::daemon::answer(&cmd, deadline, cancel) {
+        return daemon_output(answer, deadline, cap);
+    }
+    // Time spent waiting for a daemon that was connecting counts against the same deadline.
+    if start.elapsed() >= deadline {
+        return Err(Ended::Failed(RunError::Timeout(deadline)));
+    }
     let mut child = cmd
         .process_group(0)
         .stdin(Stdio::null())
@@ -157,7 +180,7 @@ pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &Atom
         .map_err(|e| Ended::Failed(RunError::Spawn(e.to_string())))?;
     let out = drain(child.stdout.take().expect("piped stdout"), cap);
     let err = drain(child.stderr.take().expect("piped stderr"), cap);
-    let start = Instant::now();
+    let mut check = CHECK;
     let (mut stdout, mut stderr) = (None, None);
     let stop = |child: &mut std::process::Child, why: Ended| {
         kill_group(child);
@@ -190,7 +213,10 @@ pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &Atom
             }
             Ok(None) if cancel.load(Ordering::Relaxed) => return stop(&mut child, Ended::Cancelled),
             Ok(None) if start.elapsed() >= deadline => return stop(&mut child, Ended::Failed(RunError::Timeout(deadline))),
-            Ok(None) => std::thread::sleep(CHECK),
+            Ok(None) => {
+                std::thread::sleep(check);
+                check = (check * 2).min(CHECK_MAX);
+            }
             Err(e) => return stop(&mut child, Ended::Failed(RunError::Io(e.to_string()))),
         }
     }
@@ -201,6 +227,22 @@ pub(crate) mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_daemon_answer_reads_as_the_clis() {
+        use crate::daemon::Error;
+        let d = Duration::from_secs(1);
+        let out = daemon_output(Ok("[1]".into()), d, 64).unwrap();
+        assert!(out.status.success() && out.stdout == b"[1]");
+        assert_eq!(daemon_output(Ok("x".repeat(65)), d, 64).unwrap_err(), Ended::Failed(RunError::TooLarge(64)));
+        assert_eq!(daemon_output(Err(Error::Cancelled), d, 64).unwrap_err(), Ended::Cancelled);
+        assert_eq!(daemon_output(Err(Error::Timeout), d, 64).unwrap_err(), Ended::Failed(RunError::Timeout(d)));
+        // A classification that failed says why on the feed's "last reading failed" line.
+        let Err(Ended::Failed(e)) = daemon_output(Err(Error::Warned("classify: timed out".into())), d, 64) else {
+            panic!("a failure")
+        };
+        assert!(crate::procs::run_failure("spectra", e).contains("classify: timed out"));
+    }
 
     /// A shell script standing in for Spectra, in its own temp directory.
     pub fn script(name: &str, body: &str) -> PathBuf {

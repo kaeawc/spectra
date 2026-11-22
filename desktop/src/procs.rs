@@ -409,13 +409,26 @@ pub type ProcFeed = Result<Vec<Process>, ProcError>;
 
 /// Reads the feed. Entries that don't parse are skipped rather than failing the whole list.
 pub fn parse(json: &str) -> ProcFeed {
+    // Straight into processes when every entry reads, without a tree of values per entry first:
+    // a busy machine's list is a few MB every couple of seconds.
+    if let Ok(procs) = serde_json::from_str::<Vec<Process>>(json) {
+        // No entry has a role (an escaped quote inside a command can't spell `"role"`).
+        if !procs.is_empty() && !json.contains("\"role\"") {
+            return Err(ProcError::TooOld("Spectra listed processes without classifying them.".into()));
+        }
+        return settled(procs);
+    }
     let raw: Vec<serde_json::Value> =
         serde_json::from_str(json).map_err(|e| ProcError::Failed(format!("Couldn't read Spectra's output: {e}")))?;
     // Without --classify every entry lacks a role; a Spectra that ignored the flag is too old.
     if !raw.is_empty() && raw.iter().all(|v| v.get("role").is_none()) {
         return Err(ProcError::TooOld("Spectra listed processes without classifying them.".into()));
     }
-    let mut procs: Vec<Process> = raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect();
+    settled(raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
+}
+
+/// The list sorted by pid with what's worked out once per reading settled; an empty one failed.
+fn settled(mut procs: Vec<Process>) -> ProcFeed {
     // Every machine runs something; an empty list means the reading went wrong.
     if procs.is_empty() {
         return Err(ProcError::Failed("Spectra listed no processes.".into()));
@@ -555,6 +568,40 @@ mod tests {
     fn a_broken_entry_is_skipped() {
         let p = parse(r#"[{"pid":"seven","role":"cli"},{"pid":8,"role":"cli"}]"#).unwrap();
         assert_eq!(p.iter().map(|p| p.pid).collect::<Vec<_>>(), [8]);
+    }
+
+    #[test]
+    fn the_quick_read_and_the_entry_by_entry_read_agree() {
+        let quick = parse(REAL).unwrap();
+        // One broken entry sends the whole list down the entry-by-entry path.
+        let broken = format!("[{{\"pid\":\"x\",\"role\":\"cli\"}},{}", &REAL.trim()[1..]);
+        let slow = parse(&broken).unwrap();
+        assert_eq!(format!("{quick:?}"), format!("{slow:?}"));
+        // A role only inside a command line doesn't count as classified.
+        let unclassified = r#"[{"pid":1,"command":"x \"role\" y"}]"#;
+        assert!(matches!(parse(unclassified), Err(ProcError::TooOld(_))));
+    }
+
+    /// The parse cost on a saved feed: `PERF_PROCS_JSON=<file> cargo test --release -- --ignored parse_cost --nocapture`.
+    #[test]
+    #[ignore]
+    fn parse_cost() {
+        let Ok(path) = std::env::var("PERF_PROCS_JSON") else { return };
+        let json = std::fs::read_to_string(path).unwrap();
+        let slow = |j: &str| -> usize {
+            let raw: Vec<serde_json::Value> = serde_json::from_str(j).unwrap();
+            raw.into_iter().filter_map(|v| serde_json::from_value::<Process>(v).ok()).count()
+        };
+        let t = std::time::Instant::now();
+        for _ in 0..10 {
+            assert!(slow(&json) > 0);
+        }
+        let before = t.elapsed() / 10;
+        let t = std::time::Instant::now();
+        for _ in 0..10 {
+            assert!(!parse(&json).unwrap().is_empty());
+        }
+        println!("parse of {} bytes: entry by entry {before:?}, quick {:?}", json.len(), t.elapsed() / 10);
     }
 
     #[test]

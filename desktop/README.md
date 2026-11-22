@@ -13,7 +13,27 @@ thread, so nothing needs setting up:
   AI agent, terminal, shell, developer tool, system), its runtime (Electron, JVM, Node, Bun, Go,
   Rust, Python, native and more), the app it belongs to and its code signature.
 - `spectra jvm -json` for JVMs in depth: heap, GC, classes and threads. It is slow (about 17 s a
-  reading), so JVM numbers land less often.
+  reading, and about as many CPU-seconds with a dozen JVMs), so it rests 30 s between readings,
+  2 s while a JVM's page is open, and doesn't run at all while the process list shows no JVM.
+
+The window asks for each reading after the last one landed and rested. While the window is
+hidden, minimised or covered, nothing is read: the feeds, the Machine readings, an open page's
+live charts and Logs' Follow, the Activity and Network pages, the Overview's "Right now" look and
+the Storage page's Time Machine read all rest (except Activity's "Keep recording"; a folder being
+measured may finish), and coming back reads at once.
+
+**Spectra's daemon.** Where the daemon (`~/.spectra/daemon.sock`, started with
+`spectra daemon start` if its socket is missing) already holds a reading, the app asks it on one
+long-lived connection instead of starting a `spectra` process. One table in `src/daemon.rs`
+decides, from the methods `daemon.status` lists: the process list from `process.list` (asked
+every 2 s while the window shows, from the daemon's shared snapshot; taken fresh after a Quit or
+Kill), JVMs from `jvm.list`, the load average from the host sample
+`alerts.subscribe` pushes (else `watch.current`), and the Machine page's memory, thermal, power
+and network readings from `memory.current`, `thermal.current`, `power.current` and
+`network.current`. A daemon without a method, or none at all,
+leaves that call to the CLI as before, and so does one error from it, for that call only. The
+connection is made on a thread of its own: a call never waits on another's reconnect, and waits
+at most half its deadline for one before the CLI runs it.
 
 Set `SPECTRA_BIN` if `spectra` isn't on `PATH`. A Spectra too old for `--classify` gets a notice
 saying so; the JVM views keep working.
@@ -57,8 +77,8 @@ What it shows:
   its page. On Linux, a part Spectra doesn't read (memory pressure, the battery) is left out
   rather than shown blank.
   - Readings: `spectra memory --json`, `spectra thermal --json` and `spectra load --json` every
-    5 s; `spectra power --json`, `spectra network --json` and `spectra storage --json` every 30 s,
-    on two threads of their own, each with a deadline (20 s and 60 s). `thermal` exits 3 when
+    5 s; `spectra power --json` and `spectra network --json` every 30 s, and
+    `spectra storage --json` about every five minutes, on two threads of their own, each with a deadline (20 s and 60 s). `thermal` exits 3 when
     warm and 4 when throttled, and `load` 3 or 4 when the machine is busy: those are readings,
     not failures. `spectra storage` also sizes `~/Library`, which can take many minutes, so it
     runs with an empty home (`/var/empty`) and only the volumes come back; one that still runs out

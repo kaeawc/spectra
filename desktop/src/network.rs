@@ -406,9 +406,9 @@ impl App {
         self.nav == Nav::Network && !self.on_page()
     }
 
-    /// Whether windows should run now: only while the page is open.
+    /// Whether windows should run now: only while the page is open and the window is shown.
     pub fn network_wanted(&self) -> bool {
-        self.network.auto && self.network_open()
+        self.network.auto && self.network_open() && self.window_shown()
     }
 
     /// Lands finished windows, stops the one in flight once the page is left, and starts the
@@ -764,6 +764,30 @@ pub(crate) mod tests {
         // The cancelled window's answer lands nowhere.
         assert!(!s.tick_network());
         assert!(s.network.top.is_none() && s.network.error.is_none());
+    }
+
+    #[test]
+    fn no_window_runs_while_the_window_is_hidden_and_one_starts_once_shown() {
+        let (mut s, fake) = faked(None);
+        s.show(Nav::Network);
+        s.tick_network();
+        assert!(s.network.measuring());
+        s.visible = false;
+        assert!(!s.network_wanted(), "nothing to wake for while hidden");
+        s.tick_network();
+        assert!(!s.network.measuring(), "hiding stops the window");
+        wait_for("cancelled", || fake.cancelled.load(Ordering::SeqCst));
+        for t in 1..100 {
+            s.now = f64::from(t);
+            s.tick_network();
+            assert!(!s.network.measuring(), "no window starts while hidden");
+        }
+        assert_eq!(calls(&fake), 1);
+        s.visible = true;
+        s.tick_network();
+        assert!(s.network.measuring(), "shown again, a window starts");
+        wait_for("the next window started", || calls(&fake) == 2);
+        s.network.cancel();
     }
 
     #[test]
