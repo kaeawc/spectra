@@ -45,7 +45,8 @@ func TestCollectorChurningPIDsStayBounded(t *testing.T) {
 			c.Add(Sample{TakenAt: at, PID: 1000 + tick*perTick + j})
 		}
 		if tick%4 == 0 { // flush once a minute, as the watch does
-			c.FlushAggregates(at, DefaultRetainWindow)
+			_, commit := c.FlushAggregates(at, DefaultRetainWindow)
+			commit()
 		}
 		maxLen = max(maxLen, c.Len())
 	}
@@ -68,13 +69,18 @@ func TestFlushAggregatesIncremental(t *testing.T) {
 	add(m0.Add(10*time.Second), 100)
 	add(m0.Add(40*time.Second), 300)
 	add(m0.Add(70*time.Second), 500) // minute 1, partial
-	first := c.FlushAggregates(m0.Add(75*time.Second), DefaultRetainWindow)
+	flush := func(at time.Time) []Aggregate {
+		aggs, commit := c.FlushAggregates(at, DefaultRetainWindow)
+		commit()
+		return aggs
+	}
+	first := flush(m0.Add(75 * time.Second))
 	if len(first) != 2 {
 		t.Fatalf("first flush = %d aggregates, want 2", len(first))
 	}
 	add(m0.Add(100*time.Second), 700) // completes minute 1
 	add(m0.Add(130*time.Second), 900) // minute 2
-	second := c.FlushAggregates(m0.Add(135*time.Second), DefaultRetainWindow)
+	second := flush(m0.Add(135 * time.Second))
 	if len(second) != 2 {
 		t.Fatalf("second flush = %+v, want minutes 1 and 2 only", second)
 	}
@@ -89,11 +95,11 @@ func TestFlushAggregatesIncremental(t *testing.T) {
 			t.Fatalf("unexpected minute re-flushed: %+v", a)
 		}
 	}
-	if third := c.FlushAggregates(m0.Add(140*time.Second), DefaultRetainWindow); len(third) != 1 {
+	if third := flush(m0.Add(140 * time.Second)); len(third) != 1 {
 		t.Fatalf("third flush = %+v, want only the newest minute", third)
 	}
 	// Exited for longer than the window: flushed out of RAM.
-	c.FlushAggregates(m0.Add(130*time.Second+DefaultRetainWindow+time.Second), DefaultRetainWindow)
+	flush(m0.Add(130*time.Second + DefaultRetainWindow + time.Second))
 	if c.Len() != 0 {
 		t.Fatalf("stale pid kept: %d", c.Len())
 	}
@@ -160,5 +166,27 @@ func TestRingBufferGapAfterDenseCadence(t *testing.T) {
 	got := rb.Samples()
 	if len(got) != 2 || got[0].RSSKiB != 9 || got[1].RSSKiB != 10 || len(rb.buf) > 16 {
 		t.Fatalf("after gap: %+v, buffer %d", got, len(rb.buf))
+	}
+}
+
+// Without a commit (the save failed) the next flush returns the same minutes
+// and the stale PID stays until a flush commits.
+func TestFlushAggregatesUncommittedRetries(t *testing.T) {
+	c := NewCollector()
+	m0 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	c.Add(Sample{TakenAt: m0.Add(10 * time.Second), PID: 7, RSSKiB: 100})
+	c.Add(Sample{TakenAt: m0.Add(70 * time.Second), PID: 7, RSSKiB: 200})
+	late := m0.Add(DefaultRetainWindow + 2*time.Minute)
+	failed, _ := c.FlushAggregates(late, DefaultRetainWindow) // save failed: no commit
+	if len(failed) != 2 || c.Len() != 1 {
+		t.Fatalf("failed flush = %d aggregates, %d pids", len(failed), c.Len())
+	}
+	retried, commit := c.FlushAggregates(late, DefaultRetainWindow)
+	if len(retried) != 2 {
+		t.Fatalf("retry = %+v, want both minutes again", retried)
+	}
+	commit()
+	if c.Len() != 0 {
+		t.Fatalf("stale pid kept after commit: %d", c.Len())
 	}
 }

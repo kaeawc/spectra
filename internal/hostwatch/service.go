@@ -376,13 +376,16 @@ func (s *Service) maintenance(ctx context.Context, at time.Time) {
 		return
 	}
 	if at.Sub(s.lastFlush) >= time.Minute {
-		aggs := s.opts.Metrics.FlushAggregates(at, metrics.DefaultRetainWindow)
+		aggs, commit := s.opts.Metrics.FlushAggregates(at, metrics.DefaultRetainWindow)
 		rows := make([]store.ProcessMetricRow, 0, len(aggs))
 		for _, a := range aggs {
 			rows = append(rows, store.ProcessMetricRow{PID: a.PID, MinuteAt: a.MinuteAt, AvgRSSKiB: a.AvgRSSKiB, MaxRSSKiB: a.MaxRSSKiB, AvgCPUPct: a.AvgCPUPct, MaxCPUPct: a.MaxCPUPct, SampleCount: a.SampleCount})
 		}
+		// Mark the minutes written only once saved; a failed save retries them.
 		if err := s.opts.Store.SaveProcessMetrics(ctx, rows); err != nil {
 			s.opts.Logger.Warn("watch process metrics flush failed", "error", err)
+		} else {
+			commit()
 		}
 		s.lastFlush = at
 	}

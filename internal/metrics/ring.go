@@ -131,6 +131,7 @@ func (r *RingBuffer) Aggregate() []Aggregate {
 }
 
 // aggregateSince aggregates the minutes at or after since (all when zero).
+// A backward wall-clock jump skips minutes until the clock catches up (accepted).
 func (r *RingBuffer) aggregateSince(since time.Time) []Aggregate {
 	i := 0
 	if !since.IsZero() {
@@ -247,28 +248,43 @@ func (c *Collector) Len() int {
 	return len(c.pids)
 }
 
-// FlushAggregates returns the 1-minute aggregates not yet returned by an
-// earlier flush (plus each PID's last flushed minute, which may have been
-// partial), and removes PIDs whose newest sample is older than retainWindow
-// before now. Each completed minute is therefore returned once rather than
-// on every flush for as long as its samples stay in RAM.
-func (c *Collector) FlushAggregates(now time.Time, retainWindow time.Duration) []Aggregate {
+// FlushAggregates returns the 1-minute aggregates not yet committed by an
+// earlier flush (plus each PID's last committed minute, which may have been
+// partial) and a commit func. The caller runs commit only after it has
+// persisted the aggregates: commit marks those minutes written and removes
+// PIDs whose newest sample is older than retainWindow before now. Without a
+// commit (a failed save) the next flush returns the same minutes again, so
+// each completed minute is persisted once rather than on every flush, and
+// is not lost to a failed write while its samples are in RAM.
+func (c *Collector) FlushAggregates(now time.Time, retainWindow time.Duration) ([]Aggregate, func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	cutoff := now.UTC().Add(-retainWindow)
 	var all []Aggregate
-	for pid, rb := range c.pids {
+	marks := make(map[*RingBuffer]time.Time, len(c.pids))
+	for _, rb := range c.pids {
 		aggs := rb.aggregateSince(rb.flushed)
+		mark := rb.flushed
 		for _, a := range aggs {
-			if a.MinuteAt.After(rb.flushed) {
-				rb.flushed = a.MinuteAt
+			if a.MinuteAt.After(mark) {
+				mark = a.MinuteAt
 			}
 		}
+		marks[rb] = mark
 		all = append(all, aggs...)
-		if rb.n == 0 || rb.at(rb.n-1).TakenAt.Before(cutoff) {
-			delete(c.pids, pid)
+	}
+	cutoff := now.UTC().Add(-retainWindow)
+	commit := func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for pid, rb := range c.pids {
+			if mark, ok := marks[rb]; ok && mark.After(rb.flushed) {
+				rb.flushed = mark
+			}
+			if rb.n == 0 || rb.at(rb.n-1).TakenAt.Before(cutoff) {
+				delete(c.pids, pid)
+			}
 		}
 	}
-	return all
+	return all, commit
 }

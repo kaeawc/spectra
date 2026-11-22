@@ -1,11 +1,51 @@
 package hostwatch
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/metrics"
+	"github.com/kaeawc/spectra/internal/store"
 )
+
+type flakyMetricsStore struct {
+	*store.DB
+	fail int
+}
+
+func (f *flakyMetricsStore) SaveProcessMetrics(ctx context.Context, rows []store.ProcessMetricRow) error {
+	if f.fail > 0 {
+		f.fail--
+		return errors.New("database is locked")
+	}
+	return f.DB.SaveProcessMetrics(ctx, rows)
+}
+
+// A failed process-metrics save leaves the minutes unwritten, so the next
+// flush writes them.
+func TestMaintenanceRetriesFailedMetricsSave(t *testing.T) {
+	db := &flakyMetricsStore{DB: testDB(t), fail: 1}
+	m := metrics.NewCollector()
+	svc := NewService(ServiceOptions{Store: db, Metrics: m})
+	ctx := context.Background()
+	m0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m.Add(metrics.Sample{TakenAt: m0.Add(10 * time.Second), PID: 42, RSSKiB: 100})
+	svc.maintenance(ctx, m0.Add(15*time.Second)) // the first call only arms the timers
+	svc.maintenance(ctx, m0.Add(90*time.Second)) // save fails
+	if rows, err := db.GetProcessMetrics(ctx, 42, 0); err != nil || len(rows) != 0 {
+		t.Fatalf("after failed save: %+v, %v", rows, err)
+	}
+	m.Add(metrics.Sample{TakenAt: m0.Add(100 * time.Second), PID: 42, RSSKiB: 300})
+	svc.maintenance(ctx, m0.Add(160*time.Second)) // save succeeds
+	rows, err := db.GetProcessMetrics(ctx, 42, 0)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("after retry: %+v, %v; want minutes 0 and 1", rows, err)
+	}
+}
 
 // The evaluation window holds two hours of samples and its backing array
 // stays proportional to that however long the daemon runs.
