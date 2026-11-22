@@ -353,10 +353,75 @@ waiting callers get an error and nothing is cached. The rows are collected on
 demand rather than taken from the watch sampler, which keeps only aggregates and
 the top CPU consumers.
 
-`process.subscribe` takes no parameters and returns `{"subscribed": true}`. The
+`process.list` also takes `classify` (bool). When true, the rows carry the
+`spectra process --json --classify` fields (`role`, `runtime`, `app`,
+`signing`, `evidence`). The classified snapshot is cached and single-flighted
+separately from the plain one, built once from the latest plain collection, so
+concurrent classified callers share one classification and plain callers never
+pay for it. Classification uses the on-disk classify cache. If the classifier
+fails or exceeds its own 15 second cap, the call still succeeds: rows the
+classifier finished (it gets up to 2 more seconds to hand back in-flight work)
+keep their fields, the rest are left unknown, and the payload carries a
+`warning` string. A cold classified call is therefore bounded by roughly 32
+seconds: 15 for collection, 15 for classification and the 2 second grace.
+`sampled_at` stays the collection time, but the 2 second cache is measured from
+when classification finished. The daemon rebuilds its classifier every 10
+minutes to bound its in-memory memo; the on-disk classify cache stays warm.
+Subscribers of both kinds on one tick share a single collection and
+`sampled_at`.
+
+`process.subscribe` takes optional `classify` (bool) and returns
+`{"subscribed": true}`. With `classify: true` the subscriber receives classified
+payloads; the daemon classifies each tick only while at least one current
+subscriber asked for it, and plain subscribers keep receiving plain payloads. The
 connection then receives `process.update` notifications whose params are the
 same `{sampled_at, processes}` payload, once per `--watch-interval` (default 15
 seconds), starting with an immediate one when the first subscriber arrives. The
 daemon collects only while at least one subscriber exists, and never in the
 background otherwise. Slow subscribers can miss updates; the next one supersedes
 them. The subscription ends when the connection closes.
+
+## Host methods
+
+Four methods serve the host facts a desktop Machine page polls, so clients skip
+spawning `spectra memory|thermal|power|network --json` per poll. Each takes
+optional `refresh` (bool) and returns exactly the JSON the matching CLI command
+prints with `--json`. Each method has its own cache; concurrent callers share
+one collection, a caller that disconnects does not cancel it for the others,
+and `refresh: true` skips the cache but joins a collection already in flight.
+A collection is capped at 20 seconds, its child processes are killed at the
+cap, and a timeout, collector error, or collector panic is returned to the
+waiting callers and never cached. On Linux each method returns what the CLI
+returns there, or the same unsupported error, except for the `network.current`
+proxy fields described below.
+
+### `memory.current`
+
+The `spectra memory --json` object (`memstate.MemoryState`). Cached for 2
+seconds. macOS cgo builds only; elsewhere it returns the "not supported" error
+the CLI prints.
+
+### `thermal.current`
+
+The `spectra thermal --json` object (verdict, evidence, findings, with
+`samples: 1`). Cached for 5 seconds. macOS reads `pmset -g therm`; Linux reads
+`/sys` thermal zones.
+
+### `power.current`
+
+The `spectra power --json` envelope in baseline mode (`mode: "baseline"`,
+`interval_ms: 1000`; battery, thermal, assertions, and top energy users from
+`pmset` and `top`). Cached for 5 seconds. The `--top`, `--joules`, and `--deep`
+modes are not served. The baseline runs `top -l 2 -s 1`, so a cold call takes
+roughly a second on a real macOS host; clients polling every 5 seconds mostly
+hit the cache.
+
+### `network.current`
+
+The `spectra network --json` object (interfaces, DNS, routes, VPN and proxy
+state). Cached for 10 seconds.
+
+On macOS the proxy fields come from system-wide `scutil` settings and match the
+CLI. On Linux they come from the daemon's own environment (`http_proxy`,
+`https_proxy`, `all_proxy` as of daemon start), not the caller's shell, so they
+can differ from `spectra network --json`.

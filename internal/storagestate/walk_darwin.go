@@ -7,7 +7,6 @@ import (
 	"errors"
 	"math"
 	"os"
-	"path/filepath"
 	"sync"
 	"unsafe"
 
@@ -52,7 +51,12 @@ var errBulkMalformed = errors.New("getattrlistbulk: malformed record")
 
 // bulkEntry is one decoded getattrlistbulk record.
 type bulkEntry struct {
-	name    string
+	// name is the entry name as a string. decodeBulk fills it; the tree
+	// walker's decoder leaves it empty and uses raw instead.
+	name string
+	// raw is the name's bytes, aliasing the result buffer: valid only until
+	// the next getattrlistbulk call into that buffer.
+	raw     []byte
 	isDir   bool
 	isReg   bool
 	errno   uint32
@@ -65,12 +69,44 @@ type bulkEntry struct {
 	hasLink bool // nlink, dev and ino are valid
 }
 
+// bulkScratch is one walker goroutine's reusable bulk-reader state: a
+// result buffer and the decoded-entry slice.
+type bulkScratch struct {
+	bp      *[]byte
+	entries []bulkEntry
+}
+
+func (s *bulkScratch) buffer() []byte {
+	if s.bp == nil {
+		s.bp = bulkBufPool.Get().(*[]byte)
+	}
+	return *s.bp
+}
+
+// release returns the buffer to the pool; the scratch stays usable.
+func (s *bulkScratch) release() {
+	if s.bp != nil {
+		bulkBufPool.Put(s.bp)
+		s.bp = nil
+	}
+	clear(s.entries)
+	s.entries = s.entries[:0]
+}
+
 // readDirBulk sizes d with getattrlistbulk(2), which returns names, types,
 // allocated sizes and inode identity for a whole batch of entries per call
 // instead of one lstat each. It reports false, having accounted nothing, when
 // the bulk reader cannot handle the directory, so the caller can fall back
 // to the lstat path.
 func (w *treeWalker) readDirBulk(d walkDir, tracked []int64) (int64, bool) {
+	s := &walkScratch{tracked: tracked}
+	defer s.bulk.release()
+	return w.readDirBulkWith(d, s)
+}
+
+// readDirBulkWith is readDirBulk accumulating tracked bytes into s.tracked
+// and reusing s's buffers.
+func (w *treeWalker) readDirBulkWith(d walkDir, s *walkScratch) (int64, bool) {
 	fd, err := openDirFD(d.path)
 	if err != nil {
 		w.addSkipped()
@@ -78,16 +114,12 @@ func (w *treeWalker) readDirBulk(d walkDir, tracked []int64) (int64, bool) {
 	}
 	defer unix.Close(fd) //nolint:errcheck // read-only directory descriptor
 
-	bp := bulkBufPool.Get().(*[]byte)
-	defer bulkBufPool.Put(bp)
-	buf := *bp
-
+	buf := s.bulk.buffer()
 	var total int64
-	var entries []bulkEntry
 	for first := true; ; first = false {
 		n, err := getattrlistbulk(fd, buf)
 		if err == nil && n > 0 {
-			entries, err = decodeBulk(buf, n, entries[:0])
+			s.bulk.entries, err = decodeBulkRecords(buf, n, s.bulk.entries[:0], false)
 		}
 		if err != nil {
 			if first {
@@ -99,30 +131,29 @@ func (w *treeWalker) readDirBulk(d walkDir, tracked []int64) (int64, bool) {
 		if n == 0 {
 			break
 		}
-		total += w.applyBulk(d, entries, tracked)
+		total += w.applyBulk(d, s.bulk.entries, s)
 	}
 	return total, true
 }
 
 // applyBulk accounts one decoded batch and queues its subdirectories.
-func (w *treeWalker) applyBulk(d walkDir, entries []bulkEntry, tracked []int64) int64 {
+func (w *treeWalker) applyBulk(d walkDir, entries []bulkEntry, s *walkScratch) int64 {
 	var total int64
-	var dirs []walkDir
 	for i := range entries {
 		e := &entries[i]
 		switch {
 		case e.hasType && e.isDir:
-			dirs = append(dirs, w.child(d, e.name))
+			s.dirs = append(s.dirs, w.child(d, e.raw))
 		case e.errno != 0 || !e.hasType || !e.hasSize:
 			// The filesystem could not supply what this entry needs;
 			// size it the slow way so semantics stay those of lstat.
-			fi, err := os.Lstat(filepath.Join(d.path, e.name))
+			fi, err := os.Lstat(joinName(d.path, e.raw))
 			switch {
 			case err != nil:
 			case fi.IsDir():
-				dirs = append(dirs, w.child(d, e.name))
+				s.dirs = append(s.dirs, w.child(d, e.raw))
 			default:
-				total += w.sizeInfo(fi, d.tracked, tracked)
+				total += w.sizeInfo(fi, d.tracked, s.tracked)
 			}
 		default:
 			linked := e.isReg && e.hasLink && e.nlink > 1
@@ -132,10 +163,10 @@ func (w *treeWalker) applyBulk(d walkDir, entries []bulkEntry, tracked []int64) 
 				// widens Stat_t.Dev so both paths key inodes identically.
 				id = fileID{dev: signExtend32(e.dev), ino: e.ino}
 			}
-			total += w.account(allocBlocks(e.alloc), id, linked, d.tracked, tracked)
+			total += w.account(allocBlocks(e.alloc), id, linked, d.tracked, s.tracked)
 		}
 	}
-	w.push(dirs)
+	w.pushScratch(s)
 	return total
 }
 
@@ -148,23 +179,42 @@ func allocBlocks(alloc int64) int64 {
 // decodeBulk parses n records from buf, appending to out. It never reads
 // past buf or a record's own declared length.
 func decodeBulk(buf []byte, n int, out []bulkEntry) ([]bulkEntry, error) {
+	return decodeBulkRecords(buf, n, out, true)
+}
+
+// decodeBulkRecords is decodeBulk with name materialization optional: when
+// names is false only raw is set, so sizing files allocates nothing.
+func decodeBulkRecords(buf []byte, n int, out []bulkEntry, names bool) ([]bulkEntry, error) {
 	off := 0
 	for range n {
-		if len(buf)-off < 4 {
-			return out, errBulkMalformed
-		}
-		recLen := int(binary.NativeEndian.Uint32(buf[off:]))
-		if recLen < minCommonLen || recLen > len(buf)-off {
-			return out, errBulkMalformed
-		}
-		e, err := decodeBulkRecord(buf[off : off+recLen])
+		rec, err := nextBulkRecord(buf, off, minCommonLen)
 		if err != nil {
 			return out, err
 		}
+		e, err := decodeBulkRecord(rec)
+		if err != nil {
+			return out, err
+		}
+		if names {
+			e.name = string(e.raw)
+		}
 		out = append(out, e)
-		off += recLen
+		off += len(rec)
 	}
 	return out, nil
+}
+
+// nextBulkRecord returns the record at off, checking its declared length
+// against minLen and the buffer.
+func nextBulkRecord(buf []byte, off, minLen int) ([]byte, error) {
+	if len(buf)-off < 4 {
+		return nil, errBulkMalformed
+	}
+	recLen := int(binary.NativeEndian.Uint32(buf[off:]))
+	if recLen < minLen || recLen > len(buf)-off {
+		return nil, errBulkMalformed
+	}
+	return buf[off : off+recLen], nil
 }
 
 func decodeBulkRecord(rec []byte) (bulkEntry, error) {
@@ -174,11 +224,11 @@ func decodeBulkRecord(rec []byte) (bulkEntry, error) {
 	if retCommon&unix.ATTR_CMN_NAME == 0 {
 		return bulkEntry{}, errBulkMalformed
 	}
-	name, err := bulkName(rec)
+	raw, err := bulkNameAt(rec, offNameRef)
 	if err != nil {
 		return bulkEntry{}, err
 	}
-	e := bulkEntry{name: name}
+	e := bulkEntry{raw: raw}
 	if retCommon&unix.ATTR_CMN_ERROR != 0 {
 		e.errno = ne.Uint32(rec[offError:])
 	}
@@ -190,10 +240,7 @@ func decodeBulkRecord(rec []byte) (bulkEntry, error) {
 		return e, nil
 	}
 	if retFile&unix.ATTR_FILE_ALLOCSIZE != 0 {
-		// off_t is signed; a negative allocation is treated as unknown.
-		if v := ne.Uint64(rec[offAllocSize:]); v <= math.MaxInt64 {
-			e.alloc, e.hasSize = int64(v), true
-		}
+		e.alloc, e.hasSize = allocAt(rec, offAllocSize)
 	}
 	const idBits = unix.ATTR_CMN_DEVID | unix.ATTR_CMN_FILEID
 	if retCommon&idBits == idBits && retFile&unix.ATTR_FILE_LINKCOUNT != 0 {
@@ -205,27 +252,37 @@ func decodeBulkRecord(rec []byte) (bulkEntry, error) {
 	return e, nil
 }
 
-// bulkName resolves the ATTR_CMN_NAME attrreference_t, whose offset is
-// relative to the reference itself and whose length includes the NUL.
-func bulkName(rec []byte) (string, error) {
+// allocAt reads an off_t allocation; off_t is signed, and a negative
+// allocation is treated as unknown.
+func allocAt(rec []byte, off int) (int64, bool) {
+	if v := binary.NativeEndian.Uint64(rec[off:]); v <= math.MaxInt64 {
+		return int64(v), true
+	}
+	return 0, false
+}
+
+// bulkNameAt resolves the ATTR_CMN_NAME attrreference_t at ref, whose
+// offset is relative to the reference itself and whose length includes the
+// NUL. The name bytes are returned in place.
+func bulkNameAt(rec []byte, ref int) ([]byte, error) {
 	ne := binary.NativeEndian
-	rel := int64(ne.Uint32(rec[offNameRef:])) // attrreference_t offset is an int32
+	rel := int64(ne.Uint32(rec[ref:])) // attrreference_t offset is an int32
 	if rel >= 1<<31 {
 		rel -= 1 << 32
 	}
-	size := int64(ne.Uint32(rec[offNameRef+4:]))
-	start := offNameRef + rel
+	size := int64(ne.Uint32(rec[ref+4:]))
+	start := int64(ref) + rel
 	if start < 0 || size < 1 || start+size > int64(len(rec)) {
-		return "", errBulkMalformed
+		return nil, errBulkMalformed
 	}
 	b := rec[start : start+size]
 	if i := indexNUL(b); i >= 0 {
 		b = b[:i]
 	}
 	if len(b) == 0 {
-		return "", errBulkMalformed
+		return nil, errBulkMalformed
 	}
-	return string(b), nil
+	return b, nil
 }
 
 // signExtend32 widens a signed 32-bit dev_t carried as uint32 the way
@@ -260,10 +317,16 @@ func openDirFD(path string) (int, error) {
 // expose. It returns the number of records packed into buf; 0 means the
 // directory is exhausted.
 func getattrlistbulk(fd int, buf []byte) (int, error) {
+	return getattrlistbulkAttrs(fd, buf, bulkCommonAttrs, bulkFileAttrs)
+}
+
+// getattrlistbulkAttrs is getattrlistbulk requesting the given common and
+// file attribute sets.
+func getattrlistbulkAttrs(fd int, buf []byte, common, file uint32) (int, error) {
 	al := unix.Attrlist{
 		Bitmapcount: unix.ATTR_BIT_MAP_COUNT,
-		Commonattr:  bulkCommonAttrs,
-		Fileattr:    bulkFileAttrs,
+		Commonattr:  common,
+		Fileattr:    file,
 	}
 	for {
 		// x/sys/unix has no libSystem wrapper for getattrlistbulk; Syscall6

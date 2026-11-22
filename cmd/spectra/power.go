@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/helperclient"
 	"github.com/kaeawc/spectra/internal/powerlog"
+	"github.com/kaeawc/spectra/internal/powerreport"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
 )
@@ -87,58 +88,21 @@ func (m powerMode) String() string {
 	}
 }
 
-// PowerReport is the stable JSON envelope emitted by `spectra power --json`.
-// Field names match across modes; backends fill what they can and missing
-// data is omitted rather than zeroed.
-type PowerReport struct {
-	IntervalMS int64                    `json:"interval_ms"`
-	Mode       string                   `json:"mode"`
-	SampledAt  time.Time                `json:"sampled_at"`
-	Battery    *BatteryInfo             `json:"battery,omitempty"`
-	Thermal    *ThermalInfo             `json:"thermal,omitempty"`
-	Assertions []sysinfo.PowerAssertion `json:"assertions,omitempty"`
-	Package    *PackageEnergy           `json:"package,omitempty"`
-	Processes  []ProcessEnergy          `json:"processes,omitempty"`
-	Skipped    int                      `json:"skipped,omitempty"`
-	Notes      []string                 `json:"notes,omitempty"`
-}
+// The report types and baseline assembly live in internal/powerreport so the
+// daemon serves the same JSON.
+type (
+	PowerReport    = powerreport.Report
+	BatteryInfo    = powerreport.BatteryInfo
+	ThermalInfo    = powerreport.ThermalInfo
+	PackageEnergy  = powerreport.PackageEnergy
+	ProcessWakeups = powerreport.ProcessWakeups
+	ProcessEnergy  = powerreport.ProcessEnergy
+)
 
-type BatteryInfo struct {
-	OnBattery bool `json:"on_battery"`
-	Pct       int  `json:"pct,omitempty"`
-}
+func fillPowerStateSections(r *PowerReport, s sysinfo.PowerState) { powerreport.FillState(r, s) }
 
-type ThermalInfo struct {
-	Pressure                string `json:"pressure,omitempty"`
-	Throttled               bool   `json:"throttled,omitempty"`
-	CPUSpeedLimitPct        int    `json:"cpu_speed_limit_pct,omitempty"`
-	LowestCPUSpeedLimitPct  int    `json:"lowest_cpu_speed_limit_pct,omitempty"`
-	AverageCPUSpeedLimitPct int    `json:"average_cpu_speed_limit_pct,omitempty"`
-	PercentThermalThrottled int    `json:"percent_thermal_throttled,omitempty"`
-}
-
-type PackageEnergy struct {
-	Joules     float64 `json:"joules,omitempty"`
-	CPUJoules  float64 `json:"cpu_joules,omitempty"`
-	GPUJoules  float64 `json:"gpu_joules,omitempty"`
-	ANEJoules  float64 `json:"ane_joules,omitempty"`
-	DRAMJoules float64 `json:"dram_joules,omitempty"`
-	IntervalNS int64   `json:"interval_ns,omitempty"`
-}
-
-type ProcessWakeups struct {
-	Interrupt uint64 `json:"interrupt,omitempty"`
-	PkgIdle   uint64 `json:"pkg_idle,omitempty"`
-}
-
-type ProcessEnergy struct {
-	PID            int                      `json:"pid"`
-	Command        string                   `json:"command,omitempty"`
-	BilledEnergyNJ uint64                   `json:"billed_energy_nj,omitempty"`
-	GPUTimeNs      uint64                   `json:"gpu_time_ns,omitempty"`
-	Wakeups        *ProcessWakeups          `json:"wakeups,omitempty"`
-	Impact         *sysinfo.ImpactBreakdown `json:"impact,omitempty"`
-	Source         string                   `json:"source"`
+func processesFromEnergyTopUsers(users []sysinfo.EnergyUser) []ProcessEnergy {
+	return powerreport.ProcessesFromEnergyTopUsers(users)
 }
 
 func runPowerWithIO(args []string, stdout, stderr io.Writer, deps powerDeps) int {
@@ -335,41 +299,6 @@ func collectPower(_, stderr io.Writer, deps powerDeps, cfg powerRunCfg) (PowerRe
 		return report, 0, true
 	}
 	return report, 0, true
-}
-
-func fillPowerStateSections(r *PowerReport, s sysinfo.PowerState) {
-	if s.OnBattery || s.BatteryPct > 0 {
-		r.Battery = &BatteryInfo{OnBattery: s.OnBattery, Pct: s.BatteryPct}
-	}
-	if s.ThermalPressure != "" || s.ThermalThrottled || s.CPUSpeedLimitPct > 0 {
-		r.Thermal = &ThermalInfo{
-			Pressure:                s.ThermalPressure,
-			Throttled:               s.ThermalThrottled,
-			CPUSpeedLimitPct:        s.CPUSpeedLimitPct,
-			LowestCPUSpeedLimitPct:  s.LowestCPUSpeedLimitPct,
-			AverageCPUSpeedLimitPct: s.AverageCPUSpeedLimitPct,
-			PercentThermalThrottled: s.PercentThermalThrottled,
-		}
-	}
-	if len(s.Assertions) > 0 {
-		r.Assertions = s.Assertions
-	}
-}
-
-func processesFromEnergyTopUsers(users []sysinfo.EnergyUser) []ProcessEnergy {
-	if len(users) == 0 {
-		return nil
-	}
-	rows := make([]ProcessEnergy, 0, len(users))
-	for _, u := range users {
-		rows = append(rows, ProcessEnergy{
-			PID:     u.PID,
-			Command: u.Command,
-			Impact:  &sysinfo.ImpactBreakdown{Total: u.EnergyImpact, FromEnergy: u.EnergyImpact},
-			Source:  "top",
-		})
-	}
-	return rows
 }
 
 func processesFromRusage(deltas []sysinfo.EnergyDelta, assertions []sysinfo.PowerAssertion, top int) []ProcessEnergy {

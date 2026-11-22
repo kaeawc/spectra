@@ -341,7 +341,9 @@ read (usually TCC-protected), whose contents are missing from the totals.
 Long-lived callers (the MCP server's storage, triage and live-rules tools)
 may serve a footprint up to 24 hours old with `user_footprint_stale: true`
 while one background walk refreshes it; MCP snapshot create/baseline always
-read it fresh. `spectra rules` accepts a cached footprint up to 24 hours old
+read it fresh. `spectra snapshot [--fresh]` reads the same cache with the same
+policy as `spectra storage`, so a snapshot within 10 minutes of a storage run
+(or another snapshot) skips the walk. `spectra rules` accepts a cached footprint up to 24 hours old
 without refreshing and walks only when none is cached; the
 `library-storage-footprint` finding says when the footprint was measured.
 

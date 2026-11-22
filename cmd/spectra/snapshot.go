@@ -50,6 +50,7 @@ func runSnapshot(args []string) int {
 	noStore := fs.Bool("no-store", false, "Do not persist the snapshot to the local database")
 	baseline := fs.Bool("baseline", false, "Save as a baseline (immutable; never auto-pruned)")
 	name := fs.String("name", "", "Human label for the snapshot (most useful with --baseline)")
+	fresh := fs.Bool("fresh", false, "Re-walk ~/Library instead of using a footprint cached within the last 10 minutes")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -65,6 +66,7 @@ func runSnapshot(args []string) int {
 		DetectOpts:     detect.Options{ScanNetwork: *withNetwork, AssessGatekeeper: *assessGatekeeper, SealCache: sealCache()},
 		SkipApps:       *skipApps,
 	}
+	withCLIFootprintCache(&opts, *fresh)
 	snap := snapshot.Build(context.Background(), opts)
 	if *baseline {
 		snap.Kind = snapshot.KindBaseline
@@ -87,6 +89,14 @@ func runSnapshot(args []string) int {
 	}
 	printSnapshot(snap)
 	return 0
+}
+
+// withCLIFootprintCache serves the snapshot's ~/Library footprint from the
+// cache `spectra storage` uses, with the same policy, so a snapshot taken
+// soon after a storage run (or another snapshot) skips the full walk. The
+// fresh-only default keeps persisted footprints within 10 minutes of capture.
+func withCLIFootprintCache(opts *snapshot.Options, fresh bool) {
+	opts.FootprintCache, opts.FootprintPolicy = cliFootprintCache(fresh)
 }
 
 func runSnapshotCreate(args []string) int {

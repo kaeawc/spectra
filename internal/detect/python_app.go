@@ -1,8 +1,7 @@
 package detect
 
 import (
-	"bytes"
-	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/kaeawc/spectra/internal/proc"
 )
-
-var errStopPythonWalk = errors.New("stop python app walk")
 
 // Compiled once at package load — these were previously rebuilt on every call
 // (some inside directory walks, i.e. per file).
@@ -26,7 +23,16 @@ var (
 type pythonAppFS interface {
 	Stat(name string) (fs.FileInfo, error)
 	ReadFile(name string) ([]byte, error)
+	// Open streams a file so large binaries are scanned in chunks instead of
+	// being read whole.
+	Open(name string) (pythonAppFile, error)
 	WalkDir(root string, fn fs.WalkDirFunc) error
+}
+
+type pythonAppFile interface {
+	io.Reader
+	io.ReaderAt
+	io.Closer
 }
 
 type pythonCommandRunner interface {
@@ -43,6 +49,10 @@ func (osPythonAppFS) ReadFile(name string) ([]byte, error) {
 	return os.ReadFile(name)
 }
 
+func (osPythonAppFS) Open(name string) (pythonAppFile, error) {
+	return os.Open(name)
+}
+
 func (osPythonAppFS) WalkDir(root string, fn fs.WalkDirFunc) error {
 	return filepath.WalkDir(root, fn)
 }
@@ -56,6 +66,10 @@ func (execPythonCommandRunner) Run(name string, args ...string) ([]byte, error) 
 type pythonAppScanner struct {
 	fs       pythonAppFS
 	commands pythonCommandRunner
+	// chunk and tokenCap override pythonScanChunk and pythonMaxTokenCarry;
+	// tests shrink them to exercise chunk boundaries and the long-token path.
+	chunk    int
+	tokenCap int
 }
 
 func scanPythonApp(appPath string) *PythonApp {
@@ -65,6 +79,28 @@ func scanPythonApp(appPath string) *PythonApp {
 	}.Scan(appPath)
 }
 
+// pythonScan is the per-Scan state. Every detection pass reads the bundle
+// through it so Contents is walked once and each file is opened at most once:
+// walks are recorded and replayed per sub-root, file marker hits and parsed
+// version files are cached by path.
+type pythonScan struct {
+	pythonAppScanner
+	contents string
+	macos    string
+	walks    map[string][]pythonWalkEntry
+	markers  map[string]pythonFileMarkers
+	versions map[string]string
+	buf      []byte
+}
+
+// pythonWalkEntry is one recorded WalkDir callback. A non-nil err marks the
+// point where an original per-root walk would have aborted.
+type pythonWalkEntry struct {
+	path string
+	d    fs.DirEntry
+	err  error
+}
+
 func (s pythonAppScanner) Scan(appPath string) *PythonApp {
 	if s.fs == nil {
 		s.fs = osPythonAppFS{}
@@ -72,18 +108,27 @@ func (s pythonAppScanner) Scan(appPath string) *PythonApp {
 	if s.commands == nil {
 		s.commands = execPythonCommandRunner{}
 	}
-
 	contents := filepath.Join(appPath, "Contents")
-	resources := filepath.Join(contents, "Resources")
+	sc := &pythonScan{
+		pythonAppScanner: s,
+		contents:         contents,
+		macos:            filepath.Join(contents, "MacOS"),
+		walks:            map[string][]pythonWalkEntry{},
+		markers:          map[string]pythonFileMarkers{},
+		versions:         map[string]string{},
+	}
+	return sc.scan(appPath)
+}
+
+func (s *pythonScan) scan(appPath string) *PythonApp {
+	resources := filepath.Join(s.contents, "Resources")
 	app := &PythonApp{
-		Packaging:     s.detectPythonPackaging(contents, resources),
+		Packaging:     s.detectPythonPackaging(s.contents, resources),
 		RuntimeSource: "unknown",
 	}
 	app.RuntimeSource, app.RuntimePath = s.resolvePythonRuntime(appPath)
 	app.Version = s.detectPythonVersion(appPath, app.RuntimePath)
 	app.ModuleRoots = s.pythonModuleRoots(appPath)
-	// One walk of Contents collects both dist-info packages and .so native
-	// extensions; they used to be two independent full-tree walks.
 	app.Packages, app.NativeExtensions = s.pythonPackagesAndExtensions(appPath)
 	app.RiskHints = s.pythonRiskHints(appPath, app)
 
@@ -93,7 +138,62 @@ func (s pythonAppScanner) Scan(appPath string) *PythonApp {
 	return app
 }
 
-func (s pythonAppScanner) detectPythonPackaging(contents, resources string) string {
+// entries returns the WalkDir callbacks that a walk rooted at root would
+// produce, up to (not including) the first error that would abort it. When
+// the recorded Contents walk covers root, root's entries are the contiguous
+// pre-order block under it; otherwise (Contents missing, a symlink, or
+// unreadable) root is walked on its own.
+func (s *pythonScan) entries(root string) []pythonWalkEntry {
+	if root != s.contents {
+		all := s.walk(s.contents)
+		if len(all) > 0 && all[0].err == nil && all[0].d != nil && all[0].d.IsDir() &&
+			(len(all) < 2 || all[1].err == nil || all[1].path != s.contents) {
+			return truncateAtWalkError(subtreeEntries(all, root))
+		}
+	}
+	return truncateAtWalkError(s.walk(root))
+}
+
+func (s *pythonScan) walk(root string) []pythonWalkEntry {
+	if w, ok := s.walks[root]; ok {
+		return w
+	}
+	var w []pythonWalkEntry
+	_ = s.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		w = append(w, pythonWalkEntry{path: path, d: d, err: err})
+		return nil
+	})
+	s.walks[root] = w
+	return w
+}
+
+func subtreeEntries(all []pythonWalkEntry, root string) []pythonWalkEntry {
+	prefix := root + string(filepath.Separator)
+	start := -1
+	for i, e := range all {
+		in := e.path == root || strings.HasPrefix(e.path, prefix)
+		if in && start < 0 {
+			start = i
+		} else if !in && start >= 0 {
+			return all[start:i]
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	return all[start:]
+}
+
+func truncateAtWalkError(entries []pythonWalkEntry) []pythonWalkEntry {
+	for i, e := range entries {
+		if e.err != nil {
+			return entries[:i]
+		}
+	}
+	return entries
+}
+
+func (s *pythonScan) detectPythonPackaging(contents, resources string) string {
 	switch {
 	case s.exists(filepath.Join(resources, "__boot__.py")) || s.exists(filepath.Join(resources, "python-libraries.zip")):
 		return "py2app"
@@ -103,14 +203,14 @@ func (s pythonAppScanner) detectPythonPackaging(contents, resources string) stri
 		return "briefcase"
 	case s.hasNuitkaMarker(contents):
 		return "nuitka"
-	case s.launcherReferencesPython(contents):
+	case s.launcherReferencesPython():
 		return "custom"
 	default:
 		return "unknown"
 	}
 }
 
-func (s pythonAppScanner) resolvePythonRuntime(appPath string) (string, string) {
+func (s *pythonScan) resolvePythonRuntime(appPath string) (string, string) {
 	candidates := []struct {
 		source string
 		path   string
@@ -128,18 +228,18 @@ func (s pythonAppScanner) resolvePythonRuntime(appPath string) (string, string) 
 	if p := s.firstMatchingFile(filepath.Join(appPath, "Contents", "Frameworks"), `libpython*.dylib`); p != "" {
 		return "bundled-dylib", relToApp(appPath, p)
 	}
-	if p := s.externalInterpreterFromLaunchers(appPath); p != "" {
+	if p := s.externalInterpreterFromLaunchers(); p != "" {
 		return pythonRuntimeSourceForPath(p), p
 	}
 	return "unknown", ""
 }
 
-func (s pythonAppScanner) detectPythonVersion(appPath, runtimePath string) string {
+func (s *pythonScan) detectPythonVersion(appPath, runtimePath string) string {
 	if runtimePath == "" {
-		return s.versionFromLayout(appPath)
+		return s.versionFromLayout()
 	}
 	if filepath.IsAbs(runtimePath) {
-		return s.versionFromLayout(appPath)
+		return s.versionFromLayout()
 	}
 	abs := filepath.Join(appPath, runtimePath)
 	for _, path := range []string{
@@ -151,10 +251,10 @@ func (s pythonAppScanner) detectPythonVersion(appPath, runtimePath string) strin
 			return v
 		}
 	}
-	return s.versionFromLayout(appPath)
+	return s.versionFromLayout()
 }
 
-func (s pythonAppScanner) pythonModuleRoots(appPath string) []string {
+func (s *pythonScan) pythonModuleRoots(appPath string) []string {
 	candidates := []string{
 		filepath.Join(appPath, "Contents", "Resources", "app"),
 		filepath.Join(appPath, "Contents", "Resources", "app_packages"),
@@ -174,26 +274,21 @@ func (s pythonAppScanner) pythonModuleRoots(appPath string) []string {
 	return dedupePythonStrings(roots)
 }
 
-// pythonPackagesAndExtensions walks Contents once, collecting both installed
-// packages (dist-info/egg-info METADATA) and compiled .so native extensions.
-// Splitting these into two walks doubled the traversal of large bundles for no
-// benefit; the matching and sort order here are identical to the originals.
-func (s pythonAppScanner) pythonPackagesAndExtensions(appPath string) ([]PythonPackage, []PythonNativeExtension) {
+// pythonPackagesAndExtensions collects installed packages (dist-info/egg-info
+// METADATA) and compiled .so native extensions from the Contents walk.
+func (s *pythonScan) pythonPackagesAndExtensions(appPath string) ([]PythonPackage, []PythonNativeExtension) {
 	var packages []PythonPackage
 	var exts []PythonNativeExtension
-	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, e := range s.entries(s.contents) {
+		if e.d == nil || e.d.IsDir() {
+			continue
 		}
-		if d == nil || d.IsDir() {
-			return nil
-		}
-		name := d.Name()
+		path, name := e.path, e.d.Name()
 		switch {
 		case name == "METADATA" || name == "PKG-INFO":
 			parent := filepath.Base(filepath.Dir(path))
 			if !strings.HasSuffix(parent, ".dist-info") && !strings.HasSuffix(parent, ".egg-info") {
-				return nil
+				continue
 			}
 			if data, readErr := s.fs.ReadFile(path); readErr == nil {
 				pkg := parsePythonPackageMetadata(data)
@@ -211,8 +306,7 @@ func (s pythonAppScanner) pythonPackagesAndExtensions(appPath string) ([]PythonP
 			}
 			exts = append(exts, ext)
 		}
-		return nil
-	})
+	}
 	sort.Slice(packages, func(i, j int) bool {
 		if packages[i].Name == packages[j].Name {
 			return packages[i].Path < packages[j].Path
@@ -223,7 +317,7 @@ func (s pythonAppScanner) pythonPackagesAndExtensions(appPath string) ([]PythonP
 	return packages, exts
 }
 
-func (s pythonAppScanner) pythonRiskHints(appPath string, app *PythonApp) []string {
+func (s *pythonScan) pythonRiskHints(appPath string, app *PythonApp) []string {
 	var hints []string
 	if app.RuntimePath != "" && filepath.IsAbs(app.RuntimePath) {
 		hints = append(hints, "external interpreter path")
@@ -238,7 +332,7 @@ func (s pythonAppScanner) pythonRiskHints(appPath string, app *PythonApp) []stri
 			hints = append(hints, "writable module root: "+root)
 		}
 	}
-	if s.launcherContainsAny(appPath, []string{"PYTHONPATH=", "PYTHONUSERBASE=", "DYLD_LIBRARY_PATH=", "DYLD_INSERT_LIBRARIES="}) {
+	if s.anyLauncher(func(m pythonFileMarkers) bool { return m.envSensitive }) {
 		hints = append(hints, "environment-sensitive launcher")
 	}
 	return dedupePythonStrings(hints)
@@ -269,146 +363,92 @@ func (s pythonAppScanner) exists(path string) bool {
 	return err == nil
 }
 
-func (s pythonAppScanner) hasGlob(root, pattern string) bool {
-	var found bool
-	_ = s.fs.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d == nil || d.IsDir() || found {
-			return nil
-		}
-		ok, _ := filepath.Match(pattern, d.Name())
-		if ok {
-			found = true
-			return errStopPythonWalk
-		}
-		return nil
-	})
-	return found
+func (s *pythonScan) hasGlob(root, pattern string) bool {
+	return s.firstMatchingFile(root, pattern) != ""
 }
 
-func (s pythonAppScanner) firstMatchingFile(root, pattern string) string {
-	var found string
-	_ = s.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+func (s *pythonScan) firstMatchingFile(root, pattern string) string {
+	for _, e := range s.entries(root) {
+		if e.d == nil || e.d.IsDir() {
+			continue
 		}
-		if d == nil || d.IsDir() || found != "" {
-			return nil
+		if ok, _ := filepath.Match(pattern, e.d.Name()); ok {
+			return e.path
 		}
-		ok, _ := filepath.Match(pattern, d.Name())
-		if ok {
-			found = path
-			return errStopPythonWalk
-		}
-		return nil
-	})
-	return found
+	}
+	return ""
 }
 
-func (s pythonAppScanner) hasNuitkaMarker(root string) bool {
-	var found bool
-	_ = s.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+func (s *pythonScan) hasNuitkaMarker(root string) bool {
+	for _, e := range s.entries(root) {
+		if e.d == nil || e.d.IsDir() {
+			continue
 		}
-		if d == nil || d.IsDir() || found {
-			return nil
-		}
-		name := strings.ToLower(d.Name())
+		name := strings.ToLower(e.d.Name())
 		if strings.Contains(name, "nuitka") {
-			found = true
-			return errStopPythonWalk
+			return true
 		}
-		if strings.HasSuffix(name, ".so") {
-			data, err := s.fs.ReadFile(path)
-			if err == nil && bytes.Contains(bytes.ToLower(data), []byte("nuitka")) {
-				found = true
-				return errStopPythonWalk
+		if strings.HasSuffix(name, ".so") && s.fileMarkers(e).nuitka {
+			return true
+		}
+	}
+	return false
+}
+
+// launcherReferencesPython reports whether any file under Contents/MacOS
+// contains "python", "Python.framework" or "libpython".
+func (s *pythonScan) launcherReferencesPython() bool {
+	return s.anyLauncher(func(m pythonFileMarkers) bool { return m.launcherPython })
+}
+
+func (s *pythonScan) anyLauncher(hit func(pythonFileMarkers) bool) bool {
+	for _, e := range s.entries(s.macos) {
+		if e.d != nil && !e.d.IsDir() && hit(s.fileMarkers(e)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *pythonScan) externalInterpreterFromLaunchers() string {
+	for _, e := range s.entries(s.macos) {
+		if e.d == nil || e.d.IsDir() {
+			continue
+		}
+		if p := s.fileMarkers(e).interpreter; p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+func (s *pythonScan) versionFromLayout() string {
+	for _, e := range s.entries(s.contents) {
+		if e.d == nil {
+			continue
+		}
+		if m := pythonLayoutVersionRE.FindStringSubmatch(e.d.Name()); len(m) == 2 {
+			return m[1]
+		}
+		if e.d.Name() == "pyvenv.cfg" {
+			if v := s.versionFromFile(e.path); v != "" {
+				return v
 			}
 		}
-		return nil
-	})
-	return found
+	}
+	return ""
 }
 
-func (s pythonAppScanner) launcherReferencesPython(contents string) bool {
-	return s.launcherContainsAny(filepath.Dir(contents), []string{"python", "Python.framework", "libpython"})
+func (s *pythonScan) versionFromFile(path string) string {
+	if v, ok := s.versions[path]; ok {
+		return v
+	}
+	v := s.readVersionFile(path)
+	s.versions[path] = v
+	return v
 }
 
-func (s pythonAppScanner) launcherContainsAny(appPath string, needles []string) bool {
-	macos := filepath.Join(appPath, "Contents", "MacOS")
-	var found bool
-	_ = s.fs.WalkDir(macos, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d == nil || d.IsDir() || found {
-			return nil
-		}
-		data, readErr := s.fs.ReadFile(path)
-		if readErr == nil {
-			for _, needle := range needles {
-				if bytes.Contains(data, []byte(needle)) {
-					found = true
-					return errStopPythonWalk
-				}
-			}
-		}
-		return nil
-	})
-	return found
-}
-
-func (s pythonAppScanner) externalInterpreterFromLaunchers(appPath string) string {
-	re := externalPythonInterpreterRE
-	var found string
-	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents", "MacOS"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d == nil || d.IsDir() || found != "" {
-			return nil
-		}
-		data, readErr := s.fs.ReadFile(path)
-		if readErr == nil {
-			if m := re.FindSubmatch(data); len(m) > 1 {
-				found = string(m[1])
-				return errStopPythonWalk
-			}
-		}
-		return nil
-	})
-	return found
-}
-
-func (s pythonAppScanner) versionFromLayout(appPath string) string {
-	re := pythonLayoutVersionRE
-	var version string
-	_ = s.fs.WalkDir(filepath.Join(appPath, "Contents"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d == nil || version != "" {
-			return nil
-		}
-		if m := re.FindStringSubmatch(d.Name()); len(m) == 2 {
-			version = m[1]
-			return errStopPythonWalk
-		}
-		if d.Name() == "pyvenv.cfg" {
-			version = s.versionFromFile(path)
-			if version != "" {
-				return errStopPythonWalk
-			}
-		}
-		return nil
-	})
-	return version
-}
-
-func (s pythonAppScanner) versionFromFile(path string) string {
+func (s *pythonScan) readVersionFile(path string) string {
 	data, err := s.fs.ReadFile(path)
 	if err != nil {
 		return ""

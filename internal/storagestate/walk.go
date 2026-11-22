@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -13,9 +14,15 @@ import (
 // directory with millions of entries does not balloon memory.
 const readDirBatch = 512
 
-// maxWalkWorkers caps directory-reading concurrency. More than this mostly
-// adds contention in the filesystem layer without improving throughput.
-const maxWalkWorkers = 16
+// maxWalkWorkers caps directory-reading concurrency, further bounded by
+// GOMAXPROCS. Measured on a real ~/Library, more readers than this mostly
+// add kernel contention (sys time) without shortening the walk.
+const maxWalkWorkers = 4
+
+// walkWorkers bounds limit by GOMAXPROCS, never below one.
+func walkWorkers(limit int) int {
+	return max(1, min(limit, runtime.GOMAXPROCS(0)))
+}
 
 // treeUsage is the on-disk usage of one directory tree.
 type treeUsage struct {
@@ -73,6 +80,14 @@ type treeWalker struct {
 	res   treeUsage
 }
 
+// walkScratch is one worker's reusable state, so reading a directory
+// allocates only for the subdirectories it queues.
+type walkScratch struct {
+	tracked []int64
+	dirs    []walkDir
+	bulk    bulkScratch
+}
+
 // walkTree returns the on-disk usage of root, plus the usage beneath each
 // tracked path that lies under root, all from one traversal. A missing root
 // yields a zero result.
@@ -83,6 +98,12 @@ func walkTree(root string, tracked ...string) treeUsage {
 // walkTreeWith is walkTree with the bulk directory reader optionally
 // disabled.
 func walkTreeWith(lstatOnly bool, root string, tracked ...string) treeUsage {
+	return walkTreeWorkers(lstatOnly, 0, root, tracked...)
+}
+
+// walkTreeWorkers is walkTreeWith with an explicit reader count, for
+// benchmarks; workers <= 0 picks the default.
+func walkTreeWorkers(lstatOnly bool, workers int, root string, tracked ...string) treeUsage {
 	root = filepath.Clean(root)
 	tracked = slices.Clone(tracked)
 	for i := range tracked {
@@ -109,7 +130,9 @@ func walkTreeWith(lstatOnly bool, root string, tracked ...string) treeUsage {
 	w.queue = []walkDir{{path: root, tracked: w.trackedAt(root, nil)}}
 	w.pending = 1
 
-	workers := min(maxWalkWorkers, 2*runtime.GOMAXPROCS(0))
+	if workers <= 0 {
+		workers = walkWorkers(maxWalkWorkers)
+	}
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Add(1)
@@ -123,6 +146,8 @@ func walkTreeWith(lstatOnly bool, root string, tracked ...string) treeUsage {
 }
 
 func (w *treeWalker) work() {
+	s := &walkScratch{tracked: make([]int64, len(w.tracked))}
+	defer s.bulk.release()
 	for {
 		w.mu.Lock()
 		for len(w.queue) == 0 && w.pending > 0 {
@@ -134,10 +159,11 @@ func (w *treeWalker) work() {
 		}
 		// LIFO keeps the queue shallow (depth-first) on wide trees.
 		d := w.queue[len(w.queue)-1]
+		w.queue[len(w.queue)-1] = walkDir{}
 		w.queue = w.queue[:len(w.queue)-1]
 		w.mu.Unlock()
 
-		w.readDir(d)
+		w.readDir(d, s)
 
 		w.mu.Lock()
 		w.pending--
@@ -148,6 +174,7 @@ func (w *treeWalker) work() {
 	}
 }
 
+// push queues dirs (copying them, so the caller may reuse the slice).
 func (w *treeWalker) push(dirs []walkDir) {
 	if len(dirs) == 0 {
 		return
@@ -163,14 +190,37 @@ func (w *treeWalker) push(dirs []walkDir) {
 	}
 }
 
-// child derives the queue item for subdirectory name of d.
-func (w *treeWalker) child(d walkDir, name string) walkDir {
-	path := filepath.Join(d.path, name)
+// pushScratch queues s.dirs and resets it for reuse.
+func (w *treeWalker) pushScratch(s *walkScratch) {
+	w.push(s.dirs)
+	clear(s.dirs)
+	s.dirs = s.dirs[:0]
+}
+
+// child derives the queue item for subdirectory name of d. The name is
+// copied into the new path, so it may alias a reader's buffer.
+func (w *treeWalker) child(d walkDir, name []byte) walkDir {
+	path := joinName(d.path, name)
 	top := d.top
 	if d.path == w.root {
-		top = name
+		top = path[len(path)-len(name):]
 	}
 	return walkDir{path: path, top: top, tracked: w.trackedAt(path, d.tracked)}
+}
+
+// joinName appends one directory entry name, which never contains a
+// separator, to a clean directory path: filepath.Join for such inputs,
+// without re-cleaning the path or a separate copy of name.
+func joinName(dir string, name []byte) string {
+	if dir == "." {
+		// filepath.Join drops the "./", and tracked paths are cleaned the
+		// same way, so trackedAt must see "sub", not "./sub".
+		return string(name)
+	}
+	if strings.HasSuffix(dir, "/") {
+		return dir + string(name)
+	}
+	return dir + "/" + string(name)
 }
 
 // trackedAt extends inherited with the tracked paths equal to path.
@@ -190,26 +240,26 @@ func (w *treeWalker) trackedAt(path string, inherited []int) []int {
 // readDir sizes the files directly inside d and queues its subdirectories.
 // It prefers the platform bulk reader and falls back to one lstat per entry
 // when that reader is unavailable for the directory.
-func (w *treeWalker) readDir(d walkDir) {
-	tracked := make([]int64, len(w.tracked))
+func (w *treeWalker) readDir(d walkDir, s *walkScratch) {
+	clear(s.tracked)
 	total, ok := int64(0), false
 	if !w.lstatOnly {
-		total, ok = w.readDirBulk(d, tracked)
+		total, ok = w.readDirBulkWith(d, s)
 	}
 	if !ok {
-		total = w.readDirLstat(d, tracked)
+		total = w.readDirLstat(d, s)
 	}
 	w.resMu.Lock()
 	w.res.Total += total
 	w.res.Top[d.top] += total
-	for i, b := range tracked {
+	for i, b := range s.tracked {
 		w.res.Tracked[i] += b
 	}
 	w.resMu.Unlock()
 }
 
 // readDirLstat reads d with ReadDir and lstats each non-directory entry.
-func (w *treeWalker) readDirLstat(d walkDir, tracked []int64) int64 {
+func (w *treeWalker) readDirLstat(d walkDir, s *walkScratch) int64 {
 	f, err := os.Open(d.path)
 	if err != nil {
 		w.addSkipped()
@@ -220,15 +270,14 @@ func (w *treeWalker) readDirLstat(d walkDir, tracked []int64) int64 {
 	var total int64
 	for {
 		entries, err := f.ReadDir(readDirBatch)
-		var dirs []walkDir
 		for _, e := range entries {
 			if e.IsDir() {
-				dirs = append(dirs, w.child(d, e.Name()))
+				s.dirs = append(s.dirs, w.child(d, []byte(e.Name())))
 				continue
 			}
-			total += w.sizeEntry(e, d.tracked, tracked)
+			total += w.sizeEntry(e, d.tracked, s.tracked)
 		}
-		w.push(dirs)
+		w.pushScratch(s)
 		if err != nil {
 			if err != io.EOF {
 				w.addSkipped()
