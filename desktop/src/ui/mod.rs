@@ -13,11 +13,14 @@ mod network;
 mod process;
 mod quit;
 mod startup;
+mod storage;
 mod system;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_startup;
+#[cfg(test)]
+mod tests_storage;
 #[cfg(test)]
 mod tests_system;
 #[cfg(test)]
@@ -95,6 +98,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::Activity, "activity".into(), None, k));
     sb = sb.child(place(s, Nav::Network, "network".into(), None, k));
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
+    sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
         let kinds = Category::ALL.iter().zip(s.stats.kinds).map(|(&c, n)| {
@@ -143,6 +147,8 @@ enum Page<'a> {
     Network,
     /// What starts at login or boot.
     Startup,
+    /// Where disk space went.
+    Storage,
     List,
 }
 
@@ -167,6 +173,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Activity => Page::Activity,
         Nav::Network => Page::Network,
         Nav::Startup => Page::Startup,
+        Nav::Storage => Page::Storage,
         _ => Page::List,
     }
 }
@@ -193,6 +200,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Activity => (activity::page(s, &k), s.nav.title().to_owned()),
         Page::Network => (network::page(s, &k), s.nav.title().to_owned()),
         Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
+        Page::Storage => (storage::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             // Lines in "Right now" are something to look at too.
             let problems = match s.problems() {

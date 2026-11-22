@@ -76,6 +76,8 @@ pub enum Nav {
     Network,
     /// What starts at login or boot, and the background services.
     Startup,
+    /// Where disk space went: free room, the biggest folders, Time Machine snapshots.
+    Storage,
 }
 
 impl Nav {
@@ -90,6 +92,7 @@ impl Nav {
             Nav::Activity => "Activity",
             Nav::Network => "Network",
             Nav::Startup => "Startup",
+            Nav::Storage => "Storage",
         }
     }
 
@@ -100,6 +103,7 @@ impl Nav {
             Nav::Activity => false,
             Nav::Network => false,
             Nav::Startup => false,
+            Nav::Storage => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,

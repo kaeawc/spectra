@@ -1,0 +1,47 @@
+{
+  "volumes": [
+    {
+      "device": "/dev/disk3s1s1",
+      "mount_point": "/",
+      "fs_type": "apfs",
+      "read_only": true,
+      "total_bytes": 1995218165760,
+      "used_bytes": 16610639872,
+      "avail_bytes": 148747935744
+    },
+    {
+      "device": "/dev/disk3s4",
+      "mount_point": "/System/Volumes/Update",
+      "fs_type": "apfs",
+      "total_bytes": 1995218165760,
+      "used_bytes": 1032736768,
+      "avail_bytes": 148747935744
+    },
+    {
+      "device": "/dev/disk3s5",
+      "mount_point": "/System/Volumes/Data",
+      "fs_type": "apfs",
+      "total_bytes": 1995218165760,
+      "used_bytes": 1809430089728,
+      "avail_bytes": 148747935744
+    },
+    {
+      "device": "/dev/disk5s1",
+      "mount_point": "/Library/Developer/CoreSimulator/Volumes/iOS_23F77",
+      "fs_type": "apfs",
+      "read_only": true,
+      "total_bytes": 24167579648,
+      "used_bytes": 23519797248,
+      "avail_bytes": 588173312
+    },
+    {
+      "device": "/dev/disk40s1",
+      "mount_point": "/Volumes/Untitled",
+      "total_bytes": 194670592,
+      "used_bytes": 191393792,
+      "avail_bytes": 3276800
+    }
+  ],
+  "user_library_bytes": 0,
+  "app_caches_bytes": 0
+}

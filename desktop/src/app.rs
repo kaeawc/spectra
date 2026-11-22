@@ -320,6 +320,8 @@ pub struct App {
     pub startup: crate::startup::Startup,
     /// "Right now" on the Overview: Spectra's look at why the machine may be slow.
     pub whatswrong: crate::whatswrong::WhatsWrong,
+    /// Where disk space went, for the Storage page.
+    pub storage: crate::storage::Storage,
 }
 
 pub fn init() -> App {
@@ -391,6 +393,7 @@ pub fn init() -> App {
         network: crate::network::NetworkPage::new(),
         startup: crate::startup::Startup::new(),
         whatswrong: crate::whatswrong::WhatsWrong::new(),
+        storage: crate::storage::Storage::new(),
     }
 }
 
@@ -598,6 +601,7 @@ impl App {
         let q = self.query.text.trim().to_lowercase();
         let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) { Nav::All } else { self.nav };
         let nav = if nav == Nav::Network { Nav::All } else { nav };
+        let nav = if nav == Nav::Storage { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -704,6 +708,10 @@ impl App {
 
     /// Shows `nav` in the main pane, closing any open page.
     pub fn show(&mut self, nav: Nav) {
+        // Leaving the Storage page stops a measurement on its way.
+        if self.nav == Nav::Storage && nav != Nav::Storage {
+            self.cancel_storage();
+        }
         self.nav = nav;
         self.select(None);
         self.table.clear_selection();
@@ -711,6 +719,10 @@ impl App {
         // The Startup page reads what starts at login each time it opens.
         if nav == Nav::Startup {
             self.read_startup();
+        }
+        // The Storage page reads Time Machine's snapshots each time it opens; sizing waits for a press.
+        if nav == Nav::Storage {
+            self.open_storage();
         }
     }
 
@@ -941,6 +953,8 @@ impl App {
             None if self.app_page.is_some() => None,
             // The Network page has no list cursor either.
             None if self.nav == Nav::Network => None,
+            // The Storage page lists folders, not processes.
+            None if self.nav == Nav::Storage => None,
             None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) => self.cursor_target(),
             None => None,
         }

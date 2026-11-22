@@ -27,6 +27,8 @@ mod spawns;
 mod sample_tree;
 mod startup;
 mod sample_startup;
+mod storage;
+mod sample_storage;
 mod system;
 mod system_findings;
 mod tools;
@@ -105,6 +107,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     startup::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     s.whatswrong.auto = false;
     s.whatswrong.cancel();
+    s.cancel_storage();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -141,7 +144,10 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     landed |= s.land_startup();
     // "Right now": a look when the Overview opens, then every 30 s while it shows.
     landed |= s.tick_whatswrong();
-    if s.overview_visible() {
+    // A folder's size or Time Machine's snapshots, for the Storage page; while a folder is
+    // being measured, the page's "started … ago" keeps counting (tick_storage says when it changed).
+    landed |= s.tick_storage();
+    if s.overview_visible() || s.storage.busy() {
         tx.wake_after(STATUS_TICK);
     }
     s.tick_inspector();
@@ -226,6 +232,10 @@ fn main() {
             ("startup", sample_startup::startup_scene),
             ("startup-confirm", sample_startup::startup_confirm_scene),
             ("startup-failed", sample_startup::startup_failed_scene),
+            ("storage", sample_storage::storage_scene),
+            ("storage-measuring", sample_storage::storage_measuring_scene),
+            ("storage-inside", sample_storage::storage_inside_scene),
+            ("storage-failed", sample_storage::storage_failed_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

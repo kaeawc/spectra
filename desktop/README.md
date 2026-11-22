@@ -141,6 +141,24 @@ What it shows:
     The outcome is Spectra's own: done, refused (and why), or didn't take, and the list is read
     again. System items say "Needs an administrator; Spectra Desktop doesn't run sudo"; login
     items say to use System Settings › General › Login Items.
+- **Storage**, under Startup: where disk space went. Read-only: nothing on it deletes, moves or
+  writes anything.
+  - Free space on each disk you keep files on, from the Machine page's own disk reading (never
+    read twice), with a bar and a warning when a disk is low: under 20 GB free, or as full as the
+    Machine page's full-disk finding. The Machine page has the full used/free figures.
+  - The biggest folders in ~/Library, only on a press of Measure ~/Library:
+    `spectra du --json --depth 1 --top 15 -- <path>`. Sizing walks every file and took over five
+    minutes for a full ~/Library on a busy Mac, so it never runs on its own; the page says how
+    long it has been going and Stop ends it. Each folder has Look inside, which sizes that folder
+    the same way and lists its folders (each with Look inside again) and its biggest files; Back
+    walks out. Look inside your home folder starts from `~`. One measurement runs at a time, with
+    a 15 min deadline; a timeout suggests a smaller folder. Each result is kept, with how long
+    ago it was measured, until Measure again; a failed re-measure keeps the sizes from before.
+    Folders macOS wouldn't let Spectra open are counted and said.
+  - Time Machine's local snapshots (`spectra timemachine --json`, read each time the page opens):
+    when each was taken and its disk, and a backup being written now. Spectra doesn't report a
+    snapshot's size, and the page says so.
+  - Leaving the page or quitting stops a measurement or read on its way.
 - **All processes**, then by kind and by runtime in the sidebar, with live counts. Sort by CPU,
   memory or name; search by name, pid, bundle id or path. The table only builds the rows on
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
@@ -279,7 +297,8 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # logs, logs-empty, logs-timeout,
                             # system, system-pressure, system-failed, system-linux,
                             # activity, activity-storm, activity-unsupported, startup,
-                            # startup-confirm, startup-failed, tree, tree-search
+                            # startup-confirm, startup-failed, tree, tree-search,
+                            # storage, storage-measuring, storage-inside, storage-failed
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -309,6 +328,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
   behind a `Runner` trait that tests replace with a fake that records what it was asked;
   `src/sample_startup.rs`: its sample data, from fixtures captured on a Mac in
   `tests/fixtures/startup`.
+- `src/storage.rs`: the Storage page's `spectra du` and `spectra timemachine` runs, their JSON,
+  the low-space rule and the measurement cache, behind a `Runner` trait that tests replace with
+  a fake; `src/sample_storage.rs`: its sample data, from `tests/fixtures/storage`.
 - `src/spawns.rs`: the Activity page's recording rounds, their JSON, the event buffer, the
   last-minute summary and the spawn-storm rule; `src/sample_activity.rs`: its sample data.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and

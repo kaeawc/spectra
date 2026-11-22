@@ -1,0 +1,30 @@
+{
+  "root": "/Users/me/Library/Logs",
+  "skipped": [],
+  "total_bytes": 686686208,
+  "file_count": 22851,
+  "dir_count": 24145,
+  "top_dirs": [
+    {
+      "path": "/Users/me/Library/Logs/CoreSimulator",
+      "allocated_bytes": 510726144
+    },
+    {
+      "path": "/Users/me/Library/Logs/DiagnosticReports",
+      "allocated_bytes": 33873920
+    }
+  ],
+  "top_files": [
+    {
+      "path": "/Users/me/Library/Logs/CoreSimulator/CoreSimulator.prev.log",
+      "allocated_bytes": 94838784
+    },
+    {
+      "path": "/Users/me/Library/Logs/CoreSimulator/CoreSimulator.log",
+      "allocated_bytes": 39849984
+    }
+  ],
+  "unreadable": [],
+  "partial": false,
+  "elapsed_ms": 3923
+}
