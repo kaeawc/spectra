@@ -241,6 +241,39 @@ history. Desktop notifications are best effort, capped at six per hour and
 cooled down per alert key for 15 minutes. LaunchAgent sessions may lack desktop
 notification permission.
 
+## JVM methods
+
+Two methods let MCP and desktop clients skip a cold CLI collection of the
+user's JVMs.
+
+`jvm.list` takes optional `refresh` (bool) and returns an array of JVM records
+in the same shape as `spectra jvm --json` (an empty array when none run). The
+daemon caches the list for 5 seconds. Concurrent callers share one collection,
+and a caller that disconnects or times out does not cancel it for the others.
+`refresh: true` skips the cache; it joins a collection that is already in
+flight rather than starting a second one.
+
+`jvm.findings` takes `pid` (required, positive) and returns
+`{"pid": N, "findings": [...]}`, where each finding has the `rules` JSON shape
+(`rule_id`, `severity`, `message`, `fix`, `subject`). Each call builds a fresh
+host snapshot without apps, storage, launchd services, or update logs, then runs
+the built-in rule catalog against it. Processes, toolchains, JVMs, and host
+facts are still collected. The result keeps findings whose subject names the
+process: `PID N` on its own or followed by a space (the per-JVM rules and
+`fd-pressure`), or ending in ` pid N` (`process-memory-hog`). A `pid` of zero or
+less is an invalid-params error. A pid that is not among the running JVMs fails
+with `pid N is not a running JVM`.
+
+Known limitations of `jvm.findings`:
+
+- It attaches no JVM history. `jvm-native-memory-growth` never fires, and
+  `jvm-gc-pressure` cannot use the old-gen trend to drop a steady-state
+  finding. Use `spectra rules` or MCP `evaluateRules` for trend-aware results.
+- It uses only the built-in catalog. Rules and overrides from `spectra.yml` are
+  not applied.
+- It takes no thread dump, so `jvm-deadlock` does not fire. Use
+  `spectra rules --thread-dump-pid <pid>`.
+
 ## Clients
 
 The CLI and stdio MCP server discover the running local daemon through its Unix
