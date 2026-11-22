@@ -251,7 +251,12 @@ in the same shape as `spectra jvm --json` (an empty array when none run). The
 daemon caches the list for 5 seconds. Concurrent callers share one collection,
 and a caller that disconnects or times out does not cancel it for the others.
 `refresh: true` skips the cache; it joins a collection that is already in
-flight rather than starting a second one.
+flight rather than starting a second one. A collection is capped at 30 seconds:
+`jps` and `jcmd` children are killed at the deadline, waiting callers get an
+error, and the next call starts a new collection. When `jps` is not on `PATH`
+the call fails with `jps not found in PATH; JVM discovery unavailable` instead
+of returning an empty list. Failed collections are never cached. A caller whose
+connection closes stops waiting.
 
 `jvm.findings` takes `pid` (required, positive) and returns
 `{"pid": N, "findings": [...]}`, where each finding has the `rules` JSON shape
@@ -262,7 +267,11 @@ facts are still collected. The result keeps findings whose subject names the
 process: `PID N` on its own or followed by a space (the per-JVM rules and
 `fd-pressure`), or ending in ` pid N` (`process-memory-hog`). A `pid` of zero or
 less is an invalid-params error. A pid that is not among the running JVMs fails
-with `pid N is not a running JVM`.
+with `pid N is not a running JVM`, followed by the snapshot's warnings in
+parentheses when there are any (for example, `jps` missing). A successful result
+carries those warnings in `warnings`. Each call is capped at 60 seconds, JVM
+tool children are killed at the deadline, and the call stops early when the
+client's connection closes.
 
 Known limitations of `jvm.findings`:
 

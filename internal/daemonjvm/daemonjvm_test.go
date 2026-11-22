@@ -21,9 +21,9 @@ import (
 )
 
 func countingList(calls *atomic.Int32) ListFunc {
-	return func(context.Context) []jvm.Info {
+	return func(context.Context) ([]jvm.Info, bool) {
 		n := calls.Add(1)
-		return []jvm.Info{{PID: int(n)}}
+		return []jvm.Info{{PID: int(n)}}, true
 	}
 }
 
@@ -76,11 +76,11 @@ func TestListSingleFlight(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	var once sync.Once
-	list := func(context.Context) []jvm.Info {
+	list := func(context.Context) ([]jvm.Info, bool) {
 		calls.Add(1)
 		once.Do(func() { close(started) })
 		<-release
-		return []jvm.Info{{PID: 7}}
+		return []jvm.Info{{PID: 7}}, true
 	}
 	s := NewService(Options{List: list, Clock: clock.NewFake(time.Unix(1000, 0))})
 	const n = 8
@@ -126,10 +126,151 @@ func TestListSingleFlight(t *testing.T) {
 }
 
 func TestListEmptyIsNonNil(t *testing.T) {
-	s := NewService(Options{List: func(context.Context) []jvm.Info { return nil }})
+	s := NewService(Options{List: func(context.Context) ([]jvm.Info, bool) { return nil, true }})
 	infos, err := s.List(context.Background(), false)
 	if err != nil || infos == nil {
 		t.Fatalf("infos=%#v err=%v", infos, err)
+	}
+}
+
+func TestListJPSUnavailableIsErrorAndNotCached(t *testing.T) {
+	var calls atomic.Int32
+	available := false
+	s := NewService(Options{List: func(context.Context) ([]jvm.Info, bool) {
+		calls.Add(1)
+		return nil, available
+	}, Clock: clock.NewFake(time.Unix(1000, 0))})
+	if _, err := s.List(context.Background(), false); !errors.Is(err, ErrJPSUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	available = true
+	if infos, err := s.List(context.Background(), false); err != nil || infos == nil || calls.Load() != 2 {
+		t.Fatalf("infos=%v err=%v calls=%d", infos, err, calls.Load())
+	}
+}
+
+func TestListHungCollectorTimesOutAndClearsInflight(t *testing.T) {
+	var calls atomic.Int32
+	block := make(chan struct{})
+	defer close(block)
+	list := func(ctx context.Context) ([]jvm.Info, bool) {
+		if calls.Add(1) == 1 {
+			<-block // ignores ctx entirely
+		}
+		return []jvm.Info{{PID: 5}}, true
+	}
+	s := NewService(Options{List: list, ListTimeout: 30 * time.Millisecond, Clock: clock.NewFake(time.Unix(1000, 0))})
+	if _, err := s.List(context.Background(), false); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hung err = %v", err)
+	}
+	infos, err := s.List(context.Background(), false)
+	if err != nil || len(infos) != 1 || infos[0].PID != 5 || calls.Load() != 2 {
+		t.Fatalf("recollect: infos=%v err=%v calls=%d", infos, err, calls.Load())
+	}
+}
+
+func TestListCtxAwareCollectorPartialResultNotCached(t *testing.T) {
+	var calls atomic.Int32
+	list := func(ctx context.Context) ([]jvm.Info, bool) {
+		if calls.Add(1) == 1 {
+			<-ctx.Done()
+			return []jvm.Info{{PID: 1}}, true // partial on deadline
+		}
+		return []jvm.Info{{PID: 2}}, true
+	}
+	s := NewService(Options{List: list, ListTimeout: 20 * time.Millisecond, Clock: clock.NewFake(time.Unix(1000, 0))})
+	if _, err := s.List(context.Background(), false); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	if infos, err := s.List(context.Background(), false); err != nil || infos[0].PID != 2 {
+		t.Fatalf("infos=%v err=%v", infos, err)
+	}
+}
+
+func TestListPanicReturnsErrorToAllWaiters(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	list := func(context.Context) ([]jvm.Info, bool) {
+		if calls.Add(1) == 1 {
+			<-release
+			panic("boom")
+		}
+		return []jvm.Info{{PID: 3}}, true
+	}
+	s := NewService(Options{List: list, Clock: clock.NewFake(time.Unix(1000, 0))})
+	const n = 4
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() { _, err := s.List(context.Background(), false); errs <- err }()
+	}
+	for calls.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	for i := 0; i < n; i++ {
+		// A waiter arriving after the panic recollects and succeeds; every
+		// waiter of the panicking call sees the panic error.
+		if err := <-errs; err != nil && !strings.Contains(err.Error(), "panicked: boom") {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	infos, err := s.List(context.Background(), true)
+	if err != nil || infos[0].PID != 3 {
+		t.Fatalf("after panic: infos=%v err=%v", infos, err)
+	}
+}
+
+func TestListRPCReturnsWhenConnectionCloses(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	s := NewService(Options{List: func(context.Context) ([]jvm.Info, bool) { <-block; return nil, true }})
+	done := make(chan struct{})
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.listRPC(context.Background(), &daemon.Request{Method: MethodList, Done: done})
+		errc <- err
+	}()
+	close(done)
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter not released by req.Done")
+	}
+}
+
+func TestFindingsSnapshotTimeoutAndPanic(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	hung := NewService(Options{FindingsTimeout: 20 * time.Millisecond, Catalog: []rules.Rule{},
+		Snapshot: func(context.Context) snapshot.Snapshot { <-block; return snapshot.Snapshot{} }})
+	if _, err := hung.Findings(context.Background(), 12); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout err = %v", err)
+	}
+	panicky := NewService(Options{Catalog: []rules.Rule{},
+		Snapshot: func(context.Context) snapshot.Snapshot { panic("boom") }})
+	if _, err := panicky.Findings(context.Background(), 12); err == nil || !strings.Contains(err.Error(), "panicked: boom") {
+		t.Fatalf("panic err = %v", err)
+	}
+	// Closing the connection releases a findings waiter too.
+	slow := NewService(Options{Catalog: []rules.Rule{},
+		Snapshot: func(context.Context) snapshot.Snapshot { <-block; return snapshot.Snapshot{} }})
+	done := make(chan struct{})
+	close(done)
+	if _, err := slow.findingsRPC(context.Background(), &daemon.Request{Params: []byte(`{"pid":12}`), Done: done}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("done err = %v", err)
+	}
+}
+
+func TestFindingsUnknownPIDCarriesJPSWarning(t *testing.T) {
+	warn := "jvm: jps not found in PATH — JVM discovery unavailable; JVM findings may be incomplete"
+	s := NewService(Options{Catalog: []rules.Rule{},
+		Snapshot: func(context.Context) snapshot.Snapshot { return snapshot.Snapshot{Warnings: []string{warn}} }})
+	_, err := s.Findings(context.Background(), 12)
+	if err == nil || !strings.Contains(err.Error(), "pid 12 is not a running JVM") || !strings.Contains(err.Error(), "jps not found") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -233,7 +374,7 @@ func TestMethodsOverDaemonSocket(t *testing.T) {
 	paths := daemon.Paths{Dir: dir, Socket: filepath.Join(dir, "d.sock"), Lock: filepath.Join(dir, "d.lock"), PID: filepath.Join(dir, "d.pid")}
 	server := daemon.New(daemon.Options{Paths: paths, Version: "test"})
 	RegisterMethods(server, NewService(Options{
-		List:     func(context.Context) []jvm.Info { return []jvm.Info{{PID: 12, MainClass: "a.Main"}} },
+		List:     func(context.Context) ([]jvm.Info, bool) { return []jvm.Info{{PID: 12, MainClass: "a.Main"}}, true },
 		Snapshot: twoJVMSnapshot,
 		Catalog:  []rules.Rule{pidRule("PID 12 (a.Main)", "PID 123 (b.Main)")},
 	}))
