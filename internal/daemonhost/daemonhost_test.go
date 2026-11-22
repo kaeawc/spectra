@@ -17,10 +17,14 @@ import (
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/proc"
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/sysinfo"
+	"github.com/kaeawc/spectra/internal/sysload"
 	"github.com/kaeawc/spectra/internal/thermal"
+	"github.com/kaeawc/spectra/internal/whatswrong"
 )
 
 func counting(calls *atomic.Int32) CollectFunc {
@@ -29,7 +33,7 @@ func counting(calls *atomic.Int32) CollectFunc {
 
 func newSvc(f CollectFunc, mutate func(*Options)) (*Service, *clock.Fake) {
 	clk := clock.NewFake(time.Unix(1000, 0))
-	o := Options{Memory: f, Thermal: f, Power: f, Network: f, Clock: clk}
+	o := Options{Memory: f, Thermal: f, Power: f, Network: f, Whatswrong: f, Clock: clk}
 	if mutate != nil {
 		mutate(&o)
 	}
@@ -40,7 +44,9 @@ func TestTTLHitAndExpiryPerMethod(t *testing.T) {
 	ttls := map[string]time.Duration{
 		MethodMemory: DefaultMemoryTTL, MethodThermal: DefaultThermalTTL,
 		MethodPower: DefaultPowerTTL, MethodNetwork: DefaultNetworkTTL,
+		MethodWhatswrong: DefaultWhatswrongTTL,
 	}
+	stale := map[string]time.Duration{MethodPower: DefaultPowerStale, MethodWhatswrong: DefaultWhatswrongStale}
 	for method, ttl := range ttls {
 		t.Run(method, func(t *testing.T) {
 			var calls atomic.Int32
@@ -52,7 +58,8 @@ func TestTTLHitAndExpiryPerMethod(t *testing.T) {
 			if calls.Load() != 1 || a != b {
 				t.Fatalf("calls=%d, want cache hit", calls.Load())
 			}
-			clk.Advance(time.Millisecond)
+			// Past the TTL and any stale window the caller waits for a new value.
+			clk.Advance(time.Millisecond + stale[method])
 			c, err := s.Get(ctx, method, false)
 			if err != nil || calls.Load() != 2 || c.(int) != 2 {
 				t.Fatalf("calls=%d c=%v err=%v, want recollect", calls.Load(), c, err)
@@ -282,7 +289,7 @@ func TestMethodsOverDaemonSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range []string{MethodMemory, MethodThermal, MethodPower, MethodNetwork} {
+	for _, m := range []string{MethodMemory, MethodThermal, MethodPower, MethodNetwork, MethodWhatswrong} {
 		if !slices.Contains(st.Methods, m) {
 			t.Fatalf("daemon.status methods %v missing %s", st.Methods, m)
 		}
@@ -291,4 +298,173 @@ func TestMethodsOverDaemonSocket(t *testing.T) {
 			t.Fatalf("%s: %v %v", m, out, err)
 		}
 	}
+}
+
+// gated returns a collector whose first call answers at once and whose later
+// calls block until release, numbering each call.
+func gated(calls *atomic.Int32, release <-chan struct{}) CollectFunc {
+	return func(context.Context) (any, error) {
+		n := int(calls.Add(1))
+		if n > 1 {
+			<-release
+		}
+		return n, nil
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not reached")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestStaleWhileRevalidate(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		ttl    time.Duration
+	}{{MethodPower, DefaultPowerTTL}, {MethodWhatswrong, DefaultWhatswrongTTL}} {
+		t.Run(tc.method, func(t *testing.T) {
+			var calls atomic.Int32
+			release := make(chan struct{})
+			s, clk := newSvc(gated(&calls, release), nil)
+			ctx := context.Background()
+			if v, err := s.Get(ctx, tc.method, false); err != nil || v != 1 {
+				t.Fatalf("cold v=%v err=%v", v, err)
+			}
+			clk.Advance(tc.ttl)
+			// The blocked refresh proves stale callers do not wait for it.
+			for i := 0; i < 5; i++ {
+				if v, err := s.Get(ctx, tc.method, false); err != nil || v != 1 {
+					t.Fatalf("stale v=%v err=%v", v, err)
+				}
+			}
+			waitFor(t, func() bool { return calls.Load() == 2 })
+			close(release)
+			waitFor(t, func() bool { v, _ := s.Get(ctx, tc.method, false); return v == 2 })
+			if calls.Load() != 2 {
+				t.Fatalf("calls=%d, want one background refresh", calls.Load())
+			}
+		})
+	}
+}
+
+func TestStaleRefreshFailureNotCached(t *testing.T) {
+	var calls atomic.Int32
+	s, clk := newSvc(func(context.Context) (any, error) {
+		switch calls.Add(1) {
+		case 2:
+			return nil, errors.New("top failed")
+		default:
+			return int(calls.Load()), nil
+		}
+	}, nil)
+	ctx := context.Background()
+	_, _ = s.Get(ctx, MethodWhatswrong, false)
+	clk.Advance(DefaultWhatswrongTTL)
+	if v, err := s.Get(ctx, MethodWhatswrong, false); err != nil || v != 1 {
+		t.Fatalf("stale v=%v err=%v", v, err)
+	}
+	m := s.methods[MethodWhatswrong]
+	waitFor(t, func() bool { m.mu.Lock(); defer m.mu.Unlock(); return calls.Load() == 2 && m.inflight == nil })
+	// The failed refresh left the old value in place and the next stale call
+	// tries again.
+	if v, err := s.Get(ctx, MethodWhatswrong, false); err != nil || v != 1 {
+		t.Fatalf("after failure v=%v err=%v", v, err)
+	}
+	waitFor(t, func() bool { v, _ := s.Get(ctx, MethodWhatswrong, false); return v == 3 })
+}
+
+func TestStaleBeyondWindowWaits(t *testing.T) {
+	var calls atomic.Int32
+	s, clk := newSvc(counting(&calls), nil)
+	ctx := context.Background()
+	_, _ = s.Get(ctx, MethodPower, false)
+	clk.Advance(DefaultPowerTTL + DefaultPowerStale)
+	if v, err := s.Get(ctx, MethodPower, false); err != nil || v != 2 {
+		t.Fatalf("v=%v err=%v, want a fresh collection", v, err)
+	}
+}
+
+func TestRefreshForcesCollectionWhenStaleServed(t *testing.T) {
+	var calls atomic.Int32
+	s, _ := newSvc(counting(&calls), nil)
+	ctx := context.Background()
+	_, _ = s.Get(ctx, MethodWhatswrong, false)
+	if v, err := s.Get(ctx, MethodWhatswrong, true); err != nil || v != 2 {
+		t.Fatalf("v=%v err=%v, want forced collection", v, err)
+	}
+}
+
+func TestWhatswrongWaiterReleasedOnDone(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	s, _ := newSvc(func(context.Context) (any, error) { <-block; return 1, nil }, nil)
+	done := make(chan struct{})
+	res := make(chan error, 1)
+	go func() {
+		_, err := s.methods[MethodWhatswrong].rpc(context.Background(), &daemon.Request{Done: done, Params: json.RawMessage(`{"refresh":true}`)})
+		res <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(done)
+	select {
+	case err := <-res:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter not released by req.Done")
+	}
+}
+
+func TestPowerTimeoutBelowClientBudget(t *testing.T) {
+	s := NewService(Options{})
+	if got := s.methods[MethodPower].timeout; got != DefaultPowerTimeout {
+		t.Fatalf("power timeout = %s", got)
+	}
+	if got := NewService(Options{Timeout: time.Second}).methods[MethodPower].timeout; got != time.Second {
+		t.Fatalf("override timeout = %s", got)
+	}
+}
+
+func TestWhatswrongMatchesCLIShape(t *testing.T) {
+	deps := whatswrong.Deps{
+		Load:  func(context.Context) sysload.Load { return sysload.Load{MemoryPressure: "critical", SwapUsedMB: 9000} },
+		Power: func(context.Context) sysinfo.PowerState { return sysinfo.PowerState{ThermalPressure: "serious"} },
+		Procs: func(context.Context) []process.Info { return []process.Info{{PID: 7, Command: "hog", CPUPct: 99}} },
+		Now:   func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Connect: whatswrong.LocalWatch(fakeWatch{alerts: []hostwatch.Alert{{Title: "Disk nearly full", Severity: "warning"}},
+			samples: []hostwatch.Sample{{At: time.Unix(1_700_000_000, 0).UTC(), Load1: 2}}}),
+	}
+	got, err := WhatswrongFrom(deps)(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gb, _ := json.Marshal(got)
+	wb, _ := json.Marshal(whatswrong.Collect(context.Background(), deps))
+	if string(gb) != string(wb) {
+		t.Fatalf("got %s want %s", gb, wb)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(gb, &m)
+	if m["causes"] == nil || m["signals"] == nil || m["daemon_alerts"] == nil || m["trend"] == nil {
+		t.Fatalf("unexpected payload %s", gb)
+	}
+}
+
+type fakeWatch struct {
+	alerts  []hostwatch.Alert
+	samples []hostwatch.Sample
+}
+
+func (f fakeWatch) Current() (hostwatch.Sample, []hostwatch.Alert) {
+	return hostwatch.Sample{}, f.alerts
+}
+func (f fakeWatch) Samples(context.Context, time.Time, int) ([]hostwatch.Sample, error) {
+	return f.samples, nil
 }

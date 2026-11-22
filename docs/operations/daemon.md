@@ -383,17 +383,24 @@ them. The subscription ends when the connection closes.
 
 ## Host methods
 
-Four methods serve the host facts a desktop Machine page polls, so clients skip
-spawning `spectra memory|thermal|power|network --json` per poll. Each takes
-optional `refresh` (bool) and returns exactly the JSON the matching CLI command
-prints with `--json`. Each method has its own cache; concurrent callers share
-one collection, a caller that disconnects does not cancel it for the others,
-and `refresh: true` skips the cache but joins a collection already in flight.
-A collection is capped at 20 seconds, its child processes are killed at the
-cap, and a timeout, collector error, or collector panic is returned to the
-waiting callers and never cached. On Linux each method returns what the CLI
-returns there, or the same unsupported error, except for the `network.current`
-proxy fields described below.
+Five methods serve the host facts a desktop Machine page polls, so clients skip
+spawning `spectra memory|thermal|power|network|whatswrong --json` per poll. Each
+takes optional `refresh` (bool) and returns exactly the JSON the matching CLI
+command prints with `--json`. Each method has its own cache; concurrent callers
+share one collection, a caller that disconnects does not cancel it for the
+others, and `refresh: true` skips the cache but joins a collection already in
+flight. A collection is capped at 20 seconds (15 for `power.current`), its child
+processes are killed at the cap, and a timeout, collector error, or collector
+panic is returned to the waiting callers and never cached. On Linux each method
+returns what the CLI returns there, or the same unsupported error, except for
+the `network.current` proxy fields described below.
+
+The two slow methods, `power.current` and `whatswrong.current`, serve
+stale-while-revalidate: once a value is past its cache time but still inside a
+stale window, the call returns it at once and starts one background collection
+to replace it. A failed background collection leaves the old value in place
+and the next call retries. A value older than the stale window, the first call
+after the daemon starts, and any `refresh: true` call wait for a collection.
 
 ### `memory.current`
 
@@ -411,10 +418,13 @@ The `spectra thermal --json` object (verdict, evidence, findings, with
 
 The `spectra power --json` envelope in baseline mode (`mode: "baseline"`,
 `interval_ms: 1000`; battery, thermal, assertions, and top energy users from
-`pmset` and `top`). Cached for 5 seconds. The `--top`, `--joules`, and `--deep`
-modes are not served. The baseline runs `top -l 2 -s 1`, so a cold call takes
-roughly a second on a real macOS host; clients polling every 5 seconds mostly
-hit the cache.
+`pmset` and `top`). Cached for 5 seconds, with a 2 minute stale window. The
+`--top`, `--joules`, and `--deep` modes are not served. The baseline runs
+`top -l 2 -s 1`, which walks every process twice a second apart: a cold call
+takes 2 to 3 seconds on an idle Mac and can pass 15 seconds under heavy load
+with thousands of processes. That is why the cap is 15 seconds, below the 20
+seconds desktop clients allow a call, and why clients polling within the stale
+window get the cached value at once.
 
 ### `network.current`
 
@@ -425,3 +435,13 @@ On macOS the proxy fields come from system-wide `scutil` settings and match the
 CLI. On Linux they come from the daemon's own environment (`http_proxy`,
 `https_proxy`, `all_proxy` as of daemon start), not the caller's shell, so they
 can differ from `spectra network --json`.
+
+### `whatswrong.current`
+
+The `spectra whatswrong --json` object (ranked `causes`, process `families`,
+`daemon_alerts`, `trend`, and the raw `signals`). Cached for 15 seconds, with a
+5 minute stale window, so a client polling every 30 seconds gets an immediate
+answer. The daemon fills `daemon_alerts` and `trend` from its own monitoring
+state, as the CLI does when it finds a running daemon. A cold call runs the
+same probes as the CLI (memory pressure, `pmset` and `top`, the process list,
+and XPC attribution of a busy service) and is capped at 20 seconds.
