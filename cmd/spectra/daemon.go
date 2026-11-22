@@ -20,6 +20,7 @@ import (
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/daemonjvm"
+	"github.com/kaeawc/spectra/internal/daemonprocess"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
@@ -185,6 +186,7 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	server := daemon.New(daemon.Options{Paths: paths, Version: version, Logger: log, IdleTimeout: *idle})
 	hostwatch.RegisterMethods(server, watch)
 	daemonjvm.RegisterMethods(server, daemonjvm.NewService(daemonjvm.Options{Snapshot: daemonjvm.DefaultSnapshot(version)}))
+	daemonprocess.RegisterMethods(server, daemonprocess.NewService(daemonprocess.Options{Interval: *watchInterval}))
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	go func() {

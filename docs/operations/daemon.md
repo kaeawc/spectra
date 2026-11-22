@@ -306,3 +306,27 @@ The MCP server connects lazily and reconnects once if the socket closes. Its
 `host_health` and `alerts` tools and `process` history operation require the
 daemon; other local collector operations continue without it. See the
 [MCP tool reference](mcp.md).
+
+## Process methods
+
+Two methods serve the process table to clients that poll it, such as the
+desktop app, without spawning `spectra process --json` each time.
+
+`process.list` takes optional `refresh` (bool) and returns
+`{"sampled_at": "<RFC3339>", "processes": [...]}`. `processes` holds the same
+rows and fields as `spectra process --json` with no flags (RSS descending; an
+empty array if none). The snapshot is cached for 2 seconds. Concurrent callers
+share one collection, and a caller that disconnects does not cancel it for the
+others. `refresh: true` skips the cache but joins a collection already in
+flight. A collection is capped at 15 seconds; on timeout or collector panic the
+waiting callers get an error and nothing is cached. The rows are collected on
+demand rather than taken from the watch sampler, which keeps only aggregates and
+the top CPU consumers.
+
+`process.subscribe` takes no parameters and returns `{"subscribed": true}`. The
+connection then receives `process.update` notifications whose params are the
+same `{sampled_at, processes}` payload, once per `--watch-interval` (default 15
+seconds), starting with an immediate one when the first subscriber arrives. The
+daemon collects only while at least one subscriber exists, and never in the
+background otherwise. Slow subscribers can miss updates; the next one supersedes
+them. The subscription ends when the connection closes.
