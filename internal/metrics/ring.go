@@ -250,20 +250,26 @@ func (c *Collector) Len() int {
 
 // FlushAggregates returns the 1-minute aggregates not yet committed by an
 // earlier flush (plus each PID's last committed minute, which may have been
-// partial) and a commit func. The caller runs commit only after it has
-// persisted the aggregates: commit marks those minutes written and removes
-// PIDs whose newest sample is older than retainWindow before now. Without a
-// commit (a failed save) the next flush returns the same minutes again, so
-// each completed minute is persisted once rather than on every flush, and
-// is not lost to a failed write while its samples are in RAM.
+// partial) and a commit func the caller runs once it has persisted them.
+// Without a commit (a failed save) the next flush returns the same minutes
+// again, so each completed minute is persisted once rather than on every
+// flush. PIDs whose newest sample is older than retainWindow before now are
+// removed by the flush itself, whether or not it is committed, so failing
+// saves cannot grow the map; their unsaved minutes are then lost.
 func (c *Collector) FlushAggregates(now time.Time, retainWindow time.Duration) ([]Aggregate, func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	cutoff := now.UTC().Add(-retainWindow)
 	var all []Aggregate
 	marks := make(map[*RingBuffer]time.Time, len(c.pids))
-	for _, rb := range c.pids {
+	for pid, rb := range c.pids {
 		aggs := rb.aggregateSince(rb.flushed)
+		all = append(all, aggs...)
+		if rb.n == 0 || rb.at(rb.n-1).TakenAt.Before(cutoff) {
+			delete(c.pids, pid)
+			continue
+		}
 		mark := rb.flushed
 		for _, a := range aggs {
 			if a.MinuteAt.After(mark) {
@@ -271,18 +277,13 @@ func (c *Collector) FlushAggregates(now time.Time, retainWindow time.Duration) (
 			}
 		}
 		marks[rb] = mark
-		all = append(all, aggs...)
 	}
-	cutoff := now.UTC().Add(-retainWindow)
 	commit := func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		for pid, rb := range c.pids {
-			if mark, ok := marks[rb]; ok && mark.After(rb.flushed) {
+		for rb, mark := range marks {
+			if mark.After(rb.flushed) {
 				rb.flushed = mark
-			}
-			if rb.n == 0 || rb.at(rb.n-1).TakenAt.Before(cutoff) {
-				delete(c.pids, pid)
 			}
 		}
 	}

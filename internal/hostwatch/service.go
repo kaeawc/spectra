@@ -99,6 +99,7 @@ type Service struct {
 	interval             time.Duration
 	cpuHistory           []float64
 	lastFlush, lastPrune time.Time
+	metricsSaveFailing   bool
 }
 
 func NewService(opts ServiceOptions) *Service {
@@ -383,9 +384,16 @@ func (s *Service) maintenance(ctx context.Context, at time.Time) {
 		}
 		// Mark the minutes written only once saved; a failed save retries them.
 		if err := s.opts.Store.SaveProcessMetrics(ctx, rows); err != nil {
-			s.opts.Logger.Warn("watch process metrics flush failed", "error", err)
+			if !s.metricsSaveFailing {
+				s.opts.Logger.Warn("watch process metrics flush failed; retrying each minute, minutes of processes gone 30 minutes are dropped", "error", err)
+				s.metricsSaveFailing = true
+			}
 		} else {
 			commit()
+			if s.metricsSaveFailing {
+				s.opts.Logger.Info("watch process metrics flush recovered")
+				s.metricsSaveFailing = false
+			}
 		}
 		s.lastFlush = at
 	}

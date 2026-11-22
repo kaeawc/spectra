@@ -169,24 +169,47 @@ func TestRingBufferGapAfterDenseCadence(t *testing.T) {
 	}
 }
 
-// Without a commit (the save failed) the next flush returns the same minutes
-// and the stale PID stays until a flush commits.
+// Without a commit (the save failed) the next flush returns the same minutes.
 func TestFlushAggregatesUncommittedRetries(t *testing.T) {
 	c := NewCollector()
 	m0 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	c.Add(Sample{TakenAt: m0.Add(10 * time.Second), PID: 7, RSSKiB: 100})
 	c.Add(Sample{TakenAt: m0.Add(70 * time.Second), PID: 7, RSSKiB: 200})
-	late := m0.Add(DefaultRetainWindow + 2*time.Minute)
-	failed, _ := c.FlushAggregates(late, DefaultRetainWindow) // save failed: no commit
-	if len(failed) != 2 || c.Len() != 1 {
-		t.Fatalf("failed flush = %d aggregates, %d pids", len(failed), c.Len())
+	at := m0.Add(2 * time.Minute)
+	failed, _ := c.FlushAggregates(at, DefaultRetainWindow) // save failed: no commit
+	if len(failed) != 2 {
+		t.Fatalf("failed flush = %d aggregates", len(failed))
 	}
-	retried, commit := c.FlushAggregates(late, DefaultRetainWindow)
+	retried, commit := c.FlushAggregates(at, DefaultRetainWindow)
 	if len(retried) != 2 {
 		t.Fatalf("retry = %+v, want both minutes again", retried)
 	}
 	commit()
-	if c.Len() != 0 {
-		t.Fatalf("stale pid kept after commit: %d", c.Len())
+	if again, _ := c.FlushAggregates(at, DefaultRetainWindow); len(again) != 1 {
+		t.Fatalf("after commit = %+v, want only the newest minute", again)
+	}
+}
+
+// Saves that never succeed still drop PIDs gone for longer than the window,
+// so churn cannot grow the map without bound.
+func TestFlushAggregatesEvictsWithoutCommit(t *testing.T) {
+	c := NewCollector()
+	base := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	const step = 15 * time.Second
+	const perTick = 50
+	ticksPerWindow := int(DefaultRetainWindow / step)
+	maxLen := 0
+	for tick := 0; tick < 6*ticksPerWindow; tick++ {
+		at := base.Add(time.Duration(tick) * step)
+		for j := 0; j < perTick; j++ {
+			c.Add(Sample{TakenAt: at, PID: 1000 + tick*perTick + j})
+		}
+		if tick%4 == 0 {
+			c.FlushAggregates(at, DefaultRetainWindow) // every save fails: never committed
+		}
+		maxLen = max(maxLen, c.Len())
+	}
+	if bound := (ticksPerWindow + 5) * perTick; maxLen > bound {
+		t.Fatalf("collector held %d pids with failing saves, bound %d", maxLen, bound)
 	}
 }
