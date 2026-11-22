@@ -56,3 +56,31 @@ func TestCLIFootprintCacheWithoutStores(t *testing.T) {
 		t.Errorf("cache = %v, want nil without cache stores", fp)
 	}
 }
+
+// TestSnapshotUsesDetectCache checks that `spectra snapshot` serves per-app
+// inspection from the detect cache with a live storage footprint, and that
+// --network (not covered by the cache key) and --fresh bypass it.
+func TestSnapshotUsesDetectCache(t *testing.T) {
+	prev := cacheStores
+	t.Cleanup(func() { cacheStores = prev })
+	cacheStores = &cache.Stores{Detect: cache.NewShardedStore(t.TempDir(), cache.KindDetect)}
+
+	var opts snapshot.Options
+	withCLIDetectCache(&opts, false)()
+	if opts.DetectStore != cacheStores.Detect || opts.DetectWriter == nil || !opts.DetectRefreshStorage {
+		t.Errorf("detect cache options = %+v", opts)
+	}
+
+	var net snapshot.Options
+	withCLIDetectCache(&net, true)()
+	if net.DetectStore != nil || net.DetectWriter != nil {
+		t.Errorf("--network should bypass the detect cache: %+v", net)
+	}
+
+	cacheStores = nil
+	var none snapshot.Options
+	withCLIDetectCache(&none, false)()
+	if none.DetectStore != nil {
+		t.Errorf("no cache stores: %+v", none)
+	}
+}

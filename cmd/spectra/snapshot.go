@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/memstate"
@@ -67,6 +68,7 @@ func runSnapshot(args []string) int {
 		SkipApps:       *skipApps,
 	}
 	withCLIFootprintCache(&opts, *fresh)
+	defer withCLIDetectCache(&opts, *withNetwork || *fresh)()
 	snap := snapshot.Build(context.Background(), opts)
 	if *baseline {
 		snap.Kind = snapshot.KindBaseline
@@ -97,6 +99,23 @@ func runSnapshot(args []string) int {
 // fresh-only default keeps persisted footprints within 10 minutes of capture.
 func withCLIFootprintCache(opts *snapshot.Options, fresh bool) {
 	opts.FootprintCache, opts.FootprintPolicy = cliFootprintCache(fresh)
+}
+
+// withCLIDetectCache serves per-app inspection from the persistent detect
+// cache the rules path uses, so an unchanged bundle is not re-walked, re-hashed
+// and re-classified on every snapshot. A hit always recollects processes,
+// uptime, login items and TCC grants; the bundle size and ~/Library
+// footprint are also measured live here because snapshots are persisted and
+// diffed. bypass skips the cache: the key does not cover --network, and
+// --fresh asks for a full re-inspection. The returned func flushes pending
+// cache writes.
+func withCLIDetectCache(opts *snapshot.Options, bypass bool) func() {
+	if cacheStores == nil || cacheStores.Detect == nil || bypass {
+		return func() {}
+	}
+	w := cache.NewAsyncWriter(cacheStores.Detect, 64, 2)
+	opts.DetectStore, opts.DetectWriter, opts.DetectRefreshStorage = cacheStores.Detect, w, true
+	return w.Close
 }
 
 func runSnapshotCreate(args []string) int {

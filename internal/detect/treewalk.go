@@ -9,13 +9,15 @@ import (
 // readDirBatch bounds how many entries one ReadDir call materializes.
 const readDirBatch = 256
 
-// walkNonDirs visits every non-directory entry under root (or root itself
+// walkNonDirsWith visits every non-directory entry under root (or root itself
 // when it is not a directory) with its lstat-derived sizes. Symlinks are not
 // followed. Unlike filepath.WalkDir it neither sorts directory entries nor
 // allocates an os.FileInfo per file: it lstats into one reused buffer.
 // Unreadable directories and vanished entries are skipped. The visit order
-// is unspecified.
-func walkNonDirs(root string, visit func(path, name string, regular bool, actual, apparent int64)) {
+// is unspecified. On Darwin whole directories are listed with
+// getattrlistbulk; lstatOnly forces one lstat per entry instead, so tests
+// can compare the two.
+func walkNonDirsWith(lstatOnly bool, root string, visit treeVisit) {
 	var st statBuf
 	fi, err := os.Lstat(root)
 	if err != nil {
@@ -28,14 +30,19 @@ func walkNonDirs(root string, visit func(path, name string, regular bool, actual
 	// The root is lstat'd as given (a trailing slash follows a symlinked
 	// bundle, as filepath.WalkDir does); children use the cleaned path.
 	stack := []string{filepath.Clean(root)}
+	bulk := newTreeBulk(lstatOnly)
+	defer bulk.release()
 	for len(stack) > 0 {
 		dir := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		stack = readTreeDir(dir, stack, &st, visit)
+		var ok bool
+		if stack, ok = bulk.readDir(dir, stack, &st, visit); !ok {
+			stack = readTreeDir(dir, stack, &st, visit)
+		}
 	}
 }
 
-func readTreeDir(dir string, stack []string, st *statBuf, visit func(path, name string, regular bool, actual, apparent int64)) []string {
+func readTreeDir(dir string, stack []string, st *statBuf, visit treeVisit) []string {
 	f, err := os.Open(dir)
 	if err != nil {
 		return stack
@@ -64,6 +71,9 @@ func readTreeDir(dir string, stack []string, st *statBuf, visit func(path, name 
 	}
 }
 
+// treeVisit receives one non-directory entry of a tree walk.
+type treeVisit func(path, name string, regular bool, actual, apparent int64)
+
 // bundleTree is what one walk of an .app bundle yields.
 type bundleTree struct {
 	// actual is the sparse-aware disk usage of all regular files; apparent is
@@ -80,11 +90,15 @@ type bundleTree struct {
 // number of .jar files and the bundled-JVM location, which classification,
 // size accounting, and dependency scanning each used to walk for separately.
 func bundleTreeStats(appPath string) bundleTree {
+	return bundleTreeStatsWith(false, appPath)
+}
+
+func bundleTreeStatsWith(lstatOnly bool, appPath string) bundleTree {
 	root := filepath.Clean(appPath)
 	contents := root + "/Contents"
 	var t bundleTree
 	var jvmFile string
-	walkNonDirs(appPath, func(path, name string, regular bool, actual, apparent int64) {
+	walkNonDirsWith(lstatOnly, appPath, func(path, name string, regular bool, actual, apparent int64) {
 		if strings.HasPrefix(path, contents) {
 			if strings.HasSuffix(name, ".jar") {
 				t.jars++
@@ -106,8 +120,12 @@ func bundleTreeStats(appPath string) bundleTree {
 }
 
 // treeBytes returns the actual disk usage of all regular files under root.
-func treeBytes(root string) (actual int64) {
-	walkNonDirs(root, func(_, _ string, regular bool, a, _ int64) {
+func treeBytes(root string) int64 {
+	return treeBytesWith(false, root)
+}
+
+func treeBytesWith(lstatOnly bool, root string) (actual int64) {
+	walkNonDirsWith(lstatOnly, root, func(_, _ string, regular bool, a, _ int64) {
 		if regular {
 			actual += a
 		}
