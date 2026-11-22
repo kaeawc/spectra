@@ -66,6 +66,30 @@ func TestParseJDKHomeLegacy(t *testing.T) {
 	}
 }
 
+func TestParseJDKHomeMalformedVersion(t *testing.T) {
+	cases := []struct {
+		name, version            string
+		wantOK                   bool
+		major, minor, patchValue int
+	}{
+		{name: "only-separators", version: "---", wantOK: false},
+		{name: "underscore-patch", version: "21.0._", wantOK: true, major: 21, minor: 0, patchValue: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			makeJDK(t, dir, "jdk", tc.version, "", "")
+			jdk, ok := parseJDKHome(filepath.Join(dir, "jdk"), "manual")
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && (jdk.VersionMajor != tc.major || jdk.VersionMinor != tc.minor || jdk.VersionPatch != tc.patchValue) {
+				t.Fatalf("version = %d.%d.%d", jdk.VersionMajor, jdk.VersionMinor, jdk.VersionPatch)
+			}
+		})
+	}
+}
+
 func TestParseJDKHomeMissingRelease(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "empty"), 0o755)

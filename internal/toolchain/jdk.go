@@ -106,8 +106,11 @@ func parseJDKHome(jdkHome, source string) (JDKInstall, bool) {
 		Vendor:        props["IMPLEMENTOR"],
 	}
 	// Parse "21.0.6", "1.8.0_392", "21.0.6+7-LTS"
-	clean := strings.FieldsFunc(raw, func(r rune) bool { return r == '+' || r == '-' })[0]
-	parts := strings.Split(clean, ".")
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == '+' || r == '-' })
+	if len(fields) == 0 {
+		return JDKInstall{}, false
+	}
+	parts := strings.Split(fields[0], ".")
 	if len(parts) >= 1 {
 		major, _ := strconv.Atoi(parts[0])
 		// Old JDK "1.8.0_N" → major is parts[1]
@@ -121,8 +124,10 @@ func parseJDKHome(jdkHome, source string) (JDKInstall, bool) {
 		jdk.VersionMinor = minor
 	}
 	if len(parts) >= 3 {
-		patch, _ := strconv.Atoi(strings.FieldsFunc(parts[2], func(r rune) bool { return r == '_' })[0])
-		jdk.VersionPatch = patch
+		// An unparseable patch is 0, like the Atoi fallbacks above.
+		if patchFields := strings.FieldsFunc(parts[2], func(r rune) bool { return r == '_' }); len(patchFields) > 0 {
+			jdk.VersionPatch, _ = strconv.Atoi(patchFields[0])
+		}
 	}
 	return jdk, true
 }
