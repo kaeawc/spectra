@@ -314,6 +314,8 @@ pub struct App {
     pub system: crate::system::System,
     /// Processes starting and exiting, for the Activity page.
     pub activity: crate::spawns::Activity,
+    /// Which processes move bytes, for the Network page.
+    pub network: crate::network::NetworkPage,
     /// What starts at login or boot, for the Startup page.
     pub startup: crate::startup::Startup,
     /// "Right now" on the Overview: Spectra's look at why the machine may be slow.
@@ -386,6 +388,7 @@ pub fn init() -> App {
         poke_rx: Some(poke_rx),
         system: crate::system::System::new(),
         activity: crate::spawns::Activity::new(),
+        network: crate::network::NetworkPage::new(),
         startup: crate::startup::Startup::new(),
         whatswrong: crate::whatswrong::WhatsWrong::new(),
     }
@@ -594,6 +597,7 @@ impl App {
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
         let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) { Nav::All } else { self.nav };
+        let nav = if nav == Nav::Network { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -935,6 +939,8 @@ impl App {
             Some(_) => None,
             // An app page hides the list and its cursor.
             None if self.app_page.is_some() => None,
+            // The Network page has no list cursor either.
+            None if self.nav == Nav::Network => None,
             None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) => self.cursor_target(),
             None => None,
         }

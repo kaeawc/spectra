@@ -51,8 +51,8 @@ What it shows:
   compressions since the last reading; free-for-new-work, compressed, compressions and swap are
   charted. Thermal state and CPU speed limit, battery and power source. Disks with used and
   free bars (only volumes people keep files on: no read-only system or simulator images, no
-  memory-backed file systems). Network: default route, DNS, VPN, connections, and every
-  listening port with the process holding it; a process the feed lists opens its page. Top
+  memory-backed file systems). Network: default route, DNS, VPN, connections and how many ports
+  are listening, with a link to the Network page for what is listening and who is moving bytes. Top
   consumers: the five busiest processes by CPU and the five largest by memory, each opening
   its page. On Linux, a part Spectra doesn't read (memory pressure, the battery) is left out
   rather than shown blank.
@@ -98,6 +98,23 @@ What it shows:
     spawn storm), opening Activity filtered to that parent. The finding appears only while
     recording is on (the page open, or Keep recording): with both off nothing is watching, so
     there is nothing to find.
+- **Network**, under Activity: which processes are moving bytes right now, and what is
+  listening. A line of the network's state on top: interface and gateway, VPN, proxy and DNS.
+  "Using the network": the processes that moved the most over the last 5 s, most first, each with
+  bytes in and out and the average rate, and up to three remote endpoints ("new" marks one that
+  started moving bytes during the window). "Listening": every listening port with its protocol,
+  bound address and process, those open on all interfaces (`*`, `0.0.0.0`, `::`) first and
+  flagged, since other devices on your network may reach them. A process opens its page only
+  when the process list has that pid under the same name (allowing for the names Spectra cuts
+  short), so a reused pid opens nothing.
+  - Measuring: `spectra network top --json --duration 5s --interval 1s --top 15` on a thread of
+    its own with a 25 s deadline and a 4 MB output cap, then a 5 s rest (a window keeps about one
+    core busy), **only while the page is open**; leaving it (or opening a process page over it)
+    or quitting stops the window in flight. A failed window keeps the last ranking, says why and
+    tries again 15 s later; an older Spectra without `network top` gets a plain notice and the
+    listening ports still show.
+  - The state line and the listening ports come from the Machine page's own `spectra network
+    --json` reading every 30 s, so the page runs nothing extra for them.
 - **Startup**, under Machine: everything that launches at login or boot, and the background
   services launchd runs, so you can see what runs without you asking. Grouped by the app it
   belongs to (an app's login item, agents, daemons and helpers together), then items no app

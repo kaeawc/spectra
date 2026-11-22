@@ -9,6 +9,7 @@ mod detail;
 mod home;
 mod list;
 mod logs;
+mod network;
 mod process;
 mod quit;
 mod startup;
@@ -25,6 +26,8 @@ mod tests_activity;
 mod tests_logs;
 #[cfg(test)]
 mod tests_whatswrong;
+#[cfg(test)]
+mod tests_network;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
@@ -90,6 +93,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     // The whole machine, right under the overview, whatever the process feed is doing.
     sb = sb.child(place(s, Nav::System, "system".into(), None, k));
     sb = sb.child(place(s, Nav::Activity, "activity".into(), None, k));
+    sb = sb.child(place(s, Nav::Network, "network".into(), None, k));
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
@@ -135,6 +139,8 @@ enum Page<'a> {
     System,
     /// Processes starting and exiting.
     Activity,
+    /// Which processes move bytes, and what is listening.
+    Network,
     /// What starts at login or boot.
     Startup,
     List,
@@ -159,6 +165,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Overview => Page::Home,
         Nav::System => Page::System,
         Nav::Activity => Page::Activity,
+        Nav::Network => Page::Network,
         Nav::Startup => Page::Startup,
         _ => Page::List,
     }
@@ -184,6 +191,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::List => (list::list(s, &k), s.nav.title().to_owned()),
         Page::System => (system::page(s, &k), s.nav.title().to_owned()),
         Page::Activity => (activity::page(s, &k), s.nav.title().to_owned()),
+        Page::Network => (network::page(s, &k), s.nav.title().to_owned()),
         Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             let problems = s.problems();

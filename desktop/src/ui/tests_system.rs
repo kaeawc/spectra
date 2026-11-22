@@ -98,7 +98,7 @@ fn the_system_page_shows_every_part() {
         "sys-battery",
         "sys-vol-:System:Volumes:Data",
         "sys-vol-:Volumes:Backup",
-        "sys-ports",
+        "sys-open-network",
         "sys-top-cpu",
         "sys-top-mem",
     ] {
@@ -134,22 +134,8 @@ fn the_system_page_shows_every_part() {
 }
 
 #[test]
-fn a_listening_port_and_a_top_consumer_open_their_process() {
+fn a_top_consumer_opens_its_process() {
     let mut rt = scene(system_scene);
-    press(&mut rt, "sys-port-11434-tcp-1370-open");
-    assert_eq!(rt.state.selected, Some(1370), "ollama's page");
-    press(&mut rt, "back");
-    assert_eq!(
-        (rt.state.nav, rt.state.selected),
-        (Nav::System, None),
-        "back to the System page"
-    );
-    assert!(
-        !has(&mut rt, "sys-port-5000-tcp-683-open"),
-        "a pid the feed doesn't list is no link"
-    );
-    assert!(has(&mut rt, "sys-port-5000-tcp-683"));
-
     let busiest = rt
         .state
         .procs
@@ -259,7 +245,7 @@ fn on_linux_what_spectra_doesnt_read_is_left_out() {
         !has(&mut rt, "sys-vol-:dev:shm"),
         "memory-backed file systems aren't disks"
     );
-    assert!(has(&mut rt, "sys-cpu-timeline") && has(&mut rt, "sys-ports"));
+    assert!(has(&mut rt, "sys-cpu-timeline") && has(&mut rt, "sys-open-network"));
 }
 
 #[test]

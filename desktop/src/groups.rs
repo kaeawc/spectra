@@ -72,6 +72,8 @@ pub enum Nav {
     System,
     /// Processes starting and exiting, live.
     Activity,
+    /// Which processes are moving bytes now, and what is listening.
+    Network,
     /// What starts at login or boot, and the background services.
     Startup,
 }
@@ -86,6 +88,7 @@ impl Nav {
             Nav::Unidentified => "Unsigned or ad hoc",
             Nav::System => "Machine",
             Nav::Activity => "Activity",
+            Nav::Network => "Network",
             Nav::Startup => "Startup",
         }
     }
@@ -95,6 +98,7 @@ impl Nav {
         match self {
             Nav::Overview | Nav::System => false,
             Nav::Activity => false,
+            Nav::Network => false,
             Nav::Startup => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),

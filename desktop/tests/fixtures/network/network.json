@@ -1,0 +1,23 @@
+{
+  "default_route_iface": "en0",
+  "default_route_gw": "192.168.1.1",
+  "dns_servers": ["192.168.1.1", "1.1.1.1"],
+  "proxy": {"https": "proxy.example.test:8443", "socks": ""},
+  "listening_ports": [
+    {"port": 7000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "user"},
+    {"port": 5000, "proto": "tcp", "local_addr": "*", "pid": 683, "command": "ControlCe", "user": "user"},
+    {"port": 3000, "proto": "tcp", "local_addr": "127.0.0.1", "pid": 1320, "command": "node", "user": "user"},
+    {"port": 8080, "proto": "tcp", "local_addr": "*", "pid": 4101, "command": "java", "user": "user"},
+    {"port": 8080, "proto": "tcp", "local_addr": "[::]", "pid": 4101, "command": "java", "user": "user"},
+    {"port": 11434, "proto": "tcp", "local_addr": "127.0.0.1", "pid": 1370, "command": "ollama", "user": "user"},
+    {"port": 49368, "proto": "tcp", "local_addr": "127.0.0.1", "pid": 902, "command": "Slack\\x20", "user": "user"},
+    {"port": 5432, "proto": "tcp", "local_addr": "0.0.0.0", "pid": 1340, "command": "postgres", "user": "user"},
+    {"port": 22, "proto": "tcp", "local_addr": "*"}
+  ],
+  "established_connections_count": 166,
+  "process_throughput": [
+    {"pid": 1200, "command": "claude", "bytes_in_per_sec": 1306, "bytes_out_per_sec": 4013}
+  ],
+  "vpn_active": true,
+  "vpn_interfaces": ["utun4"]
+}

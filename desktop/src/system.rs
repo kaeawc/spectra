@@ -294,6 +294,8 @@ pub struct Network {
     pub established: u64,
     /// By port, then protocol.
     pub ports: Vec<Port>,
+    /// The system proxies that are set, as `HTTPS proxy.example:8443`.
+    pub proxy: Vec<String>,
 }
 
 /// One landed reading.
@@ -513,7 +515,20 @@ pub fn parse_network(json: &str) -> Result<Network, Fail> {
         vpn_ifaces: strings(&v, "vpn_interfaces"),
         established: n0(&v, "established_connections_count").max(0.0) as u64,
         ports,
+        proxy: v.get("proxy").map(proxies).unwrap_or_default(),
     })
+}
+
+/// The proxies in Spectra's `proxy` object that are set, by scheme.
+fn proxies(v: &Value) -> Vec<String> {
+    [("http", "HTTP"), ("https", "HTTPS"), ("socks", "SOCKS")]
+        .iter()
+        .filter_map(|(key, label)| {
+            let at = st(v, key);
+            let at = at.trim();
+            (!at.is_empty()).then(|| format!("{label} {at}"))
+        })
+        .collect()
 }
 
 /// What a run that didn't print a reading means. Spectra says when it can't read something on

@@ -137,6 +137,7 @@ fn network(iface: &str) -> Network {
             port(8080, &["*"], 4101, "java"),
             port(11434, &["127.0.0.1"], 1370, "ollama"),
         ],
+        proxy: Vec::new(),
     }
 }
 

@@ -1,5 +1,6 @@
 //! The System page: the whole machine at a glance. CPU and load, memory pressure and where the
-//! memory is, thermal state and battery, disks, network and listening ports, and the processes
+//! memory is, thermal state and battery, disks, the network (with a link to the Network page for
+//! what is listening), and the processes
 //! using the most. Each part says when its numbers are from once that matters, and a part
 //! Spectra doesn't read on this system is left out rather than shown blank.
 
@@ -15,8 +16,6 @@ use crate::findings::Severity;
 use crate::procs::{Process, fmt_count, fmt_cpu, fmt_mem};
 use crate::system::{Fail, Pressure, Section, ThermalState, counter_deltas, fmt_size};
 
-/// Listening ports listed before "and N more".
-const PORTS: usize = 60;
 /// Processes in each top-consumer list.
 const TOP: usize = 5;
 const LABEL_W: f32 = 150.0;
@@ -538,128 +537,16 @@ fn network(s: &App, k: &Kit) -> El {
             k,
         ));
     body = body.child(facts);
-    if !n.ports.is_empty() {
-        body = body.child(ports(s, k));
-    }
-    body
-}
-
-/// The listening ports, each with the process holding it: a link to its page when the process
-/// feed lists that pid.
-fn ports(s: &App, k: &Kit) -> El {
-    let c = &k.c;
-    let Some(n) = &s.system.network.last else {
-        return col();
-    };
-    let figures = k.ty.small.features("'tnum' 1");
-    let head = |t: &str, w: Option<f32>| {
-        let t = text(t.to_owned())
-            .font(k.ty.text_xsmall)
-            .color(c.text_faint);
-        match w {
-            Some(w) => t.w(w),
-            None => t.grow(1.0).min_w(0.0),
-        }
-    };
-    let mut table = col()
-        .key("sys-ports")
-        .w_full()
-        .radius(k.radius.md)
-        .fill(c.layer_01)
-        .border(1.0, c.border_weak)
-        .py(4.0)
-        .child(
-            row()
-                .w_full()
-                .h(24.0)
-                .px(12.0)
-                .gap(12.0)
-                .center_y()
-                .child(head("Port", Some(56.0)))
-                .child(head("Protocol", Some(56.0)))
-                .child(head("Address", Some(150.0)))
-                .child(head("Process", None)),
-        );
-    for p in n.ports.iter().take(PORTS) {
-        let key = format!("sys-port-{}-{}-{}", p.port, p.proto, p.pid.unwrap_or(0));
-        let listed = p.pid.and_then(|pid| s.process(pid));
-        let who = match (listed, p.pid) {
-            (Some(proc), Some(pid)) => text(format!("{} · {pid}", proc.name()))
-                .key(format!("{key}-open"))
-                .role("link")
-                .label(format!("Open {}", proc.name()))
-                .cursor(Cursor::Pointer)
-                .font(k.ty.small)
-                .color(c.text_accent)
-                .truncate()
-                .shrink()
-                .min_w(0.0)
-                .on_press(move |s: &mut App| s.open(pid)),
-            (None, Some(pid)) => text(if p.command.is_empty() {
-                format!("pid {pid}")
-            } else {
-                format!("{} · {pid}", p.command)
-            })
+    // What is listening, and which processes move bytes, are on the Network page.
+    body.child(
+        text("See what is listening and which processes are using the network")
+            .key("sys-open-network")
+            .role("link")
+            .cursor(Cursor::Pointer)
             .font(k.ty.small)
-            .color(c.text_muted)
-            .truncate()
-            .shrink()
-            .min_w(0.0),
-            (_, None) => text(if p.command.is_empty() {
-                "Unknown".to_owned()
-            } else {
-                p.command.clone()
-            })
-            .font(k.ty.small)
-            .color(c.text_muted)
-            .truncate()
-            .shrink()
-            .min_w(0.0),
-        };
-        table = table.child(
-            row()
-                .key(key)
-                .w_full()
-                .h(26.0)
-                .px(12.0)
-                .gap(12.0)
-                .center_y()
-                .child(
-                    text(p.port.to_string())
-                        .w(56.0)
-                        .font(figures)
-                        .color(c.text_base),
-                )
-                .child(
-                    text(p.proto.clone())
-                        .w(56.0)
-                        .font(k.ty.small)
-                        .color(c.text_muted),
-                )
-                .child(
-                    text(p.addrs.join(", "))
-                        .w(150.0)
-                        .font(k.ty.small)
-                        .color(c.text_muted)
-                        .truncate(),
-                )
-                .child(row().grow(1.0).min_w(0.0).child(who)),
-        );
-    }
-    if n.ports.len() > PORTS {
-        table = table.child(
-            text(format!(
-                "and {} more",
-                fmt_count((n.ports.len() - PORTS) as u64)
-            ))
-            .key("sys-ports-more")
-            .px(12.0)
-            .py(6.0)
-            .font(k.ty.small)
-            .color(c.text_faint),
-        );
-    }
-    table
+            .color(k.c.text_accent)
+            .on_press(|s: &mut App| s.show(crate::groups::Nav::Network)),
+    )
 }
 
 /// The busiest processes by CPU and the largest by memory, each opening its page.

@@ -20,6 +20,8 @@ mod sample_jvm;
 mod sample_system;
 mod sample_activity;
 mod sample_logs;
+mod network;
+mod sample_network;
 mod signal;
 mod spawns;
 mod sample_tree;
@@ -99,6 +101,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.inspect.cancel_all();
     system::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     s.activity.cancel();
+    s.network.cancel();
     startup::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     s.whatswrong.auto = false;
     s.whatswrong.cancel();
@@ -127,6 +130,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     // Keep recording is on, and stop once neither holds.
     landed |= s.tick_activity();
     if s.activity_wanted() {
+        tx.wake_after(STATUS_TICK);
+    }
+    // Which processes move bytes: windows run only while the Network page is open.
+    landed |= s.tick_network();
+    if s.network_wanted() {
         tx.wake_after(STATUS_TICK);
     }
     // What starts at login, and a Disable or Enable's answer, for the Startup page.
@@ -212,6 +220,9 @@ fn main() {
             ("activity", sample_activity::activity_scene),
             ("activity-storm", sample_activity::activity_storm_scene),
             ("activity-unsupported", sample_activity::activity_unsupported_scene),
+            ("network", sample_network::network_scene),
+            ("network-measuring", sample_network::network_measuring_scene),
+            ("network-unsupported", sample_network::network_unsupported_scene),
             ("startup", sample_startup::startup_scene),
             ("startup-confirm", sample_startup::startup_confirm_scene),
             ("startup-failed", sample_startup::startup_failed_scene),
