@@ -224,6 +224,44 @@ func TestDetectWithCacheHitRefreshesLiveFields(t *testing.T) {
 	}
 }
 
+// TestDetectWithCacheHitRefreshesBundleSize checks that, with refreshStorage,
+// a hit after a change confined to Contents/Resources (which leaves the key
+// unchanged) reports the new bundle size, while the rules path replays it.
+func TestDetectWithCacheHitRefreshesBundleSize(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	app := makeTestBundle(t, dir, "SizeApp", "com.size.app", "SizeApp")
+	st := cache.NewShardedStore(filepath.Join(dir, "cache", "v1"), "detect")
+	first, err := detectWithCache(app, hermeticDetectOpts(), st, nil, true)
+	if err != nil {
+		t.Fatalf("detectWithCache: %v", err)
+	}
+	key := detectCacheKey(app)
+	res := filepath.Join(app, "Contents", "Resources")
+	if err := os.MkdirAll(res, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(res, "app.asar"), make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if string(detectCacheKey(app)) != string(key) {
+		t.Fatal("a Resources change should leave the cache key unchanged")
+	}
+
+	stale, err := detectWithCache(app, hermeticDetectOpts(), st, nil, false)
+	if err != nil || stale.BundleSizeBytes != first.BundleSizeBytes {
+		t.Fatalf("rules path: size %d err %v, want the cached %d", stale.BundleSizeBytes, err, first.BundleSizeBytes)
+	}
+	r, err := detectWithCache(app, hermeticDetectOpts(), st, nil, true)
+	if err != nil {
+		t.Fatalf("detectWithCache: %v", err)
+	}
+	if r.BundleSizeBytes < first.BundleSizeBytes+1<<20 || r.ApparentSizeBytes < first.ApparentSizeBytes+1<<20 {
+		t.Errorf("size = %d/%d, want at least 1 MiB over the cached %d/%d",
+			r.BundleSizeBytes, r.ApparentSizeBytes, first.BundleSizeBytes, first.ApparentSizeBytes)
+	}
+}
+
 func TestDetectWithCacheMissRunsLiveDetect(t *testing.T) {
 	dir := t.TempDir()
 	app := makeTestBundle(t, dir, "LiveApp", "com.live.app", "LiveApp")

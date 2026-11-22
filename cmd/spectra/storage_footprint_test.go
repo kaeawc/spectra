@@ -59,7 +59,7 @@ func TestCLIFootprintCacheWithoutStores(t *testing.T) {
 
 // TestSnapshotUsesDetectCache checks that `spectra snapshot` serves per-app
 // inspection from the detect cache with a live storage footprint, and that
-// --network (not covered by the cache key) bypasses it.
+// --network (not covered by the cache key) and --fresh bypass it.
 func TestSnapshotUsesDetectCache(t *testing.T) {
 	prev := cacheStores
 	t.Cleanup(func() { cacheStores = prev })

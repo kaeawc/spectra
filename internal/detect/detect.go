@@ -776,6 +776,15 @@ func RefreshStorage(r *Result, appPath string) {
 	r.Storage = scanStorage(appPath, r.BundleID)
 }
 
+// RefreshBundleSize re-measures r's bundle size fields with one walk of the
+// bundle. Content-keyed caches of Result call it on a hit when sizes must be
+// live: a change confined to Contents/Resources (an in-place app.asar or
+// plugin swap) leaves the cache key unchanged.
+func RefreshBundleSize(r *Result, appPath string) {
+	t := bundleTreeStats(appPath)
+	r.BundleSizeBytes, r.ApparentSizeBytes = t.actual, t.apparent
+}
+
 // scanStorage measures user-data sizes under ~/Library for this bundle.
 // macOS apps spread state across half a dozen locations; we sum them so
 // callers can see the real on-disk cost. Apps register state under both

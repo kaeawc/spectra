@@ -200,8 +200,8 @@ type Options struct {
 	// DetectStore must also be set; nil writes synchronously.
 	DetectWriter *cache.AsyncWriter
 
-	// DetectRefreshStorage re-measures each app's ~/Library footprint on a
-	// DetectStore hit instead of replaying the cached one. Callers that
+	// DetectRefreshStorage re-measures each app's bundle size and ~/Library
+	// footprint on a DetectStore hit instead of replaying the cached ones. Callers that
 	// persist or diff per-app storage set it; the rest of the result is
 	// served from the cache.
 	DetectRefreshStorage bool
