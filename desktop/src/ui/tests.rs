@@ -43,7 +43,8 @@ fn locate(rt: &mut Runtime<App>, key: &str) -> (f32, f32) {
     let k = key.to_owned();
     rt.update(move |_, tx| tx.scroll_into_view(k));
     settle(rt);
-    rt.find(key).unwrap_or_else(|| panic!("nothing keyed {key} on screen"))
+    rt.find(key)
+        .unwrap_or_else(|| panic!("nothing keyed {key} on screen"))
 }
 
 /// Scrolls `key` into view, then presses it.
@@ -77,19 +78,29 @@ fn text_of(rt: &Runtime<App>, key: &str) -> Option<String> {
 }
 
 fn shows_text(rt: &Runtime<App>, want: &str) -> bool {
-    rt.elements().into_iter().any(|e| e.text.as_deref() == Some(want))
+    rt.elements()
+        .into_iter()
+        .any(|e| e.text.as_deref() == Some(want))
 }
 
 #[test]
 fn the_overview_leads_with_a_summary_and_findings() {
     let rt = sample();
-    for key in ["summary-procs", "summary-cpu", "summary-memory", "findings-title"] {
+    for key in [
+        "summary-procs",
+        "summary-cpu",
+        "summary-memory",
+        "findings-title",
+    ] {
         assert!(rt.find(key).is_some(), "the overview shows {key}");
     }
     assert_eq!(text_of(&rt, "summary-procs-value").as_deref(), Some("55"));
     assert!(rt.find("subject-941-proc-invalid-signature").is_some());
     assert!(rt.find("too-old").is_none());
-    assert!(rt.find("feed-status").is_none(), "fresh numbers need no status");
+    assert!(
+        rt.find("feed-status").is_none(),
+        "fresh numbers need no status"
+    );
 }
 
 #[test]
@@ -101,7 +112,11 @@ fn a_sidebar_category_filters_the_list() {
     assert!(rt.find(SLACK).is_some(), "Slack is an app");
     assert!(rt.find("p:1340").is_none(), "python3 is not");
     let s = &rt.state;
-    let pids: Vec<u32> = s.groups.iter().flat_map(|g| g.pids.iter().copied()).collect();
+    let pids: Vec<u32> = s
+        .groups
+        .iter()
+        .flat_map(|g| g.pids.iter().copied())
+        .collect();
     assert!(!pids.is_empty());
     assert!(
         pids.iter()
@@ -110,14 +125,24 @@ fn a_sidebar_category_filters_the_list() {
 
     press(&mut rt, "rt-jvm");
     assert_eq!(rt.state.nav, Nav::Runtime(crate::procs::Runtime::Jvm));
-    let groups: Vec<(&str, usize, Option<&str>)> =
-        rt.state.groups.iter().map(|g| (g.name.as_str(), g.pids.len(), g.hint.as_deref())).collect();
+    let groups: Vec<(&str, usize, Option<&str>)> = rt
+        .state
+        .groups
+        .iter()
+        .map(|g| (g.name.as_str(), g.pids.len(), g.hint.as_deref()))
+        .collect();
     assert_eq!(
         groups,
-        [("java", 3, Some("temurin-21.jdk")), ("java", 1, Some("zulu-17.jdk"))],
+        [
+            ("java", 3, Some("temurin-21.jdk")),
+            ("java", 1, Some("zulu-17.jdk"))
+        ],
         "the three Temurin JVMs as one row, the Zulu java on its own"
     );
-    assert!(shows_text(&rt, "temurin-21.jdk") && shows_text(&rt, "zulu-17.jdk"), "the folder tells them apart");
+    assert!(
+        shows_text(&rt, "temurin-21.jdk") && shows_text(&rt, "zulu-17.jdk"),
+        "the folder tells them apart"
+    );
 }
 
 #[test]
@@ -133,14 +158,27 @@ fn the_triangle_opens_a_group_and_a_double_click_toggles_it_once() {
     assert!(rt.find("p:901").is_none());
 
     press(&mut rt, SLACK);
-    assert!(!rt.state.open_groups.contains(SLACK_ID), "a click on the row only moves the cursor");
+    assert!(
+        !rt.state.open_groups.contains(SLACK_ID),
+        "a click on the row only moves the cursor"
+    );
     assert_eq!(rt.state.app_page, None, "and opens no page");
 
     // A group that isn't an app toggles on a double click, once.
-    let zsh = rt.state.groups.iter().find(|g| g.name == "zsh").unwrap().id.clone();
+    let zsh = rt
+        .state
+        .groups
+        .iter()
+        .find(|g| g.name == "zsh")
+        .unwrap()
+        .id
+        .clone();
     let row = format!("g:{zsh}");
     double_press(&mut rt, &row);
-    assert!(rt.state.open_groups.contains(&zsh), "a double click toggles once");
+    assert!(
+        rt.state.open_groups.contains(&zsh),
+        "a double click toggles once"
+    );
     double_press(&mut rt, &row);
     assert!(!rt.state.open_groups.contains(&zsh));
 }
@@ -150,22 +188,46 @@ fn a_double_click_on_an_app_opens_its_page_and_back_returns() {
     let mut rt = sample();
     press(&mut rt, "all");
     double_press(&mut rt, SLACK);
-    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"));
+    assert_eq!(
+        rt.state.app_page.as_deref(),
+        Some("/Applications/Slack.app")
+    );
     assert_eq!(rt.state.selected, None);
-    assert!(!rt.state.open_groups.contains(SLACK_ID), "the group stays closed");
-    for key in ["ap-header", "ap-lane-cpu", "ap-lane-threads", "ap-children", "ap-live"] {
+    assert!(
+        !rt.state.open_groups.contains(SLACK_ID),
+        "the group stays closed"
+    );
+    for key in [
+        "ap-header",
+        "ap-lane-cpu",
+        "ap-lane-threads",
+        "ap-children",
+        "ap-live",
+    ] {
         assert!(rt.find(key).is_some(), "the app page shows {key}");
     }
     assert_eq!(text_of(&rt, "ap-name").as_deref(), Some("Slack"));
-    assert_eq!(text_of(&rt, "ap-meta").as_deref().map(|m| m.starts_with("4 processes")), Some(true));
+    assert_eq!(
+        text_of(&rt, "ap-meta")
+            .as_deref()
+            .map(|m| m.starts_with("4 processes")),
+        Some(true)
+    );
     // One of its processes, then back to the app, then back to the list.
     press(&mut rt, "ap-child-901");
     assert_eq!(rt.state.selected, Some(901));
     assert_eq!(back_label(&rt).as_deref(), Some("‹ Slack"));
     key(&mut rt, Key::Escape);
-    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"), "back to the app page");
+    assert_eq!(
+        rt.state.app_page.as_deref(),
+        Some("/Applications/Slack.app"),
+        "back to the app page"
+    );
     key(&mut rt, Key::Escape);
-    assert_eq!((rt.state.selected, rt.state.app_page.as_deref()), (None, None));
+    assert_eq!(
+        (rt.state.selected, rt.state.app_page.as_deref()),
+        (None, None)
+    );
     assert_eq!(rt.state.nav, Nav::All);
 }
 
@@ -175,8 +237,15 @@ fn return_on_an_app_row_opens_its_page_and_quit_shortcuts_ignore_the_hidden_curs
     press(&mut rt, "all");
     press(&mut rt, SLACK);
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.app_page.as_deref(), Some("/Applications/Slack.app"));
-    assert_eq!(rt.state.shortcut_target(), None, "the list's cursor is under the page");
+    assert_eq!(
+        rt.state.app_page.as_deref(),
+        Some("/Applications/Slack.app")
+    );
+    assert_eq!(
+        rt.state.shortcut_target(),
+        None,
+        "the list's cursor is under the page"
+    );
 }
 
 #[test]
@@ -193,8 +262,18 @@ fn arrow_keys_move_the_cursor_and_return_opens() {
         assert!(rt.state.open_groups.is_empty(), "nor toggles a group");
     }
     // Back to a process row, then Return.
-    let at = rt.state.rows.iter().position(|r| r.id == "p:1300").expect("rust-analyzer is listed");
-    let cur = rt.state.rows.iter().position(|r| Some(r.id.as_str()) == rt.state.table.cursor()).unwrap();
+    let at = rt
+        .state
+        .rows
+        .iter()
+        .position(|r| r.id == "p:1300")
+        .expect("rust-analyzer is listed");
+    let cur = rt
+        .state
+        .rows
+        .iter()
+        .position(|r| Some(r.id.as_str()) == rt.state.table.cursor())
+        .unwrap();
     for _ in 0..cur.abs_diff(at) {
         key(&mut rt, if at < cur { Key::Up } else { Key::Down });
     }
@@ -243,15 +322,29 @@ fn the_parent_link_opens_the_parent_and_back_returns_to_the_child() {
     );
     press(&mut rt, "pd-parent");
     assert_eq!(rt.state.selected, Some(921));
-    assert_eq!(text_of(&rt, "pd-name").as_deref(), Some("Code Helper (Plugin)"));
+    assert_eq!(
+        text_of(&rt, "pd-name").as_deref(),
+        Some("Code Helper (Plugin)")
+    );
     assert!(
         rt.find("pd-child-1300").is_some(),
         "and lists what it started"
     );
-    assert_eq!(text_of(&rt, "back/label").or_else(|| back_label(&rt)).as_deref(), Some("‹ rust-analyzer"));
+    assert_eq!(
+        text_of(&rt, "back/label")
+            .or_else(|| back_label(&rt))
+            .as_deref(),
+        Some("‹ rust-analyzer")
+    );
     key(&mut rt, Key::Escape);
     assert_eq!(rt.state.selected, Some(1300), "back to the child");
-    rt.key(KeyEvent { key: Key::Command('['), mods: rune::Mods { cmd: true, ..rune::Mods::default() } });
+    rt.key(KeyEvent {
+        key: Key::Command('['),
+        mods: rune::Mods {
+            cmd: true,
+            ..rune::Mods::default()
+        },
+    });
     settle(&mut rt);
     assert_eq!(rt.state.selected, None, "Cmd-[ goes back too, to the list");
     double_press(&mut rt, "p:1300");
@@ -273,10 +366,19 @@ fn back_label(rt: &Runtime<App>) -> Option<String> {
 #[test]
 fn an_unverified_signature_says_so_in_the_list_and_on_the_page() {
     let mut rt = scene(all_scene);
-    assert!(shows_text(&rt, "Developer ID · not verified"), "the list words it");
-    assert!(shows_text(&rt, "Apple"), "a checked one keeps its plain name");
+    assert!(
+        shows_text(&rt, "Developer ID · not verified"),
+        "the list words it"
+    );
+    assert!(
+        shows_text(&rt, "Apple"),
+        "a checked one keeps its plain name"
+    );
     let claude = rt.state.groups.iter().find(|g| g.name == "claude").unwrap();
-    assert_eq!(claude.signing, crate::procs::Trust::Unverified(crate::procs::SignStatus::DeveloperId));
+    assert_eq!(
+        claude.signing,
+        crate::procs::Trust::Unverified(crate::procs::SignStatus::DeveloperId)
+    );
     rt = scene(signed_scene);
     assert_eq!(rt.state.selected, Some(1200));
     assert_eq!(
@@ -288,8 +390,15 @@ fn an_unverified_signature_says_so_in_the_list_and_on_the_page() {
     // An Apple process's page reads as checked.
     rt.update(|s, _| s.open(152));
     settle(&mut rt);
-    assert_eq!(text_of(&rt, "pd-signing").as_deref(), Some("no team · hardened runtime off"));
-    assert!(text_of(&rt, "pd-signing-evidence").unwrap().contains("validated by codesign --verify"));
+    assert_eq!(
+        text_of(&rt, "pd-signing").as_deref(),
+        Some("no team · hardened runtime off")
+    );
+    assert!(
+        text_of(&rt, "pd-signing-evidence")
+            .unwrap()
+            .contains("validated by codesign --verify")
+    );
 }
 
 #[test]
@@ -303,13 +412,23 @@ fn a_failed_reading_keeps_the_sidebar_and_says_how_old_the_numbers_are() {
         Some("Updated 14 s ago · last reading failed: spectra process failed: no processes found")
     );
     press(&mut rt, "overview");
-    assert!(rt.find("summary-procs").is_some(), "the overview keeps its summary");
+    assert!(
+        rt.find("summary-procs").is_some(),
+        "the overview keeps its summary"
+    );
     assert!(rt.find("feed-status").is_some());
-    assert!(rt.find("proc-error").is_none(), "no full-page error while there's a list");
+    assert!(
+        rt.find("proc-error").is_none(),
+        "no full-page error while there's a list"
+    );
     // An empty reading is a failure too.
     rt.update(|s, _| s.land_procs(Ok(vec![])));
     settle(&mut rt);
-    assert!(text_of(&rt, "feed-status").unwrap().ends_with("last reading failed: Spectra listed no processes"));
+    assert!(
+        text_of(&rt, "feed-status")
+            .unwrap()
+            .ends_with("last reading failed: Spectra listed no processes")
+    );
 }
 
 #[test]
@@ -388,9 +507,19 @@ fn a_spectra_too_old_to_classify_says_so_and_jvms_still_work() {
 #[test]
 fn a_jvms_process_page_holds_its_jvm_numbers() {
     let rt = scene(detail_scene);
-    assert_eq!(text_of(&rt, "pd-name").as_deref(), Some("Server"), "named for what it runs");
+    assert_eq!(
+        text_of(&rt, "pd-name").as_deref(),
+        Some("Server"),
+        "named for what it runs"
+    );
     assert_eq!(text_of(&rt, "pd-verdict").as_deref(), Some("Heap 83% full"));
-    for key in ["jd-detail", "jd-tile-heap", "jd-lane-heap", "jd-args", "pd-lane-cpu"] {
+    for key in [
+        "jd-detail",
+        "jd-tile-heap",
+        "jd-lane-heap",
+        "jd-args",
+        "pd-lane-cpu",
+    ] {
         assert!(rt.find(key).is_some(), "the page shows {key}");
     }
     assert!(rt.find("subject-4101-jvm-heap-pressure").is_some());
@@ -415,10 +544,11 @@ fn the_unsigned_finding_lists_those_processes() {
     assert_eq!(rt.state.nav, Nav::Unidentified);
     let s = &rt.state;
     assert!(
-        s.groups
-            .iter()
-            .flat_map(|g| &g.pids)
-            .all(|pid| s.process(*pid).unwrap().sign_status().is_unidentified())
+        s.groups.iter().flat_map(|g| &g.pids).all(|pid| s
+            .process(*pid)
+            .unwrap()
+            .sign_status()
+            .is_unidentified())
     );
     assert!(rt.find("p:1340").is_some(), "python3 is unsigned");
 }
@@ -440,7 +570,10 @@ fn a_search_narrows_the_list() {
         s.rebuild();
     });
     settle(&mut rt);
-    assert!(rt.find("p:4101").is_some(), "a lone match shows as its process");
+    assert!(
+        rt.find("p:4101").is_some(),
+        "a lone match shows as its process"
+    );
 }
 
 #[test]
@@ -518,22 +651,44 @@ fn send(rt: &mut Runtime<App>) {
 }
 
 fn opt_cmd_q() -> KeyEvent {
-    KeyEvent { key: Key::Command('q'), mods: rune::Mods { cmd: true, alt: true, ..rune::Mods::default() } }
+    KeyEvent {
+        key: Key::Command('q'),
+        mods: rune::Mods {
+            cmd: true,
+            alt: true,
+            ..rune::Mods::default()
+        },
+    }
 }
 
 #[test]
 fn confirming_quit_sends_one_term_to_that_pid_and_polls_again() {
     let (mut rt, r) = recorded(quit_scene);
     press(&mut rt, "pd-quit");
-    assert!(rt.find("confirm-dialog").is_some(), "the confirmation opens");
+    assert!(
+        rt.find("confirm-dialog").is_some(),
+        "the confirmation opens"
+    );
     assert!(r.sent().is_empty(), "opening it sends nothing");
     assert!(shows_text(&rt, "Quit Slack?"));
-    assert!(shows_text(&rt, "Slack (pid 900) will be asked to close. Unsaved changes may be lost."));
+    assert!(shows_text(
+        &rt,
+        "Slack (pid 900) will be asked to close. Unsaved changes may be lost."
+    ));
     press(&mut rt, "confirm-send");
     assert!(rt.find("confirm-dialog").is_none());
-    assert!(r.asked().is_empty() && r.sent().is_empty(), "ps and kill wait for the worker");
-    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Checking that pid 900 is still Slack…"));
-    assert!(rt.find("quit-outcome-dismiss").is_none(), "the answer has to land somewhere");
+    assert!(
+        r.asked().is_empty() && r.sent().is_empty(),
+        "ps and kill wait for the worker"
+    );
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Checking that pid 900 is still Slack…")
+    );
+    assert!(
+        rt.find("quit-outcome-dismiss").is_none(),
+        "the answer has to land somewhere"
+    );
     // Nothing more can be asked meanwhile, by any route.
     rt.update(|s, _| {
         s.ask(900, Signal::Kill);
@@ -546,22 +701,34 @@ fn confirming_quit_sends_one_term_to_that_pid_and_polls_again() {
     release(&mut rt);
     assert_eq!(r.sent(), [(900, Signal::Term)]);
     assert_eq!(r.asked(), [900], "checked who has the pid first");
-    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"));
-    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(), "the feed is asked for a reading now");
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Asked Slack to quit")
+    );
+    assert!(
+        rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(),
+        "the feed is asked for a reading now"
+    );
 }
 
 #[test]
 fn confirming_force_quit_sends_one_kill_and_warns_about_macos() {
     let (mut rt, r) = recorded(force_confirm_scene);
     assert!(shows_text(&rt, "Force quit trustd?"));
-    assert!(shows_text(&rt, "trustd (pid 340) will be stopped immediately. Unsaved changes will be lost."));
+    assert!(shows_text(
+        &rt,
+        "trustd (pid 340) will be stopped immediately. Unsaved changes will be lost."
+    ));
     assert_eq!(
         text_of(&rt, "confirm-line-1").as_deref(),
         Some("This is part of macOS and may restart or disrupt your session.")
     );
     send(&mut rt);
     assert_eq!(r.sent(), [(340, Signal::Kill)]);
-    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Stopping trustd"));
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Stopping trustd")
+    );
 }
 
 #[test]
@@ -579,7 +746,11 @@ fn cancel_esc_the_close_button_and_return_on_the_default_button_send_nothing() {
     assert!(rt.state.confirm.is_none());
     // Cancel has focus: Return sends nothing, Space presses Cancel.
     press(&mut rt, "pd-force");
-    let focused = rt.elements().into_iter().find(|e| e.focused).and_then(|e| e.key);
+    let focused = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.focused)
+        .and_then(|e| e.key);
     assert_eq!(focused.as_deref(), Some("confirm-cancel"));
     key(&mut rt, Key::Enter);
     assert!(r.sent().is_empty(), "Return isn't a yes");
@@ -594,8 +765,14 @@ fn a_pid_that_changed_hands_or_ended_gets_nothing() {
     let (mut rt, r) = recorded(quit_scene);
     let exe = rt.state.process(900).unwrap().executable_path.clone();
     let cases = [
-        (Some(("2026-11-19T08:00:05-05:00", exe.as_str())), "already ended; its pid now belongs to another process"),
-        (Some(("2026-11-19T08:00:04-05:00", "/usr/bin/node")), "pid 900 now runs /usr/bin/node, not Slack"),
+        (
+            Some(("2026-11-19T08:00:05-05:00", exe.as_str())),
+            "already ended; its pid now belongs to another process",
+        ),
+        (
+            Some(("2026-11-19T08:00:04-05:00", "/usr/bin/node")),
+            "pid 900 now runs /usr/bin/node, not Slack",
+        ),
         (None, "That process has already ended. Nothing was sent."),
     ];
     for (now, says) in cases {
@@ -607,9 +784,15 @@ fn a_pid_that_changed_hands_or_ended_gets_nothing() {
         send(&mut rt);
         let line = text_of(&rt, "quit-outcome-text").unwrap();
         assert!(line.contains(says), "{line}");
-        assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Refused(_)));
+        assert!(matches!(
+            rt.state.outcome.as_ref().unwrap().status,
+            Status::Refused(_)
+        ));
     }
-    assert!(r.sent().is_empty(), "nothing was sent to a pid that isn't Slack's");
+    assert!(
+        r.sent().is_empty(),
+        "nothing was sent to a pid that isn't Slack's"
+    );
 }
 
 /// Every way to ask for `pid`, straight to the guard: Rune ignores a press on a disabled
@@ -663,7 +846,10 @@ fn the_kernel_launchd_the_app_itself_and_what_its_readings_started_are_refused()
         ask_every_way(&mut rt, pid);
         assert!(rt.state.confirm.is_none(), "pid {pid} can't be asked");
     }
-    assert_eq!(text_of(&rt, "pd-refusal").as_deref(), Some("Spectra Desktop started it to take a reading; it ends on its own."));
+    assert_eq!(
+        text_of(&rt, "pd-refusal").as_deref(),
+        Some("Spectra Desktop started it to take a reading; it ends on its own.")
+    );
     rt.update(|s, _| s.open(1));
     settle(&mut rt);
     assert_eq!(
@@ -676,7 +862,10 @@ fn the_kernel_launchd_the_app_itself_and_what_its_readings_started_are_refused()
 #[test]
 fn another_users_process_is_off_with_the_reason_shown() {
     let (mut rt, r) = recorded(quit_root_scene);
-    assert_eq!(text_of(&rt, "pd-refusal").as_deref(), Some("Owned by root; Spectra Desktop can't stop it"));
+    assert_eq!(
+        text_of(&rt, "pd-refusal").as_deref(),
+        Some("Owned by root; Spectra Desktop can't stop it")
+    );
     ask_every_way(&mut rt, 301);
     assert!(rt.state.confirm.is_none());
     assert!(r.sent().is_empty());
@@ -685,14 +874,28 @@ fn another_users_process_is_off_with_the_reason_shown() {
 #[test]
 fn an_app_rows_quit_is_its_main_process_and_other_groups_have_none() {
     let (mut rt, r) = recorded(quit_list_scene);
-    assert_eq!(rt.state.cursor_target(), Some(900), "Slack's main process, not a helper");
+    assert_eq!(
+        rt.state.cursor_target(),
+        Some(900),
+        "Slack's main process, not a helper"
+    );
     assert_eq!(text_of(&rt, "list-target").as_deref(), Some("Slack · 900"));
     press(&mut rt, "list-quit");
-    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Term)));
+    assert_eq!(
+        rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)),
+        Some((900, Signal::Term))
+    );
     assert!(shows_text(&rt, "Quit Slack?"));
     press(&mut rt, "confirm-cancel");
     // Several zsh are no one process.
-    let zsh = rt.state.groups.iter().find(|g| g.name == "zsh").unwrap().id.clone();
+    let zsh = rt
+        .state
+        .groups
+        .iter()
+        .find(|g| g.name == "zsh")
+        .unwrap()
+        .id
+        .clone();
     rt.update(move |s, _| s.table.select(format!("g:{zsh}")));
     settle(&mut rt);
     assert_eq!(rt.state.cursor_target(), None);
@@ -742,7 +945,10 @@ fn the_shortcut_only_opens_the_confirmation() {
         rt.key(opt_cmd_q());
         settle(&mut rt);
     }
-    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Term)));
+    assert_eq!(
+        rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)),
+        Some((900, Signal::Term))
+    );
     assert!(r.sent().is_empty(), "a held shortcut never sends");
     key(&mut rt, Key::Escape);
     // On a page it acts on the page's process.
@@ -753,7 +959,13 @@ fn the_shortcut_only_opens_the_confirmation() {
     assert_eq!(rt.state.confirm.as_ref().map(|c| c.target.pid), Some(1300));
     // Without the shortcut's modifiers, Q is just a key.
     key(&mut rt, Key::Escape);
-    rt.key(KeyEvent { key: Key::Command('q'), mods: rune::Mods { cmd: true, ..rune::Mods::default() } });
+    rt.key(KeyEvent {
+        key: Key::Command('q'),
+        mods: rune::Mods {
+            cmd: true,
+            ..rune::Mods::default()
+        },
+    });
     key(&mut rt, Key::Text("q".into()));
     assert!(rt.state.confirm.is_none());
     assert!(r.sent().is_empty());
@@ -778,7 +990,12 @@ fn typing_in_the_search_field_triggers_nothing() {
 fn reading(rt: &mut Runtime<App>, secs: f64, slack: bool) {
     rt.update(move |s, _| {
         s.now += secs;
-        let procs = s.procs.iter().filter(|p| slack || p.pid != 900).cloned().collect();
+        let procs = s
+            .procs
+            .iter()
+            .filter(|p| slack || p.pid != 900)
+            .cloned()
+            .collect();
         s.land_procs(Ok(procs));
     });
     settle(rt);
@@ -790,7 +1007,11 @@ fn a_quit_that_isnt_taken_offers_force_quit() {
     press(&mut rt, "pd-quit");
     send(&mut rt);
     reading(&mut rt, 2.0, true);
-    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Asked Slack to quit"), "two seconds is patience");
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Asked Slack to quit"),
+        "two seconds is patience"
+    );
     assert!(rt.find("quit-outcome-force").is_none());
     press(&mut rt, "pd-quit");
     assert!(rt.state.confirm.is_none(), "already asked");
@@ -801,9 +1022,16 @@ fn a_quit_that_isnt_taken_offers_force_quit() {
     );
     // `ps` is asked, off the UI thread, whether it's a zombie; it isn't.
     release(&mut rt);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::StillRunning
+    );
     press(&mut rt, "quit-outcome-force");
-    assert_eq!(rt.state.confirm.as_ref().map(|c| c.signal), Some(Signal::Kill), "it only opens the confirmation");
+    assert_eq!(
+        rt.state.confirm.as_ref().map(|c| c.signal),
+        Some(Signal::Kill),
+        "it only opens the confirmation"
+    );
     assert_eq!(r.sent(), [(900, Signal::Term)]);
     send(&mut rt);
     assert_eq!(r.sent(), [(900, Signal::Term), (900, Signal::Kill)]);
@@ -823,7 +1051,11 @@ fn a_quit_process_is_said_to_have_quit_and_its_page_offers_back() {
     press(&mut rt, "ended-back");
     assert_eq!(rt.state.selected, None);
     assert_eq!(rt.state.nav, Nav::Category(Category::Apps));
-    assert_eq!(text_of(&rt, "quit-outcome-text").as_deref(), Some("Slack quit"), "the list says it too");
+    assert_eq!(
+        text_of(&rt, "quit-outcome-text").as_deref(),
+        Some("Slack quit"),
+        "the list says it too"
+    );
     press(&mut rt, "quit-outcome-dismiss");
     assert!(rt.find("quit-outcome").is_none());
 }
@@ -831,15 +1063,23 @@ fn a_quit_process_is_said_to_have_quit_and_its_page_offers_back() {
 #[test]
 fn a_failed_kill_says_why() {
     let (mut rt, r) = recorded(quit_scene);
-    r.fail_kill(SendError::NotSent("kill failed: Operation not permitted".into()));
+    r.fail_kill(SendError::NotSent(
+        "kill failed: Operation not permitted".into(),
+    ));
     press(&mut rt, "pd-quit");
     send(&mut rt);
     assert_eq!(
         text_of(&rt, "quit-outcome-text").as_deref(),
         Some("Couldn't quit Slack: kill failed: Operation not permitted.")
     );
-    assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Failed(_)));
-    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_err(), "nothing was sent, so no hurry");
+    assert!(matches!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::Failed(_)
+    ));
+    assert!(
+        rt.state.poke_rx.as_ref().unwrap().try_recv().is_err(),
+        "nothing was sent, so no hurry"
+    );
 }
 
 #[test]
@@ -857,7 +1097,10 @@ fn an_invalid_signature_points_to_force_quit_on_its_page() {
 fn quit_slack(rt: &mut Runtime<App>) {
     press(rt, "pd-quit");
     send(rt);
-    assert!(matches!(rt.state.outcome.as_ref().unwrap().status, Status::Asked { .. }));
+    assert!(matches!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::Asked { .. }
+    ));
 }
 
 #[test]
@@ -870,13 +1113,24 @@ fn a_failed_reading_leaves_a_quit_as_asked() {
         s.land_procs(Err(ProcError::Failed("spectra process failed".into())));
     });
     settle(&mut rt);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, asked, "a failure says nothing about Slack");
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        asked,
+        "a failure says nothing about Slack"
+    );
     rt.update(|s, _| s.land_procs(Ok(vec![])));
     settle(&mut rt);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, asked, "nor does an empty reading");
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        asked,
+        "nor does an empty reading"
+    );
     // The next good reading does.
     reading(&mut rt, 0.0, true);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::StillRunning
+    );
 }
 
 #[test]
@@ -919,13 +1173,19 @@ fn the_banners_force_quit_opens_nothing_once_the_pid_changed_hands() {
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     settle(&mut rt);
-    assert!(rt.state.confirm.is_none(), "no confirmation naming the new process");
+    assert!(
+        rt.state.confirm.is_none(),
+        "no confirmation naming the new process"
+    );
     // The guard itself, whether or not the press reached the old button.
     rt.update(move |s, _| s.ask_target(drawn.clone(), Signal::Kill));
     assert!(rt.state.confirm.is_none());
     // Asked about the new process by pid, it names the new process.
     rt.update(|s, _| s.ask(900, Signal::Kill));
-    assert_eq!(rt.state.confirm.as_ref().map(|c| c.target.name.as_str()), Some("node"));
+    assert_eq!(
+        rt.state.confirm.as_ref().map(|c| c.target.name.as_str()),
+        Some("node")
+    );
     assert_eq!(r.sent(), [(900, Signal::Term)]);
 }
 
@@ -935,7 +1195,10 @@ fn the_banners_force_quit_opens_the_confirmation_while_it_still_matches() {
     still_running(&mut rt);
     let drawn = rt.state.outcome.as_ref().unwrap().target.clone();
     rt.update(move |s, _| s.ask_target(drawn.clone(), Signal::Kill));
-    assert_eq!(rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)), Some((900, Signal::Kill)));
+    assert_eq!(
+        rt.state.confirm.as_ref().map(|c| (c.target.pid, c.signal)),
+        Some((900, Signal::Kill))
+    );
 }
 
 #[test]
@@ -946,11 +1209,19 @@ fn a_kill_that_times_out_may_have_been_sent_and_is_watched() {
     send(&mut rt);
     assert_eq!(
         text_of(&rt, "quit-outcome-text").as_deref(),
-        Some("Quit may have been sent to Slack (kill took longer than 5 s); watching whether it ends")
+        Some(
+            "Quit may have been sent to Slack (kill took longer than 5 s); watching whether it ends"
+        )
     );
-    assert!(rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(), "the feed is asked for a reading now");
+    assert!(
+        rt.state.poke_rx.as_ref().unwrap().try_recv().is_ok(),
+        "the feed is asked for a reading now"
+    );
     rt.update(|s, _| s.ask(900, Signal::Term));
-    assert!(rt.state.confirm.is_none(), "a second Quit could be a second signal");
+    assert!(
+        rt.state.confirm.is_none(),
+        "a second Quit could be a second signal"
+    );
     reading(&mut rt, 2.0, false);
     assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Ended);
     assert_eq!(text_of(&rt, "ended-said").as_deref(), Some("Slack quit"));
@@ -963,7 +1234,10 @@ fn a_kill_that_times_out_and_leaves_it_running_says_so_later() {
     press(&mut rt, "pd-quit");
     send(&mut rt);
     reading(&mut rt, 6.0, true);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::StillRunning
+    );
 }
 
 #[test]
@@ -975,14 +1249,27 @@ fn a_zombie_waits_for_its_parent_and_gets_no_force_quit() {
     r.zombie(900, &started);
     reading(&mut rt, 6.0, true);
     release(&mut rt);
-    let parent = rt.state.process(ppid).map(|p| format!("{} (pid {ppid})", crate::signal::display_name(p)));
+    let parent = rt
+        .state
+        .process(ppid)
+        .map(|p| format!("{} (pid {ppid})", crate::signal::display_name(p)));
     let parent = parent.unwrap_or_else(|| format!("its parent (pid {ppid})"));
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::Waiting { parent: parent.clone() });
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::Waiting {
+            parent: parent.clone()
+        }
+    );
     assert_eq!(
         text_of(&rt, "quit-outcome-text"),
-        Some(format!("Slack has exited and is waiting for {parent} to collect it; Force quit can't help"))
+        Some(format!(
+            "Slack has exited and is waiting for {parent} to collect it; Force quit can't help"
+        ))
     );
-    assert!(rt.find("quit-outcome-force").is_none(), "Force quit can't help");
+    assert!(
+        rt.find("quit-outcome-force").is_none(),
+        "Force quit can't help"
+    );
     assert!(text_of(&rt, "pd-refusal").unwrap().contains("waiting for"));
     ask_every_way(&mut rt, 900);
     assert!(rt.state.confirm.is_none());
@@ -999,7 +1286,11 @@ fn a_zombie_found_at_confirmation_gets_nothing() {
     r.zombie(900, &started);
     press(&mut rt, "pd-force");
     send(&mut rt);
-    assert!(text_of(&rt, "quit-outcome-text").unwrap().contains("waiting for its parent"));
+    assert!(
+        text_of(&rt, "quit-outcome-text")
+            .unwrap()
+            .contains("waiting for its parent")
+    );
     assert!(r.sent().is_empty());
 }
 
@@ -1025,7 +1316,10 @@ fn an_answer_for_a_dismissed_outcome_is_dropped() {
         s.outcome = Some(stale);
     });
     release(&mut rt);
-    assert_eq!(rt.state.outcome.as_ref().unwrap().status, Status::StillRunning);
+    assert_eq!(
+        rt.state.outcome.as_ref().unwrap().status,
+        Status::StillRunning
+    );
 }
 
 fn confirmed_quit(f: impl FnOnce(&mut App)) -> Runtime<App> {
@@ -1096,7 +1390,10 @@ fn a_thread_that_cannot_start_lands_failed() {
 #[test]
 fn an_unlisted_pid_is_said_to_have_ended() {
     let (rt, _) = recorded(quit_scene);
-    assert_eq!(rt.state.refusal(4_000_000).as_deref(), Some("That process has already ended."));
+    assert_eq!(
+        rt.state.refusal(4_000_000).as_deref(),
+        Some("That process has already ended.")
+    );
 }
 
 // The inspector: tools and live readings with a fake Spectra.
@@ -1129,12 +1426,18 @@ fn a_tool_runs_from_its_button_and_shows_its_result() {
     let (mut rt, fake) = inspecting(Fake::all());
     assert!(rt.find("tools").is_some(), "the page has its tools");
     press(&mut rt, "tool-sample-run");
-    assert!(rt.find("tool-sample-running").is_some(), "it says it's running");
+    assert!(
+        rt.find("tool-sample-running").is_some(),
+        "it says it's running"
+    );
     assert!(rt.find("tool-sample-cancel").is_some());
     run_held(&mut rt);
     assert!(rt.find("tool-sample-result").is_some());
     assert!(rt.find("sample-stacks-0").is_some(), "its top stacks");
-    assert_eq!(text_of(&rt, "sample-verdict").as_deref(), Some("Idle: waiting for work"));
+    assert_eq!(
+        text_of(&rt, "sample-verdict").as_deref(),
+        Some("Idle: waiting for work")
+    );
     assert_eq!(fake.calls(), [vec!["sample", "-json", "1300"]]);
 }
 
@@ -1154,7 +1457,10 @@ fn every_tools_result_view_renders() {
         run_held(&mut rt);
         assert!(rt.find(key).is_some(), "{tool:?} shows {key}");
     }
-    assert_eq!(text_of(&rt, "hang-verdict").as_deref(), Some("Blocked on a lock"));
+    assert_eq!(
+        text_of(&rt, "hang-verdict").as_deref(),
+        Some("Blocked on a lock")
+    );
 }
 
 #[test]
@@ -1162,9 +1468,15 @@ fn cancel_stops_a_tool_and_nothing_else_runs_meanwhile() {
     let (mut rt, fake) = inspecting(Fake::all());
     press(&mut rt, "tool-memtrace-run");
     press(&mut rt, "tool-lineage-run");
-    assert!(rt.state.inspect.state(Tool::Lineage).is_none(), "lineage waits: one tool at a time");
+    assert!(
+        rt.state.inspect.state(Tool::Lineage).is_none(),
+        "lineage waits: one tool at a time"
+    );
     press(&mut rt, "tool-memtrace-cancel");
-    assert_eq!(rt.state.inspect.state(Tool::Memtrace), Some(&RunState::Cancelling));
+    assert_eq!(
+        rt.state.inspect.state(Tool::Memtrace),
+        Some(&RunState::Cancelling)
+    );
     run_held(&mut rt);
     assert!(rt.find("tool-memtrace-cancelled").is_some());
     assert_eq!(fake.calls().len(), 1, "only memtrace was asked");
@@ -1175,7 +1487,10 @@ fn cancel_stops_a_tool_and_nothing_else_runs_meanwhile() {
 
 #[test]
 fn a_failed_tool_shows_why() {
-    let (mut rt, _) = inspecting(Fake::with(&[("vmmap", Err("vmmap: cannot examine process 1300"))]));
+    let (mut rt, _) = inspecting(Fake::with(&[(
+        "vmmap",
+        Err("vmmap: cannot examine process 1300"),
+    )]));
     press(&mut rt, "tool-vmmap-run");
     run_held(&mut rt);
     assert!(rt.find("tool-vmmap-error").is_some());
@@ -1216,8 +1531,14 @@ fn live_readings_feed_the_charts_while_the_page_is_open() {
     }
     assert_eq!(rt.state.inspect.net.points.len(), 4);
     assert!(rt.find("live-lane-in").is_some() && rt.find("live-lane-out").is_some());
-    assert_eq!(text_of(&rt, "live-lane-in-now").as_deref(), Some("2.7 MB/s"));
-    assert_eq!(text_of(&rt, "pd-energy-off").as_deref(), Some("Energy impact: impact: not available here"));
+    assert_eq!(
+        text_of(&rt, "live-lane-in-now").as_deref(),
+        Some("2.7 MB/s")
+    );
+    assert_eq!(
+        text_of(&rt, "pd-energy-off").as_deref(),
+        Some("Energy impact: impact: not available here")
+    );
     // Readings also feed the CPU, memory and threads lanes.
     assert!(rt.find("pd-lane-threads").is_some());
     assert_eq!(text_of(&rt, "pd-lane-threads-now").as_deref(), Some("18"));

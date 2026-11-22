@@ -688,7 +688,11 @@ impl Ask {
                 lines
             }
             Action::Enable => {
-                let now = if self.item.loaded { "" } else { " and starts now" };
+                let now = if self.item.loaded {
+                    ""
+                } else {
+                    " and starts now"
+                };
                 vec![format!(
                     "{name} ({label}) can start again. It will start at your next login{now}."
                 )]
@@ -1567,11 +1571,15 @@ pub(crate) mod tests {
         for label in ["com.example.x", "--", "-x", "--json"] {
             assert_eq!(
                 Action::Disable.args(label),
-                ["startup", "disable", "--json", "--scope", "user", "--", label]
+                [
+                    "startup", "disable", "--json", "--scope", "user", "--", label
+                ]
             );
             assert_eq!(
                 Action::Enable.args(label),
-                ["startup", "enable", "--json", "--scope", "user", "--", label]
+                [
+                    "startup", "enable", "--json", "--scope", "user", "--", label
+                ]
             );
         }
     }
@@ -1584,7 +1592,10 @@ pub(crate) mod tests {
             cancel_for(&args(&["startup", "list", "--json"])),
             quit
         ));
-        assert!(std::ptr::eq(cancel_for(&args(&["services", "--json"])), quit));
+        assert!(std::ptr::eq(
+            cancel_for(&args(&["services", "--json"])),
+            quit
+        ));
         for action in [Action::Disable, Action::Enable] {
             let flag = cancel_for(&action.args("-x"));
             assert!(!std::ptr::eq(flag, quit), "a change isn't killed at quit");
@@ -1596,15 +1607,28 @@ pub(crate) mod tests {
     #[test]
     fn the_confirmation_says_when_it_starts_and_what_unloads() {
         let mut item = by(&listing(), "com.jetbrains.toolbox").clone();
-        let ask = |item: &Item, action| Ask { item: item.clone(), action }.consequence();
+        let ask = |item: &Item, action| {
+            Ask {
+                item: item.clone(),
+                action,
+            }
+            .consequence()
+        };
         item.loaded = false;
         item.running = false;
         item.pid = None;
         assert_eq!(ask(&item, Action::Enable).len(), 1);
-        assert!(ask(&item, Action::Enable)[0].ends_with("It will start at your next login and starts now."));
+        assert!(
+            ask(&item, Action::Enable)[0]
+                .ends_with("It will start at your next login and starts now.")
+        );
         item.loaded = true;
         assert!(ask(&item, Action::Enable)[0].ends_with("It will start at your next login."));
-        assert!(ask(&item, Action::Disable).iter().any(|l| l.contains("loaded") && l.contains("unloads")));
+        assert!(
+            ask(&item, Action::Disable)
+                .iter()
+                .any(|l| l.contains("loaded") && l.contains("unloads"))
+        );
         item.loaded = false;
         assert_eq!(ask(&item, Action::Disable).len(), 1);
     }

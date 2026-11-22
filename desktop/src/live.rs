@@ -20,7 +20,11 @@ pub const BACKOFF: f64 = 5.0;
 
 /// The extra rest after `fails` failures in a row: none after a success.
 pub fn backoff(fails: u32) -> f64 {
-    if fails == 0 { 0.0 } else { BACKOFF * f64::from(1u32 << (fails - 1).min(6)) }
+    if fails == 0 {
+        0.0
+    } else {
+        BACKOFF * f64::from(1u32 << (fails - 1).min(6))
+    }
 }
 /// How long network top watches, in seconds.
 pub const NET_SECS: u64 = 2;
@@ -31,14 +35,25 @@ pub const IMPACT_DEADLINE: Duration = Duration::from_secs(10);
 const IMPACT_TOP: &str = "100000";
 
 pub fn net_args(pid: u32) -> Vec<String> {
-    ["network", "top", "--pid", &pid.to_string(), "--json", "--duration", &format!("{NET_SECS}s")]
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
+    [
+        "network",
+        "top",
+        "--pid",
+        &pid.to_string(),
+        "--json",
+        "--duration",
+        &format!("{NET_SECS}s"),
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
 }
 
 pub fn impact_args() -> Vec<String> {
-    ["impact", "--json", "--top", IMPACT_TOP].into_iter().map(str::to_owned).collect()
+    ["impact", "--json", "--top", IMPACT_TOP]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Bytes a second in and out, averaged over the window.
@@ -64,11 +79,15 @@ struct NetTop {
 
 /// The pid's (and its descendants') traffic over the window.
 pub fn parse_net(json: &str) -> Result<NetPoint, String> {
-    let t: NetTop = serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
+    let t: NetTop =
+        serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
     if t.samples == 0 {
         return Err("Spectra measured no intervals".into());
     }
-    Ok(NetPoint { in_bps: t.totals.avg_in_bytes_per_sec, out_bps: t.totals.avg_out_bytes_per_sec })
+    Ok(NetPoint {
+        in_bps: t.totals.avg_in_bytes_per_sec,
+        out_bps: t.totals.avg_out_bytes_per_sec,
+    })
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -92,8 +111,13 @@ struct Impact {
 
 /// The summed energy impact of `pids`, or `None` when Spectra scored none of them this round.
 pub fn parse_impact(json: &str, pids: &[u32]) -> Result<Option<f64>, String> {
-    let all: Vec<Impact> = serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
-    let mine: Vec<f64> = all.iter().filter(|i| pids.contains(&i.input.pid)).map(|i| i.breakdown.total).collect();
+    let all: Vec<Impact> =
+        serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
+    let mine: Vec<f64> = all
+        .iter()
+        .filter(|i| pids.contains(&i.input.pid))
+        .map(|i| i.breakdown.total)
+        .collect();
     Ok((!mine.is_empty()).then(|| mine.iter().sum()))
 }
 
@@ -150,7 +174,11 @@ pub fn fmt_rate(bps: f64) -> String {
 }
 
 pub fn fmt_score(v: f64) -> String {
-    if v >= 10.0 { format!("{v:.0}") } else { format!("{v:.1}") }
+    if v >= 10.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+    }
 }
 
 #[cfg(test)]
@@ -172,19 +200,32 @@ pub(crate) mod tests {
     #[test]
     fn network_top_gives_the_average_in_and_out() {
         let p = parse_net(NET).unwrap();
-        assert_eq!(p, NetPoint { in_bps: 2840731.26, out_bps: 4186.6 });
+        assert_eq!(
+            p,
+            NetPoint {
+                in_bps: 2840731.26,
+                out_bps: 4186.6
+            }
+        );
         assert_eq!(fmt_rate(p.in_bps), "2.7 MB/s");
         assert_eq!(fmt_rate(p.out_bps), "4 KB/s");
         assert_eq!(fmt_rate(0.2), "0 B/s");
         assert!(parse_net(r#"{"samples":0}"#).is_err(), "nothing measured");
-        assert_eq!(net_args(9), ["network", "top", "--pid", "9", "--json", "--duration", "2s"]);
+        assert_eq!(
+            net_args(9),
+            ["network", "top", "--pid", "9", "--json", "--duration", "2s"]
+        );
     }
 
     #[test]
     fn impact_sums_the_pages_pids() {
         assert_eq!(parse_impact(IMPACT, &[900, 901]).unwrap(), Some(7.75));
         assert_eq!(parse_impact(IMPACT, &[900]).unwrap(), Some(6.25));
-        assert_eq!(parse_impact(IMPACT, &[5]).unwrap(), None, "not scored this round");
+        assert_eq!(
+            parse_impact(IMPACT, &[5]).unwrap(),
+            None,
+            "not scored this round"
+        );
         assert!(parse_impact("{}", &[5]).is_err());
         assert_eq!(fmt_score(7.75), "7.8");
         assert_eq!(fmt_score(20.1), "20");

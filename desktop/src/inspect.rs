@@ -17,7 +17,7 @@ use crate::bundle::{self, Bundle};
 use crate::jvm_tools::{self, HistogramReport, Recording, ThreadState};
 use crate::live::{self, NetPoint, Round, Series};
 use crate::logs::{LogsPage, LogsReport};
-use crate::procs::{self, Process, ProcSample, Role};
+use crate::procs::{self, ProcSample, Process, Role};
 use crate::run::{self, Ended};
 use crate::tools::{Kind, Paths, Report, Tool};
 
@@ -39,10 +39,21 @@ pub enum Failure {
 pub trait Spectra: Send + Sync {
     /// Runs `spectra <args>` and returns what it printed, stopping it at `deadline` or once
     /// `cancel` is set.
-    fn run(&self, args: &[String], deadline: Duration, cancel: &AtomicBool) -> Result<String, Failure>;
+    fn run(
+        &self,
+        args: &[String],
+        deadline: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<String, Failure>;
 
     /// [`Spectra::run`], stopping it once it prints more than `cap` bytes.
-    fn run_capped(&self, args: &[String], deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<String, Failure> {
+    fn run_capped(
+        &self,
+        args: &[String],
+        deadline: Duration,
+        cap: usize,
+        cancel: &AtomicBool,
+    ) -> Result<String, Failure> {
         let _ = cap;
         self.run(args, deadline, cancel)
     }
@@ -52,11 +63,22 @@ pub trait Spectra: Send + Sync {
 pub struct System;
 
 impl Spectra for System {
-    fn run(&self, args: &[String], deadline: Duration, cancel: &AtomicBool) -> Result<String, Failure> {
+    fn run(
+        &self,
+        args: &[String],
+        deadline: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<String, Failure> {
         self.run_capped(args, deadline, MAX_OUTPUT, cancel)
     }
 
-    fn run_capped(&self, args: &[String], deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<String, Failure> {
+    fn run_capped(
+        &self,
+        args: &[String],
+        deadline: Duration,
+        cap: usize,
+        cancel: &AtomicBool,
+    ) -> Result<String, Failure> {
         let bin = std::env::var("SPECTRA_BIN").unwrap_or_else(|_| "spectra".into());
         let mut cmd = Command::new(&bin);
         cmd.args(args);
@@ -65,7 +87,12 @@ impl Spectra for System {
             Ended::Failed(e) => Failure::Failed(procs::run_failure(&bin, e)),
         })?;
         if !out.status.success() {
-            return Err(Failure::Failed(failure_line(&bin, args, &out.stderr, out.status.code())));
+            return Err(Failure::Failed(failure_line(
+                &bin,
+                args,
+                &out.stderr,
+                out.status.code(),
+            )));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
@@ -91,7 +118,9 @@ pub struct Inert;
 
 impl Spectra for Inert {
     fn run(&self, _: &[String], _: Duration, _: &AtomicBool) -> Result<String, Failure> {
-        Err(Failure::Failed("This is sample data; there is no process to look at.".into()))
+        Err(Failure::Failed(
+            "This is sample data; there is no process to look at.".into(),
+        ))
     }
 }
 
@@ -107,7 +136,9 @@ pub enum Subject {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RunState {
     /// Started at the window clock's `since`.
-    Running { since: f64 },
+    Running {
+        since: f64,
+    },
     /// Cancel was pressed; waiting for Spectra to be stopped.
     Cancelling,
     Done(Box<Report>),
@@ -152,10 +183,24 @@ pub struct JvmPage {
 #[derive(Clone, Debug)]
 pub enum Landed {
     /// `pid` is the process it ran on: a recording that started late is stopped there.
-    Tool { job: u64, tool: Tool, pid: u32, result: Result<Report, Failure> },
-    Live { job: u64, round: Round },
-    Bundle { job: u64, result: Result<Box<Bundle>, String> },
-    Logs { job: u64, result: Result<LogsReport, Failure> },
+    Tool {
+        job: u64,
+        tool: Tool,
+        pid: u32,
+        result: Result<Report, Failure>,
+    },
+    Live {
+        job: u64,
+        round: Round,
+    },
+    Bundle {
+        job: u64,
+        result: Result<Box<Bundle>, String>,
+    },
+    Logs {
+        job: u64,
+        result: Result<LogsReport, Failure>,
+    },
 }
 
 pub type Work = Box<dyn FnOnce() -> Landed + Send>;
@@ -226,7 +271,9 @@ impl Inspector {
 
     /// The tool running (or being cancelled), if any: one runs at a time.
     pub fn busy(&self) -> Option<Tool> {
-        Tool::ALL.into_iter().find(|t| self.runs.get(t).is_some_and(ToolRun::busy))
+        Tool::ALL
+            .into_iter()
+            .find(|t| self.runs.get(t).is_some_and(ToolRun::busy))
     }
 
     pub fn state(&self, tool: Tool) -> Option<&RunState> {
@@ -235,7 +282,14 @@ impl Inspector {
 
     /// Shows `tool` as `state` without running anything: for the sample scenes.
     pub fn put(&mut self, tool: Tool, state: RunState) {
-        self.runs.insert(tool, ToolRun { state, job: 0, cancel: Arc::new(AtomicBool::new(false)) });
+        self.runs.insert(
+            tool,
+            ToolRun {
+                state,
+                job: 0,
+                cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
     }
 
     /// Asks every job in flight (tools, live round, bundle) to stop.
@@ -243,7 +297,10 @@ impl Inspector {
         for r in self.runs.values() {
             r.cancel.store(true, Ordering::Relaxed);
         }
-        for f in [self.live.take(), self.bundle_job.take()].into_iter().flatten() {
+        for f in [self.live.take(), self.bundle_job.take()]
+            .into_iter()
+            .flatten()
+        {
             f.cancel.store(true, Ordering::Relaxed);
         }
         self.logs.cancel();
@@ -285,7 +342,13 @@ impl Default for Inspector {
 /// NMT and the VM's own view, and says plainly when NMT is off. Stopping a recording always
 /// stops it, even when writing it out failed or was cancelled; a start that was cancelled or
 /// failed (a deadline, or an attach error after `JFR.start` ran) is stopped again at once.
-fn perform(tool: Tool, pid: u32, paths: &Paths, spectra: &dyn Spectra, flag: &AtomicBool) -> Result<Report, Failure> {
+fn perform(
+    tool: Tool,
+    pid: u32,
+    paths: &Paths,
+    spectra: &dyn Spectra,
+    flag: &AtomicBool,
+) -> Result<Report, Failure> {
     let steps = tool.steps(pid, paths);
     let deadline = tool.deadline();
     let never = AtomicBool::new(false);
@@ -303,11 +366,14 @@ fn perform(tool: Tool, pid: u32, paths: &Paths, spectra: &dyn Spectra, flag: &At
             if matches!(vm, Err(Failure::Cancelled)) {
                 return Err(Failure::Cancelled);
             }
-            jvm_tools::native_memory(nmt.map_err(why), vm.map_err(why)).map(Report::NativeMemory).map_err(Failure::Failed)
+            jvm_tools::native_memory(nmt.map_err(why), vm.map_err(why))
+                .map(Report::NativeMemory)
+                .map_err(Failure::Failed)
         }
         Tool::JfrStart => {
             let started = spectra.run(&steps[0], deadline, flag);
-            let cancelled = flag.load(Ordering::Relaxed) || matches!(started, Err(Failure::Cancelled));
+            let cancelled =
+                flag.load(Ordering::Relaxed) || matches!(started, Err(Failure::Cancelled));
             if cancelled || started.is_err() {
                 let _ = spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never);
             }
@@ -365,7 +431,10 @@ impl App {
     /// What the open page is about.
     pub fn subject(&self) -> Option<Subject> {
         if let Some(pid) = self.selected {
-            return Some(Subject::Process { pid, started: self.selected_started.clone() });
+            return Some(Subject::Process {
+                pid,
+                started: self.selected_started.clone(),
+            });
         }
         self.app_page.clone().map(Subject::App)
     }
@@ -388,7 +457,11 @@ impl App {
 
     /// An app page's processes, busiest first.
     pub fn app_procs(&self, path: &str) -> Vec<&Process> {
-        let mut v: Vec<&Process> = self.procs.iter().filter(|p| p.bundle_path() == Some(path)).collect();
+        let mut v: Vec<&Process> = self
+            .procs
+            .iter()
+            .filter(|p| p.bundle_path() == Some(path))
+            .collect();
         v.sort_by(|a, b| crate::groups::Sort::default().processes(a, b));
         v
     }
@@ -396,7 +469,12 @@ impl App {
     /// An app's main process: its `App` role, else its lowest pid.
     pub fn app_lead(&self, path: &str) -> Option<u32> {
         let procs = self.app_procs(path);
-        procs.iter().filter(|p| p.role == Role::App).map(|p| p.pid).min().or_else(|| procs.iter().map(|p| p.pid).min())
+        procs
+            .iter()
+            .filter(|p| p.role == Role::App)
+            .map(|p| p.pid)
+            .min()
+            .or_else(|| procs.iter().map(|p| p.pid).min())
     }
 
     /// What an app is called: its processes' app name, else its bundle's file name.
@@ -404,16 +482,29 @@ impl App {
         self.procs
             .iter()
             .filter(|p| p.bundle_path() == Some(path))
-            .find_map(|p| p.app.as_ref().map(|a| a.name.clone()).filter(|n| !n.is_empty()))
+            .find_map(|p| {
+                p.app
+                    .as_ref()
+                    .map(|a| a.name.clone())
+                    .filter(|n| !n.is_empty())
+            })
             .unwrap_or_else(|| {
-                let file = path.trim_end_matches('/').rsplit('/').next().unwrap_or(path);
+                let file = path
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(path);
                 file.trim_end_matches(".app").to_owned()
             })
     }
 
     /// An app's readings, its processes' summed.
     pub fn app_history(&self, path: &str) -> Vec<ProcSample> {
-        let tracks: Vec<&[ProcSample]> = self.app_procs(path).iter().map(|p| self.proc_history(p.pid)).collect();
+        let tracks: Vec<&[ProcSample]> = self
+            .app_procs(path)
+            .iter()
+            .map(|p| self.proc_history(p.pid))
+            .collect();
         summed(&tracks)
     }
 
@@ -434,8 +525,17 @@ impl App {
             }
             let recording = self.inspect.jvm.recording.is_some();
             match tool {
-                Tool::LeakSuspects | Tool::Dominators if self.heap_dump_path().is_none() => return Some("Take a heap dump first".into()),
-                Tool::JfrStart if self.inspect.starts.values().chain(self.inspect.stops.values()).any(|p| p == pid) => {
+                Tool::LeakSuspects | Tool::Dominators if self.heap_dump_path().is_none() => {
+                    return Some("Take a heap dump first".into());
+                }
+                Tool::JfrStart
+                    if self
+                        .inspect
+                        .starts
+                        .values()
+                        .chain(self.inspect.stops.values())
+                        .any(|p| p == pid) =>
+                {
                     return Some("A recording is still starting or stopping on this JVM. Try again in a moment.".into());
                 }
                 Tool::JfrStart if recording => return Some("Already recording".into()),
@@ -447,7 +547,11 @@ impl App {
             && let (Some(p), Some(me)) = (self.process(*pid), self.me.uid)
             && p.uid != me
         {
-            let who = if p.user.is_empty() { format!("uid {}", p.uid) } else { p.user.clone() };
+            let who = if p.user.is_empty() {
+                format!("uid {}", p.uid)
+            } else {
+                p.user.clone()
+            };
             return Some(if tool.attaches() {
                 format!("Owned by {who}; only that user can attach to its JVM")
             } else {
@@ -471,13 +575,24 @@ impl App {
     /// The files `tool` reads or writes on `pid`: a new heap dump or recording in Downloads,
     /// named for the JVM, and the page's heap dump for its analyses.
     fn tool_paths(&self, tool: Tool, pid: u32) -> Paths {
-        let name = self.jvm(pid).map(|j| j.name()).or_else(|| self.process(pid).map(|p| p.name().into_owned())).unwrap_or_default();
+        let name = self
+            .jvm(pid)
+            .map(|j| j.name())
+            .or_else(|| self.process(pid).map(|p| p.name().into_owned()))
+            .unwrap_or_default();
         let out = match tool {
-            Tool::HeapDump => jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "hprof"),
-            Tool::JfrStop => jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "jfr"),
+            Tool::HeapDump => {
+                jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "hprof")
+            }
+            Tool::JfrStop => {
+                jvm_tools::out_path(&jvm_tools::out_dir(), &name, pid, (self.wall)(), "jfr")
+            }
             _ => String::new(),
         };
-        Paths { out, hprof: self.heap_dump_path().unwrap_or_default() }
+        Paths {
+            out,
+            hprof: self.heap_dump_path().unwrap_or_default(),
+        }
     }
 
     /// Stops the flight recording on `pid` off the UI thread; nothing waits for the answer but
@@ -491,10 +606,22 @@ impl App {
             Box::new(move || {
                 let _pending = pending;
                 let never = AtomicBool::new(false);
-                let result = spectra.run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never).map(|_| Report::JfrStarted);
-                Landed::Tool { job, tool: Tool::JfrStop, pid, result }
+                let result = spectra
+                    .run(&jvm_tools::stop_args(pid), STOP_DEADLINE, &never)
+                    .map(|_| Report::JfrStarted);
+                Landed::Tool {
+                    job,
+                    tool: Tool::JfrStop,
+                    pid,
+                    result,
+                }
             }),
-            Landed::Tool { job, tool: Tool::JfrStop, pid, result: Err(Failure::Cancelled) },
+            Landed::Tool {
+                job,
+                tool: Tool::JfrStop,
+                pid,
+                result: Err(Failure::Cancelled),
+            },
         );
     }
 
@@ -504,7 +631,14 @@ impl App {
         if let Some(r) = self.inspect.runs.get(&Tool::JfrStart) {
             r.cancel.store(true, Ordering::Relaxed);
         }
-        let mut pids: Vec<u32> = self.inspect.jvm.recording.take().map(|r| r.pid).into_iter().collect();
+        let mut pids: Vec<u32> = self
+            .inspect
+            .jvm
+            .recording
+            .take()
+            .map(|r| r.pid)
+            .into_iter()
+            .collect();
         pids.extend(self.inspect.starts.drain().map(|(_, pid)| pid));
         pids.sort_unstable();
         pids.dedup();
@@ -525,7 +659,9 @@ impl App {
         if self.tool_refusal(tool).is_some() || self.inspect.busy().is_some() {
             return;
         }
-        let Some(Subject::Process { pid, .. }) = self.inspect.subject.clone() else { return };
+        let Some(Subject::Process { pid, .. }) = self.inspect.subject.clone() else {
+            return;
+        };
         let paths = self.tool_paths(tool, pid);
         match tool {
             // The histogram this one will be compared with.
@@ -548,7 +684,14 @@ impl App {
         let (job, cancel) = self.inspect.next_job();
         let spectra = Arc::clone(&self.inspect.spectra);
         let flag = Arc::clone(&cancel);
-        self.inspect.runs.insert(tool, ToolRun { state: RunState::Running { since: self.now }, job, cancel });
+        self.inspect.runs.insert(
+            tool,
+            ToolRun {
+                state: RunState::Running { since: self.now },
+                job,
+                cancel,
+            },
+        );
         if tool == Tool::JfrStart {
             self.inspect.starts.insert(job, pid);
         }
@@ -561,9 +704,21 @@ impl App {
             Box::new(move || {
                 let _pending = pending;
                 let result = perform(tool, pid, &paths, &*spectra, &flag);
-                Landed::Tool { job, tool, pid, result }
+                Landed::Tool {
+                    job,
+                    tool,
+                    pid,
+                    result,
+                }
             }),
-            Landed::Tool { job, tool, pid, result: Err(Failure::Failed("Spectra Desktop hit an internal error running it.".into())) },
+            Landed::Tool {
+                job,
+                tool,
+                pid,
+                result: Err(Failure::Failed(
+                    "Spectra Desktop hit an internal error running it.".into(),
+                )),
+            },
         );
     }
 
@@ -579,7 +734,9 @@ impl App {
 
     /// Reads the open app page's bundle (again, after a failure).
     pub fn read_bundle(&mut self) {
-        let Some(Subject::App(path)) = self.inspect.subject.clone() else { return };
+        let Some(Subject::App(path)) = self.inspect.subject.clone() else {
+            return;
+        };
         if self.inspect.bundle_job.is_some() {
             return;
         }
@@ -597,7 +754,10 @@ impl App {
                 };
                 Landed::Bundle { job, result }
             }),
-            Landed::Bundle { job, result: Err("Spectra Desktop hit an internal error reading it.".into()) },
+            Landed::Bundle {
+                job,
+                result: Err("Spectra Desktop hit an internal error reading it.".into()),
+            },
         );
     }
 
@@ -638,10 +798,16 @@ impl App {
         self.sync_inspector();
         self.tick_logs();
         let i = &self.inspect;
-        if !i.auto || i.live.is_some() || self.now < i.next_live || (i.net.off.is_some() && i.energy.off.is_some()) {
+        if !i.auto
+            || i.live.is_some()
+            || self.now < i.next_live
+            || (i.net.off.is_some() && i.energy.off.is_some())
+        {
             return;
         }
-        let Some((pids, net_pid)) = self.live_targets() else { return };
+        let Some((pids, net_pid)) = self.live_targets() else {
+            return;
+        };
         let (want_net, want_energy) = (i.net.off.is_none(), i.energy.off.is_none());
         let (job, cancel) = self.inspect.next_job();
         let spectra = Arc::clone(&self.inspect.spectra);
@@ -654,7 +820,10 @@ impl App {
                     Failure::Failed(why) => why,
                 };
                 let net = want_net.then(|| {
-                    spectra.run(&live::net_args(net_pid), live::NET_DEADLINE, &flag).map_err(failed).and_then(|o| live::parse_net(&o))
+                    spectra
+                        .run(&live::net_args(net_pid), live::NET_DEADLINE, &flag)
+                        .map_err(failed)
+                        .and_then(|o| live::parse_net(&o))
                 });
                 let energy = (want_energy && !flag.load(Ordering::Relaxed)).then(|| {
                     spectra
@@ -662,13 +831,20 @@ impl App {
                         .map_err(failed)
                         .and_then(|o| live::parse_impact(&o, &pids))
                 });
-                Landed::Live { job, round: Round { net, energy } }
+                Landed::Live {
+                    job,
+                    round: Round { net, energy },
+                }
             }),
             Landed::Live {
                 job,
                 round: Round {
-                    net: Some(Err("Spectra Desktop hit an internal error reading it.".into())),
-                    energy: Some(Err("Spectra Desktop hit an internal error reading it.".into())),
+                    net: Some(Err(
+                        "Spectra Desktop hit an internal error reading it.".into()
+                    )),
+                    energy: Some(Err(
+                        "Spectra Desktop hit an internal error reading it.".into()
+                    )),
                 },
             },
         );
@@ -680,15 +856,17 @@ impl App {
             Exec::Thread => {
                 let (tx, wake) = (self.inspect.tx.clone(), self.wake.clone());
                 let fallback = failed.clone();
-                let spawned = std::thread::Builder::new().name("spectra-tool".into()).spawn({
-                    let (tx, wake) = (tx.clone(), wake.clone());
-                    move || {
-                        let _ = tx.send(guarded(work, failed));
-                        if let Some(wake) = wake {
-                            wake();
+                let spawned = std::thread::Builder::new()
+                    .name("spectra-tool".into())
+                    .spawn({
+                        let (tx, wake) = (tx.clone(), wake.clone());
+                        move || {
+                            let _ = tx.send(guarded(work, failed));
+                            if let Some(wake) = wake {
+                                wake();
+                            }
                         }
-                    }
-                });
+                    });
                 if spawned.is_err() {
                     let _ = tx.send(fallback);
                     if let Some(wake) = wake {
@@ -696,7 +874,10 @@ impl App {
                     }
                 }
             }
-            Exec::Held(q) => q.lock().expect("the held work").push(Box::new(move || guarded(work, failed))),
+            Exec::Held(q) => q
+                .lock()
+                .expect("the held work")
+                .push(Box::new(move || guarded(work, failed))),
         }
     }
 
@@ -728,23 +909,48 @@ impl App {
             l => l,
         };
         let now = self.now;
-        if let Landed::Tool { job, tool: Tool::JfrStop, .. } = &l {
+        if let Landed::Tool {
+            job,
+            tool: Tool::JfrStop,
+            ..
+        } = &l
+        {
             self.inspect.stops.remove(job);
         }
-        if let Landed::Tool { job, tool: Tool::JfrStart, pid, result } = &l {
+        if let Landed::Tool {
+            job,
+            tool: Tool::JfrStart,
+            pid,
+            result,
+        } = &l
+        {
             self.inspect.starts.remove(job);
             // A start that got through after its run was cancelled or its page was left: nothing
             // will keep or stop that recording, so stop it now.
-            let wanted = self.inspect.runs.get(&Tool::JfrStart).is_some_and(|r| r.job == *job && !matches!(r.state, RunState::Cancelling));
+            let wanted = self
+                .inspect
+                .runs
+                .get(&Tool::JfrStart)
+                .is_some_and(|r| r.job == *job && !matches!(r.state, RunState::Cancelling));
             if result.is_ok() && !wanted {
                 self.stop_recording(*pid);
             }
         }
         let i = &mut self.inspect;
         match l {
-            Landed::Tool { job, tool, pid, result } => {
-                let Some(r) = i.runs.get_mut(&tool).filter(|r| r.job == job) else { return };
-                if tool == Tool::JfrStart && result.is_ok() && !matches!(r.state, RunState::Cancelling) {
+            Landed::Tool {
+                job,
+                tool,
+                pid,
+                result,
+            } => {
+                let Some(r) = i.runs.get_mut(&tool).filter(|r| r.job == job) else {
+                    return;
+                };
+                if tool == Tool::JfrStart
+                    && result.is_ok()
+                    && !matches!(r.state, RunState::Cancelling)
+                {
                     i.jvm.recording = Some(Recording { pid, since: now });
                 }
                 r.state = match (&r.state, result) {
@@ -804,7 +1010,10 @@ pub(crate) mod tests {
     impl Fake {
         pub fn with(replies: &[(&'static str, Result<&str, &str>)]) -> Fake {
             Fake {
-                replies: replies.iter().map(|(k, v)| (*k, v.map(str::to_owned).map_err(str::to_owned))).collect(),
+                replies: replies
+                    .iter()
+                    .map(|(k, v)| (*k, v.map(str::to_owned).map_err(str::to_owned)))
+                    .collect(),
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -834,7 +1043,10 @@ pub(crate) mod tests {
                 ("jvm dominators", Ok(jx::DOMINATORS)),
                 ("jvm jfr start", Ok(jx::JFR_STARTED)),
                 ("jvm jfr dump", Ok("/Users/user/Downloads/x.jfr\n")),
-                ("jvm jfr stop", Ok("JFR recording \"spectra-desktop\" stopped on PID 7\n")),
+                (
+                    "jvm jfr stop",
+                    Ok("JFR recording \"spectra-desktop\" stopped on PID 7\n"),
+                ),
                 ("jvm jfr summary", Ok(jx::JFR)),
             ])
         }
@@ -845,14 +1057,29 @@ pub(crate) mod tests {
     }
 
     impl Spectra for Fake {
-        fn run(&self, args: &[String], _: Duration, cancel: &AtomicBool) -> Result<String, Failure> {
+        fn run(
+            &self,
+            args: &[String],
+            _: Duration,
+            cancel: &AtomicBool,
+        ) -> Result<String, Failure> {
             self.calls.lock().unwrap().push(args.to_vec());
             if cancel.load(Ordering::Relaxed) {
                 return Err(Failure::Cancelled);
             }
             // `jvm jfr start`, then `jvm nmt`, then the subcommand alone.
-            let key = |n: usize| args.iter().take(n).map(String::as_str).collect::<Vec<_>>().join(" ");
-            let reply = [3, 2, 1].into_iter().find_map(|n| (args.len() >= n).then(|| self.replies.get(key(n).as_str())).flatten());
+            let key = |n: usize| {
+                args.iter()
+                    .take(n)
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let reply = [3, 2, 1].into_iter().find_map(|n| {
+                (args.len() >= n)
+                    .then(|| self.replies.get(key(n).as_str()))
+                    .flatten()
+            });
             match reply {
                 Some(Ok(out)) => Ok(out.clone()),
                 Some(Err(why)) => Err(Failure::Failed(why.clone())),
@@ -871,10 +1098,25 @@ pub(crate) mod tests {
         let mut other = proc(8, "WindowServer", 1.0, 1200.0);
         other.uid = 88;
         other.user = "_windowserver".into();
-        let chat = app(proc(900, "Chat", 2.0, 1000.0), "Chat", "/Applications/Chat.app", Role::App);
-        let helper = app(proc(901, "Chat Helper", 1.0, 500.0), "Chat", "/Applications/Chat.app", Role::AppHelper);
+        let chat = app(
+            proc(900, "Chat", 2.0, 1000.0),
+            "Chat",
+            "/Applications/Chat.app",
+            Role::App,
+        );
+        let helper = app(
+            proc(901, "Chat Helper", 1.0, 500.0),
+            "Chat",
+            "/Applications/Chat.app",
+            Role::AppHelper,
+        );
         s.me.uid = Some(501);
-        s.land_procs(Ok(vec![mine(proc(7, "sleep", 0.0, 1200.0)), other, mine(chat), mine(helper)]));
+        s.land_procs(Ok(vec![
+            mine(proc(7, "sleep", 0.0, 1200.0)),
+            other,
+            mine(chat),
+            mine(helper),
+        ]));
         (s, fake)
     }
 
@@ -890,9 +1132,14 @@ pub(crate) mod tests {
         let (mut s, fake) = faked(Fake::all());
         s.open(7);
         s.run_tool(Tool::Sample);
-        assert!(matches!(s.inspect.state(Tool::Sample), Some(RunState::Running { .. })));
+        assert!(matches!(
+            s.inspect.state(Tool::Sample),
+            Some(RunState::Running { .. })
+        ));
         s.run_held_inspect();
-        let Some(RunState::Done(r)) = s.inspect.state(Tool::Sample) else { panic!("{:?}", s.inspect.state(Tool::Sample)) };
+        let Some(RunState::Done(r)) = s.inspect.state(Tool::Sample) else {
+            panic!("{:?}", s.inspect.state(Tool::Sample))
+        };
         assert!(matches!(**r, Report::Sample(_)));
         assert_eq!(fake.calls(), [vec!["sample", "-json", "7"]]);
     }
@@ -911,7 +1158,10 @@ pub(crate) mod tests {
         s.run_tool(Tool::Lineage);
         s.run_held_inspect();
         assert_eq!(fake.calls().len(), 2);
-        assert!(matches!(s.inspect.state(Tool::Lineage), Some(RunState::Done(_))));
+        assert!(matches!(
+            s.inspect.state(Tool::Lineage),
+            Some(RunState::Done(_))
+        ));
     }
 
     #[test]
@@ -922,35 +1172,57 @@ pub(crate) mod tests {
         s.cancel_tool(Tool::Hang);
         assert_eq!(s.inspect.state(Tool::Hang), Some(&RunState::Cancelling));
         s.run_tool(Tool::Sample);
-        assert_eq!(held(&s), 1, "nothing starts until the cancelled one has stopped");
+        assert_eq!(
+            held(&s),
+            1,
+            "nothing starts until the cancelled one has stopped"
+        );
         s.run_held_inspect();
         assert_eq!(s.inspect.state(Tool::Hang), Some(&RunState::Cancelled));
         s.run_tool(Tool::Hang);
-        assert!(matches!(s.inspect.state(Tool::Hang), Some(RunState::Running { .. })), "and it can run again");
+        assert!(
+            matches!(s.inspect.state(Tool::Hang), Some(RunState::Running { .. })),
+            "and it can run again"
+        );
     }
 
     #[test]
     fn a_failed_tool_says_why() {
-        let (mut s, _) = faked(Fake::with(&[("vmmap", Err("vmmap: cannot examine process 7")), ("lineage", Ok("not json"))]));
+        let (mut s, _) = faked(Fake::with(&[
+            ("vmmap", Err("vmmap: cannot examine process 7")),
+            ("lineage", Ok("not json")),
+        ]));
         s.open(7);
         s.run_tool(Tool::Vmmap);
         s.run_held_inspect();
-        assert_eq!(s.inspect.state(Tool::Vmmap), Some(&RunState::Failed("vmmap: cannot examine process 7".into())));
+        assert_eq!(
+            s.inspect.state(Tool::Vmmap),
+            Some(&RunState::Failed("vmmap: cannot examine process 7".into()))
+        );
         s.run_tool(Tool::Lineage);
         s.run_held_inspect();
-        assert!(matches!(s.inspect.state(Tool::Lineage), Some(RunState::Failed(why)) if why.starts_with("Couldn't read")));
+        assert!(
+            matches!(s.inspect.state(Tool::Lineage), Some(RunState::Failed(why)) if why.starts_with("Couldn't read"))
+        );
     }
 
     #[test]
     fn root_tools_and_other_users_task_tools_are_off_with_the_reason() {
         let (mut s, fake) = faked(Fake::all());
         s.open(8);
-        assert_eq!(s.tool_refusal(Tool::Spindump).as_deref(), Some("Needs root; Spectra Desktop doesn't run sudo"));
+        assert_eq!(
+            s.tool_refusal(Tool::Spindump).as_deref(),
+            Some("Needs root; Spectra Desktop doesn't run sudo")
+        );
         assert_eq!(
             s.tool_refusal(Tool::Sample).as_deref(),
             Some("Owned by _windowserver; reading its threads or memory needs root")
         );
-        assert_eq!(s.tool_refusal(Tool::Lineage), None, "lineage reads only the process table");
+        assert_eq!(
+            s.tool_refusal(Tool::Lineage),
+            None,
+            "lineage reads only the process table"
+        );
         s.run_tool(Tool::Spindump);
         s.run_tool(Tool::Sample);
         s.run_tool(Tool::Lsmp);
@@ -967,7 +1239,10 @@ pub(crate) mod tests {
         assert!(s.inspect.runs.is_empty(), "a new page starts with no runs");
         s.back();
         s.run_held_inspect();
-        assert!(s.inspect.runs.is_empty(), "the old page's sample lands nowhere");
+        assert!(
+            s.inspect.runs.is_empty(),
+            "the old page's sample lands nowhere"
+        );
     }
 
     #[test]
@@ -987,9 +1262,18 @@ pub(crate) mod tests {
         // The old job's answer arrives while the new one is still running: only the job number
         // tells them apart.
         s.land_inspected((work.next().unwrap())());
-        assert!(matches!(s.inspect.state(Tool::Sample), Some(RunState::Running { .. })), "the old answer was dropped");
+        assert!(
+            matches!(
+                s.inspect.state(Tool::Sample),
+                Some(RunState::Running { .. })
+            ),
+            "the old answer was dropped"
+        );
         s.land_inspected((work.next().unwrap())());
-        assert!(matches!(s.inspect.state(Tool::Sample), Some(RunState::Done(_))));
+        assert!(matches!(
+            s.inspect.state(Tool::Sample),
+            Some(RunState::Done(_))
+        ));
     }
 
     #[test]
@@ -1018,18 +1302,27 @@ pub(crate) mod tests {
         assert_eq!(held(&s), 1, "never two rounds at once");
         s.run_held_inspect();
         assert_eq!(s.inspect.net.points.len(), 1);
-        assert!(s.inspect.energy.points.is_empty(), "pid 7 isn't in the impact list");
+        assert!(
+            s.inspect.energy.points.is_empty(),
+            "pid 7 isn't in the impact list"
+        );
         s.tick_inspector();
         assert_eq!(held(&s), 0, "it rests after a round");
         s.now += live::REST;
         s.tick_inspector();
         assert_eq!(held(&s), 1);
         let calls = fake.calls();
-        assert_eq!(calls[0], ["network", "top", "--pid", "7", "--json", "--duration", "2s"]);
+        assert_eq!(
+            calls[0],
+            ["network", "top", "--pid", "7", "--json", "--duration", "2s"]
+        );
         assert_eq!(calls[1][0], "impact");
         s.show(crate::groups::Nav::All);
         s.run_held_inspect();
-        assert!(s.inspect.net.points.is_empty(), "closing the page dropped the round");
+        assert!(
+            s.inspect.net.points.is_empty(),
+            "closing the page dropped the round"
+        );
         s.now += 60.0;
         s.tick_inspector();
         assert_eq!(held(&s), 0, "nothing runs without a page");
@@ -1037,7 +1330,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_failed_live_series_is_retried_with_backoff_before_it_stops() {
-        let (mut s, fake) = faked(Fake::with(&[("network", Ok(crate::live::tests::NET)), ("impact", Err("impact: not supported on linux"))]));
+        let (mut s, fake) = faked(Fake::with(&[
+            ("network", Ok(crate::live::tests::NET)),
+            ("impact", Err("impact: not supported on linux")),
+        ]));
         s.open(900);
         let impacts = |f: &Fake| f.calls().iter().filter(|c| c[0] == "impact").count();
         let mut waits = Vec::new();
@@ -1049,7 +1345,10 @@ pub(crate) mod tests {
         }
         assert_eq!(impacts(&fake), 4, "the first try and three retries");
         assert_eq!(waits, [15.0, 20.0, 30.0, 50.0]);
-        assert_eq!(s.inspect.energy.off.as_deref(), Some("impact: not supported on linux"));
+        assert_eq!(
+            s.inspect.energy.off.as_deref(),
+            Some("impact: not supported on linux")
+        );
         s.tick_inspector();
         s.run_held_inspect();
         assert_eq!(s.inspect.net.points.len(), 5, "network kept going");
@@ -1060,12 +1359,26 @@ pub(crate) mod tests {
     fn energy_sums_the_process_and_its_descendants() {
         let (mut s, _) = faked(Fake::all());
         let mine = |p: Process| Process { uid: 501, ..p };
-        let child = |pid, ppid| mine(Process { ppid, ..proc(pid, "x", 0.0, 1.0) });
-        s.land_procs(Ok(vec![mine(proc(900, "Chat", 2.0, 1000.0)), child(901, 900), child(77, 901), child(5, 1)]));
+        let child = |pid, ppid| {
+            mine(Process {
+                ppid,
+                ..proc(pid, "x", 0.0, 1.0)
+            })
+        };
+        s.land_procs(Ok(vec![
+            mine(proc(900, "Chat", 2.0, 1000.0)),
+            child(901, 900),
+            child(77, 901),
+            child(5, 1),
+        ]));
         s.open(900);
         s.tick_inspector();
         s.run_held_inspect();
-        assert_eq!(s.inspect.energy.points.back(), Some(&27.85), "900 + child 901 + grandchild 77, not the unrelated pid");
+        assert_eq!(
+            s.inspect.energy.points.back(),
+            Some(&27.85),
+            "900 + child 901 + grandchild 77, not the unrelated pid"
+        );
     }
 
     #[test]
@@ -1075,8 +1388,15 @@ pub(crate) mod tests {
         s.run_tool(Tool::Memtrace);
         s.now = 5.0;
         s.tick_inspector();
-        let mut flags: Vec<_> = s.inspect.runs.values().map(|r| Arc::clone(&r.cancel)).collect();
-        flags.push(Arc::clone(&s.inspect.live.as_ref().expect("a live round").cancel));
+        let mut flags: Vec<_> = s
+            .inspect
+            .runs
+            .values()
+            .map(|r| Arc::clone(&r.cancel))
+            .collect();
+        flags.push(Arc::clone(
+            &s.inspect.live.as_ref().expect("a live round").cancel,
+        ));
         assert_eq!(flags.len(), 2);
         assert!(flags.iter().all(|f| !f.load(Ordering::Relaxed)));
         s.inspect.cancel_all();
@@ -1090,26 +1410,50 @@ pub(crate) mod tests {
         assert_eq!(s.inspect.bundle, Some(BundleState::Loading));
         s.sync_inspector();
         s.run_held_inspect();
-        assert!(matches!(&s.inspect.bundle, Some(BundleState::Loaded(b)) if b.bundle_id == "com.example.chat"));
-        assert_eq!(fake.calls(), [vec!["--json", "/Applications/Chat.app"]], "read once");
+        assert!(
+            matches!(&s.inspect.bundle, Some(BundleState::Loaded(b)) if b.bundle_id == "com.example.chat")
+        );
+        assert_eq!(
+            fake.calls(),
+            [vec!["--json", "/Applications/Chat.app"]],
+            "read once"
+        );
         assert_eq!(s.app_lead("/Applications/Chat.app"), Some(900));
         assert_eq!(s.app_name("/Applications/Chat.app"), "Chat");
         let h = s.app_history("/Applications/Chat.app");
-        assert_eq!(h.last().map(|x| (x.cpu, x.rss_kib, x.threads)), Some((3.0, 1500.0, 4)));
+        assert_eq!(
+            h.last().map(|x| (x.cpu, x.rss_kib, x.threads)),
+            Some((3.0, 1500.0, 4))
+        );
         s.now = 5.0;
         s.tick_inspector();
         s.run_held_inspect();
-        assert_eq!(s.inspect.energy.points.back(), Some(&7.75), "both of its processes' impact");
-        assert_eq!(fake.calls()[1][3], "900", "its network is its main process's, helpers included");
+        assert_eq!(
+            s.inspect.energy.points.back(),
+            Some(&7.75),
+            "both of its processes' impact"
+        );
+        assert_eq!(
+            fake.calls()[1][3],
+            "900",
+            "its network is its main process's, helpers included"
+        );
     }
 
     #[test]
     fn readings_sum_aligned_on_the_latest() {
-        let x = |cpu| ProcSample { cpu, rss_kib: 1.0, threads: 1 };
+        let x = |cpu| ProcSample {
+            cpu,
+            rss_kib: 1.0,
+            threads: 1,
+        };
         let a = [x(1.0), x(2.0), x(3.0)];
         let b = [x(10.0)];
         let s = summed(&[&a, &b]);
-        assert_eq!(s.iter().map(|p| p.cpu).collect::<Vec<_>>(), [1.0, 2.0, 13.0]);
+        assert_eq!(
+            s.iter().map(|p| p.cpu).collect::<Vec<_>>(),
+            [1.0, 2.0, 13.0]
+        );
         assert_eq!(s[2].threads, 2);
         assert!(summed(&[]).is_empty());
     }
@@ -1117,8 +1461,14 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_run_says_spectras_first_line() {
         let args = vec!["spindump".to_owned()];
-        assert_eq!(failure_line("spectra", &args, b"\nspindump requires root\nmore", Some(1)), "spindump requires root");
-        assert_eq!(failure_line("spectra", &args, b"", Some(2)), "spectra spindump stopped with exit status 2");
+        assert_eq!(
+            failure_line("spectra", &args, b"\nspindump requires root\nmore", Some(1)),
+            "spindump requires root"
+        );
+        assert_eq!(
+            failure_line("spectra", &args, b"", Some(2)),
+            "spectra spindump stopped with exit status 2"
+        );
     }
 
     /// `faked`, with pid 7 also a JVM.
@@ -1399,7 +1749,17 @@ pub(crate) mod tests {
         let mut work = take_held(s);
         assert_eq!(work.len(), 1);
         let landed = (work.pop().unwrap())();
-        assert!(matches!(&landed, Landed::Tool { pid: 7, result: Ok(_), .. }), "{landed:?}");
+        assert!(
+            matches!(
+                &landed,
+                Landed::Tool {
+                    pid: 7,
+                    result: Ok(_),
+                    ..
+                }
+            ),
+            "{landed:?}"
+        );
         landed
     }
 
@@ -1437,22 +1797,35 @@ pub(crate) mod tests {
 
     #[test]
     fn a_start_is_refused_while_one_is_pending_or_its_stop_is() {
-        const WHY: &str = "A recording is still starting or stopping on this JVM. Try again in a moment.";
+        const WHY: &str =
+            "A recording is still starting or stopping on this JVM. Try again in a moment.";
         let (mut s, fake) = jvm_faked(Fake::all());
         s.open(7);
         let landed = started_not_landed(&mut s);
         s.open(900);
         s.open(7);
-        assert_eq!(s.tool_refusal(Tool::JfrStart).as_deref(), Some(WHY), "the start hasn't landed");
+        assert_eq!(
+            s.tool_refusal(Tool::JfrStart).as_deref(),
+            Some(WHY),
+            "the start hasn't landed"
+        );
         s.run_tool(Tool::JfrStart);
         assert_eq!(take_held(&s).len(), 0, "no second start was queued");
         assert_eq!(jvm_calls(&fake, "jfr start"), 1);
         // It lands as unwanted; its stop is queued and still holds the name.
         s.land_inspected(landed);
-        assert_eq!(s.tool_refusal(Tool::JfrStart).as_deref(), Some(WHY), "a stop is pending");
+        assert_eq!(
+            s.tool_refusal(Tool::JfrStart).as_deref(),
+            Some(WHY),
+            "a stop is pending"
+        );
         s.run_held_inspect();
         assert_eq!(jvm_calls(&fake, "jfr start"), 1, "only the first start ran");
-        assert_eq!(s.tool_refusal(Tool::JfrStart), None, "allowed once start and stop landed");
+        assert_eq!(
+            s.tool_refusal(Tool::JfrStart),
+            None,
+            "allowed once start and stop landed"
+        );
     }
 
     #[test]
@@ -1484,7 +1857,16 @@ pub(crate) mod tests {
         s.stop_recording_now();
         assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "stopped there and then");
         let landed = (take_held(&s).pop().unwrap())();
-        assert!(matches!(landed, Landed::Tool { result: Err(Failure::Cancelled), .. }), "the start itself was cancelled");
+        assert!(
+            matches!(
+                landed,
+                Landed::Tool {
+                    result: Err(Failure::Cancelled),
+                    ..
+                }
+            ),
+            "the start itself was cancelled"
+        );
     }
 
     #[test]
@@ -1501,13 +1883,21 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_start_is_stopped_too() {
         let mut fake = Fake::all();
-        fake.replies.insert("jvm jfr start", Err("timed out after 30s".into()));
+        fake.replies
+            .insert("jvm jfr start", Err("timed out after 30s".into()));
         let (mut s, fake) = jvm_faked(fake);
         s.open(7);
         s.run_tool(Tool::JfrStart);
         s.run_held_inspect();
-        assert_eq!(jvm_calls(&fake, "jfr stop"), 1, "JFR.start may have run before it failed");
-        assert_eq!(s.inspect.state(Tool::JfrStart), Some(&RunState::Failed("timed out after 30s".into())));
+        assert_eq!(
+            jvm_calls(&fake, "jfr stop"),
+            1,
+            "JFR.start may have run before it failed"
+        );
+        assert_eq!(
+            s.inspect.state(Tool::JfrStart),
+            Some(&RunState::Failed("timed out after 30s".into()))
+        );
         assert!(s.inspect.jvm.recording.is_none());
     }
 
@@ -1518,17 +1908,43 @@ pub(crate) mod tests {
         let mut child = Command::new("sleep").arg("120").spawn().unwrap();
         let pid = child.id();
         let never = AtomicBool::new(false);
-        let calc = System.run(&bundle::args("/System/Applications/Calculator.app"), bundle::DEADLINE, &never);
-        println!("bundle     {:?}", calc.map_err(|e| format!("{e:?}")).and_then(|o| bundle::parse(&o)).map(|b| b.built_with()));
-        for tool in Tool::ALL.into_iter().filter(|t| t.needs_root().is_none() && t.kind() != Kind::Jvm) {
+        let calc = System.run(
+            &bundle::args("/System/Applications/Calculator.app"),
+            bundle::DEADLINE,
+            &never,
+        );
+        println!(
+            "bundle     {:?}",
+            calc.map_err(|e| format!("{e:?}"))
+                .and_then(|o| bundle::parse(&o))
+                .map(|b| b.built_with())
+        );
+        for tool in Tool::ALL
+            .into_iter()
+            .filter(|t| t.needs_root().is_none() && t.kind() != Kind::Jvm)
+        {
             let out = System.run(&tool.args(pid), tool.deadline(), &never);
-            let parsed = out.map_err(|e| format!("{e:?}")).and_then(|o| tool.parse(&o));
-            println!("{:<10} {}", tool.id(), if parsed.is_ok() { "ok".into() } else { format!("{parsed:?}") });
+            let parsed = out
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|o| tool.parse(&o));
+            println!(
+                "{:<10} {}",
+                tool.id(),
+                if parsed.is_ok() {
+                    "ok".into()
+                } else {
+                    format!("{parsed:?}")
+                }
+            );
             assert!(parsed.is_ok(), "{tool:?}");
         }
-        let net = System.run(&live::net_args(pid), live::NET_DEADLINE, &never).unwrap();
+        let net = System
+            .run(&live::net_args(pid), live::NET_DEADLINE, &never)
+            .unwrap();
         println!("network {:?}", live::parse_net(&net));
-        let imp = System.run(&live::impact_args(), live::IMPACT_DEADLINE, &never).unwrap();
+        let imp = System
+            .run(&live::impact_args(), live::IMPACT_DEADLINE, &never)
+            .unwrap();
         println!("impact {:?}", live::parse_impact(&imp, &[pid]));
         // Only the sleep this test started.
         let _ = child.kill();

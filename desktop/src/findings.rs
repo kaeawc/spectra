@@ -86,7 +86,11 @@ pub fn diagnose(jvm: &Jvm, history: &[Sample]) -> Vec<Finding> {
     if max > 0.0 {
         let pct = used / max * 100.0;
         if pct >= 75.0 {
-            let severity = if pct >= 90.0 { Severity::Critical } else { Severity::Warning };
+            let severity = if pct >= 90.0 {
+                Severity::Critical
+            } else {
+                Severity::Warning
+            };
             add(
                 "jvm-heap-pressure",
                 severity,
@@ -103,7 +107,10 @@ pub fn diagnose(jvm: &Jvm, history: &[Sample]) -> Vec<Finding> {
             "jvm-old-gen-growth",
             Severity::Warning,
             format!("Old generation grew {growth:.0}% and never dropped"),
-            format!("It rose in every one of the last {} readings, which is how a leak looks.", history.len().min(WINDOW)),
+            format!(
+                "It rose in every one of the last {} readings, which is how a leak looks.",
+                history.len().min(WINDOW)
+            ),
             "Compare two heap histograms a few minutes apart: spectra jvm heap-histogram compare.",
             Chart::OldGen,
         );
@@ -116,7 +123,10 @@ pub fn diagnose(jvm: &Jvm, history: &[Sample]) -> Vec<Finding> {
                 "jvm-full-gc",
                 Severity::Warning,
                 format!("{} full GCs, {avg:.1} s each", gc.fgc),
-                format!("Full collections have paused this JVM for {:.1} s in total.", gc.fgct),
+                format!(
+                    "Full collections have paused this JVM for {:.1} s in total.",
+                    gc.fgct
+                ),
                 "Check the GC log for what triggers them: spectra jvm gc-log.",
                 Chart::HeapUsed,
             );
@@ -153,7 +163,12 @@ pub fn diagnose(jvm: &Jvm, history: &[Sample]) -> Vec<Finding> {
             "jvm-healthy",
             Severity::Healthy,
             "Healthy".into(),
-            format!("{} of {} heap, {} threads.", fmt_kib(used), fmt_kib(max), jvm.thread_count),
+            format!(
+                "{} of {} heap, {} threads.",
+                fmt_kib(used),
+                fmt_kib(max),
+                jvm.thread_count
+            ),
             "",
             Chart::HeapUsed,
         );
@@ -169,7 +184,9 @@ fn old_gen_growth(history: &[Sample]) -> Option<f64> {
         return None;
     }
     let tail = &history[history.len() - WINDOW..];
-    let rising = tail.windows(2).all(|w| w[1].old_used_kib > w[0].old_used_kib);
+    let rising = tail
+        .windows(2)
+        .all(|w| w[1].old_used_kib > w[0].old_used_kib);
     let first = tail[0].old_used_kib;
     let growth = (tail[WINDOW - 1].old_used_kib - first) / first.max(1.0) * 100.0;
     (rising && first > 0.0 && growth >= 20.0).then_some(growth)
@@ -181,7 +198,13 @@ mod tests {
     use crate::data::Gc;
 
     fn jvm(args: &str, gc: Gc) -> Jvm {
-        Jvm { pid: 1, main_class: "a.App".into(), vm_args: args.into(), gc: Some(gc), ..Jvm::default() }
+        Jvm {
+            pid: 1,
+            main_class: "a.App".into(),
+            vm_args: args.into(),
+            gc: Some(gc),
+            ..Jvm::default()
+        }
     }
 
     fn rules(f: &[Finding]) -> Vec<&str> {
@@ -190,7 +213,16 @@ mod tests {
 
     #[test]
     fn a_quiet_jvm_is_healthy() {
-        let f = diagnose(&jvm("-Xmx1g -XX:+HeapDumpOnOutOfMemoryError", Gc { ou: 1024.0, ..Gc::default() }), &[]);
+        let f = diagnose(
+            &jvm(
+                "-Xmx1g -XX:+HeapDumpOnOutOfMemoryError",
+                Gc {
+                    ou: 1024.0,
+                    ..Gc::default()
+                },
+            ),
+            &[],
+        );
         assert_eq!(rules(&f), ["jvm-healthy"]);
         assert_eq!(f[0].severity, Severity::Healthy);
     }
@@ -198,15 +230,41 @@ mod tests {
     #[test]
     fn a_full_heap_is_critical_and_a_filling_one_warns() {
         let args = "-Xmx1g -XX:+HeapDumpOnOutOfMemoryError";
-        let full = diagnose(&jvm(args, Gc { ou: 0.95 * 1024.0 * 1024.0, ..Gc::default() }), &[]);
-        assert_eq!((full[0].rule, full[0].severity), ("jvm-heap-pressure", Severity::Critical));
-        let filling = diagnose(&jvm(args, Gc { ou: 0.8 * 1024.0 * 1024.0, ..Gc::default() }), &[]);
+        let full = diagnose(
+            &jvm(
+                args,
+                Gc {
+                    ou: 0.95 * 1024.0 * 1024.0,
+                    ..Gc::default()
+                },
+            ),
+            &[],
+        );
+        assert_eq!(
+            (full[0].rule, full[0].severity),
+            ("jvm-heap-pressure", Severity::Critical)
+        );
+        let filling = diagnose(
+            &jvm(
+                args,
+                Gc {
+                    ou: 0.8 * 1024.0 * 1024.0,
+                    ..Gc::default()
+                },
+            ),
+            &[],
+        );
         assert_eq!(filling[0].severity, Severity::Warning);
     }
 
     #[test]
     fn steady_old_gen_growth_reads_as_a_leak() {
-        let grow: Vec<Sample> = (0..6).map(|i| Sample { old_used_kib: 1000.0 + 100.0 * i as f64, ..Sample::default() }).collect();
+        let grow: Vec<Sample> = (0..6)
+            .map(|i| Sample {
+                old_used_kib: 1000.0 + 100.0 * i as f64,
+                ..Sample::default()
+            })
+            .collect();
         assert_eq!(old_gen_growth(&grow), Some(50.0));
         let mut sawtooth = grow.clone();
         sawtooth[3].old_used_kib = 900.0;
@@ -216,8 +274,20 @@ mod tests {
 
     #[test]
     fn flags_slow_full_gcs_metaspace_and_missing_oom_dump() {
-        let gc = Gc { fgc: 4, fgct: 3.0, mu: 250.0 * 1024.0, ..Gc::default() };
+        let gc = Gc {
+            fgc: 4,
+            fgct: 3.0,
+            mu: 250.0 * 1024.0,
+            ..Gc::default()
+        };
         let f = diagnose(&jvm("-Xmx4g -XX:MaxMetaspaceSize=256m", gc), &[]);
-        assert_eq!(rules(&f), ["jvm-full-gc", "jvm-metaspace-pressure", "jvm-oom-dump-disabled"]);
+        assert_eq!(
+            rules(&f),
+            [
+                "jvm-full-gc",
+                "jvm-metaspace-pressure",
+                "jvm-oom-dump-disabled"
+            ]
+        );
     }
 }

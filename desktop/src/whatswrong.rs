@@ -390,9 +390,15 @@ pub fn plain(detail: &str, wall: i64) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut in_hint = false;
     for p in detail.split("; ") {
-        let other = ["owner chain: ", "up ", "next: ", "sample ", "thread summary"]
-            .iter()
-            .any(|f| p.trim().starts_with(f));
+        let other = [
+            "owner chain: ",
+            "up ",
+            "next: ",
+            "sample ",
+            "thread summary",
+        ]
+        .iter()
+        .any(|f| p.trim().starts_with(f));
         match parts.last_mut() {
             Some(last) if in_hint && !other => {
                 last.push_str("; ");
@@ -1221,7 +1227,10 @@ pub(crate) mod tests {
 
     #[test]
     fn an_unknown_hint_never_shows_a_backtick() {
-        let got = plain("hint: restart it (`kill -9 1`) soon; run `foo --bar` first; then wait", 0);
+        let got = plain(
+            "hint: restart it (`kill -9 1`) soon; run `foo --bar` first; then wait",
+            0,
+        );
         assert_eq!(got, "restart it soon; then wait");
         assert_eq!(plain("hint: run `foo` now", 0), "");
         assert_eq!(plain("hint: a `b` c", 0), "");

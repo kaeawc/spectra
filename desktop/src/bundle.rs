@@ -7,7 +7,9 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer};
 
 /// Spectra writes `null` for an empty list or map; read it as empty.
-pub(crate) fn nullable<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+pub(crate) fn nullable<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(
+    d: D,
+) -> Result<T, D::Error> {
     Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
@@ -123,12 +125,20 @@ impl Bundle {
     /// What it's built with: `Electron · Node+Chromium · TypeScript/JS`, repeats left out.
     pub fn built_with(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
-        for p in [self.ui.as_str(), self.runtime.as_str(), self.language.as_str()] {
+        for p in [
+            self.ui.as_str(),
+            self.runtime.as_str(),
+            self.language.as_str(),
+        ] {
             if !p.is_empty() && !parts.contains(&p) {
                 parts.push(p);
             }
         }
-        if parts.is_empty() { "Unknown".into() } else { parts.join(" · ") }
+        if parts.is_empty() {
+            "Unknown".into()
+        } else {
+            parts.join(" · ")
+        }
     }
 
     pub fn version(&self) -> String {
@@ -167,8 +177,11 @@ pub fn permission_label(raw: &str) -> String {
 }
 
 pub fn parse(json: &str) -> Result<Bundle, String> {
-    let all: Vec<Bundle> = serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
-    all.into_iter().next().ok_or_else(|| "Spectra described no bundle.".to_owned())
+    let all: Vec<Bundle> =
+        serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
+    all.into_iter()
+        .next()
+        .ok_or_else(|| "Spectra described no bundle.".to_owned())
 }
 
 /// How long reading a bundle may take; a big one with a lot stored takes a few seconds.
@@ -211,21 +224,39 @@ pub(crate) mod tests {
         assert_eq!(b.bundle_id, "com.example.chat");
         assert_eq!(b.built_with(), "Electron · Node+Chromium · TypeScript/JS");
         assert_eq!(b.version(), "4.47.72 (build 447000072)");
-        assert_eq!(b.framework_versions.get("Electron").map(String::as_str), Some("39.2.7"));
+        assert_eq!(
+            b.framework_versions.get("Electron").map(String::as_str),
+            Some("39.2.7")
+        );
         assert!(b.hardened_runtime && b.sandboxed && b.mas_receipt);
         assert_eq!(b.helpers.helper_apps.len(), 2);
         assert_eq!(b.login_items[0].label, "com.example.chat.updater");
         assert!(b.login_items[0].run_at_load);
-        assert_eq!(b.storage.parts(), [("Containers", 1_448_222_720), ("Caches", 1024)]);
-        let granted: Vec<String> = b.granted_permissions.iter().map(|p| permission_label(p)).collect();
+        assert_eq!(
+            b.storage.parts(),
+            [("Containers", 1_448_222_720), ("Caches", 1024)]
+        );
+        let granted: Vec<String> = b
+            .granted_permissions
+            .iter()
+            .map(|p| permission_label(p))
+            .collect();
         assert_eq!(granted, ["Camera", "Screen recording"]);
     }
 
     #[test]
     fn nulls_read_as_empty() {
         let b = parse(SPARSE).unwrap();
-        assert_eq!(b.built_with(), "SwiftUI · Swift", "the language repeats the runtime");
-        assert!(b.entitlements.is_empty() && b.login_items.is_empty() && b.granted_permissions.is_empty());
+        assert_eq!(
+            b.built_with(),
+            "SwiftUI · Swift",
+            "the language repeats the runtime"
+        );
+        assert!(
+            b.entitlements.is_empty()
+                && b.login_items.is_empty()
+                && b.granted_permissions.is_empty()
+        );
         assert!(b.helpers.is_empty());
         assert_eq!(b.storage.total, 0);
         assert!(parse("[]").is_err());
@@ -234,6 +265,9 @@ pub(crate) mod tests {
 
     #[test]
     fn reads_the_bundle_it_is_given() {
-        assert_eq!(args("/Applications/Chat.app"), ["--json", "/Applications/Chat.app"]);
+        assert_eq!(
+            args("/Applications/Chat.app"),
+            ["--json", "/Applications/Chat.app"]
+        );
     }
 }

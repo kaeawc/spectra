@@ -6,8 +6,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::jvm_tools::{
-    self, DominatorReport, ExplainReport, GcReport, HeapDumpReport, HistogramReport, JfrReport, LeakReport, NativeMemoryReport,
-    ThreadDumpReport,
+    self, DominatorReport, ExplainReport, GcReport, HeapDumpReport, HistogramReport, JfrReport,
+    LeakReport, NativeMemoryReport, ThreadDumpReport,
 };
 
 /// One of Spectra's per-process tools.
@@ -62,7 +62,13 @@ pub enum Kind {
 
 impl Kind {
     /// A JVM's tools lead its page.
-    pub const ALL: [Kind; 5] = [Kind::Jvm, Kind::Cpu, Kind::Memory, Kind::Relations, Kind::Runtime];
+    pub const ALL: [Kind; 5] = [
+        Kind::Jvm,
+        Kind::Cpu,
+        Kind::Memory,
+        Kind::Relations,
+        Kind::Runtime,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -212,7 +218,10 @@ impl Tool {
 
     /// Whether it reads another process's memory or stacks, which only works on one's own.
     pub fn reads_task(self) -> bool {
-        matches!(self, Tool::Sample | Tool::Hang | Tool::Vmmap | Tool::Vmregions)
+        matches!(
+            self,
+            Tool::Sample | Tool::Hang | Tool::Vmmap | Tool::Vmregions
+        )
     }
 
     /// Whether it attaches to the JVM, which works only as the user that runs it.
@@ -222,7 +231,10 @@ impl Tool {
 
     /// Whether it has a row of its own; the rest show inside another's.
     pub fn has_row(self) -> bool {
-        !matches!(self, Tool::LeakSuspects | Tool::Dominators | Tool::JfrStop | Tool::Logs)
+        !matches!(
+            self,
+            Tool::LeakSuspects | Tool::Dominators | Tool::JfrStop | Tool::Logs
+        )
     }
 
     /// What its button says before it has run.
@@ -249,9 +261,14 @@ impl Tool {
         let p = pid.to_string();
         let name = jvm_tools::RECORDING;
         match self {
-            Tool::NativeMemory => vec![own(&["jvm", "nmt", "--json", &p]), own(&["jvm", "vm-memory", "--json", &p])],
+            Tool::NativeMemory => vec![
+                own(&["jvm", "nmt", "--json", &p]),
+                own(&["jvm", "vm-memory", "--json", &p]),
+            ],
             Tool::JfrStop => vec![
-                own(&["jvm", "jfr", "dump", "--name", name, "--out", &paths.out, &p]),
+                own(&[
+                    "jvm", "jfr", "dump", "--name", name, "--out", &paths.out, &p,
+                ]),
                 jvm_tools::stop_args(pid),
                 own(&["jvm", "jfr", "summary", "--json", &paths.out]),
             ],
@@ -266,7 +283,15 @@ impl Tool {
             Tool::Hang => vec!["hang", "--json", pid],
             Tool::Vmmap => vec!["vmmap", "--json", pid],
             Tool::Vmregions => vec!["vmregions", "--json", pid],
-            Tool::Memtrace => return vec!["memtrace".into(), pid.into(), "--duration".into(), format!("{MEMTRACE_SECS}s"), "--json".into()],
+            Tool::Memtrace => {
+                return vec![
+                    "memtrace".into(),
+                    pid.into(),
+                    "--duration".into(),
+                    format!("{MEMTRACE_SECS}s"),
+                    "--json".into(),
+                ];
+            }
             Tool::Lineage => vec!["lineage", "--json", pid],
             Tool::Owner => vec!["owner", "--json", pid],
             Tool::Runtime => vec!["runtime", "--json", pid],
@@ -336,7 +361,10 @@ impl Tool {
             Tool::Threads => Report::Threads(read(json)?),
             Tool::Histogram => Report::Histogram(read(json)?),
             Tool::Gc => Report::Gc(read(json)?),
-            Tool::NativeMemory => Report::NativeMemory(NativeMemoryReport { nmt: Ok(read(json)?), vm: None }),
+            Tool::NativeMemory => Report::NativeMemory(NativeMemoryReport {
+                nmt: Ok(read(json)?),
+                vm: None,
+            }),
             Tool::Explain => Report::Explain(read(json)?),
             Tool::HeapDump => Report::HeapDump(jvm_tools::heap_dump(json)?),
             Tool::LeakSuspects => Report::Leaks(read(json)?),
@@ -345,10 +373,15 @@ impl Tool {
             Tool::JfrStart => Report::JfrStarted,
             Tool::JfrStop => {
                 let summary: jvm_tools::JfrSummary = read(json)?;
-                Report::Jfr(JfrReport { path: summary.path.clone(), summary })
+                Report::Jfr(JfrReport {
+                    path: summary.path.clone(),
+                    summary,
+                })
             }
             Tool::Logs => Report::Logs(crate::logs::parse(json)?),
-            Tool::Spindump | Tool::Lsmp => return Err("Spectra Desktop doesn't run this tool.".into()),
+            Tool::Spindump | Tool::Lsmp => {
+                return Err("Spectra Desktop doesn't run this tool.".into());
+            }
         })
     }
 }
@@ -406,7 +439,10 @@ impl MainThread {
 
     /// Whether the verdict says the main thread can't respond: blocked, or spinning.
     pub fn stuck(&self) -> bool {
-        matches!(self.verdict.as_str(), "lock-blocked" | "io-blocked" | "spinning")
+        matches!(
+            self.verdict.as_str(),
+            "lock-blocked" | "io-blocked" | "spinning"
+        )
     }
 }
 
@@ -542,7 +578,11 @@ impl MemtraceReport {
     pub fn headline(&self) -> String {
         let s = &self.summary;
         let rate = crate::procs::fmt_mem(s.growth_kib_per_min.abs());
-        let under = if s.pattern == "sawtooth" { " under a sawtooth" } else { "" };
+        let under = if s.pattern == "sawtooth" {
+            " under a sawtooth"
+        } else {
+            ""
+        };
         let head = match s.verdict.as_str() {
             "steady" => "Steady: not growing".to_owned(),
             "growing" => format!("Growing{under}: {rate} a minute"),
@@ -728,49 +768,120 @@ pub(crate) mod tests {
         assert_eq!(Tool::Sample.args(7), ["sample", "-json", "7"]);
         assert_eq!(Tool::Hang.args(7), ["hang", "--json", "7"]);
         assert_eq!(Tool::Vmregions.args(7), ["vmregions", "--json", "7"]);
-        assert_eq!(Tool::Memtrace.args(7), ["memtrace", "7", "--duration", "20s", "--json"]);
+        assert_eq!(
+            Tool::Memtrace.args(7),
+            ["memtrace", "7", "--duration", "20s", "--json"]
+        );
         assert_eq!(Tool::Lineage.args(7), ["lineage", "--json", "7"]);
-        assert!(Tool::Memtrace.deadline() > Duration::from_secs(MEMTRACE_SECS), "longer than it watches");
-        let root: Vec<Tool> = Tool::ALL.into_iter().filter(|t| t.needs_root().is_some()).collect();
+        assert!(
+            Tool::Memtrace.deadline() > Duration::from_secs(MEMTRACE_SECS),
+            "longer than it watches"
+        );
+        let root: Vec<Tool> = Tool::ALL
+            .into_iter()
+            .filter(|t| t.needs_root().is_some())
+            .collect();
         assert_eq!(root, [Tool::Spindump, Tool::Lsmp]);
         assert!(Tool::Spindump.parse("{}").is_err(), "never run");
     }
 
     #[test]
     fn jvm_tools_run_spectras_jvm_commands_with_flags_before_the_pid_or_file() {
-        let paths = Paths { out: "/d/App-7-T.hprof".into(), hprof: "/d/x.hprof".into() };
+        let paths = Paths {
+            out: "/d/App-7-T.hprof".into(),
+            hprof: "/d/x.hprof".into(),
+        };
         assert_eq!(Tool::Threads.args(7), ["jvm", "thread-dump", "--json", "7"]);
-        assert_eq!(Tool::Histogram.args(7), ["jvm", "heap-histogram", "--json", "7"]);
+        assert_eq!(
+            Tool::Histogram.args(7),
+            ["jvm", "heap-histogram", "--json", "7"]
+        );
         assert_eq!(Tool::Gc.args(7), ["jvm", "gc-stats", "--json", "7"]);
         assert_eq!(Tool::Explain.args(7), ["jvm", "explain", "--json", "7"]);
-        assert_eq!(Tool::NativeMemory.steps(7, &paths), [vec!["jvm", "nmt", "--json", "7"], vec!["jvm", "vm-memory", "--json", "7"]]);
-        assert_eq!(Tool::HeapDump.steps(7, &paths), [vec!["jvm", "heap-dump", "--out", "/d/App-7-T.hprof", "7"]]);
-        assert_eq!(Tool::LeakSuspects.steps(7, &paths), [vec!["jvm", "heap-hprof", "--json", "--leak-suspects", "/d/x.hprof"]]);
-        assert_eq!(Tool::Dominators.steps(7, &paths), [vec!["jvm", "dominators", "--json", "/d/x.hprof"]]);
-        assert_eq!(Tool::JfrStart.args(7), ["jvm", "jfr", "start", "--name", "spectra-desktop", "7"]);
-        let paths = Paths { out: "/d/r.jfr".into(), ..Paths::default() };
+        assert_eq!(
+            Tool::NativeMemory.steps(7, &paths),
+            [
+                vec!["jvm", "nmt", "--json", "7"],
+                vec!["jvm", "vm-memory", "--json", "7"]
+            ]
+        );
+        assert_eq!(
+            Tool::HeapDump.steps(7, &paths),
+            [vec!["jvm", "heap-dump", "--out", "/d/App-7-T.hprof", "7"]]
+        );
+        assert_eq!(
+            Tool::LeakSuspects.steps(7, &paths),
+            [vec![
+                "jvm",
+                "heap-hprof",
+                "--json",
+                "--leak-suspects",
+                "/d/x.hprof"
+            ]]
+        );
+        assert_eq!(
+            Tool::Dominators.steps(7, &paths),
+            [vec!["jvm", "dominators", "--json", "/d/x.hprof"]]
+        );
+        assert_eq!(
+            Tool::JfrStart.args(7),
+            ["jvm", "jfr", "start", "--name", "spectra-desktop", "7"]
+        );
+        let paths = Paths {
+            out: "/d/r.jfr".into(),
+            ..Paths::default()
+        };
         assert_eq!(
             Tool::JfrStop.steps(7, &paths),
             [
-                vec!["jvm", "jfr", "dump", "--name", "spectra-desktop", "--out", "/d/r.jfr", "7"],
+                vec![
+                    "jvm",
+                    "jfr",
+                    "dump",
+                    "--name",
+                    "spectra-desktop",
+                    "--out",
+                    "/d/r.jfr",
+                    "7"
+                ],
                 vec!["jvm", "jfr", "stop", "--name", "spectra-desktop", "7"],
                 vec!["jvm", "jfr", "summary", "--json", "/d/r.jfr"],
             ]
         );
-        let jvm: Vec<Tool> = Tool::ALL.into_iter().filter(|t| t.kind() == Kind::Jvm).collect();
+        let jvm: Vec<Tool> = Tool::ALL
+            .into_iter()
+            .filter(|t| t.kind() == Kind::Jvm)
+            .collect();
         assert_eq!(jvm.len(), 10);
         assert!(jvm.iter().all(|t| t.needs_root().is_none()));
         assert!(!Tool::LeakSuspects.attaches() && Tool::HeapDump.attaches());
         let rows: Vec<Tool> = jvm.into_iter().filter(|t| t.has_row()).collect();
-        assert_eq!(rows, [Tool::Threads, Tool::Histogram, Tool::Gc, Tool::NativeMemory, Tool::Explain, Tool::HeapDump, Tool::JfrStart]);
+        assert_eq!(
+            rows,
+            [
+                Tool::Threads,
+                Tool::Histogram,
+                Tool::Gc,
+                Tool::NativeMemory,
+                Tool::Explain,
+                Tool::HeapDump,
+                Tool::JfrStart
+            ]
+        );
     }
 
     #[test]
     fn parses_a_sample() {
-        let Report::Sample(r) = Tool::Sample.parse(SAMPLE).unwrap() else { panic!() };
+        let Report::Sample(r) = Tool::Sample.parse(SAMPLE).unwrap() else {
+            panic!()
+        };
         assert_eq!((r.total_samples, r.stacks.len()), (85, 2));
         assert_eq!(r.stacks[0].leaf(), "__semwait_signal");
-        assert_eq!(r.stacks[0].callers(2), ["main", "nanosleep"], "the thread's name is skipped");
+        assert_eq!(
+            r.stacks[0].callers(2),
+            ["main", "nanosleep"],
+            "the thread's name is skipped"
+        );
         let main = r.main_thread.unwrap();
         assert_eq!(main.headline(), "Idle: waiting for work");
         assert!(!main.stuck());
@@ -778,7 +889,9 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_a_hang_verdict() {
-        let Report::Hang(r) = Tool::Hang.parse(HANG).unwrap() else { panic!() };
+        let Report::Hang(r) = Tool::Hang.parse(HANG).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.main_thread.headline(), "Blocked on a lock");
         assert!(r.main_thread.stuck());
         assert_eq!(MainThread::default().headline(), "Main thread not found");
@@ -786,11 +899,15 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_memory_maps() {
-        let Report::Vmmap(r) = Tool::Vmmap.parse(VMMAP).unwrap() else { panic!() };
+        let Report::Vmmap(r) = Tool::Vmmap.parse(VMMAP).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.regions[0].kind, "MALLOC metadata");
         assert_eq!(r.regions[1].swapped_bytes, 4096);
         assert_eq!(fmt_bytes(r.footprint_bytes), "912 KB");
-        let Report::Regions(r) = Tool::Vmregions.parse(VMREGIONS).unwrap() else { panic!() };
+        let Report::Regions(r) = Tool::Vmregions.parse(VMREGIONS).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.top_dirty.len(), 2);
         assert_eq!(r.top_dirty[1].detail, "", "a region with no detail");
         assert_eq!(r.top_dirty[0].share, "PRV");
@@ -798,7 +915,9 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_a_memory_trend() {
-        let Report::Memtrace(r) = Tool::Memtrace.parse(MEMTRACE).unwrap() else { panic!() };
+        let Report::Memtrace(r) = Tool::Memtrace.parse(MEMTRACE).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.samples.len(), 5);
         assert!(r.growing());
         assert_eq!(r.headline(), "Growing: 8.0 MB a minute");
@@ -806,30 +925,44 @@ pub(crate) mod tests {
         steady.summary.verdict = "steady".into();
         steady.summary.exited = true;
         steady.summary.exit_reason = "gone".into();
-        assert_eq!(steady.headline(), "Steady: not growing (it exited before the end)");
+        assert_eq!(
+            steady.headline(),
+            "Steady: not growing (it exited before the end)"
+        );
     }
 
     #[test]
     fn parses_lineage_into_a_tree() {
-        let Report::Lineage(r) = Tool::Lineage.parse(LINEAGE).unwrap() else { panic!() };
-        assert_eq!(r.ancestors.iter().map(|a| a.pid).collect::<Vec<_>>(), [4300, 4299, 1]);
+        let Report::Lineage(r) = Tool::Lineage.parse(LINEAGE).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            r.ancestors.iter().map(|a| a.pid).collect::<Vec<_>>(),
+            [4300, 4299, 1]
+        );
         let rows: Vec<(usize, u32)> = r.descendants().iter().map(|(d, n)| (*d, n.pid)).collect();
         assert_eq!(rows, [(0, 4300), (1, 4302), (2, 4303)]);
     }
 
     #[test]
     fn parses_owner_and_runtime() {
-        let Report::Owner(r) = Tool::Owner.parse(OWNER).unwrap() else { panic!() };
+        let Report::Owner(r) = Tool::Owner.parse(OWNER).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.holders[0].chain[0].command, "launchd");
         assert!(!r.incomplete);
-        let Report::Runtime(r) = Tool::Runtime.parse(RUNTIME).unwrap() else { panic!() };
+        let Report::Runtime(r) = Tool::Runtime.parse(RUNTIME).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.capabilities.len(), 2);
         assert_eq!(r.runtime, "native");
     }
 
     #[test]
     fn logs_parse_like_the_other_tools_but_run_from_their_own_section() {
-        let Report::Logs(r) = Tool::Logs.parse(crate::logs::tests::FINDER).unwrap() else { panic!() };
+        let Report::Logs(r) = Tool::Logs.parse(crate::logs::tests::FINDER).unwrap() else {
+            panic!()
+        };
         assert_eq!(r.entries.len(), 4);
         assert!(!Tool::ALL.contains(&Tool::Logs) && !Tool::Logs.has_row());
         assert_eq!(Tool::Logs.deadline(), crate::logs::DEADLINE);

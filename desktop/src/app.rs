@@ -79,7 +79,11 @@ pub struct PageRef {
 
 impl PageRef {
     fn app(path: String) -> PageRef {
-        PageRef { pid: 0, started: String::new(), app: Some(path) }
+        PageRef {
+            pid: 0,
+            started: String::new(),
+            app: Some(path),
+        }
     }
 }
 
@@ -124,12 +128,19 @@ impl Outcome {
     pub fn line(&self) -> String {
         let name = &self.target.name;
         match (&self.status, self.signal) {
-            (Status::Checking, _) => format!("Checking that pid {} is still {name}…", self.target.pid),
+            (Status::Checking, _) => {
+                format!("Checking that pid {} is still {name}…", self.target.pid)
+            }
             (Status::MaybeSent { why, .. }, signal) => {
-                format!("{} may have been sent to {name} ({why}); watching whether it ends", signal.verb())
+                format!(
+                    "{} may have been sent to {name} ({why}); watching whether it ends",
+                    signal.verb()
+                )
             }
             (Status::Waiting { parent }, _) => {
-                format!("{name} has exited and is waiting for {parent} to collect it; Force quit can't help")
+                format!(
+                    "{name} has exited and is waiting for {parent} to collect it; Force quit can't help"
+                )
             }
             (Status::Asked { .. }, Signal::Term) => format!("Asked {name} to quit"),
             (Status::Asked { .. }, Signal::Kill) => format!("Stopping {name}"),
@@ -139,7 +150,9 @@ impl Outcome {
                 format!("{name} is still running {STILL_AFTER:.0} s after being asked to quit")
             }
             (Status::StillRunning, Signal::Kill) => {
-                format!("{name} is still running after Force quit; it may be stuck waiting on the system")
+                format!(
+                    "{name} is still running after Force quit; it may be stuck waiting on the system"
+                )
             }
             (Status::Refused(why) | Status::Failed(why), _) => why.clone(),
         }
@@ -151,7 +164,10 @@ pub enum Done {
     /// A confirmed Quit's check and send, for outcome number `job`.
     Quit { job: u64, attempt: Attempt },
     /// What `ps` says of a process still listed after its signal, for outcome number `job`.
-    Probe { job: u64, now: Result<Option<Identity>, String> },
+    Probe {
+        job: u64,
+        now: Result<Option<Identity>, String>,
+    },
 }
 
 /// Work that runs `ps` or `kill`, off the UI thread.
@@ -162,7 +178,12 @@ pub type Job = Box<dyn FnOnce() -> Done + Send>;
 type Failure = fn(u64, String) -> Done;
 
 fn quit_failed(job: u64, why: String) -> Done {
-    Done::Quit { job, attempt: Attempt::Failed(format!("{why} Check whether the process is still running before trying again.")) }
+    Done::Quit {
+        job,
+        attempt: Attempt::Failed(format!(
+            "{why} Check whether the process is still running before trying again."
+        )),
+    }
 }
 
 fn probe_failed(job: u64, why: String) -> Done {
@@ -228,7 +249,12 @@ impl Stats {
             s.apps += usize::from(p.role == Role::App);
             s.signed |= p.signing.is_some();
         }
-        s.memory = Category::ALL.iter().copied().zip(memory).filter(|(_, kib)| *kib > 0.0).collect();
+        s.memory = Category::ALL
+            .iter()
+            .copied()
+            .zip(memory)
+            .filter(|(_, kib)| *kib > 0.0)
+            .collect();
         s.memory.sort_by(|a, b| b.1.total_cmp(&a.1));
         s
     }
@@ -415,7 +441,10 @@ pub fn init() -> App {
         done_rx,
         wake: None,
         job: 0,
-        me: Me { pid: std::process::id(), uid: None },
+        me: Me {
+            pid: std::process::id(),
+            uid: None,
+        },
         confirm: None,
         outcome: None,
         poke: Some(poke),
@@ -473,7 +502,11 @@ impl App {
     pub fn land_procs(&mut self, feed: ProcFeed) {
         self.proc_loaded = true;
         self.feeds.proc_out = false;
-        let rest = if matches!(feed, Err(ProcError::TooOld(_))) { RETRY_OLD } else { REFRESH };
+        let rest = if matches!(feed, Err(ProcError::TooOld(_))) {
+            RETRY_OLD
+        } else {
+            REFRESH
+        };
         self.feeds.proc_next = self.now + rest.as_secs_f64();
         if std::mem::take(&mut self.feeds.proc_again) {
             self.ask_procs(true);
@@ -501,10 +534,12 @@ impl App {
             if old.as_ref().is_some_and(|t| t.started != p.started_at) {
                 reused.push(p.pid);
             }
-            let mut t = old.filter(|t| t.started == p.started_at).unwrap_or_else(|| Track {
-                started: p.started_at.clone(),
-                samples: Vec::new(),
-            });
+            let mut t = old
+                .filter(|t| t.started == p.started_at)
+                .unwrap_or_else(|| Track {
+                    started: p.started_at.clone(),
+                    samples: Vec::new(),
+                });
             t.samples.push(p.sample());
             if t.samples.len() > PROC_HISTORY {
                 t.samples.remove(0);
@@ -541,7 +576,11 @@ impl App {
             self.readings.remove(pid);
             self.baseline.remove(pid);
             let prefix = format!("{pid}/");
-            if self.expanded.as_deref().is_some_and(|id| id.starts_with(&prefix)) {
+            if self
+                .expanded
+                .as_deref()
+                .is_some_and(|id| id.starts_with(&prefix))
+            {
                 self.expanded = None;
             }
             self.tree_open.remove(pid);
@@ -558,7 +597,10 @@ impl App {
             return;
         }
         let all: Vec<&Process> = self.procs.iter().collect();
-        let ids: HashSet<String> = groups::group(&all, self.sort).into_iter().map(|g| g.id).collect();
+        let ids: HashSet<String> = groups::group(&all, self.sort)
+            .into_iter()
+            .map(|g| g.id)
+            .collect();
         self.open_groups.retain(|id| ids.contains(id));
     }
 
@@ -591,7 +633,11 @@ impl App {
     /// A page whose process the app was asked to stop stays, to say it ended.
     fn drop_gone_selection(&mut self) {
         if let Some(pid) = self.selected
-            && !self.is_live(&PageRef { pid, started: self.selected_started.clone(), app: None })
+            && !self.is_live(&PageRef {
+                pid,
+                started: self.selected_started.clone(),
+                app: None,
+            })
             && self.ended_page().is_none()
         {
             self.selected = None;
@@ -618,7 +664,10 @@ impl App {
         let ago = self.now - self.proc_updated?;
         let when = format!("Updated {} ago", fmt_ago(ago));
         match &self.proc_error {
-            Some(ProcError::Failed(why)) => Some(format!("{when} · last reading failed: {}", why.trim_end_matches('.'))),
+            Some(ProcError::Failed(why)) => Some(format!(
+                "{when} · last reading failed: {}",
+                why.trim_end_matches('.')
+            )),
             _ if ago > STALE_AFTER => Some(when),
             _ => None,
         }
@@ -629,7 +678,10 @@ impl App {
     }
 
     pub fn children(&self, pid: u32) -> Vec<&Process> {
-        self.procs.iter().filter(|p| p.ppid == pid && p.pid != pid).collect()
+        self.procs
+            .iter()
+            .filter(|p| p.ppid == pid && p.pid != pid)
+            .collect()
     }
 
     pub fn proc_history(&self, pid: u32) -> &[ProcSample] {
@@ -639,7 +691,14 @@ impl App {
     /// Re-cuts the list after a reading, a sidebar choice, a search, a sort or a group opening.
     pub fn rebuild(&mut self) {
         let q = self.query.text.trim().to_lowercase();
-        let nav = if matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) { Nav::All } else { self.nav };
+        let nav = if matches!(
+            self.nav,
+            Nav::Overview | Nav::System | Nav::Activity | Nav::Startup
+        ) {
+            Nav::All
+        } else {
+            self.nav
+        };
         let nav = if nav == Nav::Network { Nav::All } else { nav };
         let nav = if nav == Nav::Storage { Nav::All } else { nav };
         if self.view == View::Tree {
@@ -669,11 +728,18 @@ impl App {
             self.tree_matches = self.tree.nodes.len();
             self.tree_keep = None;
         } else {
-            let (keep, hits) = self.tree.keep(|pid| self.process(pid).is_some_and(|p| groups::matches_query(p, q)));
+            let (keep, hits) = self.tree.keep(|pid| {
+                self.process(pid)
+                    .is_some_and(|p| groups::matches_query(p, q))
+            });
             self.tree_matches = hits;
             self.tree_keep = Some(keep);
         }
-        self.rows = self.tree.flatten(&self.tree_open, self.tree_keep.as_deref(), &self.tree_closed);
+        self.rows = self.tree.flatten(
+            &self.tree_open,
+            self.tree_keep.as_deref(),
+            &self.tree_closed,
+        );
     }
 
     /// Lays the list out grouped or as a tree.
@@ -687,14 +753,21 @@ impl App {
 
     /// Whether the tree shows `pid`'s children.
     pub fn tree_is_open(&self, pid: u32) -> bool {
-        self.tree
-            .index_of(pid)
-            .is_some_and(|i| self.tree.is_open(i, &self.tree_open, self.tree_keep.as_deref(), &self.tree_closed))
+        self.tree.index_of(pid).is_some_and(|i| {
+            self.tree.is_open(
+                i,
+                &self.tree_open,
+                self.tree_keep.as_deref(),
+                &self.tree_closed,
+            )
+        })
     }
 
     /// Whether `pid` has children the tree would show: with a search, only kept ones.
     pub fn tree_has_children(&self, pid: u32) -> bool {
-        self.tree.index_of(pid).is_some_and(|i| self.tree.has_shown_children(i, self.tree_keep.as_deref()))
+        self.tree
+            .index_of(pid)
+            .is_some_and(|i| self.tree.has_shown_children(i, self.tree_keep.as_deref()))
     }
 
     /// Opens or closes `pid`'s branch in the tree.
@@ -722,7 +795,12 @@ impl App {
     /// first child; Left closes an open one, then steps to the parent. Returns the row the
     /// cursor should move to, if it moves.
     pub fn tree_step(&mut self, right: bool) -> Option<String> {
-        let at = self.table.cursor()?.strip_prefix("p:")?.parse::<u32>().ok()?;
+        let at = self
+            .table
+            .cursor()?
+            .strip_prefix("p:")?
+            .parse::<u32>()
+            .ok()?;
         self.tree.index_of(at)?;
         let has_children = self.tree_has_children(at);
         // A branch whose children all ended shows no triangle: Left goes straight to the parent.
@@ -735,13 +813,18 @@ impl App {
             }
             (true, true) => {
                 let i = self.rows.iter().position(|r| r.id == format!("p:{at}"))?;
-                self.rows.get(i + 1).filter(|r| r.depth > self.rows[i].depth).map(|r| r.id.clone())
+                self.rows
+                    .get(i + 1)
+                    .filter(|r| r.depth > self.rows[i].depth)
+                    .map(|r| r.id.clone())
             }
             (false, true) => {
                 self.set_tree_open(at, false);
                 None
             }
-            (false, false) => parent.map(|p| format!("p:{p}")).filter(|id| self.rows.iter().any(|r| &r.id == id)),
+            (false, false) => parent
+                .map(|p| format!("p:{p}"))
+                .filter(|id| self.rows.iter().any(|r| &r.id == id)),
             _ => None,
         }
     }
@@ -786,7 +869,14 @@ impl App {
             dir == SortDir::Descending
         };
         self.sort = Sort { key, descending };
-        self.table.set_sort(column, if descending { SortDir::Descending } else { SortDir::Ascending });
+        self.table.set_sort(
+            column,
+            if descending {
+                SortDir::Descending
+            } else {
+                SortDir::Ascending
+            },
+        );
         self.rebuild();
     }
 
@@ -806,8 +896,15 @@ impl App {
 
     /// The bundle path of an app group, by its id.
     fn app_path_of(&self, group: &str) -> Option<String> {
-        let g = self.groups.iter().find(|g| g.id == group && g.kind == groups::GroupKind::App)?;
-        g.pids.iter().find_map(|pid| self.process(*pid).and_then(|p| p.bundle_path()).map(str::to_owned))
+        let g = self
+            .groups
+            .iter()
+            .find(|g| g.id == group && g.kind == groups::GroupKind::App)?;
+        g.pids.iter().find_map(|pid| {
+            self.process(*pid)
+                .and_then(|p| p.bundle_path())
+                .map(str::to_owned)
+        })
     }
 
     pub fn follow(&mut self, link: Link) {
@@ -832,12 +929,18 @@ impl App {
 
     /// Findings that need a look (worse than information).
     pub fn problems(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity < Severity::Info).count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity < Severity::Info)
+            .count()
     }
 
     /// One process's findings, its JVM's included, worst first.
     pub fn findings_for(&self, pid: u32) -> Vec<&Finding> {
-        self.findings.iter().filter(|f| f.link == Link::Process(pid)).collect()
+        self.findings
+            .iter()
+            .filter(|f| f.link == Link::Process(pid))
+            .collect()
     }
 
     pub fn worst(&self, pid: u32) -> Severity {
@@ -881,7 +984,9 @@ impl App {
     fn page_ref(&self, pid: u32) -> PageRef {
         PageRef {
             pid,
-            started: self.process(pid).map_or_else(String::new, |p| p.started_at.clone()),
+            started: self
+                .process(pid)
+                .map_or_else(String::new, |p| p.started_at.clone()),
             app: None,
         }
     }
@@ -905,7 +1010,11 @@ impl App {
     /// Remembers the open page, if any, for "back".
     fn push_current(&mut self) {
         if let Some(cur) = self.selected {
-            self.back_stack.push(PageRef { pid: cur, started: self.selected_started.clone(), app: None });
+            self.back_stack.push(PageRef {
+                pid: cur,
+                started: self.selected_started.clone(),
+                app: None,
+            });
         } else if let Some(path) = self.app_page.take() {
             self.back_stack.push(PageRef::app(path));
         }
@@ -956,7 +1065,10 @@ impl App {
 
     /// The process page "back" would return to.
     pub fn back_to(&self) -> Option<u32> {
-        self.back_stack.last().filter(|p| p.app.is_none()).map(|p| p.pid)
+        self.back_stack
+            .last()
+            .filter(|p| p.app.is_none())
+            .map(|p| p.pid)
     }
 
     /// The page "back" would return to.
@@ -976,7 +1088,11 @@ impl App {
         if g.kind != groups::GroupKind::App {
             return None;
         }
-        g.pids.iter().copied().filter(|pid| self.process(*pid).is_some_and(|p| p.role == Role::App)).min()
+        g.pids
+            .iter()
+            .copied()
+            .filter(|pid| self.process(*pid).is_some_and(|p| p.role == Role::App))
+            .min()
     }
 
     /// What the list's Quit acts on: the row under the cursor's target.
@@ -995,7 +1111,13 @@ impl App {
             None if self.nav == Nav::Network => None,
             // The Storage page lists folders, not processes.
             None if self.nav == Nav::Storage => None,
-            None if !matches!(self.nav, Nav::Overview | Nav::System | Nav::Activity | Nav::Startup) => self.cursor_target(),
+            None if !matches!(
+                self.nav,
+                Nav::Overview | Nav::System | Nav::Activity | Nav::Startup
+            ) =>
+            {
+                self.cursor_target()
+            }
             None => None,
         }
     }
@@ -1009,7 +1131,9 @@ impl App {
             && o.target.is(p)
             && let Status::Waiting { parent } = &o.status
         {
-            return Some(format!("It has exited and is waiting for {parent} to collect it."));
+            return Some(format!(
+                "It has exited and is waiting for {parent} to collect it."
+            ));
         }
         signal::refusal(p, self.me, &|pid| self.process(pid).map(|p| p.ppid))
     }
@@ -1027,7 +1151,9 @@ impl App {
     /// Whether a confirmed Quit or Force quit is still being checked and sent. Nothing else
     /// may be asked meanwhile.
     pub fn checking(&self) -> bool {
-        self.outcome.as_ref().is_some_and(|o| o.status == Status::Checking)
+        self.outcome
+            .as_ref()
+            .is_some_and(|o| o.status == Status::Checking)
     }
 
     /// Opens the confirmation for `signal` to `pid` as it is now. It never sends anything itself.
@@ -1048,7 +1174,10 @@ impl App {
             return;
         }
         if let Some(p) = self.process(t.pid).filter(|p| t.is(p)) {
-            self.confirm = Some(Confirm { target: Target::of(p), signal });
+            self.confirm = Some(Confirm {
+                target: Target::of(p),
+                signal,
+            });
         }
     }
 
@@ -1066,15 +1195,29 @@ impl App {
         let job = self.job;
         let signals = Arc::clone(&self.signals);
         let t = target.clone();
-        self.outcome = Some(Outcome { target, signal, status: Status::Checking });
-        self.submit(job, quit_failed, Box::new(move || Done::Quit { job, attempt: signal::quit(signals.as_ref(), &t, signal) }));
+        self.outcome = Some(Outcome {
+            target,
+            signal,
+            status: Status::Checking,
+        });
+        self.submit(
+            job,
+            quit_failed,
+            Box::new(move || Done::Quit {
+                job,
+                attempt: signal::quit(signals.as_ref(), &t, signal),
+            }),
+        );
     }
 
     /// Hands `work`, outcome number `id`'s job, to the worker. If it panics or can't be started,
     /// `failed` says so, so the outcome still settles.
     fn submit(&self, id: u64, failed: Failure, work: Job) {
         let start_failed = |e: std::io::Error| {
-            let _ = self.done_tx.send(failed(id, format!("Couldn't start a thread for the check: {e}.")));
+            let _ = self.done_tx.send(failed(
+                id,
+                format!("Couldn't start a thread for the check: {e}."),
+            ));
             if let Some(wake) = &self.wake {
                 wake();
             }
@@ -1083,19 +1226,25 @@ impl App {
             Runner::Thread => {
                 let tx = self.done_tx.clone();
                 let wake = self.wake.clone();
-                let spawned = std::thread::Builder::new().name("spectra-quit".into()).spawn(move || {
-                    let _ = tx.send(run_guarded(work, id, failed));
-                    if let Some(wake) = wake {
-                        wake();
-                    }
-                });
+                let spawned = std::thread::Builder::new()
+                    .name("spectra-quit".into())
+                    .spawn(move || {
+                        let _ = tx.send(run_guarded(work, id, failed));
+                        if let Some(wake) = wake {
+                            wake();
+                        }
+                    });
                 if let Err(e) = spawned {
                     start_failed(e);
                 }
             }
             #[cfg(test)]
             Runner::NoThreads => start_failed(std::io::Error::other("out of threads")),
-            Runner::Held(q) => q.lock().expect("the held jobs").push(Held { job: work, id, failed }),
+            Runner::Held(q) => q.lock().expect("the held jobs").push(Held {
+                job: work,
+                id,
+                failed,
+            }),
         }
     }
 
@@ -1133,7 +1282,11 @@ impl App {
         if job != self.job {
             return;
         }
-        let Some(o) = self.outcome.as_mut().filter(|o| o.status == Status::Checking) else {
+        let Some(o) = self
+            .outcome
+            .as_mut()
+            .filter(|o| o.status == Status::Checking)
+        else {
             return;
         };
         o.status = match attempt {
@@ -1152,12 +1305,19 @@ impl App {
         if job != self.job {
             return;
         }
-        let Some(o) = self.outcome.as_ref().filter(|o| o.status == Status::StillRunning) else {
+        let Some(o) = self
+            .outcome
+            .as_ref()
+            .filter(|o| o.status == Status::StillRunning)
+        else {
             return;
         };
         match now {
             Ok(Some(id)) if signal::waits_for_parent(&o.target, Some(&id)) => {
-                let ppid = self.process(o.target.pid).filter(|p| o.target.is(p)).map_or(o.target.process.ppid, |p| p.ppid);
+                let ppid = self
+                    .process(o.target.pid)
+                    .filter(|p| o.target.is(p))
+                    .map_or(o.target.process.ppid, |p| p.ppid);
                 let parent = match self.process(ppid) {
                     Some(p) => format!("{} (pid {ppid})", signal::display_name(p)),
                     None => format!("its parent (pid {ppid})"),
@@ -1200,13 +1360,20 @@ impl App {
     /// Whether the JVM feed is worth reading: before the process list says otherwise, while the
     /// list has a JVM, or while the last JVM reading found one.
     pub fn jvm_wanted(&self) -> bool {
-        let jvm = Runtime::ALL.iter().position(|r| *r == Runtime::Jvm).map_or(0, |i| self.stats.runtimes[i]);
+        let jvm = Runtime::ALL
+            .iter()
+            .position(|r| *r == Runtime::Jvm)
+            .map_or(0, |i| self.stats.runtimes[i]);
         !self.has_processes() || jvm > 0 || !self.jvms.is_empty()
     }
 
     /// How long the JVM feed rests after a reading: briefly while a JVM's page is open.
     fn jvm_rest(&self) -> Duration {
-        if self.selected.is_some_and(|pid| self.jvm(pid).is_some()) { REFRESH } else { JVM_REST }
+        if self.selected.is_some_and(|pid| self.jvm(pid).is_some()) {
+            REFRESH
+        } else {
+            JVM_REST
+        }
     }
 
     /// An open page's live rounds, which rest while the window isn't shown.
@@ -1233,7 +1400,10 @@ impl App {
             }
         }
         if self.jvm_wanted() && !self.feeds.jvm_out {
-            let next = self.feeds.jvm_landed.map_or(0.0, |t| t + self.jvm_rest().as_secs_f64());
+            let next = self
+                .feeds
+                .jvm_landed
+                .map_or(0.0, |t| t + self.jvm_rest().as_secs_f64());
             if self.now >= next {
                 if let Some(go) = &self.jvm_go
                     && go.send(()).is_ok()
@@ -1253,7 +1423,14 @@ impl App {
         let Some(o) = &self.outcome else { return };
         let (job, pid) = (self.job, o.target.pid);
         let signals = Arc::clone(&self.signals);
-        self.submit(job, probe_failed, Box::new(move || Done::Probe { job, now: signals.identify(pid) }));
+        self.submit(
+            job,
+            probe_failed,
+            Box::new(move || Done::Probe {
+                job,
+                now: signals.identify(pid),
+            }),
+        );
     }
 
     /// Dismisses the outcome, except while it's being checked: the answer has to land somewhere.
@@ -1270,7 +1447,10 @@ impl App {
     /// `ps` is asked whether it's a zombie.
     fn track_outcome(&mut self) {
         let Some(o) = &mut self.outcome else { return };
-        let listed = self.proc_index.get(&o.target.pid).and_then(|&i| self.procs.get(i));
+        let listed = self
+            .proc_index
+            .get(&o.target.pid)
+            .and_then(|&i| self.procs.get(i));
         let gone = !listed.is_some_and(|p| o.target.is(p));
         let mut probe = false;
         match o.status {
@@ -1331,7 +1511,11 @@ mod tests {
         let mut s = init();
         let fresh = |s: &App| s.poke_rx.as_ref().unwrap().try_iter().collect::<Vec<_>>();
         s.tick_feeds();
-        assert_eq!(fresh(&s), vec![false], "every {REFRESH:?}, the daemon's snapshot");
+        assert_eq!(
+            fresh(&s),
+            vec![false],
+            "every {REFRESH:?}, the daemon's snapshot"
+        );
         s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
         s.poke_feed();
         assert_eq!(fresh(&s), vec![true], "after a Quit, one taken now");
@@ -1342,21 +1526,30 @@ mod tests {
     }
 
     fn jvm_proc(pid: u32) -> Process {
-        Process { runtime: Runtime::Jvm, ..proc(pid, "java", 1.0, 1.0) }
+        Process {
+            runtime: Runtime::Jvm,
+            ..proc(pid, "java", 1.0, 1.0)
+        }
     }
 
     /// What landing a saved feed costs: `PERF_PROCS_JSON=<file> cargo test --release -- --ignored land_cost --nocapture`.
     #[test]
     #[ignore]
     fn land_cost() {
-        let Ok(path) = std::env::var("PERF_PROCS_JSON") else { return };
+        let Ok(path) = std::env::var("PERF_PROCS_JSON") else {
+            return;
+        };
         let procs = crate::procs::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
         let mut s = init();
         let t = std::time::Instant::now();
         for _ in 0..20 {
             s.land_procs(Ok(procs.clone()));
         }
-        println!("land_procs of {} processes: {:?}", procs.len(), t.elapsed() / 20);
+        println!(
+            "land_procs of {} processes: {:?}",
+            procs.len(),
+            t.elapsed() / 20
+        );
     }
 
     #[test]
@@ -1384,7 +1577,11 @@ mod tests {
         assert_eq!(asked(&s), (0, 0), "nothing more while both are out");
         s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
         s.now = 6.0;
-        assert_eq!(s.tick_feeds(), Some(5.0 + REFRESH.as_secs_f64()), "due a rest after it landed");
+        assert_eq!(
+            s.tick_feeds(),
+            Some(5.0 + REFRESH.as_secs_f64()),
+            "due a rest after it landed"
+        );
         assert_eq!(asked(&s), (0, 0));
         s.now = 7.0;
         s.tick_feeds();
@@ -1397,15 +1594,25 @@ mod tests {
         s.land_procs(Ok(vec![jvm_proc(7), proc(8, "b", 0.0, 1.0)]));
         s.tick_feeds();
         asked(&s);
-        s.land(Ok(vec![data::Jvm { pid: 7, ..data::Jvm::default() }]));
+        s.land(Ok(vec![data::Jvm {
+            pid: 7,
+            ..data::Jvm::default()
+        }]));
         s.feeds.proc_out = true;
         s.now = REFRESH.as_secs_f64();
         s.tick_feeds();
-        assert_eq!(asked(&s), (0, 0), "off its page the JVM feed rests {JVM_REST:?}");
+        assert_eq!(
+            asked(&s),
+            (0, 0),
+            "off its page the JVM feed rests {JVM_REST:?}"
+        );
         s.now = JVM_REST.as_secs_f64();
         s.tick_feeds();
         assert_eq!(asked(&s), (0, 1));
-        s.land(Ok(vec![data::Jvm { pid: 7, ..data::Jvm::default() }]));
+        s.land(Ok(vec![data::Jvm {
+            pid: 7,
+            ..data::Jvm::default()
+        }]));
         s.open(7);
         s.now += REFRESH.as_secs_f64();
         s.tick_feeds();
@@ -1447,7 +1654,10 @@ mod tests {
     fn process_history_is_bounded_and_forgets_ended_processes() {
         let mut s = init();
         for i in 0..(PROC_HISTORY + 5) {
-            s.land_procs(Ok(vec![proc(1, "a", i as f64, 1.0), proc(2, "b", 0.0, 1.0)]));
+            s.land_procs(Ok(vec![
+                proc(1, "a", i as f64, 1.0),
+                proc(2, "b", 0.0, 1.0),
+            ]));
         }
         assert_eq!(s.proc_history(1).len(), PROC_HISTORY);
         assert_eq!(s.proc_history(1)[0].cpu, 5.0, "the oldest rolled out");
@@ -1469,23 +1679,40 @@ mod tests {
     #[test]
     fn a_reused_pid_closes_the_page_and_forgets_what_was_keyed_by_it() {
         let mut s = init();
-        let jvm = Jvm { pid: 1, main_class: "a.B".into(), gc: Some(data::Gc::default()), ..Jvm::default() };
+        let jvm = Jvm {
+            pid: 1,
+            main_class: "a.B".into(),
+            gc: Some(data::Gc::default()),
+            ..Jvm::default()
+        };
         s.land(Ok(vec![jvm.clone()]));
-        s.land_procs(Ok(vec![started(proc(1, "java", 1.0, 1.0), "09:00"), started(proc(2, "zsh", 1.0, 1.0), "09:00")]));
+        s.land_procs(Ok(vec![
+            started(proc(1, "java", 1.0, 1.0), "09:00"),
+            started(proc(2, "zsh", 1.0, 1.0), "09:00"),
+        ]));
         s.toggle_baseline();
         s.open(2);
         s.open(1);
         assert_eq!(s.back_to(), Some(2));
         s.expanded = Some("1/jvm-healthy".into());
         // Pid 1 is now another program.
-        s.land_procs(Ok(vec![started(proc(1, "node", 1.0, 1.0), "10:00"), started(proc(2, "zsh", 1.0, 1.0), "09:00")]));
+        s.land_procs(Ok(vec![
+            started(proc(1, "node", 1.0, 1.0), "10:00"),
+            started(proc(2, "zsh", 1.0, 1.0), "09:00"),
+        ]));
         assert_eq!(s.selected, None, "the page was for the old process");
-        assert!(s.baseline.is_empty() && s.history(1).is_empty(), "its JVM numbers went with it");
+        assert!(
+            s.baseline.is_empty() && s.history(1).is_empty(),
+            "its JVM numbers went with it"
+        );
         assert_eq!(s.expanded, None);
         // And a reused pid in the back stack is skipped.
         s.open(2);
         s.open(1);
-        s.land_procs(Ok(vec![started(proc(1, "node", 1.0, 1.0), "10:00"), started(proc(2, "zsh", 1.0, 1.0), "11:00")]));
+        s.land_procs(Ok(vec![
+            started(proc(1, "node", 1.0, 1.0), "10:00"),
+            started(proc(2, "zsh", 1.0, 1.0), "11:00"),
+        ]));
         assert_eq!(s.selected, Some(1));
         s.back();
         assert_eq!(s.selected, None, "pid 2's page was for the zsh that ended");
@@ -1494,7 +1721,11 @@ mod tests {
     #[test]
     fn open_groups_that_no_longer_exist_are_forgotten() {
         let mut s = init();
-        s.land_procs(Ok(vec![proc(1, "zsh", 1.0, 1.0), proc(2, "zsh", 1.0, 1.0), proc(3, "a", 1.0, 1.0)]));
+        s.land_procs(Ok(vec![
+            proc(1, "zsh", 1.0, 1.0),
+            proc(2, "zsh", 1.0, 1.0),
+            proc(3, "a", 1.0, 1.0),
+        ]));
         s.toggle_group("exe:zsh");
         assert!(s.open_groups.contains("exe:zsh"));
         s.land_procs(Ok(vec![proc(1, "zsh", 1.0, 1.0), proc(3, "a", 1.0, 1.0)]));
@@ -1536,11 +1767,19 @@ mod tests {
         s.now = 100.0 + STALE_AFTER - 1.0;
         assert_eq!(s.feed_status(), None, "still recent");
         s.now = 112.0;
-        assert_eq!(s.feed_status().as_deref(), Some("Updated 12 s ago"), "a hung reading leaves it old");
-        s.land_procs(Err(ProcError::Failed("spectra process failed: no processes found".into())));
         assert_eq!(
             s.feed_status().as_deref(),
-            Some("Updated 12 s ago · last reading failed: spectra process failed: no processes found")
+            Some("Updated 12 s ago"),
+            "a hung reading leaves it old"
+        );
+        s.land_procs(Err(ProcError::Failed(
+            "spectra process failed: no processes found".into(),
+        )));
+        assert_eq!(
+            s.feed_status().as_deref(),
+            Some(
+                "Updated 12 s ago · last reading failed: spectra process failed: no processes found"
+            )
         );
         s.now = 400.0;
         s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0)]));
@@ -1559,13 +1798,20 @@ mod tests {
         assert_eq!(s.stats.runtimes[0], 1, "Electron");
         assert_eq!(s.stats.runtimes[Runtime::ALL.len() - 1], 1, "Unknown");
         assert_eq!((s.stats.cpu, s.stats.apps, s.stats.signed), (4.0, 1, false));
-        assert_eq!(s.stats.memory, [(Category::Apps, 100.0), (Category::DevTools, 50.0)]);
+        assert_eq!(
+            s.stats.memory,
+            [(Category::Apps, 100.0), (Category::DevTools, 50.0)]
+        );
     }
 
     #[test]
     fn back_walks_the_pages_opened() {
         let mut s = init();
-        s.land_procs(Ok(vec![proc(1, "a", 1.0, 1.0), proc(2, "b", 1.0, 1.0), proc(3, "c", 1.0, 1.0)]));
+        s.land_procs(Ok(vec![
+            proc(1, "a", 1.0, 1.0),
+            proc(2, "b", 1.0, 1.0),
+            proc(3, "c", 1.0, 1.0),
+        ]));
         s.open(3);
         s.open(2);
         s.open(1);
@@ -1588,7 +1834,13 @@ mod tests {
         s.show(Nav::All);
         assert_eq!(s.rows[0].id, "p:2", "CPU, busiest first");
         s.sort_by("mem", SortDir::Ascending);
-        assert_eq!(s.sort, Sort { key: SortKey::Memory, descending: true });
+        assert_eq!(
+            s.sort,
+            Sort {
+                key: SortKey::Memory,
+                descending: true
+            }
+        );
         assert_eq!(s.rows[0].id, "p:1");
         s.sort_by("mem", SortDir::Ascending);
         assert_eq!(s.rows[0].id, "p:2", "a second click flips it");

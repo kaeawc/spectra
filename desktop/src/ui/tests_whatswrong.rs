@@ -80,10 +80,7 @@ fn right_now_sits_above_the_numbers_with_its_age_and_one_line_per_cause() {
         text_of(&mut rt, "ww-2-title").as_deref(),
         Some("A process is using heavy CPU")
     );
-    assert_eq!(
-        text_of(&mut rt, "ww-1-open").as_deref(),
-        Some("Xcode")
-    );
+    assert_eq!(text_of(&mut rt, "ww-1-open").as_deref(), Some("Xcode"));
     assert_eq!(text_of(&mut rt, "ww-0-open").as_deref(), Some("Machine"));
 }
 

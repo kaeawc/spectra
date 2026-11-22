@@ -18,19 +18,19 @@ mod system;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_activity;
+#[cfg(test)]
+mod tests_logs;
+#[cfg(test)]
+mod tests_network;
+#[cfg(test)]
 mod tests_startup;
 #[cfg(test)]
 mod tests_storage;
 #[cfg(test)]
 mod tests_system;
 #[cfg(test)]
-mod tests_activity;
-#[cfg(test)]
-mod tests_logs;
-#[cfg(test)]
 mod tests_whatswrong;
-#[cfg(test)]
-mod tests_network;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
@@ -91,7 +91,13 @@ fn place(s: &App, nav: Nav, key: String, count: Option<usize>, k: &Kit) -> El {
 
 fn sidebar(s: &App, k: &Kit) -> El {
     let problems = s.problems();
-    let overview = place(s, Nav::Overview, "overview".into(), Some(problems).filter(|n| *n > 0), k);
+    let overview = place(
+        s,
+        Nav::Overview,
+        "overview".into(),
+        Some(problems).filter(|n| *n > 0),
+        k,
+    );
     let mut sb = Sidebar::new().header(overview);
     // The whole machine, right under the overview, whatever the process feed is doing.
     sb = sb.child(place(s, Nav::System, "system".into(), None, k));
@@ -101,9 +107,10 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
-        let kinds = Category::ALL.iter().zip(s.stats.kinds).map(|(&c, n)| {
-            place(s, Nav::Category(c), format!("cat-{}", c.id()), Some(n), k)
-        });
+        let kinds = Category::ALL
+            .iter()
+            .zip(s.stats.kinds)
+            .map(|(&c, n)| place(s, Nav::Category(c), format!("cat-{}", c.id()), Some(n), k));
         sb = sb.section(SidebarSection::new("Kinds").key("kinds").rows(kinds));
         let runtimes: Vec<El> = Runtime::ALL
             .iter()
@@ -111,7 +118,11 @@ fn sidebar(s: &App, k: &Kit) -> El {
             .filter(|(_, n)| *n > 0)
             .map(|(&r, n)| place(s, Nav::Runtime(r), format!("rt-{}", r.id()), Some(n), k))
             .collect();
-        sb = sb.section(SidebarSection::new("Runtimes").key("runtimes").rows(runtimes));
+        sb = sb.section(
+            SidebarSection::new("Runtimes")
+                .key("runtimes")
+                .rows(runtimes),
+        );
     } else if !s.jvms.is_empty() {
         // Without the process feed, the JVMs are listed as before.
         let jvms = s.jvms.iter().map(|j| {
@@ -230,7 +241,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let mut toolbar = Toolbar::new().title(title);
     if s.on_page() {
         let to = match s.back_page() {
-            Some(crate::app::PageRef { app: Some(path), .. }) => s.app_name(path),
+            Some(crate::app::PageRef {
+                app: Some(path), ..
+            }) => s.app_name(path),
             Some(p) => page_name(s, p.pid),
             None => s.nav.title().to_owned(),
         };

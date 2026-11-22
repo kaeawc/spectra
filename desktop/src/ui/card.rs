@@ -117,14 +117,17 @@ fn evidence(s: &App, f: &Finding, k: &Kit) -> El {
         && let Link::Process(pid) = f.link
     {
         body = body.child(
-            text(format!("To stop it now, open {} and choose Force quit.", f.subject))
-                .key(format!("fix-open-{pid}"))
-                .role("link")
-                .label(format!("Open {}", f.subject))
-                .cursor(Cursor::Pointer)
-                .font(k.ty.small)
-                .color(c.text_accent)
-                .on_press(move |s: &mut App| s.open(pid)),
+            text(format!(
+                "To stop it now, open {} and choose Force quit.",
+                f.subject
+            ))
+            .key(format!("fix-open-{pid}"))
+            .role("link")
+            .label(format!("Open {}", f.subject))
+            .cursor(Cursor::Pointer)
+            .font(k.ty.small)
+            .color(c.text_accent)
+            .on_press(move |s: &mut App| s.open(pid)),
         );
     }
     body
@@ -136,10 +139,19 @@ pub fn card(s: &App, f: &Finding, k: &Kit) -> El {
     let open = s.expanded.as_deref() == Some(id.as_str());
     let (pid, link) = (f.pid, f.link);
     let (subject, label) = match link {
-        Link::Process(pid) => (format!("{} · {pid}", f.subject), format!("Open {}", f.subject)),
-        Link::Unidentified => (f.subject.clone(), "Show unsigned and ad hoc processes".to_owned()),
+        Link::Process(pid) => (
+            format!("{} · {pid}", f.subject),
+            format!("Open {}", f.subject),
+        ),
+        Link::Unidentified => (
+            f.subject.clone(),
+            "Show unsigned and ad hoc processes".to_owned(),
+        ),
         Link::System => (f.subject.clone(), "Show the Machine page".to_owned()),
-        Link::Activity(ppid) => (format!("{} · {ppid}", f.subject), format!("Show what {} starts", f.subject)),
+        Link::Activity(ppid) => (
+            format!("{} · {ppid}", f.subject),
+            format!("Show what {} starts", f.subject),
+        ),
     };
     // Its own handler, so pressing it opens the process rather than the card.
     let subject = text(subject)

@@ -672,7 +672,11 @@ fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner)
                     }
                     let (reading, timed_out) = fetch(&bin, kind, deadline);
                     if kind == Kind::Storage {
-                        skip_storage = if timed_out { STORAGE_BACKOFF } else { STORAGE_REST };
+                        skip_storage = if timed_out {
+                            STORAGE_BACKOFF
+                        } else {
+                            STORAGE_REST
+                        };
                     }
                     if tx.send(reading).is_err() {
                         return;

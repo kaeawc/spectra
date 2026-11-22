@@ -42,7 +42,11 @@ pub fn page(s: &App, p: &Process, k: &Kit) -> El {
         .child(section("Activity", activity(s, p, k), k));
     if s.ended_page().is_none() {
         page = page
-            .child(section("Network and energy", super::app_page::live(s, "pd", k), k))
+            .child(section(
+                "Network and energy",
+                super::app_page::live(s, "pd", k),
+                k,
+            ))
             .child(super::tools::panel(s, p.pid, k))
             .child(super::logs::panel(s, k));
     }
@@ -177,16 +181,40 @@ fn facts(s: &App, p: &Process, k: &Kit) -> El {
         .border(1.0, c.border_weak)
         .child(fact("parent", "Parent", parent, k))
         .child(fact("user", "User", value(user, k), k))
-        .child(fact("started", "Started", value(or_unknown(&p.started()), k), k))
-        .child(fact("path", "Executable", value(or_unknown(&p.executable_path), k), k))
+        .child(fact(
+            "started",
+            "Started",
+            value(or_unknown(&p.started()), k),
+            k,
+        ))
+        .child(fact(
+            "path",
+            "Executable",
+            value(or_unknown(&p.executable_path), k),
+            k,
+        ))
         .child(fact("role", "Role", value(p.role.label(), k), k))
         .child(fact("runtime", "Runtime", value(p.runtime.label(), k), k));
     if let Some(app) = &p.app {
-        let name = if app.name.is_empty() { app.bundle_path.clone() } else { app.name.clone() };
+        let name = if app.name.is_empty() {
+            app.bundle_path.clone()
+        } else {
+            app.name.clone()
+        };
         list = list
             .child(fact("app", "App", value(name, k), k))
-            .child(fact("bundle-id", "Bundle id", value(or_unknown(&app.bundle_id), k), k))
-            .child(fact("bundle", "Bundle", value(or_unknown(&app.bundle_path), k), k));
+            .child(fact(
+                "bundle-id",
+                "Bundle id",
+                value(or_unknown(&app.bundle_id), k),
+                k,
+            ))
+            .child(fact(
+                "bundle",
+                "Bundle",
+                value(or_unknown(&app.bundle_path), k),
+                k,
+            ));
     }
     list.child(fact("signing", "Signature", signing(p, k), k))
 }
@@ -204,7 +232,11 @@ fn signing(p: &Process, k: &Kit) -> El {
         (false, true) => format!("team {}", sg.team_id),
         (false, false) => format!("team {} as displayed, not verified", sg.team_id),
     };
-    let hardened = if sg.hardened_runtime { "hardened runtime on" } else { "hardened runtime off" };
+    let hardened = if sg.hardened_runtime {
+        "hardened runtime on"
+    } else {
+        "hardened runtime off"
+    };
     let mut body = col().w_full().gap(4.0).child(
         row()
             .gap(8.0)
@@ -295,11 +327,33 @@ pub(super) fn children(prefix: &str, kids: &[&Process], k: &Kit) -> El {
                     .shrink()
                     .min_w(0.0),
             )
-            .child(text(p.runtime.label()).font(k.ty.text_xsmall).color(c.text_faint))
+            .child(
+                text(p.runtime.label())
+                    .font(k.ty.text_xsmall)
+                    .color(c.text_faint),
+            )
             .child(el().grow(1.0))
-            .child(text(fmt_cpu(p.cpu_pct)).w(64.0).align(rune::Align::End).font(figures).color(c.text_base))
-            .child(text(fmt_mem(p.rss_kib)).w(72.0).align(rune::Align::End).font(figures).color(c.text_base))
-            .child(text(pid.to_string()).w(56.0).align(rune::Align::End).font(figures).color(c.text_muted));
+            .child(
+                text(fmt_cpu(p.cpu_pct))
+                    .w(64.0)
+                    .align(rune::Align::End)
+                    .font(figures)
+                    .color(c.text_base),
+            )
+            .child(
+                text(fmt_mem(p.rss_kib))
+                    .w(72.0)
+                    .align(rune::Align::End)
+                    .font(figures)
+                    .color(c.text_base),
+            )
+            .child(
+                text(pid.to_string())
+                    .w(56.0)
+                    .align(rune::Align::End)
+                    .font(figures)
+                    .color(c.text_muted),
+            );
         list = list.child(k.interactive(r));
     }
     if kids.len() > CHILDREN {
@@ -340,7 +394,11 @@ fn command_line(s: &App, p: &Process, k: &Kit) -> El {
             .font(k.ty.small)
             .color(c.text_muted);
     }
-    let shown = if s.cmd_all { all.len() } else { all.len().min(CMD_LINES) };
+    let shown = if s.cmd_all {
+        all.len()
+    } else {
+        all.len().min(CMD_LINES)
+    };
     let lines: Vec<El> = all
         .iter()
         .take(shown)

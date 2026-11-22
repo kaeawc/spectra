@@ -475,11 +475,26 @@ fn the_row_stays_off_until_the_re_read_after_a_change_lands() {
     ));
     assert!(rt.state.startup.busy(), "the old rows are still on screen");
     assert!(!rt.state.startup.sending());
-    rt.update(|s, _| s.ask_startup(TOOLBOX_LABEL, TOOLBOX_PLIST, crate::startup::Action::Disable));
-    assert!(rt.state.startup.confirm.is_none(), "nothing opens meanwhile");
+    rt.update(|s, _| {
+        s.ask_startup(
+            TOOLBOX_LABEL,
+            TOOLBOX_PLIST,
+            crate::startup::Action::Disable,
+        )
+    });
+    assert!(
+        rt.state.startup.confirm.is_none(),
+        "nothing opens meanwhile"
+    );
     press(&mut rt, &format!("{BREW}-act"));
-    assert!(rt.state.startup.confirm.is_none(), "an off button opens nothing");
-    assert!(!has(&mut rt, "su-outcome-dismiss"), "nor can the outcome go");
+    assert!(
+        rt.state.startup.confirm.is_none(),
+        "an off button opens nothing"
+    );
+    assert!(
+        !has(&mut rt, "su-outcome-dismiss"),
+        "nor can the outcome go"
+    );
     drop(held);
     for _ in 0..200 {
         rt.update(|s, _| {
@@ -537,7 +552,11 @@ fn quit_shortcut_does_not_reach_a_hidden_process_row_on_the_startup_page() {
     let id = "p:1300";
     press(&mut rt, id);
     assert_eq!(rt.state.table.cursor(), Some(id));
-    assert_eq!(rt.state.shortcut_target(), Some(1300), "on the list it has one");
+    assert_eq!(
+        rt.state.shortcut_target(),
+        Some(1300),
+        "on the list it has one"
+    );
     rt.update(|s, _| s.show(Nav::Startup));
     assert_eq!(rt.state.shortcut_target(), None);
 }

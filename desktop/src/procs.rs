@@ -285,15 +285,18 @@ impl Process {
     }
 
     pub fn sign_status(&self) -> SignStatus {
-        self.signing.as_ref().map_or(SignStatus::Unknown, |s| s.status)
+        self.signing
+            .as_ref()
+            .map_or(SignStatus::Unknown, |s| s.status)
     }
 
     /// Whether its signature was checked: Spectra's `validated` when it sends one, else what
     /// the evidence says, else not.
     pub fn validated(&self) -> bool {
-        self.signing
-            .as_ref()
-            .is_some_and(|s| s.validated.unwrap_or_else(|| evidence_validated(&self.evidence)))
+        self.signing.as_ref().is_some_and(|s| {
+            s.validated
+                .unwrap_or_else(|| evidence_validated(&self.evidence))
+        })
     }
 
     /// Settles what can be worked out once per reading, so the list doesn't redo it per row.
@@ -317,7 +320,10 @@ impl Process {
 
     /// The `signing:` line of its evidence, if Spectra gave one.
     pub fn signing_evidence(&self) -> Option<&str> {
-        self.evidence.iter().find(|l| l.starts_with("signing:")).map(String::as_str)
+        self.evidence
+            .iter()
+            .find(|l| l.starts_with("signing:"))
+            .map(String::as_str)
     }
 
     /// Seconds it had been running at `now` (Unix seconds), from `started_at`, else from the
@@ -329,7 +335,10 @@ impl Process {
     }
 
     pub fn bundle_path(&self) -> Option<&str> {
-        self.app.as_ref().map(|a| a.bundle_path.as_str()).filter(|p| !p.is_empty())
+        self.app
+            .as_ref()
+            .map(|a| a.bundle_path.as_str())
+            .filter(|p| !p.is_empty())
     }
 
     /// When it started, as `2026-11-19 19:28` in the time zone Spectra reported.
@@ -338,7 +347,11 @@ impl Process {
     }
 
     pub fn sample(&self) -> ProcSample {
-        ProcSample { cpu: self.cpu_pct, rss_kib: self.rss_kib, threads: self.thread_count }
+        ProcSample {
+            cpu: self.cpu_pct,
+            rss_kib: self.rss_kib,
+            threads: self.thread_count,
+        }
     }
 }
 
@@ -353,7 +366,13 @@ pub fn fmt_start(s: &str) -> String {
 /// `2026-11-19T19:28:38-05:00` (or `Z`) as Unix seconds.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let b = s.as_bytes();
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') || b[13] != b':' || b[16] != b':' {
+    if b.len() < 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || !matches!(b[10], b'T' | b't' | b' ')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
         return None;
     }
     let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
@@ -414,17 +433,25 @@ pub fn parse(json: &str) -> ProcFeed {
     if let Ok(procs) = serde_json::from_str::<Vec<Process>>(json) {
         // No entry has a role (an escaped quote inside a command can't spell `"role"`).
         if !procs.is_empty() && !json.contains("\"role\"") {
-            return Err(ProcError::TooOld("Spectra listed processes without classifying them.".into()));
+            return Err(ProcError::TooOld(
+                "Spectra listed processes without classifying them.".into(),
+            ));
         }
         return settled(procs);
     }
-    let raw: Vec<serde_json::Value> =
-        serde_json::from_str(json).map_err(|e| ProcError::Failed(format!("Couldn't read Spectra's output: {e}")))?;
+    let raw: Vec<serde_json::Value> = serde_json::from_str(json)
+        .map_err(|e| ProcError::Failed(format!("Couldn't read Spectra's output: {e}")))?;
     // Without --classify every entry lacks a role; a Spectra that ignored the flag is too old.
     if !raw.is_empty() && raw.iter().all(|v| v.get("role").is_none()) {
-        return Err(ProcError::TooOld("Spectra listed processes without classifying them.".into()));
+        return Err(ProcError::TooOld(
+            "Spectra listed processes without classifying them.".into(),
+        ));
     }
-    settled(raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
+    settled(
+        raw.into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect(),
+    )
 }
 
 /// The list sorted by pid with what's worked out once per reading settled; an empty one failed.
@@ -444,7 +471,9 @@ fn settled(mut procs: Vec<Process>) -> ProcFeed {
 pub fn classify_failure(bin: &str, stderr: &str) -> ProcError {
     let stderr = stderr.trim();
     if stderr.contains("not defined: -classify") || stderr.contains("unknown command") {
-        ProcError::TooOld(format!("{bin} can't classify processes (it has no --classify)."))
+        ProcError::TooOld(format!(
+            "{bin} can't classify processes (it has no --classify)."
+        ))
     } else {
         let first = stderr.lines().next().unwrap_or("no output");
         ProcError::Failed(format!("{bin} process failed: {first}"))
@@ -459,9 +488,16 @@ pub const MAX_OUTPUT: usize = 64 << 20;
 /// What a run that didn't finish means, for `bin`.
 pub fn run_failure(bin: &str, e: RunError) -> String {
     match e {
-        RunError::Spawn(e) => format!("Couldn't run {bin}: {e}. Install Spectra or set SPECTRA_BIN."),
-        RunError::Timeout(d) => format!("{bin} took longer than {} s and was stopped", d.as_secs_f64().round()),
-        RunError::TooLarge(cap) => format!("{bin} printed more than {} MB and was stopped", cap >> 20),
+        RunError::Spawn(e) => {
+            format!("Couldn't run {bin}: {e}. Install Spectra or set SPECTRA_BIN.")
+        }
+        RunError::Timeout(d) => format!(
+            "{bin} took longer than {} s and was stopped",
+            d.as_secs_f64().round()
+        ),
+        RunError::TooLarge(cap) => {
+            format!("{bin} printed more than {} MB and was stopped", cap >> 20)
+        }
         RunError::Io(e) => format!("Couldn't read {bin}'s output: {e}"),
     }
 }
@@ -476,7 +512,8 @@ pub fn fetch() -> ProcFeed {
 pub fn fetch_from(bin: &str, deadline: Duration) -> ProcFeed {
     let mut cmd = Command::new(bin);
     cmd.args(["process", "-json", "--classify"]);
-    let out = run::run(cmd, deadline, MAX_OUTPUT).map_err(|e| ProcError::Failed(run_failure(bin, e)))?;
+    let out =
+        run::run(cmd, deadline, MAX_OUTPUT).map_err(|e| ProcError::Failed(run_failure(bin, e)))?;
     if !out.status.success() {
         return Err(classify_failure(bin, &String::from_utf8_lossy(&out.stderr)));
     }
@@ -540,7 +577,10 @@ mod tests {
         let p = parse(REAL).unwrap();
         assert_eq!(p.len(), 2);
         let q = &p[0];
-        assert_eq!((q.pid, q.role, q.runtime), (1836, Role::Cli, Runtime::Native));
+        assert_eq!(
+            (q.pid, q.role, q.runtime),
+            (1836, Role::Cli, Runtime::Native)
+        );
         assert_eq!(q.sign_status(), SignStatus::DeveloperId);
         assert!(q.signing.as_ref().unwrap().hardened_runtime);
         assert_eq!(q.rss_kib, 8_622_592.0);
@@ -586,11 +626,15 @@ mod tests {
     #[test]
     #[ignore]
     fn parse_cost() {
-        let Ok(path) = std::env::var("PERF_PROCS_JSON") else { return };
+        let Ok(path) = std::env::var("PERF_PROCS_JSON") else {
+            return;
+        };
         let json = std::fs::read_to_string(path).unwrap();
         let slow = |j: &str| -> usize {
             let raw: Vec<serde_json::Value> = serde_json::from_str(j).unwrap();
-            raw.into_iter().filter_map(|v| serde_json::from_value::<Process>(v).ok()).count()
+            raw.into_iter()
+                .filter_map(|v| serde_json::from_value::<Process>(v).ok())
+                .count()
         };
         let t = std::time::Instant::now();
         for _ in 0..10 {
@@ -601,21 +645,40 @@ mod tests {
         for _ in 0..10 {
             assert!(!parse(&json).unwrap().is_empty());
         }
-        println!("parse of {} bytes: entry by entry {before:?}, quick {:?}", json.len(), t.elapsed() / 10);
+        println!(
+            "parse of {} bytes: entry by entry {before:?}, quick {:?}",
+            json.len(),
+            t.elapsed() / 10
+        );
     }
 
     #[test]
     fn spots_a_spectra_too_old_to_classify() {
-        let err = classify_failure("spectra", "flag provided but not defined: -classify\nUsage of spectra process:");
+        let err = classify_failure(
+            "spectra",
+            "flag provided but not defined: -classify\nUsage of spectra process:",
+        );
         assert!(matches!(err, ProcError::TooOld(_)));
-        assert!(matches!(classify_failure("spectra", "permission denied"), ProcError::Failed(_)));
-        assert!(matches!(parse(r#"[{"pid":1,"command":"launchd"}]"#), Err(ProcError::TooOld(_))));
+        assert!(matches!(
+            classify_failure("spectra", "permission denied"),
+            ProcError::Failed(_)
+        ));
+        assert!(matches!(
+            parse(r#"[{"pid":1,"command":"launchd"}]"#),
+            Err(ProcError::TooOld(_))
+        ));
     }
 
     #[test]
     fn an_empty_list_is_a_failed_reading() {
         assert!(matches!(parse("[]"), Err(ProcError::Failed(_))));
-        assert!(matches!(parse(r#"[{"pid":"x","role":"cli"}]"#), Err(ProcError::Failed(_))), "nothing parsed");
+        assert!(
+            matches!(
+                parse(r#"[{"pid":"x","role":"cli"}]"#),
+                Err(ProcError::Failed(_))
+            ),
+            "nothing parsed"
+        );
     }
 
     /// The real feed's `signing:` lines, team ids changed.
@@ -651,21 +714,42 @@ mod tests {
         let mut all = trust.clone();
         all.extend([Trust::Adhoc, Trust::Invalid, Trust::Unknown]);
         all.sort();
-        assert_eq!(&all[..4], [Trust::Invalid, Trust::Adhoc, Trust::Unknown, Trust::Unverified(SignStatus::DeveloperId)]);
+        assert_eq!(
+            &all[..4],
+            [
+                Trust::Invalid,
+                Trust::Adhoc,
+                Trust::Unknown,
+                Trust::Unverified(SignStatus::DeveloperId)
+            ]
+        );
         assert_eq!(all.last(), Some(&Trust::Verified(SignStatus::Apple)));
     }
 
     #[test]
     fn reads_start_times_and_ages() {
         assert_eq!(parse_rfc3339("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_rfc3339("2026-11-19T19:28:38-05:00"), Some(1_795_134_518));
-        assert_eq!(parse_rfc3339("2026-11-20T00:28:38.123+00:00"), Some(1_795_134_518));
+        assert_eq!(
+            parse_rfc3339("2026-11-19T19:28:38-05:00"),
+            Some(1_795_134_518)
+        );
+        assert_eq!(
+            parse_rfc3339("2026-11-20T00:28:38.123+00:00"),
+            Some(1_795_134_518)
+        );
         assert_eq!(parse_rfc3339("yesterday"), None);
-        let mut p = Process { started_at: "2026-11-19T19:28:38-05:00".into(), ..Process::default() };
+        let mut p = Process {
+            started_at: "2026-11-19T19:28:38-05:00".into(),
+            ..Process::default()
+        };
         assert_eq!(p.age_secs(1_795_134_518 + 90), Some(90));
         p.started_at.clear();
         p.elapsed = Some(201_000_000_000);
-        assert_eq!(p.age_secs(0), Some(201), "the reading's elapsed when there's no start time");
+        assert_eq!(
+            p.age_secs(0),
+            Some(201),
+            "the reading's elapsed when there's no start time"
+        );
         p.elapsed = None;
         assert_eq!(p.age_secs(0), None);
     }
@@ -674,14 +758,22 @@ mod tests {
     fn a_hung_spectra_is_stopped_and_reported() {
         let bin = crate::run::tests::script("hung-process", "exec sleep 60");
         let err = fetch_from(bin.to_str().unwrap(), Duration::from_millis(200)).unwrap_err();
-        let ProcError::Failed(why) = err else { panic!("{err:?}") };
-        assert!(why.contains("took longer than") && why.contains("was stopped"), "{why}");
+        let ProcError::Failed(why) = err else {
+            panic!("{err:?}")
+        };
+        assert!(
+            why.contains("took longer than") && why.contains("was stopped"),
+            "{why}"
+        );
     }
 
     #[test]
     fn a_spectra_that_lists_nothing_has_failed() {
         let bin = crate::run::tests::script("empty-process", "echo '[]'");
-        assert!(matches!(fetch_from(bin.to_str().unwrap(), DEADLINE), Err(ProcError::Failed(_))));
+        assert!(matches!(
+            fetch_from(bin.to_str().unwrap(), DEADLINE),
+            Err(ProcError::Failed(_))
+        ));
     }
 
     #[test]
@@ -689,7 +781,11 @@ mod tests {
         assert_eq!(fmt_mem(736.0), "0.7 MB");
         assert_eq!(fmt_mem(272_464.0), "266 MB");
         assert_eq!(fmt_mem(8_622_592.0), "8.2 GB");
-        assert_eq!(fmt_mem(1023.96 * 1024.0), "1.0 GB", "rounds up into GB, never 1024 MB");
+        assert_eq!(
+            fmt_mem(1023.96 * 1024.0),
+            "1.0 GB",
+            "rounds up into GB, never 1024 MB"
+        );
         assert_eq!(fmt_mem(1023.4 * 1024.0), "1023 MB");
         assert_eq!(fmt_mem(9.97 * 1024.0), "10 MB");
         assert_eq!(fmt_cpu(211.64), "211.6%");
@@ -700,7 +796,12 @@ mod tests {
 
     #[test]
     fn worst_signing_sorts_first() {
-        let mut s = [SignStatus::Apple, SignStatus::Adhoc, SignStatus::Invalid, SignStatus::DeveloperId];
+        let mut s = [
+            SignStatus::Apple,
+            SignStatus::Adhoc,
+            SignStatus::Invalid,
+            SignStatus::DeveloperId,
+        ];
         s.sort();
         assert_eq!(s[0], SignStatus::Invalid);
         assert_eq!(s[3], SignStatus::Apple);
@@ -713,21 +814,63 @@ mod tests {
         let procs = fetch().unwrap();
         let count = |f: &dyn Fn(&Process) -> bool| procs.iter().filter(|p| f(p)).count();
         println!("{} processes", procs.len());
-        for r in [Role::App, Role::AppHelper, Role::AiAgent, Role::Terminal, Role::Shell, Role::Cli, Role::System, Role::Other] {
+        for r in [
+            Role::App,
+            Role::AppHelper,
+            Role::AiAgent,
+            Role::Terminal,
+            Role::Shell,
+            Role::Cli,
+            Role::System,
+            Role::Other,
+        ] {
             println!("  role {:<11} {}", r.label(), count(&|p| p.role == r));
         }
         for rt in Runtime::ALL {
-            println!("  runtime {:<12} {}", rt.label(), count(&|p| p.runtime == rt));
+            println!(
+                "  runtime {:<12} {}",
+                rt.label(),
+                count(&|p| p.runtime == rt)
+            );
         }
-        for st in [SignStatus::Apple, SignStatus::DeveloperId, SignStatus::Adhoc, SignStatus::Unsigned, SignStatus::Invalid, SignStatus::Unknown] {
-            println!("  signing {:<12} {}", st.label(), count(&|p| p.sign_status() == st));
+        for st in [
+            SignStatus::Apple,
+            SignStatus::DeveloperId,
+            SignStatus::Adhoc,
+            SignStatus::Unsigned,
+            SignStatus::Invalid,
+            SignStatus::Unknown,
+        ] {
+            println!(
+                "  signing {:<12} {}",
+                st.label(),
+                count(&|p| p.sign_status() == st)
+            );
         }
         let validated = procs.iter().filter(|p| p.validated()).count();
-        println!("  {validated} signatures verified, {} not", procs.iter().filter(|p| p.signing.is_some()).count() - validated);
-        let groups = crate::groups::group(&procs.iter().collect::<Vec<_>>(), crate::groups::Sort::default());
-        println!("{} groups, {} of them apps", groups.len(), groups.iter().filter(|g| g.kind == crate::groups::GroupKind::App).count());
+        println!(
+            "  {validated} signatures verified, {} not",
+            procs.iter().filter(|p| p.signing.is_some()).count() - validated
+        );
+        let groups = crate::groups::group(
+            &procs.iter().collect::<Vec<_>>(),
+            crate::groups::Sort::default(),
+        );
+        println!(
+            "{} groups, {} of them apps",
+            groups.len(),
+            groups
+                .iter()
+                .filter(|g| g.kind == crate::groups::GroupKind::App)
+                .count()
+        );
         for g in groups.iter().filter(|g| g.hint.is_some()).take(8) {
-            println!("  same name, told apart: {} [{}] ({} processes)", g.name, g.hint.as_deref().unwrap_or(""), g.pids.len());
+            println!(
+                "  same name, told apart: {} [{}] ({} processes)",
+                g.name,
+                g.hint.as_deref().unwrap_or(""),
+                g.pids.len()
+            );
         }
         assert!(!procs.is_empty());
     }

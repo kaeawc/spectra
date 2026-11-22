@@ -45,7 +45,10 @@ pub struct Jvm {
 impl Jvm {
     /// A short name: the class or jar without its package or folder.
     pub fn name(&self) -> String {
-        let last = self.main_class.rsplit(['/', '.']).find(|p| !p.is_empty() && *p != "jar");
+        let last = self
+            .main_class
+            .rsplit(['/', '.'])
+            .find(|p| !p.is_empty() && *p != "jar");
         match last {
             Some(n) if self.main_class.ends_with(".jar") => format!("{n}.jar"),
             Some(n) => n.to_owned(),
@@ -54,13 +57,18 @@ impl Jvm {
     }
 
     pub fn heap_used_kib(&self) -> f64 {
-        self.gc.as_ref().map_or(0.0, |g| g.eu + g.ou + g.s0u + g.s1u)
+        self.gc
+            .as_ref()
+            .map_or(0.0, |g| g.eu + g.ou + g.s0u + g.s1u)
     }
 
     /// `-Xmx` when set, else what the heap has committed so far.
     pub fn heap_max_kib(&self) -> f64 {
-        flag_size_kib(&self.vm_args, "-Xmx")
-            .unwrap_or_else(|| self.gc.as_ref().map_or(0.0, |g| g.ec + g.oc + g.s0c + g.s1c))
+        flag_size_kib(&self.vm_args, "-Xmx").unwrap_or_else(|| {
+            self.gc
+                .as_ref()
+                .map_or(0.0, |g| g.ec + g.oc + g.s0c + g.s1c)
+        })
     }
 
     pub fn sample(&self) -> Sample {
@@ -93,7 +101,10 @@ pub struct Sample {
 
 /// The size after `prefix` in JVM arguments (`-Xmx5g`, `-XX:MaxMetaspaceSize=256m`), in KiB.
 pub fn flag_size_kib(vm_args: &str, prefix: &str) -> Option<f64> {
-    let raw = vm_args.split_whitespace().rev().find_map(|a| a.strip_prefix(prefix))?;
+    let raw = vm_args
+        .split_whitespace()
+        .rev()
+        .find_map(|a| a.strip_prefix(prefix))?;
     let raw = raw.trim_start_matches('=');
     let digits = raw.trim_end_matches(|c: char| c.is_ascii_alphabetic());
     let n: f64 = digits.parse().ok()?;
@@ -108,7 +119,8 @@ pub fn flag_size_kib(vm_args: &str, prefix: &str) -> Option<f64> {
 }
 
 pub fn parse(json: &str) -> Result<Vec<Jvm>, String> {
-    let mut jvms: Vec<Jvm> = serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
+    let mut jvms: Vec<Jvm> =
+        serde_json::from_str(json).map_err(|e| format!("Couldn't read Spectra's output: {e}"))?;
     // The JDK tools Spectra runs to look are JVMs too; they're gone by the next reading.
     jvms.retain(|j| !j.main_class.starts_with("jdk.jcmd/"));
     jvms.sort_by_key(|j| j.pid);
@@ -123,9 +135,13 @@ pub fn fetch() -> Result<Vec<Jvm>, String> {
     let bin = std::env::var("SPECTRA_BIN").unwrap_or_else(|_| "spectra".into());
     let mut cmd = Command::new(&bin);
     cmd.args(["jvm", "-json"]);
-    let out = crate::run::run(cmd, JVM_DEADLINE, crate::procs::MAX_OUTPUT).map_err(|e| crate::procs::run_failure(&bin, e))?;
+    let out = crate::run::run(cmd, JVM_DEADLINE, crate::procs::MAX_OUTPUT)
+        .map_err(|e| crate::procs::run_failure(&bin, e))?;
     if !out.status.success() {
-        return Err(format!("{bin} jvm failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "{bin} jvm failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     parse(&String::from_utf8_lossy(&out.stdout))
 }
@@ -145,9 +161,18 @@ mod tests {
 
     #[test]
     fn reads_flag_sizes() {
-        assert_eq!(flag_size_kib("-Xms512m -Xmx5g", "-Xmx"), Some(5.0 * 1024.0 * 1024.0));
-        assert_eq!(flag_size_kib("-XX:MaxMetaspaceSize=256m", "-XX:MaxMetaspaceSize"), Some(256.0 * 1024.0));
-        assert_eq!(flag_size_kib("-Xmx1g -Xmx2g", "-Xmx"), Some(2.0 * 1024.0 * 1024.0));
+        assert_eq!(
+            flag_size_kib("-Xms512m -Xmx5g", "-Xmx"),
+            Some(5.0 * 1024.0 * 1024.0)
+        );
+        assert_eq!(
+            flag_size_kib("-XX:MaxMetaspaceSize=256m", "-XX:MaxMetaspaceSize"),
+            Some(256.0 * 1024.0)
+        );
+        assert_eq!(
+            flag_size_kib("-Xmx1g -Xmx2g", "-Xmx"),
+            Some(2.0 * 1024.0 * 1024.0)
+        );
         assert_eq!(flag_size_kib("-Dfoo=bar", "-Xmx"), None);
     }
 
@@ -159,9 +184,19 @@ mod tests {
 
     #[test]
     fn names_classes_and_jars() {
-        let j = |m: &str| Jvm { pid: 7, main_class: m.into(), ..Jvm::default() };
-        assert_eq!(j("org.gradle.launcher.daemon.bootstrap.GradleDaemon").name(), "GradleDaemon");
-        assert_eq!(j("/opt/app/gradle-wrapper.jar").name(), "gradle-wrapper.jar");
+        let j = |m: &str| Jvm {
+            pid: 7,
+            main_class: m.into(),
+            ..Jvm::default()
+        };
+        assert_eq!(
+            j("org.gradle.launcher.daemon.bootstrap.GradleDaemon").name(),
+            "GradleDaemon"
+        );
+        assert_eq!(
+            j("/opt/app/gradle-wrapper.jar").name(),
+            "gradle-wrapper.jar"
+        );
         assert_eq!(j("").name(), "pid 7");
     }
 
@@ -181,7 +216,13 @@ mod tests {
     fn fetches_the_live_feed() {
         let jvms = fetch().unwrap();
         for j in &jvms {
-            println!("{} {} heap {} of {}", j.pid, j.name(), fmt_kib(j.heap_used_kib()), fmt_kib(j.heap_max_kib()));
+            println!(
+                "{} {} heap {} of {}",
+                j.pid,
+                j.name(),
+                fmt_kib(j.heap_used_kib()),
+                fmt_kib(j.heap_max_kib())
+            );
         }
     }
 }

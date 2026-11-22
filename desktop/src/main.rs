@@ -13,30 +13,30 @@ mod inspect;
 mod jvm_tools;
 mod live;
 mod logs;
+mod network;
 mod proc_findings;
 mod procs;
 mod run;
 mod sample;
-mod sample_jvm;
-mod sample_system;
 mod sample_activity;
+mod sample_jvm;
 mod sample_logs;
-mod network;
 mod sample_network;
+mod sample_startup;
+mod sample_storage;
+mod sample_system;
+mod sample_tree;
+mod sample_whatswrong;
 mod signal;
 mod spawns;
-mod sample_tree;
 mod startup;
-mod sample_startup;
 mod storage;
-mod sample_storage;
 mod system;
 mod system_findings;
 mod tools;
 mod tree;
 mod ui;
 mod whatswrong;
-mod sample_whatswrong;
 
 use std::time::Duration;
 
@@ -81,7 +81,11 @@ fn setup(s: &mut App, wake: rune::Waker) {
         // one taken now after a Quit or Kill.
         std::thread::spawn(move || {
             while let Ok(fresh) = poke.recv() {
-                let feed = if fresh { daemon::fresh(procs::fetch) } else { procs::fetch() };
+                let feed = if fresh {
+                    daemon::fresh(procs::fetch)
+                } else {
+                    procs::fetch()
+                };
                 if tx.send(feed).is_err() {
                     return;
                 }
@@ -172,7 +176,9 @@ fn land_machine(s: &mut App) -> bool {
     let findings = finding_keys(&s.findings);
     let shown = shown_reading(s);
     s.land_system()
-        && (s.nav == groups::Nav::System || shown_reading(s) != shown || finding_keys(&s.findings) != findings)
+        && (s.nav == groups::Nav::System
+            || shown_reading(s) != shown
+            || finding_keys(&s.findings) != findings)
 }
 
 /// The machine reading the page on screen draws from: when it last landed and what failed since.
@@ -186,7 +192,10 @@ fn shown_reading(s: &App) -> Option<(Option<f64>, Option<system::Fail>)> {
 
 /// What a finding shows, to tell whether a reading changed any.
 fn finding_keys(findings: &[findings::Finding]) -> Vec<(&'static str, u32, String, String)> {
-    findings.iter().map(|f| (f.rule, f.pid, f.title.clone(), f.detail.clone())).collect()
+    findings
+        .iter()
+        .map(|f| (f.rule, f.pid, f.title.clone(), f.detail.clone()))
+        .collect()
 }
 
 /// The window going off screen rests every feed and the machine readings; coming back reads
@@ -245,7 +254,10 @@ fn main() {
             ("logs-timeout", sample_logs::logs_timeout_scene),
             ("jvm-tools", sample_jvm::jvm_tools_scene),
             ("tool-threads", sample_jvm::tool_threads_scene),
-            ("tool-threads-deadlock", sample_jvm::tool_threads_deadlock_scene),
+            (
+                "tool-threads-deadlock",
+                sample_jvm::tool_threads_deadlock_scene,
+            ),
             ("tool-histogram", sample_jvm::tool_histogram_scene),
             ("tool-gc", sample_jvm::tool_gc_scene),
             ("tool-nmt", sample_jvm::tool_nmt_scene),
@@ -260,10 +272,16 @@ fn main() {
             ("system-linux", sample_system::system_linux_scene),
             ("activity", sample_activity::activity_scene),
             ("activity-storm", sample_activity::activity_storm_scene),
-            ("activity-unsupported", sample_activity::activity_unsupported_scene),
+            (
+                "activity-unsupported",
+                sample_activity::activity_unsupported_scene,
+            ),
             ("network", sample_network::network_scene),
             ("network-measuring", sample_network::network_measuring_scene),
-            ("network-unsupported", sample_network::network_unsupported_scene),
+            (
+                "network-unsupported",
+                sample_network::network_unsupported_scene,
+            ),
             ("startup", sample_startup::startup_scene),
             ("startup-confirm", sample_startup::startup_confirm_scene),
             ("startup-failed", sample_startup::startup_failed_scene),
@@ -281,7 +299,11 @@ fn main() {
         on_key: Some(ui::on_key),
         ..AppSpec::new("Spectra", (1100.0, 700.0), app::init, ui::view)
     };
-    rune::App::new(spec).chrome(chrome).on_quit(on_quit).on_visibility(on_visibility).run();
+    rune::App::new(spec)
+        .chrome(chrome)
+        .on_quit(on_quit)
+        .on_visibility(on_visibility)
+        .run();
 }
 
 #[cfg(test)]
@@ -300,12 +322,36 @@ mod tests {
             tx.send(r).unwrap();
             land_machine(s)
         };
-        assert!(lands(&mut s, Nav::Network, Reading::Network(Ok(Network::default()))));
-        assert!(lands(&mut s, Nav::Storage, Reading::Storage(Ok(Vec::new()))));
-        assert!(lands(&mut s, Nav::System, Reading::Network(Ok(Network::default()))));
+        assert!(lands(
+            &mut s,
+            Nav::Network,
+            Reading::Network(Ok(Network::default()))
+        ));
+        assert!(lands(
+            &mut s,
+            Nav::Storage,
+            Reading::Storage(Ok(Vec::new()))
+        ));
+        assert!(lands(
+            &mut s,
+            Nav::System,
+            Reading::Network(Ok(Network::default()))
+        ));
         // A page that doesn't show it, with no finding changed: nothing to redraw.
-        assert!(!lands(&mut s, Nav::All, Reading::Network(Ok(Network::default()))));
-        assert!(!lands(&mut s, Nav::Network, Reading::Storage(Ok(Vec::new()))));
-        assert!(!lands(&mut s, Nav::Storage, Reading::Network(Ok(Network::default()))));
+        assert!(!lands(
+            &mut s,
+            Nav::All,
+            Reading::Network(Ok(Network::default()))
+        ));
+        assert!(!lands(
+            &mut s,
+            Nav::Network,
+            Reading::Storage(Ok(Vec::new()))
+        ));
+        assert!(!lands(
+            &mut s,
+            Nav::Storage,
+            Reading::Network(Ok(Network::default()))
+        ));
     }
 }

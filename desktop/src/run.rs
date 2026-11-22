@@ -40,7 +40,9 @@ pub struct Pending {
 
 /// Holds quit until the returned [`Pending`] is dropped.
 pub fn pending() -> Pending {
-    Pending { _running: Running::new() }
+    Pending {
+        _running: Running::new(),
+    }
 }
 
 /// Waits until every run, and every [`Pending`] job, has finished (a cancelled one finishes within a check or two), or
@@ -102,14 +104,25 @@ pub enum Ended {
 }
 
 /// The daemon's answer as the CLI's output: what it would have printed, exit status 0.
-fn daemon_output(answer: Result<String, crate::daemon::Error>, deadline: Duration, cap: usize) -> Result<Output, Ended> {
+fn daemon_output(
+    answer: Result<String, crate::daemon::Error>,
+    deadline: Duration,
+    cap: usize,
+) -> Result<Output, Ended> {
     use std::os::unix::process::ExitStatusExt;
     match answer {
         Ok(s) if s.len() > cap => Err(Ended::Failed(RunError::TooLarge(cap))),
-        Ok(s) => Ok(Output { status: ExitStatus::from_raw(0), stdout: s.into_bytes(), stderr: Vec::new() }),
+        Ok(s) => Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: s.into_bytes(),
+            stderr: Vec::new(),
+        }),
         Err(crate::daemon::Error::Cancelled) => Err(Ended::Cancelled),
         Err(crate::daemon::Error::Timeout) => Err(Ended::Failed(RunError::Timeout(deadline))),
-        Err(e) => Err(Ended::Failed(RunError::Io(format!("Spectra's daemon: {}", e.why())))),
+        Err(e) => Err(Ended::Failed(RunError::Io(format!(
+            "Spectra's daemon: {}",
+            e.why()
+        )))),
     }
 }
 
@@ -160,7 +173,12 @@ pub fn run(cmd: Command, deadline: Duration, cap: usize) -> Result<Output, RunEr
 
 /// [`run`], also killing it once `cancel` is set. The command runs in a process group of its
 /// own, and stopping it stops that group: its children go too, and nothing else.
-pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &AtomicBool) -> Result<Output, Ended> {
+pub fn run_until(
+    mut cmd: Command,
+    deadline: Duration,
+    cap: usize,
+    cancel: &AtomicBool,
+) -> Result<Output, Ended> {
     let _running = Running::new();
     let start = Instant::now();
     // A call Spectra's daemon answers starts no process.
@@ -203,16 +221,27 @@ pub fn run_until(mut cmd: Command, deadline: Duration, cap: usize, cancel: &Atom
                 // Exited: the pipes close unless a grandchild still holds them, so wait for
                 // the readers only as long as the deadline allows.
                 let left = deadline.saturating_sub(start.elapsed());
-                let take =|rx: &Receiver<Result<Vec<u8>, RunError>>, slot: Option<Vec<u8>>| match slot {
-                    Some(b) => Ok(b),
-                    None => rx.recv_timeout(left).map_err(|_| RunError::Timeout(deadline))?,
-                };
+                let take =
+                    |rx: &Receiver<Result<Vec<u8>, RunError>>, slot: Option<Vec<u8>>| match slot {
+                        Some(b) => Ok(b),
+                        None => rx
+                            .recv_timeout(left)
+                            .map_err(|_| RunError::Timeout(deadline))?,
+                    };
                 let stdout = take(&out, stdout).map_err(Ended::Failed)?;
                 let stderr = take(&err, stderr).map_err(Ended::Failed)?;
-                return Ok(Output { status, stdout, stderr });
+                return Ok(Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
             }
-            Ok(None) if cancel.load(Ordering::Relaxed) => return stop(&mut child, Ended::Cancelled),
-            Ok(None) if start.elapsed() >= deadline => return stop(&mut child, Ended::Failed(RunError::Timeout(deadline))),
+            Ok(None) if cancel.load(Ordering::Relaxed) => {
+                return stop(&mut child, Ended::Cancelled);
+            }
+            Ok(None) if start.elapsed() >= deadline => {
+                return stop(&mut child, Ended::Failed(RunError::Timeout(deadline)));
+            }
             Ok(None) => {
                 std::thread::sleep(check);
                 check = (check * 2).min(CHECK_MAX);
@@ -234,11 +263,22 @@ pub(crate) mod tests {
         let d = Duration::from_secs(1);
         let out = daemon_output(Ok("[1]".into()), d, 64).unwrap();
         assert!(out.status.success() && out.stdout == b"[1]");
-        assert_eq!(daemon_output(Ok("x".repeat(65)), d, 64).unwrap_err(), Ended::Failed(RunError::TooLarge(64)));
-        assert_eq!(daemon_output(Err(Error::Cancelled), d, 64).unwrap_err(), Ended::Cancelled);
-        assert_eq!(daemon_output(Err(Error::Timeout), d, 64).unwrap_err(), Ended::Failed(RunError::Timeout(d)));
+        assert_eq!(
+            daemon_output(Ok("x".repeat(65)), d, 64).unwrap_err(),
+            Ended::Failed(RunError::TooLarge(64))
+        );
+        assert_eq!(
+            daemon_output(Err(Error::Cancelled), d, 64).unwrap_err(),
+            Ended::Cancelled
+        );
+        assert_eq!(
+            daemon_output(Err(Error::Timeout), d, 64).unwrap_err(),
+            Ended::Failed(RunError::Timeout(d))
+        );
         // A classification that failed says why on the feed's "last reading failed" line.
-        let Err(Ended::Failed(e)) = daemon_output(Err(Error::Warned("classify: timed out".into())), d, 64) else {
+        let Err(Ended::Failed(e)) =
+            daemon_output(Err(Error::Warned("classify: timed out".into())), d, 64)
+        else {
             panic!("a failure")
         };
         assert!(crate::procs::run_failure("spectra", e).contains("classify: timed out"));
@@ -246,7 +286,8 @@ pub(crate) mod tests {
 
     /// A shell script standing in for Spectra, in its own temp directory.
     pub fn script(name: &str, body: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("spectra-desktop-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("spectra-desktop-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("spectra");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -257,7 +298,10 @@ pub(crate) mod tests {
     #[test]
     fn quit_waits_for_a_pending_job_until_it_is_done() {
         let job = pending();
-        assert!(!wait_idle(Duration::from_millis(30)), "queued but not started still counts");
+        assert!(
+            !wait_idle(Duration::from_millis(30)),
+            "queued but not started still counts"
+        );
         let start = Instant::now();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
@@ -282,8 +326,14 @@ pub(crate) mod tests {
         let bin = script("hang", "exec sleep 60");
         let deadline = Duration::from_millis(200);
         let start = Instant::now();
-        assert_eq!(run(Command::new(&bin), deadline, 1024).unwrap_err(), RunError::Timeout(deadline));
-        assert!(start.elapsed() < Duration::from_secs(30), "it didn't wait for the sleep");
+        assert_eq!(
+            run(Command::new(&bin), deadline, 1024).unwrap_err(),
+            RunError::Timeout(deadline)
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "it didn't wait for the sleep"
+        );
     }
 
     #[test]
@@ -296,13 +346,22 @@ pub(crate) mod tests {
             flag.store(true, Ordering::Relaxed);
         });
         let start = Instant::now();
-        assert_eq!(run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(), Ended::Cancelled);
-        assert!(start.elapsed() < Duration::from_secs(20), "it didn't wait for the sleep");
+        assert_eq!(
+            run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(),
+            Ended::Cancelled
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "it didn't wait for the sleep"
+        );
     }
 
     /// Whether `pid` is alive and not a zombie. Only ever asked about pids this test started.
     fn alive(pid: u32) -> bool {
-        let out = Command::new("/bin/ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+        let out = Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
         let stat = String::from_utf8_lossy(&out.stdout);
         let stat = stat.trim();
         !stat.is_empty() && !stat.starts_with('Z')
@@ -318,7 +377,8 @@ pub(crate) mod tests {
 
     /// A shell that starts a `sleep` grandchild and prints its pid, then waits on it.
     fn grandparent(name: &str) -> (PathBuf, PathBuf) {
-        let pidfile = std::env::temp_dir().join(format!("spectra-desktop-{}-{name}.pid", std::process::id()));
+        let pidfile =
+            std::env::temp_dir().join(format!("spectra-desktop-{}-{name}.pid", std::process::id()));
         let _ = std::fs::remove_file(&pidfile);
         let body = format!("sleep 60 &\necho $! > {}\nwait", pidfile.display());
         (script(name, &body), pidfile)
@@ -327,10 +387,16 @@ pub(crate) mod tests {
     fn grandchild_pid(pidfile: &std::path::Path) -> u32 {
         let start = Instant::now();
         loop {
-            if let Some(pid) = std::fs::read_to_string(pidfile).ok().and_then(|t| t.trim().parse().ok()) {
+            if let Some(pid) = std::fs::read_to_string(pidfile)
+                .ok()
+                .and_then(|t| t.trim().parse().ok())
+            {
                 return pid;
             }
-            assert!(start.elapsed() < Duration::from_secs(5), "the shell never started its sleep");
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "the shell never started its sleep"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -347,22 +413,37 @@ pub(crate) mod tests {
             flag.store(true, Ordering::Relaxed);
             gc
         });
-        assert_eq!(run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(), Ended::Cancelled);
+        assert_eq!(
+            run_until(Command::new(&bin), Duration::from_secs(30), 1024, &cancel).unwrap_err(),
+            Ended::Cancelled
+        );
         let gc = waiter.join().unwrap();
-        assert!(wait_gone(gc), "the sleep started by the shell outlived the cancel");
+        assert!(
+            wait_gone(gc),
+            "the sleep started by the shell outlived the cancel"
+        );
     }
 
     #[test]
     fn a_deadline_kills_the_grandchildren_too() {
         let (bin, pidfile) = grandparent("group-deadline");
         let deadline = Duration::from_millis(400);
-        assert_eq!(run(Command::new(&bin), deadline, 1024).unwrap_err(), RunError::Timeout(deadline));
-        assert!(wait_gone(grandchild_pid(&pidfile)), "the sleep started by the shell outlived the deadline");
+        assert_eq!(
+            run(Command::new(&bin), deadline, 1024).unwrap_err(),
+            RunError::Timeout(deadline)
+        );
+        assert!(
+            wait_gone(grandchild_pid(&pidfile)),
+            "the sleep started by the shell outlived the deadline"
+        );
     }
 
     #[test]
     fn a_flood_is_cut_off_at_the_cap() {
         let bin = script("flood", "exec yes spectra");
-        assert_eq!(run(Command::new(&bin), Duration::from_secs(20), 4096).unwrap_err(), RunError::TooLarge(4096));
+        assert_eq!(
+            run(Command::new(&bin), Duration::from_secs(20), 4096).unwrap_err(),
+            RunError::TooLarge(4096)
+        );
     }
 }

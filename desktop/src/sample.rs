@@ -6,14 +6,17 @@ use crate::app::{App, Confirm, Outcome, Status};
 use crate::data::{self, Jvm};
 use crate::findings::Finding;
 use crate::groups::{Category, Nav};
-use crate::procs::{AppInfo, ProcError, Process, Role, Runtime, SignStatus, Signing};
-use crate::signal::{self, Me, Signal, Target};
 use crate::inspect::{self, BundleState, RunState};
 use crate::live::NetPoint;
+use crate::procs::{AppInfo, ProcError, Process, Role, Runtime, SignStatus, Signing};
+use crate::signal::{self, Me, Signal, Target};
 use crate::tools::Tool;
 
 /// The app's own pid and user in the sample: not one of the sample's processes.
-pub const SAMPLE_ME: Me = Me { pid: 5000, uid: Some(501) };
+pub const SAMPLE_ME: Me = Me {
+    pid: 5000,
+    uid: Some(501),
+};
 
 /// Readings of every process the sample lands, enough for the memory-growth rule.
 const PROC_READINGS: usize = crate::proc_findings::GROWTH_READINGS + 4;
@@ -162,19 +165,45 @@ impl P {
     }
 }
 
-const SLACK: (&str, &str, &str) = ("Slack", "/Applications/Slack.app", "com.tinyspeck.slackmacgap");
+const SLACK: (&str, &str, &str) = (
+    "Slack",
+    "/Applications/Slack.app",
+    "com.tinyspeck.slackmacgap",
+);
 const SAFARI: (&str, &str, &str) = ("Safari", "/Applications/Safari.app", "com.apple.Safari");
-const CODE: (&str, &str, &str) = ("Visual Studio Code", "/Applications/Visual Studio Code.app", "com.microsoft.VSCode");
+const CODE: (&str, &str, &str) = (
+    "Visual Studio Code",
+    "/Applications/Visual Studio Code.app",
+    "com.microsoft.VSCode",
+);
 const XCODE: (&str, &str, &str) = ("Xcode", "/Applications/Xcode.app", "com.apple.dt.Xcode");
-const NOTES_LITE: (&str, &str, &str) = ("Notes Lite", "/Users/user/Applications/Notes Lite.app", "com.example.noteslite");
-const BURROW: (&str, &str, &str) = ("Burrow VPN", "/Applications/Burrow VPN.app", "net.burrow.vpn");
+const NOTES_LITE: (&str, &str, &str) = (
+    "Notes Lite",
+    "/Users/user/Applications/Notes Lite.app",
+    "com.example.noteslite",
+);
+const BURROW: (&str, &str, &str) = (
+    "Burrow VPN",
+    "/Applications/Burrow VPN.app",
+    "net.burrow.vpn",
+);
 const ITERM: (&str, &str, &str) = ("iTerm", "/Applications/iTerm.app", "com.googlecode.iterm2");
-const TERMINAL: (&str, &str, &str) = ("Terminal", "/System/Applications/Utilities/Terminal.app", "com.apple.Terminal");
-const CLAUDE: (&str, &str, &str) = ("claude", "/Users/user/.local/share/claude/claude.app", "com.anthropic.claude-code");
+const TERMINAL: (&str, &str, &str) = (
+    "Terminal",
+    "/System/Applications/Utilities/Terminal.app",
+    "com.apple.Terminal",
+);
+const CLAUDE: (&str, &str, &str) = (
+    "claude",
+    "/Users/user/.local/share/claude/claude.app",
+    "com.anthropic.claude-code",
+);
 const OLLAMA: (&str, &str, &str) = ("Ollama", "/Applications/Ollama.app", "com.electron.ollama");
 
 use Role::{AiAgent, App as AppRole, AppHelper, Cli, Shell as ShellRole, System, Terminal};
-use Runtime::{Bun, Deno, Electron, Go, Jvm as JvmRt, Native, Node, Python, Ruby, Rust, Shell, Unknown};
+use Runtime::{
+    Bun, Deno, Electron, Go, Jvm as JvmRt, Native, Node, Python, Ruby, Rust, Shell, Unknown,
+};
 use SignStatus::{Adhoc, DeveloperId, Invalid, Unsigned};
 
 fn sample_procs() -> Vec<P> {
@@ -395,7 +424,9 @@ fn sample_procs() -> Vec<P> {
 /// Readable notes like the real feed's.
 fn evidence(x: &P) -> Vec<String> {
     let role = match (x.role, x.app) {
-        (AppRole | AppHelper | AiAgent | Terminal, Some((_, path, _))) => format!("role: inside bundle {path}"),
+        (AppRole | AppHelper | AiAgent | Terminal, Some((_, path, _))) => {
+            format!("role: inside bundle {path}")
+        }
         (System, _) => "role: Apple platform path".to_owned(),
         (ShellRole, _) => format!("role: executable {} is a known shell", x.name),
         _ => "role: no app, system, shell, terminal or agent signal".to_owned(),
@@ -423,7 +454,9 @@ fn signing_evidence(status: SignStatus, team: &str) -> String {
     const VERDICT: &str = "verdict is for the file on disk";
     let id = match status {
         SignStatus::Apple => {
-            return format!(r#"signing: platform binary validated by codesign --verify --ignore-resources -R="anchor apple"; {VERDICT}"#);
+            return format!(
+                r#"signing: platform binary validated by codesign --verify --ignore-resources -R="anchor apple"; {VERDICT}"#
+            );
         }
         // The real feed rarely has these; worded like the displayed ones.
         Invalid => "invalid",
@@ -442,7 +475,9 @@ fn signing_evidence(status: SignStatus, team: &str) -> String {
 fn process(x: &P, reading: usize) -> Process {
     let step = reading as f64;
     // A small, fixed wobble so lines aren't flat; the two the findings are about move on purpose.
-    let wobble = [1.0, 1.08, 0.94, 1.03, 0.97, 1.05, 0.92, 1.0, 1.06, 0.96, 1.02, 0.99][reading % 12];
+    let wobble = [
+        1.0, 1.08, 0.94, 1.03, 0.97, 1.05, 0.92, 1.0, 1.06, 0.96, 1.02, 0.99,
+    ][reading % 12];
     let cpu = match x.pid {
         1300 => 132.0 + 6.0 * (step % 3.0),
         _ => x.cpu * wobble,
@@ -473,7 +508,11 @@ fn process(x: &P, reading: usize) -> Process {
         started_at: format!("2026-11-19T{:02}:{:02}:04-05:00", 8 + x.pid % 9, x.pid % 60),
         role: x.role,
         runtime: x.runtime,
-        app: x.app.map(|(name, path, id)| AppInfo { name: name.into(), bundle_path: path.into(), bundle_id: id.into() }),
+        app: x.app.map(|(name, path, id)| AppInfo {
+            name: name.into(),
+            bundle_path: path.into(),
+            bundle_id: id.into(),
+        }),
         signing: x.signing.map(|(status, team)| Signing {
             status,
             team_id: team.into(),
@@ -527,7 +566,9 @@ pub fn signed_scene(s: &mut App) {
 pub fn stale_scene(s: &mut App) {
     all_scene(s);
     s.proc_updated = Some(s.now - 14.0);
-    s.land_procs(Err(ProcError::Failed("spectra process failed: no processes found".into())));
+    s.land_procs(Err(ProcError::Failed(
+        "spectra process failed: no processes found".into(),
+    )));
 }
 
 /// Every process.
@@ -572,7 +613,10 @@ pub fn quit_list_scene(s: &mut App) {
 
 fn confirming(s: &mut App, pid: u32, signal: Signal) {
     let p = s.process(pid).expect("a sample process");
-    s.confirm = Some(Confirm { target: Target::of(p), signal });
+    s.confirm = Some(Confirm {
+        target: Target::of(p),
+        signal,
+    });
 }
 
 /// Slack's page, confirming Quit.
@@ -602,14 +646,22 @@ pub fn quit_root_scene(s: &mut App) {
 pub fn quit_still_scene(s: &mut App) {
     quit_scene(s);
     let p = s.process(900).expect("Slack");
-    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status: Status::StillRunning });
+    s.outcome = Some(Outcome {
+        target: Target::of(p),
+        signal: Signal::Term,
+        status: Status::StillRunning,
+    });
 }
 
 /// Slack's page after Slack quit: it says so and offers Back.
 pub fn quit_ended_scene(s: &mut App) {
     quit_scene(s);
     let p = s.process(900).expect("Slack");
-    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status: Status::Asked { at: s.now } });
+    s.outcome = Some(Outcome {
+        target: Target::of(p),
+        signal: Signal::Term,
+        status: Status::Asked { at: s.now },
+    });
     let procs: Vec<Process> = s.procs.iter().filter(|p| p.pid != 900).cloned().collect();
     s.land_procs(Ok(procs));
 }
@@ -617,7 +669,11 @@ pub fn quit_ended_scene(s: &mut App) {
 fn quit_with(s: &mut App, status: Status) {
     quit_scene(s);
     let p = s.process(900).expect("Slack");
-    s.outcome = Some(Outcome { target: Target::of(p), signal: Signal::Term, status });
+    s.outcome = Some(Outcome {
+        target: Target::of(p),
+        signal: Signal::Term,
+        status,
+    });
 }
 
 /// Slack's page just after Quit was confirmed, while `ps` and `kill` run.
@@ -627,18 +683,31 @@ pub fn quit_checking_scene(s: &mut App) {
 
 /// Slack's page after a `kill` that timed out: the Quit may have been sent.
 pub fn quit_maybe_scene(s: &mut App) {
-    quit_with(s, Status::MaybeSent { at: s.now, why: "kill took longer than 5 s".into() });
+    quit_with(
+        s,
+        Status::MaybeSent {
+            at: s.now,
+            why: "kill took longer than 5 s".into(),
+        },
+    );
 }
 
 /// Slack's page after Slack exited but its parent hasn't collected it: no Force quit.
 pub fn quit_zombie_scene(s: &mut App) {
-    quit_with(s, Status::Waiting { parent: "launchd (pid 1)".into() });
+    quit_with(
+        s,
+        Status::Waiting {
+            parent: "launchd (pid 1)".into(),
+        },
+    );
 }
 
 /// The JVMs only, as with a Spectra too old to list processes.
 pub fn old_scene(s: &mut App) {
     sample_jvms(s);
-    s.land_procs(Err(ProcError::TooOld("spectra can't classify processes (it has no --classify).".into())));
+    s.land_procs(Err(ProcError::TooOld(
+        "spectra can't classify processes (it has no --classify).".into(),
+    )));
     s.expanded = s.findings.first().map(Finding::id);
 }
 
@@ -647,7 +716,10 @@ pub(crate) fn sample_live(s: &mut App) {
     const WAVE: [f64; 12] = [1.0, 1.4, 0.8, 2.6, 1.1, 0.9, 3.2, 1.2, 0.7, 1.5, 2.1, 1.0];
     for i in 0..24 {
         let w = WAVE[i % 12];
-        s.inspect.net.push(NetPoint { in_bps: 180_000.0 * w, out_bps: 24_000.0 * WAVE[(i + 5) % 12] });
+        s.inspect.net.push(NetPoint {
+            in_bps: 180_000.0 * w,
+            out_bps: 24_000.0 * WAVE[(i + 5) % 12],
+        });
         s.inspect.energy.push(4.0 + 3.0 * w);
     }
 }
@@ -698,7 +770,8 @@ fn analyzer(s: &mut App) {
 /// rust-analyzer's page with its tools: memtrace running, the rest waiting, the root tools off.
 pub fn tools_scene(s: &mut App) {
     analyzer(s);
-    s.inspect.put(Tool::Memtrace, RunState::Running { since: s.now });
+    s.inspect
+        .put(Tool::Memtrace, RunState::Running { since: s.now });
 }
 
 /// A root process's page: the tools that read threads or memory are off, and say why.
@@ -712,55 +785,71 @@ pub fn tools_root_scene(s: &mut App) {
 /// What each tool printed for the sample's rust-analyzer.
 pub fn tool_output(tool: Tool) -> &'static str {
     match tool {
-        Tool::Sample => r#"{"pid":1300,"process":"rust-analyzer","duration_ms":1000,"interval_ms":10,"total_samples":412,"stack_count":5,
+        Tool::Sample => {
+            r#"{"pid":1300,"process":"rust-analyzer","duration_ms":1000,"interval_ms":10,"total_samples":412,"stack_count":5,
             "stacks":[
               {"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::method_resolution::iterate_method_candidates","chalk_solve::solve::Solver::solve"],"count":171,"percent":41.5},
               {"frames":["Thread_2202","start_wqthread","rayon_core::registry::WorkerThread::wait_until","ide_db::symbol_index::SymbolIndex::new","fst::raw::build::Builder::insert"],"count":96,"percent":23.3},
               {"frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","crossbeam_channel::select::Select::select","__psynch_cvwait"],"count":82,"percent":19.9},
               {"frames":["Thread_2203","start_wqthread","salsa::function::fetch::fetch_cold","hir_def::nameres::collector::collect_defs"],"count":41,"percent":10.0},
               {"frames":["Thread_2204","start_wqthread","__workq_kernreturn"],"count":22,"percent":5.3}],
-            "main_thread":{"found":true,"verdict":"idle","reason":"main thread is waiting on a condition variable (crossbeam_channel::select → __psynch_cvwait), not blocked on I/O or a lock","leaf":"__psynch_cvwait","top_frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","crossbeam_channel::select::Select::select","__psynch_cvwait"]}}"#,
-        Tool::Hang => r#"{"main_thread":{"found":true,"verdict":"spinning","reason":"main thread is on CPU in user code (hir_ty::infer::InferenceContext::infer_body), not waiting","leaf":"hir_ty::infer::InferenceContext::infer_body",
-            "top_frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","rust_analyzer::reload::GlobalState::switch_workspaces","hir_ty::infer::InferenceContext::infer_body"]}}"#,
-        Tool::Vmmap => r#"{"footprint_bytes":1174405120,"footprint_peak_bytes":1258291200,
+            "main_thread":{"found":true,"verdict":"idle","reason":"main thread is waiting on a condition variable (crossbeam_channel::select → __psynch_cvwait), not blocked on I/O or a lock","leaf":"__psynch_cvwait","top_frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","crossbeam_channel::select::Select::select","__psynch_cvwait"]}}"#
+        }
+        Tool::Hang => {
+            r#"{"main_thread":{"found":true,"verdict":"spinning","reason":"main thread is on CPU in user code (hir_ty::infer::InferenceContext::infer_body), not waiting","leaf":"hir_ty::infer::InferenceContext::infer_body",
+            "top_frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","rust_analyzer::reload::GlobalState::switch_workspaces","hir_ty::infer::InferenceContext::infer_body"]}}"#
+        }
+        Tool::Vmmap => {
+            r#"{"footprint_bytes":1174405120,"footprint_peak_bytes":1258291200,
             "regions":[{"type":"MALLOC_LARGE","virtual_bytes":905969664,"resident_bytes":880803840,"dirty_bytes":880803840,"swapped_bytes":0},
                        {"type":"MALLOC_SMALL","virtual_bytes":209715200,"resident_bytes":178257920,"dirty_bytes":176160768,"swapped_bytes":8388608},
                        {"type":"MALLOC_TINY","virtual_bytes":62914560,"resident_bytes":50331648,"dirty_bytes":50331648,"swapped_bytes":0},
                        {"type":"Stack","virtual_bytes":136314880,"resident_bytes":6291456,"dirty_bytes":6291456,"swapped_bytes":0},
                        {"type":"__DATA","virtual_bytes":4194304,"resident_bytes":2097152,"dirty_bytes":1048576,"swapped_bytes":0},
                        {"type":"MALLOC metadata","virtual_bytes":2097152,"resident_bytes":917504,"dirty_bytes":917504,"swapped_bytes":0}],
-            "total_virtual_bytes":422054862848,"total_resident_bytes":1180696576,"total_dirty_bytes":1115553792,"total_swapped_bytes":8388608}"#,
-        Tool::Vmregions => r#"{"total_resident_bytes":1180696576,"total_dirty_bytes":1115553792,"shared_resident_bytes":3145728,
+            "total_virtual_bytes":422054862848,"total_resident_bytes":1180696576,"total_dirty_bytes":1115553792,"total_swapped_bytes":8388608}"#
+        }
+        Tool::Vmregions => {
+            r#"{"total_resident_bytes":1180696576,"total_dirty_bytes":1115553792,"shared_resident_bytes":3145728,
             "file_backed_dirty_bytes":2097152,"anonymous_dirty_bytes":1113456640,
             "top_dirty":[{"type":"MALLOC_LARGE","addr_start":"14c000000","addr_end":"16c000000","prot":"rw-","max_prot":"rwx","share":"PRV","detail":"DefaultMallocZone_0x104e3c000","resident_bytes":520093696,"dirty_bytes":520093696},
                          {"type":"MALLOC_LARGE","addr_start":"17a000000","addr_end":"18a000000","prot":"rw-","max_prot":"rwx","share":"PRV","detail":"DefaultMallocZone_0x104e3c000","resident_bytes":251658240,"dirty_bytes":251658240},
                          {"type":"MALLOC_SMALL","addr_start":"128000000","addr_end":"130000000","prot":"rw-","max_prot":"rwx","share":"PRV","detail":"DefaultMallocZone_0x104e3c000","resident_bytes":125829120,"dirty_bytes":125829120},
                          {"type":"Stack","addr_start":"16f604000","addr_end":"16fe00000","prot":"rw-","max_prot":"rwx","share":"PRV","detail":"thread 0","resident_bytes":1048576,"dirty_bytes":1048576},
-                         {"type":"shared memory","addr_start":"104c88000","addr_end":"104c90000","prot":"r--","max_prot":"r--","share":"SHM","resident_bytes":32768,"dirty_bytes":32768}]}"#,
-        Tool::Memtrace => r#"{"pid":1300,"command":"rust-analyzer","tree":false,"duration_ms":20000,"interval_ms":2000,
+                         {"type":"shared memory","addr_start":"104c88000","addr_end":"104c90000","prot":"r--","max_prot":"r--","share":"SHM","resident_bytes":32768,"dirty_bytes":32768}]}"#
+        }
+        Tool::Memtrace => {
+            r#"{"pid":1300,"command":"rust-analyzer","tree":false,"duration_ms":20000,"interval_ms":2000,
             "samples":[{"elapsed_ms":0,"rss_kib":1146880},{"elapsed_ms":2000,"rss_kib":1150976},{"elapsed_ms":4000,"rss_kib":1159168},
                        {"elapsed_ms":6000,"rss_kib":1157120},{"elapsed_ms":8000,"rss_kib":1167360},{"elapsed_ms":10000,"rss_kib":1175552},
                        {"elapsed_ms":12000,"rss_kib":1173504},{"elapsed_ms":14000,"rss_kib":1183744},{"elapsed_ms":16000,"rss_kib":1189888},
                        {"elapsed_ms":18000,"rss_kib":1196032},{"elapsed_ms":20000,"rss_kib":1200128}],
             "polls_failed":0,"polls_skipped":0,
             "summary":{"samples":11,"min_kib":1146880,"max_kib":1200128,"first_kib":1146880,"last_kib":1200128,"net_change_kib":53248,
-                       "growth_kib_per_min":159744,"verdict":"growing"},"growers":[]}"#,
-        Tool::Lineage => r#"{"pid":1300,"ancestors":[
+                       "growth_kib_per_min":159744,"verdict":"growing"},"growers":[]}"#
+        }
+        Tool::Lineage => {
+            r#"{"pid":1300,"ancestors":[
               {"pid":1300,"ppid":921,"user":"user","command":"rust-analyzer"},
               {"pid":921,"ppid":920,"user":"user","command":"Code Helper (Plugin)"},
               {"pid":920,"ppid":1,"user":"user","command":"Code"},
               {"pid":1,"ppid":0,"user":"root","command":"launchd"}],
             "tree":{"pid":1300,"ppid":921,"user":"user","command":"rust-analyzer","rss_kib":1146880,"cpu_pct":138,"count":3,"subtree_rss_kib":1160192,"subtree_cpu_pct":139.5,
               "children":[{"pid":7533,"ppid":1300,"user":"user","command":"<defunct>","rss_kib":0,"cpu_pct":0,"count":1,"subtree_rss_kib":0,"subtree_cpu_pct":0},
-                          {"pid":7540,"ppid":1300,"user":"user","command":"rust-analyzer-proc-macro-srv","rss_kib":13312,"cpu_pct":1.5,"count":1,"subtree_rss_kib":13312,"subtree_cpu_pct":1.5}]}}"#,
-        Tool::Owner => r#"{"target":{"kind":"pid","raw":"1300","pid":1300},"holders":[{"pid":1300,"user":"user","command":"rust-analyzer",
+                          {"pid":7540,"ppid":1300,"user":"user","command":"rust-analyzer-proc-macro-srv","rss_kib":13312,"cpu_pct":1.5,"count":1,"subtree_rss_kib":13312,"subtree_cpu_pct":1.5}]}}"#
+        }
+        Tool::Owner => {
+            r#"{"target":{"kind":"pid","raw":"1300","pid":1300},"holders":[{"pid":1300,"user":"user","command":"rust-analyzer",
             "executable":"/Users/user/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer","started":"2026-11-19T10:40:04-05:00","hold":"process",
-            "chain":[{"pid":921,"command":"Code Helper (Plugin)"},{"pid":920,"command":"Code"},{"pid":1,"command":"launchd"}]}]}"#,
-        Tool::Runtime => r#"{"pid":1300,"command":"rust-analyzer","executable_path":"/Users/user/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer",
+            "chain":[{"pid":921,"command":"Code Helper (Plugin)"},{"pid":920,"command":"Code"},{"pid":1,"command":"launchd"}]}]}"#
+        }
+        Tool::Runtime => {
+            r#"{"pid":1300,"command":"rust-analyzer","executable_path":"/Users/user/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer",
             "runtime":"rust","evidence":"Mach-O carries Rust panic symbols (rust_begin_unwind)",
             "capabilities":[{"name":"user-space CPU sample","how":"spectra sample 1300"},
                             {"name":"attach a native debugger","how":"rust-lldb -p 1300"},
-                            {"name":"flame graph","how":"spectra flamegraph 1300"}]}"#,
+                            {"name":"flame graph","how":"spectra flamegraph 1300"}]}"#
+        }
         // A JVM's tools print the sample checkout server's; the root tools never run.
         t => crate::sample_jvm::output(t),
     }
@@ -769,7 +858,9 @@ pub fn tool_output(tool: Tool) -> &'static str {
 /// rust-analyzer's page with `tool`'s result.
 fn tool_scene(s: &mut App, tool: Tool) {
     analyzer(s);
-    let report = tool.parse(tool_output(tool)).expect("the sample output parses");
+    let report = tool
+        .parse(tool_output(tool))
+        .expect("the sample output parses");
     s.inspect.put(tool, RunState::Done(Box::new(report)));
 }
 
@@ -801,12 +892,14 @@ pub fn tool_runtime_scene(s: &mut App) {
 /// A tool that failed and one that was cancelled, and network readings that couldn't be had.
 pub fn tool_failed_scene(s: &mut App) {
     analyzer(s);
-    s.inspect.put(Tool::Vmmap, RunState::Failed("vmmap: cannot examine process 1300 (task_for_pid failed)".into()));
+    s.inspect.put(
+        Tool::Vmmap,
+        RunState::Failed("vmmap: cannot examine process 1300 (task_for_pid failed)".into()),
+    );
     s.inspect.put(Tool::Sample, RunState::Cancelled);
     s.inspect.net = Default::default();
     s.inspect.net.off = Some("spectra network top: nettop is not available".into());
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -818,16 +911,34 @@ mod tests {
     fn the_sample_covers_every_role_and_signing_status_and_most_runtimes() {
         let mut s = init();
         sample_scene(&mut s);
-        for role in [AppRole, AppHelper, AiAgent, Terminal, ShellRole, Cli, System] {
+        for role in [
+            AppRole, AppHelper, AiAgent, Terminal, ShellRole, Cli, System,
+        ] {
             assert!(s.procs.iter().any(|p| p.role == role), "{role:?}");
         }
-        for st in [SignStatus::Apple, DeveloperId, Adhoc, Unsigned, Invalid, SignStatus::Unknown] {
+        for st in [
+            SignStatus::Apple,
+            DeveloperId,
+            Adhoc,
+            Unsigned,
+            Invalid,
+            SignStatus::Unknown,
+        ] {
             assert!(s.procs.iter().any(|p| p.sign_status() == st), "{st:?}");
         }
-        let runtimes = Rt::ALL.iter().filter(|r| s.procs.iter().any(|p| p.runtime == **r)).count();
+        let runtimes = Rt::ALL
+            .iter()
+            .filter(|r| s.procs.iter().any(|p| p.runtime == **r))
+            .count();
         assert_eq!(runtimes, Rt::ALL.len(), "every runtime");
         let rules: Vec<&str> = s.findings.iter().map(|f| f.rule).collect();
-        for rule in ["proc-busy-cpu", "proc-memory-growth", "proc-invalid-signature", "proc-unidentified", "jvm-heap-pressure"] {
+        for rule in [
+            "proc-busy-cpu",
+            "proc-memory-growth",
+            "proc-invalid-signature",
+            "proc-unidentified",
+            "jvm-heap-pressure",
+        ] {
             assert!(rules.contains(&rule), "{rule} in {rules:?}");
         }
         // Like the real feed: Apple's checked, the rest only as displayed, and some rows with
@@ -836,12 +947,23 @@ mod tests {
             match p.sign_status() {
                 SignStatus::Apple => assert!(p.validated(), "{}", p.name()),
                 SignStatus::Unknown => assert!(p.signing_evidence().is_none()),
-                _ => assert!(!p.validated() && p.signing_evidence().unwrap().contains("not validated"), "{}", p.name()),
+                _ => assert!(
+                    !p.validated() && p.signing_evidence().unwrap().contains("not validated"),
+                    "{}",
+                    p.name()
+                ),
             }
         }
-        assert!(s.procs.iter().any(|p| p.executable_path.is_empty() && p.signing.is_none()));
+        assert!(
+            s.procs
+                .iter()
+                .any(|p| p.executable_path.is_empty() && p.signing.is_none())
+        );
         let ollama = s.process(1370).unwrap();
-        assert_eq!((ollama.role, ollama.bundle_path()), (AiAgent, Some("/Applications/Ollama.app")));
+        assert_eq!(
+            (ollama.role, ollama.bundle_path()),
+            (AiAgent, Some("/Applications/Ollama.app"))
+        );
     }
 
     #[test]

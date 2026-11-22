@@ -121,7 +121,9 @@ pub fn matches_query(p: &Process, q: &str) -> bool {
     p.pid.to_string() == q
         || has(&p.name())
         || has(&p.executable_path)
-        || p.app.as_ref().is_some_and(|a| has(&a.name) || has(&a.bundle_id) || has(&a.bundle_path))
+        || p.app
+            .as_ref()
+            .is_some_and(|a| has(&a.name) || has(&a.bundle_id) || has(&a.bundle_path))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,19 +158,29 @@ impl Sort {
             SortKey::Memory => a.1.total_cmp(&b.1),
             SortKey::Name => by_name(),
         };
-        let by_key = if self.descending { by_key.reverse() } else { by_key };
+        let by_key = if self.descending {
+            by_key.reverse()
+        } else {
+            by_key
+        };
         by_key.then_with(by_name).then_with(|| a.3.cmp(b.3))
     }
 
     pub fn processes(self, a: &Process, b: &Process) -> Ordering {
         // `name` borrows unless a process has neither command nor path.
         let (na, nb) = (a.name(), b.name());
-        self.order((a.cpu_pct, a.rss_kib, &na, ""), (b.cpu_pct, b.rss_kib, &nb, ""))
-            .then(a.pid.cmp(&b.pid))
+        self.order(
+            (a.cpu_pct, a.rss_kib, &na, ""),
+            (b.cpu_pct, b.rss_kib, &nb, ""),
+        )
+        .then(a.pid.cmp(&b.pid))
     }
 
     pub fn groups(self, a: &Group, b: &Group) -> Ordering {
-        self.order((a.cpu, a.rss_kib, &a.name, &a.id), (b.cpu, b.rss_kib, &b.name, &b.id))
+        self.order(
+            (a.cpu, a.rss_kib, &a.name, &a.id),
+            (b.cpu, b.rss_kib, &b.name, &b.id),
+        )
     }
 }
 
@@ -237,7 +249,10 @@ fn exe_key(p: &Process) -> (&str, Cow<'_, str>) {
 pub fn distinguishing_folder(path: &str, others: &[&str]) -> Option<String> {
     let (dir, _) = path.rsplit_once('/')?;
     let theirs: HashSet<&str> = others.iter().flat_map(|o| o.split('/')).collect();
-    let unique = dir.rsplit('/').filter(|c| !c.is_empty()).find(|c| !theirs.contains(c));
+    let unique = dir
+        .rsplit('/')
+        .filter(|c| !c.is_empty())
+        .find(|c| !theirs.contains(c));
     Some(match unique {
         Some(c) if c.chars().count() > 2 => c.to_owned(),
         _ if dir.is_empty() => "/".to_owned(),
@@ -248,7 +263,11 @@ pub fn distinguishing_folder(path: &str, others: &[&str]) -> Option<String> {
 /// Gives each non-app group whose name another group shares the folder that tells it apart.
 fn add_hints(groups: &mut [Group]) {
     let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (i, g) in groups.iter().enumerate().filter(|(_, g)| g.kind != GroupKind::App) {
+    for (i, g) in groups
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| g.kind != GroupKind::App)
+    {
         by_name.entry(g.name.as_str()).or_default().push(i);
     }
     let hints: Vec<(usize, Option<String>)> = by_name
@@ -256,7 +275,11 @@ fn add_hints(groups: &mut [Group]) {
         .filter(|ix| ix.len() > 1)
         .flat_map(|ix| {
             ix.iter().map(|&i| {
-                let others: Vec<&str> = ix.iter().filter(|&&j| j != i).map(|&j| groups[j].path.as_str()).collect();
+                let others: Vec<&str> = ix
+                    .iter()
+                    .filter(|&&j| j != i)
+                    .map(|&j| groups[j].path.as_str())
+                    .collect();
                 (i, distinguishing_folder(&groups[i].path, &others))
             })
         })
@@ -277,7 +300,11 @@ pub fn group(procs: &[&Process], sort: Sort) -> Vec<Group> {
     for p in procs {
         let (id, kind, name) = match (&p.app, p.bundle_path()) {
             (Some(app), Some(path)) => {
-                let name = if app.name.is_empty() { p.name().into_owned() } else { app.name.clone() };
+                let name = if app.name.is_empty() {
+                    p.name().into_owned()
+                } else {
+                    app.name.clone()
+                };
                 (format!("app:{}", key_safe(path)), GroupKind::App, name)
             }
             _ if by_exe.get(&exe_key(p)).copied().unwrap_or(0) > 1 => {
@@ -287,7 +314,11 @@ pub fn group(procs: &[&Process], sort: Sort) -> Vec<Group> {
                 };
                 (id, GroupKind::Exe, p.name().into_owned())
             }
-            _ => (format!("pid:{}", p.pid), GroupKind::Single, p.name().into_owned()),
+            _ => (
+                format!("pid:{}", p.pid),
+                GroupKind::Single,
+                p.name().into_owned(),
+            ),
         };
         members
             .entry(id.clone())
@@ -301,7 +332,10 @@ pub fn group(procs: &[&Process], sort: Sort) -> Vec<Group> {
     let mut groups: Vec<Group> = order
         .into_iter()
         .map(|id| {
-            let (kind, name, mut ps) = members.remove(&id).unwrap_or((GroupKind::Single, String::new(), Vec::new()));
+            let (kind, name, mut ps) =
+                members
+                    .remove(&id)
+                    .unwrap_or((GroupKind::Single, String::new(), Vec::new()));
             ps.sort_by(|a, b| sort.processes(a, b));
             let lead = ps
                 .iter()
@@ -355,12 +389,27 @@ pub fn flatten(groups: &[Group], open: &HashSet<String>) -> Vec<Row> {
     let mut rows = Vec::with_capacity(groups.len());
     for (i, g) in groups.iter().enumerate() {
         if g.kind == GroupKind::Single || g.pids.len() == 1 {
-            rows.push(Row { id: format!("p:{}", g.pids[0]), depth: 0, item: RowRef::Process(g.pids[0]), group: i });
+            rows.push(Row {
+                id: format!("p:{}", g.pids[0]),
+                depth: 0,
+                item: RowRef::Process(g.pids[0]),
+                group: i,
+            });
             continue;
         }
-        rows.push(Row { id: format!("g:{}", g.id), depth: 0, item: RowRef::Group(i), group: i });
+        rows.push(Row {
+            id: format!("g:{}", g.id),
+            depth: 0,
+            item: RowRef::Group(i),
+            group: i,
+        });
         if open.contains(&g.id) {
-            rows.extend(g.pids.iter().map(|&pid| Row { id: format!("p:{pid}"), depth: 1, item: RowRef::Process(pid), group: i }));
+            rows.extend(g.pids.iter().map(|&pid| Row {
+                id: format!("p:{pid}"),
+                depth: 1,
+                item: RowRef::Process(pid),
+                group: i,
+            }));
         }
     }
     rows
@@ -385,23 +434,48 @@ pub(crate) mod tests {
     }
 
     pub fn app(mut p: Process, name: &str, path: &str, role: Role) -> Process {
-        p.app = Some(AppInfo { name: name.into(), bundle_path: path.into(), bundle_id: format!("com.example.{name}") });
+        p.app = Some(AppInfo {
+            name: name.into(),
+            bundle_path: path.into(),
+            bundle_id: format!("com.example.{name}"),
+        });
         p.role = role;
         p
     }
 
     fn sample() -> Vec<Process> {
         let mut v = vec![
-            app(proc(10, "Slack", 2.0, 200_000.0), "Slack", "/Applications/Slack.app", Role::App),
-            app(proc(11, "Slack Helper", 5.0, 300_000.0), "Slack", "/Applications/Slack.app", Role::AppHelper),
-            app(proc(12, "Slack Helper (GPU)", 1.0, 100_000.0), "Slack", "/Applications/Slack.app", Role::AppHelper),
+            app(
+                proc(10, "Slack", 2.0, 200_000.0),
+                "Slack",
+                "/Applications/Slack.app",
+                Role::App,
+            ),
+            app(
+                proc(11, "Slack Helper", 5.0, 300_000.0),
+                "Slack",
+                "/Applications/Slack.app",
+                Role::AppHelper,
+            ),
+            app(
+                proc(12, "Slack Helper (GPU)", 1.0, 100_000.0),
+                "Slack",
+                "/Applications/Slack.app",
+                Role::AppHelper,
+            ),
             proc(20, "zsh", 0.0, 3_000.0),
             proc(21, "zsh", 0.0, 3_000.0),
             proc(22, "zsh", 0.5, 3_000.0),
             proc(30, "gh", 0.0, 40_000.0),
         ];
-        v[1].signing = Some(Signing { status: SignStatus::Adhoc, ..Signing::default() });
-        v[0].signing = Some(Signing { status: SignStatus::DeveloperId, ..Signing::default() });
+        v[1].signing = Some(Signing {
+            status: SignStatus::Adhoc,
+            ..Signing::default()
+        });
+        v[0].signing = Some(Signing {
+            status: SignStatus::DeveloperId,
+            ..Signing::default()
+        });
         v
     }
 
@@ -426,8 +500,16 @@ pub(crate) mod tests {
     #[test]
     fn an_unverified_member_makes_the_group_unverified() {
         let mut v = sample();
-        v[1].signing = Some(Signing { status: SignStatus::Apple, validated: Some(true), ..Signing::default() });
-        v[2].signing = Some(Signing { status: SignStatus::Apple, validated: Some(true), ..Signing::default() });
+        v[1].signing = Some(Signing {
+            status: SignStatus::Apple,
+            validated: Some(true),
+            ..Signing::default()
+        });
+        v[2].signing = Some(Signing {
+            status: SignStatus::Apple,
+            validated: Some(true),
+            ..Signing::default()
+        });
         let g = group(&refs(&v), Sort::default());
         assert_eq!(g[0].signing, Trust::Unverified(SignStatus::DeveloperId));
         v[0].signing.as_mut().unwrap().validated = Some(true);
@@ -442,7 +524,8 @@ pub(crate) mod tests {
 
     #[test]
     fn same_named_programs_at_different_paths_are_separate_rows() {
-        const TEMURIN: &str = "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java";
+        const TEMURIN: &str =
+            "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java";
         const ZULU: &str = "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin/java";
         const SIM: &str = "/Library/Developer/CoreSimulator/Volumes/iOS_22A/System/Library/PrivateFrameworks/Sharing.framework/sharingd";
         let v = vec![
@@ -455,8 +538,17 @@ pub(crate) mod tests {
             at(proc(7, "deploy.sh", 0.0, 1.0), "/bin/bash"),
             at(proc(8, "gh", 0.0, 1.0), "/opt/homebrew/bin/gh"),
         ];
-        let g = group(&refs(&v), Sort { key: SortKey::Name, descending: false });
-        let rows: Vec<(&str, Vec<u32>, Option<&str>)> = g.iter().map(|g| (g.name.as_str(), g.pids.clone(), g.hint.as_deref())).collect();
+        let g = group(
+            &refs(&v),
+            Sort {
+                key: SortKey::Name,
+                descending: false,
+            },
+        );
+        let rows: Vec<(&str, Vec<u32>, Option<&str>)> = g
+            .iter()
+            .map(|g| (g.name.as_str(), g.pids.clone(), g.hint.as_deref()))
+            .collect();
         assert_eq!(
             rows,
             [
@@ -472,21 +564,35 @@ pub(crate) mod tests {
         assert_eq!(g[3].kind, GroupKind::Exe);
         assert!(!g[3].id.contains('/'));
         assert_ne!(g[3].id, g[4].id);
-        assert_eq!(distinguishing_folder("/a/b/x", &["/a/b/x"]).as_deref(), Some("/a/b"), "identical paths: the whole folder");
+        assert_eq!(
+            distinguishing_folder("/a/b/x", &["/a/b/x"]).as_deref(),
+            Some("/a/b"),
+            "identical paths: the whole folder"
+        );
         // Seen in a real feed: the host's copy and two simulators'.
         const SIM_A: &str = "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/runningboardd";
         const SIM_B: &str = "/private/var/run/mnt/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.2.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/runningboardd";
         const HOST: &str = "/usr/libexec/runningboardd";
-        assert_eq!(distinguishing_folder(SIM_A, &[SIM_B, HOST]).as_deref(), Some("iOS 26.5.simruntime"));
-        assert_eq!(distinguishing_folder(HOST, &[SIM_A, SIM_B]).as_deref(), Some("/usr/libexec"));
-        const MA: &str = "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd";
+        assert_eq!(
+            distinguishing_folder(SIM_A, &[SIM_B, HOST]).as_deref(),
+            Some("iOS 26.5.simruntime")
+        );
+        assert_eq!(
+            distinguishing_folder(HOST, &[SIM_A, SIM_B]).as_deref(),
+            Some("/usr/libexec")
+        );
+        const MA: &str =
+            "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd";
         const MA_SIM: &str = "/Sim/RuntimeRoot/System/Library/PrivateFrameworks/MediaAnalysis.framework/mediaanalysisd";
         assert_eq!(
             distinguishing_folder(MA, &[MA_SIM]).as_deref(),
             Some("/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A"),
             "`A` on its own says nothing"
         );
-        assert_eq!(distinguishing_folder(MA_SIM, &[MA]).as_deref(), Some("RuntimeRoot"));
+        assert_eq!(
+            distinguishing_folder(MA_SIM, &[MA]).as_deref(),
+            Some("RuntimeRoot")
+        );
         assert_eq!(distinguishing_folder("", &[MA]), None);
     }
 
@@ -503,20 +609,51 @@ pub(crate) mod tests {
     #[test]
     fn sorts_by_cpu_memory_and_name() {
         let v = sample();
-        let names = |s: Sort| group(&refs(&v), s).into_iter().map(|g| g.name).collect::<Vec<_>>();
+        let names = |s: Sort| {
+            group(&refs(&v), s)
+                .into_iter()
+                .map(|g| g.name)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(Sort::default()), ["Slack", "zsh", "gh"]);
-        assert_eq!(names(Sort { key: SortKey::Memory, descending: true }), ["Slack", "gh", "zsh"]);
-        assert_eq!(names(Sort { key: SortKey::Name, descending: false }), ["gh", "Slack", "zsh"]);
-        assert_eq!(names(Sort { key: SortKey::Name, descending: true }), ["zsh", "Slack", "gh"]);
+        assert_eq!(
+            names(Sort {
+                key: SortKey::Memory,
+                descending: true
+            }),
+            ["Slack", "gh", "zsh"]
+        );
+        assert_eq!(
+            names(Sort {
+                key: SortKey::Name,
+                descending: false
+            }),
+            ["gh", "Slack", "zsh"]
+        );
+        assert_eq!(
+            names(Sort {
+                key: SortKey::Name,
+                descending: true
+            }),
+            ["zsh", "Slack", "gh"]
+        );
     }
 
     #[test]
     fn ties_keep_their_order_from_reading_to_reading() {
         // Five idle processes with equal CPU, landing in a different order each time.
-        let mut v: Vec<Process> = (0..5).map(|i| proc(100 + i, &format!("idle{i}"), 0.0, 1_000.0)).collect();
-        let first: Vec<String> = group(&refs(&v), Sort::default()).into_iter().map(|g| g.id).collect();
+        let mut v: Vec<Process> = (0..5)
+            .map(|i| proc(100 + i, &format!("idle{i}"), 0.0, 1_000.0))
+            .collect();
+        let first: Vec<String> = group(&refs(&v), Sort::default())
+            .into_iter()
+            .map(|g| g.id)
+            .collect();
         v.reverse();
-        let second: Vec<String> = group(&refs(&v), Sort::default()).into_iter().map(|g| g.id).collect();
+        let second: Vec<String> = group(&refs(&v), Sort::default())
+            .into_iter()
+            .map(|g| g.id)
+            .collect();
         assert_eq!(first, second);
         assert_eq!(first[0], "pid:100", "ties fall back to name");
         // Same name and value: the pid decides.
@@ -532,7 +669,10 @@ pub(crate) mod tests {
         let v = sample();
         let g = group(&refs(&v), Sort::default());
         let closed = flatten(&g, &HashSet::new());
-        assert_eq!(closed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["g:app::Applications:Slack.app", "g:exe:zsh", "p:30"]);
+        assert_eq!(
+            closed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["g:app::Applications:Slack.app", "g:exe:zsh", "p:30"]
+        );
         let open: HashSet<String> = ["app::Applications:Slack.app".to_owned()].into();
         let rows = flatten(&g, &open);
         assert_eq!(rows.len(), 6);

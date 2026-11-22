@@ -145,7 +145,10 @@ pub fn refusal(p: &Process, me: Me, parent_of: &dyn Fn(u32) -> Option<u32>) -> O
         return Some("This is the kernel; it can't be stopped.".into());
     }
     if p.pid == 1 {
-        return Some(format!("{} starts and looks after everything else; Spectra Desktop won't stop it.", p.name()));
+        return Some(format!(
+            "{} starts and looks after everything else; Spectra Desktop won't stop it.",
+            p.name()
+        ));
     }
     if p.pid == me.pid {
         return Some("This is Spectra Desktop itself.".into());
@@ -157,7 +160,11 @@ pub fn refusal(p: &Process, me: Me, parent_of: &dyn Fn(u32) -> Option<u32>) -> O
         && uid != 0
         && p.uid != uid
     {
-        let owner = if p.user.is_empty() { format!("uid {}", p.uid) } else { p.user.clone() };
+        let owner = if p.user.is_empty() {
+            format!("uid {}", p.uid)
+        } else {
+            p.user.clone()
+        };
         return Some(format!("Owned by {owner}; Spectra Desktop can't stop it"));
     }
     if parse_rfc3339(&p.started_at).is_none() {
@@ -169,8 +176,14 @@ pub fn refusal(p: &Process, me: Me, parent_of: &dyn Fn(u32) -> Option<u32>) -> O
 /// What the confirmation says will happen.
 pub fn consequence(t: &Target, signal: Signal) -> Vec<String> {
     let mut lines = vec![match signal {
-        Signal::Term => format!("{} (pid {}) will be asked to close. Unsaved changes may be lost.", t.name, t.pid),
-        Signal::Kill => format!("{} (pid {}) will be stopped immediately. Unsaved changes will be lost.", t.name, t.pid),
+        Signal::Term => format!(
+            "{} (pid {}) will be asked to close. Unsaved changes may be lost.",
+            t.name, t.pid
+        ),
+        Signal::Kill => format!(
+            "{} (pid {}) will be stopped immediately. Unsaved changes will be lost.",
+            t.name, t.pid
+        ),
     }];
     if t.system {
         lines.push("This is part of macOS and may restart or disrupt your session.".into());
@@ -193,19 +206,29 @@ pub enum Attempt {
 /// `ps -o lstart=` with `TZ=UTC0` and `LC_ALL=C` (`Fri Nov  7 08:53:10 2026`) as Unix seconds.
 pub fn parse_lstart(s: &str) -> Option<i64> {
     let mut w = s.split_whitespace();
-    let (_weekday, month, day, time, year) = (w.next()?, w.next()?, w.next()?, w.next()?, w.next()?);
+    let (_weekday, month, day, time, year) =
+        (w.next()?, w.next()?, w.next()?, w.next()?, w.next()?);
     if w.next().is_some() {
         return None;
     }
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let month = MONTHS.iter().position(|m| m.eq_ignore_ascii_case(month))? + 1;
     let day: u32 = day.parse().ok()?;
     let year: u32 = year.parse().ok()?;
     let t: Vec<&str> = time.split(':').collect();
-    if t.len() != 3 || t.iter().any(|p| p.len() != 2 || !p.bytes().all(|b| b.is_ascii_digit())) || !(1..=31).contains(&day) {
+    if t.len() != 3
+        || t.iter()
+            .any(|p| p.len() != 2 || !p.bytes().all(|b| b.is_ascii_digit()))
+        || !(1..=31).contains(&day)
+    {
         return None;
     }
-    parse_rfc3339(&format!("{year:04}-{month:02}-{day:02}T{}:{}:{}Z", t[0], t[1], t[2]))
+    parse_rfc3339(&format!(
+        "{year:04}-{month:02}-{day:02}T{}:{}:{}Z",
+        t[0], t[1], t[2]
+    ))
 }
 
 /// One line of `ps -o lstart= -o stat= -o comm=`: five words of start time, the state, then the
@@ -230,14 +253,20 @@ pub fn parse_ps(line: &str) -> Option<Identity> {
     if stat.is_empty() {
         return None;
     }
-    Some(Identity { started, comm: comm.trim().to_owned(), zombie: stat.starts_with('Z') })
+    Some(Identity {
+        started,
+        comm: comm.trim().to_owned(),
+        zombie: stat.starts_with('Z'),
+    })
 }
 
 /// Whether a Linux `/proc/<pid>/status` shows other threads still running. A process whose main
 /// thread exited while others run is listed as `Z` but is alive, and a signal still reaches it.
 pub fn still_has_threads(status: Option<&str>) -> bool {
     let threads = status.and_then(|s| s.lines().find_map(|l| l.strip_prefix("Threads:")));
-    threads.and_then(|n| n.trim().parse::<u32>().ok()).is_some_and(|n| n > 1)
+    threads
+        .and_then(|n| n.trim().parse::<u32>().ok())
+        .is_some_and(|n| n > 1)
 }
 
 fn base(path: &str) -> &str {
@@ -261,8 +290,14 @@ pub fn same_program(comm: &str, t: &Process) -> bool {
     if !exe.is_empty() && comm == exe {
         return true;
     }
-    let names = [(!exe.is_empty()).then(|| base(exe)), (!command.is_empty()).then_some(command)];
-    names.into_iter().flatten().any(|n| n == theirs || (theirs.len() == 15 && n.starts_with(theirs)))
+    let names = [
+        (!exe.is_empty()).then(|| base(exe)),
+        (!command.is_empty()).then_some(command),
+    ];
+    names
+        .into_iter()
+        .flatten()
+        .any(|n| n == theirs || (theirs.len() == 15 && n.starts_with(theirs)))
 }
 
 /// Whether `now` (what `ps` says has the pid) is still `t`, or why not.
@@ -271,16 +306,25 @@ pub fn verify(t: &Target, now: Option<&Identity>) -> Result<(), String> {
         return Err("That process has already ended. Nothing was sent.".into());
     };
     let Some(started) = parse_rfc3339(&t.started) else {
-        return Err(format!("Spectra didn't say when {} started, so nothing was sent.", t.name));
+        return Err(format!(
+            "Spectra didn't say when {} started, so nothing was sent.",
+            t.name
+        ));
     };
     if now.started != started {
         return Err("That process has already ended; its pid now belongs to another process. Nothing was sent.".into());
     }
     if now.zombie {
-        return Err(format!("{} has already exited and is waiting for its parent to collect it; a signal can't help. Nothing was sent.", t.name));
+        return Err(format!(
+            "{} has already exited and is waiting for its parent to collect it; a signal can't help. Nothing was sent.",
+            t.name
+        ));
     }
     if !same_program(&now.comm, &t.process) {
-        return Err(format!("pid {} now runs {}, not {}. Nothing was sent.", t.pid, now.comm, t.name));
+        return Err(format!(
+            "pid {} now runs {}, not {}. Nothing was sent.",
+            t.pid, now.comm, t.name
+        ));
     }
     Ok(())
 }
@@ -289,14 +333,23 @@ pub fn verify(t: &Target, now: Option<&Identity>) -> Result<(), String> {
 pub fn quit(signals: &dyn Signals, t: &Target, signal: Signal) -> Attempt {
     let now = match signals.identify(t.pid) {
         Ok(now) => now,
-        Err(e) => return Attempt::Failed(format!("Couldn't check that pid {} is still {}: {e}. Nothing was sent.", t.pid, t.name)),
+        Err(e) => {
+            return Attempt::Failed(format!(
+                "Couldn't check that pid {} is still {}: {e}. Nothing was sent.",
+                t.pid, t.name
+            ));
+        }
     };
     if let Err(why) = verify(t, now.as_ref()) {
         return Attempt::Refused(why);
     }
     match signals.send(t.pid, signal) {
         Ok(()) => Attempt::Sent,
-        Err(SendError::NotSent(e)) => Attempt::Failed(format!("Couldn't {} {}: {e}.", signal.verb().to_lowercase(), t.name)),
+        Err(SendError::NotSent(e)) => Attempt::Failed(format!(
+            "Couldn't {} {}: {e}.",
+            signal.verb().to_lowercase(),
+            t.name
+        )),
         Err(SendError::Unsure(e)) => Attempt::Unsure(e),
     }
 }
@@ -328,7 +381,9 @@ impl Signals for Inert {
 pub fn my_uid() -> Option<i64> {
     let mut cmd = Command::new("/usr/bin/id");
     cmd.arg("-u");
-    let out = run::run(cmd, DEADLINE, MAX_OUTPUT).ok().filter(|o| o.status.success())?;
+    let out = run::run(cmd, DEADLINE, MAX_OUTPUT)
+        .ok()
+        .filter(|o| o.status.success())?;
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
@@ -364,18 +419,32 @@ impl Signals for System {
     fn identify(&self, pid: u32) -> Result<Option<Identity>, String> {
         let mut cmd = Command::new("/bin/ps");
         // UTC and English, so the start time reads the same on every machine.
-        cmd.env("TZ", "UTC0").env("LC_ALL", "C").args(["-o", "lstart=", "-o", "stat=", "-o", "comm=", "-p", &pid.to_string()]);
+        cmd.env("TZ", "UTC0").env("LC_ALL", "C").args([
+            "-o",
+            "lstart=",
+            "-o",
+            "stat=",
+            "-o",
+            "comm=",
+            "-p",
+            &pid.to_string(),
+        ]);
         let out = run::run(cmd, DEADLINE, MAX_OUTPUT).map_err(|e| failure("ps", &e))?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         let Some(line) = stdout.lines().find(|l| !l.trim().is_empty()) else {
             // `ps -p` prints nothing and exits 1 for a pid nobody has.
-            return if out.status.code() == Some(1) && out.stderr.iter().all(u8::is_ascii_whitespace) {
+            return if out.status.code() == Some(1) && out.stderr.iter().all(u8::is_ascii_whitespace)
+            {
                 Ok(None)
             } else {
-                Err(format!("ps failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+                Err(format!(
+                    "ps failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ))
             };
         };
-        let mut id = parse_ps(line).ok_or_else(|| format!("couldn't read ps's answer: {}", line.trim()))?;
+        let mut id =
+            parse_ps(line).ok_or_else(|| format!("couldn't read ps's answer: {}", line.trim()))?;
         if cfg!(target_os = "linux") && id.zombie {
             let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
             id.zombie = !still_has_threads(status.as_deref());
@@ -395,7 +464,12 @@ impl Signals for System {
         }
         let why = String::from_utf8_lossy(&out.stderr);
         // `kill: 900: Operation not permitted` → the reason alone.
-        let why = why.trim().rsplit(": ").next().filter(|w| !w.is_empty()).unwrap_or("no reason given");
+        let why = why
+            .trim()
+            .rsplit(": ")
+            .next()
+            .filter(|w| !w.is_empty())
+            .unwrap_or("no reason given");
         Err(SendError::NotSent(format!("kill failed: {why}")))
     }
 }
@@ -407,9 +481,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_zombie_leader_with_running_threads_is_not_a_zombie() {
-        assert!(still_has_threads(Some("Name:\tjava\nState:\tZ (zombie)\nThreads:\t12\nVmRSS:\t1 kB\n")));
+        assert!(still_has_threads(Some(
+            "Name:\tjava\nState:\tZ (zombie)\nThreads:\t12\nVmRSS:\t1 kB\n"
+        )));
         // A true zombie has no threads left but itself.
-        assert!(!still_has_threads(Some("State:\tZ (zombie)\nThreads:\t1\n")));
+        assert!(!still_has_threads(Some(
+            "State:\tZ (zombie)\nThreads:\t1\n"
+        )));
         // Unreadable or unparseable: stay with what `ps` said.
         assert!(!still_has_threads(None));
         assert!(!still_has_threads(Some("State:\tZ (zombie)\n")));
@@ -439,7 +517,14 @@ pub(crate) mod tests {
     impl Recorder {
         pub fn alive(&self, pid: u32, started_at: &str, comm: &str) {
             let started = parse_rfc3339(started_at).expect("an RFC 3339 time");
-            self.alive.lock().unwrap().push((pid, Identity { started, comm: comm.into(), zombie: false }));
+            self.alive.lock().unwrap().push((
+                pid,
+                Identity {
+                    started,
+                    comm: comm.into(),
+                    zombie: false,
+                },
+            ));
         }
 
         /// `pid` is still listed by `ps`, but exited: state `Z`, command `<defunct>`.
@@ -447,7 +532,14 @@ pub(crate) mod tests {
             let started = parse_rfc3339(started_at).expect("an RFC 3339 time");
             let mut alive = self.alive.lock().unwrap();
             alive.retain(|(p, _)| *p != pid);
-            alive.push((pid, Identity { started, comm: "<defunct>".into(), zombie: true }));
+            alive.push((
+                pid,
+                Identity {
+                    started,
+                    comm: "<defunct>".into(),
+                    zombie: true,
+                },
+            ));
         }
 
         pub fn forget(&self, pid: u32) {
@@ -477,7 +569,13 @@ pub(crate) mod tests {
             if let Some(e) = self.fail_ps.lock().unwrap().clone() {
                 return Err(e);
             }
-            Ok(self.alive.lock().unwrap().iter().find(|(p, _)| *p == pid).map(|(_, id)| id.clone()))
+            Ok(self
+                .alive
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(p, _)| *p == pid)
+                .map(|(_, id)| id.clone()))
         }
 
         fn send(&self, pid: u32, signal: Signal) -> Result<(), SendError> {
@@ -503,16 +601,35 @@ pub(crate) mod tests {
         }
     }
 
-    const ME: Me = Me { pid: 5000, uid: Some(501) };
+    const ME: Me = Me {
+        pid: 5000,
+        uid: Some(501),
+    };
 
     #[test]
     fn reads_lstart_in_utc_with_single_digit_days() {
-        assert_eq!(parse_lstart("Fri Nov 20 00:28:38 2026"), parse_rfc3339("2026-11-19T19:28:38-05:00"));
+        assert_eq!(
+            parse_lstart("Fri Nov 20 00:28:38 2026"),
+            parse_rfc3339("2026-11-19T19:28:38-05:00")
+        );
         // A one-digit day is padded with a space.
-        assert_eq!(parse_lstart("Fri Nov  7 08:05:01 2026"), parse_rfc3339("2026-11-07T08:05:01Z"));
-        assert_eq!(parse_lstart("Sat Feb 29 23:59:59 2028"), parse_rfc3339("2028-03-01T05:29:59+05:30"));
+        assert_eq!(
+            parse_lstart("Fri Nov  7 08:05:01 2026"),
+            parse_rfc3339("2026-11-07T08:05:01Z")
+        );
+        assert_eq!(
+            parse_lstart("Sat Feb 29 23:59:59 2028"),
+            parse_rfc3339("2028-03-01T05:29:59+05:30")
+        );
         assert_eq!(parse_lstart("Thu Jan  1 00:00:00 1970"), Some(0));
-        for bad in ["", "Fri Nov 20 2026", "Fri Nov 20 0:28:38 2026", "Fri Nvb 20 00:28:38 2026", "Fri Nov 32 00:28:38 2026", "Fri Nov 20 00:28:38 2026 x"] {
+        for bad in [
+            "",
+            "Fri Nov 20 2026",
+            "Fri Nov 20 0:28:38 2026",
+            "Fri Nvb 20 00:28:38 2026",
+            "Fri Nov 32 00:28:38 2026",
+            "Fri Nov 20 00:28:38 2026 x",
+        ] {
             assert_eq!(parse_lstart(bad), None, "{bad:?}");
         }
     }
@@ -521,9 +638,15 @@ pub(crate) mod tests {
     fn a_ps_line_keeps_a_command_with_spaces() {
         let id = parse_ps("Fri Nov  7 08:05:01 2026     S    /Applications/Slack.app/Contents/Frameworks/Slack Helper (GPU).app/Contents/MacOS/Slack Helper (GPU)\n").unwrap();
         assert_eq!(id.started, parse_rfc3339("2026-11-07T08:05:01Z").unwrap());
-        assert_eq!(id.comm, "/Applications/Slack.app/Contents/Frameworks/Slack Helper (GPU).app/Contents/MacOS/Slack Helper (GPU)");
+        assert_eq!(
+            id.comm,
+            "/Applications/Slack.app/Contents/Frameworks/Slack Helper (GPU).app/Contents/MacOS/Slack Helper (GPU)"
+        );
         assert!(!id.zombie);
-        assert_eq!(parse_ps("Fri Nov 7 08:05:01 2026 Ss+ sleep").unwrap().comm, "sleep");
+        assert_eq!(
+            parse_ps("Fri Nov 7 08:05:01 2026 Ss+ sleep").unwrap().comm,
+            "sleep"
+        );
         assert_eq!(parse_ps("Fri Nov 7 08:05:01"), None);
         assert_eq!(parse_ps("Fri Nov 7 08:05:01 2026"), None, "no state");
         // As macOS prints a zombie.
@@ -536,50 +659,106 @@ pub(crate) mod tests {
     fn the_same_second_in_another_zone_matches_and_the_next_second_does_not() {
         let t = Target::of(&slack());
         let exe = "/Applications/Slack.app/Contents/MacOS/Slack";
-        let at = |lstart: &str| Identity { started: parse_lstart(lstart).unwrap(), comm: exe.into(), zombie: false };
-        assert_eq!(verify(&t, Some(&at("Fri Nov 20 00:28:38 2026"))), Ok(()), "-05:00 is 00:28:38 UTC");
+        let at = |lstart: &str| Identity {
+            started: parse_lstart(lstart).unwrap(),
+            comm: exe.into(),
+            zombie: false,
+        };
+        assert_eq!(
+            verify(&t, Some(&at("Fri Nov 20 00:28:38 2026"))),
+            Ok(()),
+            "-05:00 is 00:28:38 UTC"
+        );
         let mut ist = t.clone();
         ist.started = "2026-11-20T05:58:38.900+05:30".into();
-        assert_eq!(verify(&ist, Some(&at("Fri Nov 20 00:28:38 2026"))), Ok(()), "fractions are a format, not a second");
-        assert!(verify(&t, Some(&at("Fri Nov 20 00:28:39 2026"))).unwrap_err().contains("already ended"));
-        assert!(verify(&t, Some(&at("Thu Nov 19 19:28:38 2026"))).is_err(), "local time read as UTC is a different instant");
-        assert_eq!(verify(&t, None).unwrap_err(), "That process has already ended. Nothing was sent.");
+        assert_eq!(
+            verify(&ist, Some(&at("Fri Nov 20 00:28:38 2026"))),
+            Ok(()),
+            "fractions are a format, not a second"
+        );
+        assert!(
+            verify(&t, Some(&at("Fri Nov 20 00:28:39 2026")))
+                .unwrap_err()
+                .contains("already ended")
+        );
+        assert!(
+            verify(&t, Some(&at("Thu Nov 19 19:28:38 2026"))).is_err(),
+            "local time read as UTC is a different instant"
+        );
+        assert_eq!(
+            verify(&t, None).unwrap_err(),
+            "That process has already ended. Nothing was sent."
+        );
     }
 
     #[test]
     fn the_program_must_match_too() {
         let p = slack();
-        assert!(same_program("/Applications/Slack.app/Contents/MacOS/Slack", &p));
+        assert!(same_program(
+            "/Applications/Slack.app/Contents/MacOS/Slack",
+            &p
+        ));
         assert!(same_program("Slack", &p), "a bare name");
         assert!(!same_program("/usr/bin/node", &p));
-        let mut zsh = Process { command: "zsh".into(), executable_path: "/bin/zsh".into(), ..Process::default() };
+        let mut zsh = Process {
+            command: "zsh".into(),
+            executable_path: "/bin/zsh".into(),
+            ..Process::default()
+        };
         assert!(same_program("-zsh", &zsh), "a login shell");
         zsh.command = "deploy.sh".into();
         zsh.executable_path = "/bin/bash".into();
         assert!(same_program("/bin/bash", &zsh));
-        let long = Process { command: "qemu-system-aarch64-headless".into(), ..Process::default() };
-        assert!(same_program("qemu-system-aar", &long), "Linux's 15-byte comm");
+        let long = Process {
+            command: "qemu-system-aarch64-headless".into(),
+            ..Process::default()
+        };
+        assert!(
+            same_program("qemu-system-aar", &long),
+            "Linux's 15-byte comm"
+        );
         assert!(!same_program("qemu-system-x86", &long));
         let t = Target::of(&slack());
-        let id = Identity { started: parse_rfc3339(&t.started).unwrap(), comm: "/usr/bin/node".into(), zombie: false };
-        assert_eq!(verify(&t, Some(&id)).unwrap_err(), "pid 900 now runs /usr/bin/node, not Slack. Nothing was sent.");
+        let id = Identity {
+            started: parse_rfc3339(&t.started).unwrap(),
+            comm: "/usr/bin/node".into(),
+            zombie: false,
+        };
+        assert_eq!(
+            verify(&t, Some(&id)).unwrap_err(),
+            "pid 900 now runs /usr/bin/node, not Slack. Nothing was sent."
+        );
     }
 
     #[test]
     fn quit_sends_one_signal_only_after_the_check() {
         let r = Recorder::default();
         let t = Target::of(&slack());
-        assert!(matches!(quit(&r, &t, Signal::Term), Attempt::Refused(_)), "gone");
+        assert!(
+            matches!(quit(&r, &t, Signal::Term), Attempt::Refused(_)),
+            "gone"
+        );
         assert!(r.sent().is_empty());
-        r.alive(900, "2026-11-20T00:28:38Z", "/Applications/Slack.app/Contents/MacOS/Slack");
+        r.alive(
+            900,
+            "2026-11-20T00:28:38Z",
+            "/Applications/Slack.app/Contents/MacOS/Slack",
+        );
         assert_eq!(quit(&r, &t, Signal::Kill), Attempt::Sent);
         assert_eq!(r.sent(), [(900, Signal::Kill)]);
         r.fail_kill(SendError::Unsure("kill took longer than 5 s".into()));
-        assert_eq!(quit(&r, &t, Signal::Term), Attempt::Unsure("kill took longer than 5 s".into()));
-        r.fail_kill(SendError::NotSent("kill failed: Operation not permitted".into()));
+        assert_eq!(
+            quit(&r, &t, Signal::Term),
+            Attempt::Unsure("kill took longer than 5 s".into())
+        );
+        r.fail_kill(SendError::NotSent(
+            "kill failed: Operation not permitted".into(),
+        ));
         assert!(matches!(quit(&r, &t, Signal::Term), Attempt::Failed(_)));
         r.fail_ps("ps took longer than 5 s");
-        let Attempt::Failed(why) = quit(&r, &t, Signal::Term) else { panic!() };
+        let Attempt::Failed(why) = quit(&r, &t, Signal::Term) else {
+            panic!()
+        };
         assert!(why.contains("Nothing was sent"), "{why}");
         assert_eq!(r.sent().len(), 1);
     }
@@ -589,7 +768,9 @@ pub(crate) mod tests {
         let r = Recorder::default();
         let t = Target::of(&slack());
         r.zombie(900, "2026-11-20T00:28:38Z");
-        let Attempt::Refused(why) = quit(&r, &t, Signal::Kill) else { panic!() };
+        let Attempt::Refused(why) = quit(&r, &t, Signal::Kill) else {
+            panic!()
+        };
         assert!(why.contains("waiting for its parent"), "{why}");
         assert!(r.sent().is_empty());
         let now = r.identify(900).unwrap();
@@ -602,9 +783,18 @@ pub(crate) mod tests {
 
     #[test]
     fn a_kill_that_never_ran_sent_nothing_and_one_that_hung_may_have() {
-        assert!(matches!(send_failure(RunError::Spawn("no such file".into())), SendError::NotSent(_)));
-        assert_eq!(send_failure(RunError::Timeout(DEADLINE)), SendError::Unsure("kill took longer than 5 s".into()));
-        assert!(matches!(send_failure(RunError::Io("broken pipe".into())), SendError::Unsure(_)));
+        assert!(matches!(
+            send_failure(RunError::Spawn("no such file".into())),
+            SendError::NotSent(_)
+        ));
+        assert_eq!(
+            send_failure(RunError::Timeout(DEADLINE)),
+            SendError::Unsure("kill took longer than 5 s".into())
+        );
+        assert!(matches!(
+            send_failure(RunError::Io("broken pipe".into())),
+            SendError::Unsure(_)
+        ));
     }
 
     #[test]
@@ -619,29 +809,85 @@ pub(crate) mod tests {
         };
         assert!(with(&|p| p.pid = 0).unwrap().contains("kernel"));
         assert!(with(&|p| p.pid = 1).unwrap().contains("won't stop it"));
-        assert_eq!(with(&|p| p.pid = ME.pid).as_deref(), Some("This is Spectra Desktop itself."));
-        assert!(with(&|p| p.ppid = ME.pid).unwrap().contains("to take a reading"));
-        assert_eq!(with(&|p| { p.uid = 0; p.user = "root".into() }).as_deref(), Some("Owned by root; Spectra Desktop can't stop it"));
-        assert_eq!(with(&|p| { p.uid = -2; p.user.clear() }).as_deref(), Some("Owned by uid -2; Spectra Desktop can't stop it"));
-        assert!(with(&|p| p.started_at.clear()).unwrap().contains("didn't say when it started"));
+        assert_eq!(
+            with(&|p| p.pid = ME.pid).as_deref(),
+            Some("This is Spectra Desktop itself.")
+        );
+        assert!(
+            with(&|p| p.ppid = ME.pid)
+                .unwrap()
+                .contains("to take a reading")
+        );
+        assert_eq!(
+            with(&|p| {
+                p.uid = 0;
+                p.user = "root".into()
+            })
+            .as_deref(),
+            Some("Owned by root; Spectra Desktop can't stop it")
+        );
+        assert_eq!(
+            with(&|p| {
+                p.uid = -2;
+                p.user.clear()
+            })
+            .as_deref(),
+            Some("Owned by uid -2; Spectra Desktop can't stop it")
+        );
+        assert!(
+            with(&|p| p.started_at.clear())
+                .unwrap()
+                .contains("didn't say when it started")
+        );
         assert!(with(&|p| p.started_at = "yesterday".into()).is_some());
         // Its parent is not refused.
         assert_eq!(with(&|p| p.pid = 4999), None);
         // Run as root, it may stop anyone's; unsure who it is, the kill says.
         let mut root = slack();
         root.uid = 0;
-        assert_eq!(refusal(&root, Me { pid: 5000, uid: Some(0) }, &none), None);
-        assert_eq!(refusal(&root, Me { pid: 5000, uid: None }, &none), None);
+        assert_eq!(
+            refusal(
+                &root,
+                Me {
+                    pid: 5000,
+                    uid: Some(0)
+                },
+                &none
+            ),
+            None
+        );
+        assert_eq!(
+            refusal(
+                &root,
+                Me {
+                    pid: 5000,
+                    uid: None
+                },
+                &none
+            ),
+            None
+        );
     }
 
     #[test]
     fn what_the_apps_readings_started_is_refused_at_any_depth() {
         // 5000 (the app) → 5001 (spectra) → 5002 (ps) → 5003; 4000 → 4001 is someone else's.
-        let parents = [(5001, ME.pid), (5002, 5001), (5003, 5002), (4001, 4000), (4000, 1)];
+        let parents = [
+            (5001, ME.pid),
+            (5002, 5001),
+            (5003, 5002),
+            (4001, 4000),
+            (4000, 1),
+        ];
         let parent_of = |pid: u32| parents.iter().find(|(p, _)| *p == pid).map(|(_, pp)| *pp);
         let child = |ppid: u32| Process { ppid, ..slack() };
         for ppid in [ME.pid, 5001, 5002, 5003] {
-            assert!(refusal(&child(ppid), ME, &parent_of).unwrap().contains("to take a reading"), "under {ppid}");
+            assert!(
+                refusal(&child(ppid), ME, &parent_of)
+                    .unwrap()
+                    .contains("to take a reading"),
+                "under {ppid}"
+            );
         }
         assert_eq!(refusal(&child(4001), ME, &parent_of), None);
         // An ancestor gone from the reading ends the walk; a loop in a reading doesn't spin.
@@ -653,13 +899,22 @@ pub(crate) mod tests {
     #[test]
     fn the_confirmation_says_what_will_happen_in_plain_words() {
         let t = Target::of(&slack());
-        assert_eq!(consequence(&t, Signal::Term), ["Slack (pid 900) will be asked to close. Unsaved changes may be lost."]);
-        assert_eq!(consequence(&t, Signal::Kill), ["Slack (pid 900) will be stopped immediately. Unsaved changes will be lost."]);
+        assert_eq!(
+            consequence(&t, Signal::Term),
+            ["Slack (pid 900) will be asked to close. Unsaved changes may be lost."]
+        );
+        assert_eq!(
+            consequence(&t, Signal::Kill),
+            ["Slack (pid 900) will be stopped immediately. Unsaved changes will be lost."]
+        );
         let mut sys = slack();
         sys.role = Role::System;
         sys.command = "trustd".into();
         let lines = consequence(&Target::of(&sys), Signal::Term);
-        assert_eq!(lines[1], "This is part of macOS and may restart or disrupt your session.");
+        assert_eq!(
+            lines[1],
+            "This is part of macOS and may restart or disrupt your session."
+        );
     }
 
     /// Spawns `sleep 600` and makes sure it's gone however the test ends.
@@ -674,7 +929,10 @@ pub(crate) mod tests {
     }
 
     fn unix_now() -> i64 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
     }
 
     /// Spawns `prog` as this test's own child and reads its start from `ps`, which is where the
@@ -684,8 +942,15 @@ pub(crate) mod tests {
         let before = unix_now();
         let c = Child(Command::new(prog).arg(arg).spawn().expect("it runs"));
         let after = unix_now();
-        let id = System.identify(c.0.id()).expect("ps runs").expect("ps lists our child");
-        assert!((before - 1..=after + 1).contains(&id.started), "{} not in {before}..={after}", id.started);
+        let id = System
+            .identify(c.0.id())
+            .expect("ps runs")
+            .expect("ps lists our child");
+        assert!(
+            (before - 1..=after + 1).contains(&id.started),
+            "{} not in {before}..={after}",
+            id.started
+        );
         (c, id.started)
     }
 
@@ -702,7 +967,12 @@ pub(crate) mod tests {
         let day = doy - (153 * mp + 2) / 5 + 1;
         let month = if mp < 10 { mp + 3 } else { mp - 9 };
         let year = yoe + era * 400 + i64::from(month <= 2);
-        format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", s / 3600, s / 60 % 60, s % 60)
+        format!(
+            "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+            s / 3600,
+            s / 60 % 60,
+            s % 60
+        )
     }
 
     /// Lands what the worker threads finish, until `done` or ten seconds pass.
@@ -710,7 +980,10 @@ pub(crate) mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !done(s) {
             s.land_work();
-            assert!(std::time::Instant::now() < deadline, "the worker never answered");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the worker never answered"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -735,31 +1008,53 @@ pub(crate) mod tests {
             ..Process::default()
         };
         let mut s = crate::app::init();
-        s.me = Me { pid: u32::MAX, uid: Some(uid) };
+        s.me = Me {
+            pid: u32::MAX,
+            uid: Some(uid),
+        };
         assert!(s.poke_rx.is_some(), "no feed thread runs in a test");
-        assert!(matches!(s.runner, crate::app::Runner::Thread), "the real worker");
-        let settled = |s: &crate::app::App| s.outcome.as_ref().is_some_and(|o| o.status != crate::app::Status::Checking);
+        assert!(
+            matches!(s.runner, crate::app::Runner::Thread),
+            "the real worker"
+        );
+        let settled = |s: &crate::app::App| {
+            s.outcome
+                .as_ref()
+                .is_some_and(|o| o.status != crate::app::Status::Checking)
+        };
 
         s.land_procs(Ok(vec![sleeper(rfc3339(started - 1))]));
         s.ask(pid, Signal::Term);
         s.confirm();
         wait_for(&mut s, settled);
         let status = s.outcome.as_ref().map(|o| o.status.clone());
-        assert!(matches!(status, Some(crate::app::Status::Refused(_))), "{status:?}");
-        assert!(child.0.try_wait().unwrap().is_none(), "a second off sends nothing");
+        assert!(
+            matches!(status, Some(crate::app::Status::Refused(_))),
+            "{status:?}"
+        );
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "a second off sends nothing"
+        );
 
         s.land_procs(Ok(vec![sleeper(rfc3339(started))]));
         s.ask(pid, Signal::Term);
         assert!(s.confirm.is_some());
         s.confirm();
         wait_for(&mut s, settled);
-        assert_eq!(s.outcome.as_ref().map(|o| o.status.clone()), Some(crate::app::Status::Asked { at: 0.0 }));
+        assert_eq!(
+            s.outcome.as_ref().map(|o| o.status.clone()),
+            Some(crate::app::Status::Asked { at: 0.0 })
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let status = loop {
             if let Some(s) = child.0.try_wait().unwrap() {
                 break s;
             }
-            assert!(std::time::Instant::now() < deadline, "sleep {pid} still running");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "sleep {pid} still running"
+            );
             std::thread::sleep(Duration::from_millis(20));
         };
         use std::os::unix::process::ExitStatusExt;
@@ -775,7 +1070,10 @@ pub(crate) mod tests {
         let pid = child.0.id();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let id = loop {
-            let id = System.identify(pid).expect("ps runs").expect("unreaped, so still listed");
+            let id = System
+                .identify(pid)
+                .expect("ps runs")
+                .expect("unreaped, so still listed");
             if id.zombie {
                 break id;
             }
@@ -791,7 +1089,11 @@ pub(crate) mod tests {
             ..Process::default()
         });
         assert!(waits_for_parent(&t, Some(&id)));
-        assert!(verify(&t, Some(&id)).unwrap_err().contains("waiting for its parent"));
+        assert!(
+            verify(&t, Some(&id))
+                .unwrap_err()
+                .contains("waiting for its parent")
+        );
         drop(child);
     }
 }

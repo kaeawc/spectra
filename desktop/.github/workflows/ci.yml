@@ -69,5 +69,8 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
+      - name: Format
+        run: cargo fmt --check
+
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings

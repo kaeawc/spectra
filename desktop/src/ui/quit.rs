@@ -41,11 +41,20 @@ pub fn actions(s: &App, p: &Process, key: &str, k: &Kit) -> El {
         .variant(ButtonVariant::Danger)
         .icon(k.glyph.circle_x)
         .disabled(off)
-        .help(if checking { "Checking…".to_owned() } else { format!("Stop {name} (pid {pid}) immediately") })
+        .help(if checking {
+            "Checking…".to_owned()
+        } else {
+            format!("Stop {name} (pid {pid}) immediately")
+        })
         .on_press(move |s: &mut App| s.ask(pid, Signal::Kill))
         .build(k)
         .key(format!("{key}-force"));
-    let mut r = row().key(format!("{key}-actions")).gap(8.0).center_y().min_w(0.0).shrink();
+    let mut r = row()
+        .key(format!("{key}-actions"))
+        .gap(8.0)
+        .center_y()
+        .min_w(0.0)
+        .shrink();
     if let Some(why) = refusal {
         r = r.child(
             row()
@@ -138,13 +147,27 @@ pub fn dialog(s: &App, k: &Kit, layer: &mut Vec<El>) {
                 .px(10.0)
                 .radius(k.radius.md)
                 .border(1.0, k.c.warning.fg)
-                .child(text("Careful:").font(k.ty.small_medium).color(k.c.text_base))
-                .child(text(line.clone()).key(format!("confirm-line-{i}")).font(k.ty.small).color(k.c.text_base).wrap().grow(1.0).min_w(0.0)),
+                .child(
+                    text("Careful:")
+                        .font(k.ty.small_medium)
+                        .color(k.c.text_base),
+                )
+                .child(
+                    text(line.clone())
+                        .key(format!("confirm-line-{i}"))
+                        .font(k.ty.small)
+                        .color(k.c.text_base)
+                        .wrap()
+                        .grow(1.0)
+                        .min_w(0.0),
+                ),
         );
     }
     let send = match signal {
         Signal::Term => Button::new("Quit").variant(ButtonVariant::Contrast),
-        Signal::Kill => Button::new("Force quit").variant(ButtonVariant::Danger).icon(k.glyph.circle_x),
+        Signal::Kill => Button::new("Force quit")
+            .variant(ButtonVariant::Danger)
+            .icon(k.glyph.circle_x),
     };
     let buttons = row()
         .w_full()
@@ -158,7 +181,11 @@ pub fn dialog(s: &App, k: &Kit, layer: &mut Vec<El>) {
                 .key("confirm-cancel")
                 .autofocus(),
         )
-        .child(send.on_press(|s: &mut App| s.confirm()).build(k).key("confirm-send"));
+        .child(
+            send.on_press(|s: &mut App| s.confirm())
+                .build(k)
+                .key("confirm-send"),
+        );
     d = d.child(body.child(buttons));
     d.build(k, layer);
 }
@@ -176,7 +203,9 @@ pub fn outcome(s: &App, pid: Option<u32>, k: &Kit) -> Option<El> {
         Status::StillRunning | Status::MaybeSent { .. } | Status::Waiting { .. } => {
             (Some(k.glyph.dash), c.text_base, c.warning.fg)
         }
-        Status::Refused(_) | Status::Failed(_) => (Some(k.glyph.circle_x), c.text_base, c.danger.fg),
+        Status::Refused(_) | Status::Failed(_) => {
+            (Some(k.glyph.circle_x), c.text_base, c.danger.fg)
+        }
     };
     let line = o.line();
     let mut r = row()
@@ -193,9 +222,21 @@ pub fn outcome(s: &App, pid: Option<u32>, k: &Kit) -> Option<El> {
     if let Some(m) = mark {
         r = r.child(icon(m, 12.0).color(c.icon_base));
     }
-    r = r.child(text(line).key("quit-outcome-text").font(k.ty.small).color(ink).wrap().grow(1.0).min_w(0.0));
+    r = r.child(
+        text(line)
+            .key("quit-outcome-text")
+            .font(k.ty.small)
+            .color(ink)
+            .wrap()
+            .grow(1.0)
+            .min_w(0.0),
+    );
     let alive = s.process(o.target.pid).is_some_and(|p| o.target.is(p));
-    if o.status == Status::StillRunning && o.signal == Signal::Term && alive && s.refusal(o.target.pid).is_none() {
+    if o.status == Status::StillRunning
+        && o.signal == Signal::Term
+        && alive
+        && s.refusal(o.target.pid).is_none()
+    {
         // The process as drawn: if its pid changes hands before the press, the press opens nothing.
         let target = o.target.clone();
         r = r.child(
@@ -232,7 +273,9 @@ pub fn ended(s: &App, t: &Target, k: &Kit) -> El {
         Some(o) if o.status == Status::Ended => o.line(),
         _ => format!("{} has ended", t.name),
     };
-    let to = s.back_to().map_or_else(|| s.nav.title().to_owned(), |pid| super::page_name(s, pid));
+    let to = s
+        .back_to()
+        .map_or_else(|| s.nav.title().to_owned(), |pid| super::page_name(s, pid));
     col()
         .key("ended-page")
         .w_full()
@@ -242,15 +285,29 @@ pub fn ended(s: &App, t: &Target, k: &Kit) -> El {
             row()
                 .gap(10.0)
                 .center_y()
-                .child(text(t.name.clone()).key("ended-name").font(k.ty.body_medium).color(c.text_base))
-                .child(text(format!("pid {} · started {}", t.pid, p.started())).font(k.ty.small).color(c.text_muted)),
+                .child(
+                    text(t.name.clone())
+                        .key("ended-name")
+                        .font(k.ty.body_medium)
+                        .color(c.text_base),
+                )
+                .child(
+                    text(format!("pid {} · started {}", t.pid, p.started()))
+                        .font(k.ty.small)
+                        .color(c.text_muted),
+                ),
         )
         .child(
             row()
                 .gap(8.0)
                 .center_y()
                 .child(icon(k.glyph.check_small, 14.0).color(c.icon_base))
-                .child(text(said).key("ended-said").font(k.ty.ui_medium).color(c.text_base)),
+                .child(
+                    text(said)
+                        .key("ended-said")
+                        .font(k.ty.ui_medium)
+                        .color(c.text_base),
+                ),
         )
         .child(
             text("It's no longer running, so there's nothing more to show.")

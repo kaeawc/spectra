@@ -97,7 +97,11 @@ fn name_cell(n: Name, k: &Kit) -> Cell {
     let c = &k.c;
     let mark = match n.twisty {
         Some((what, open)) => {
-            let glyph = if open { k.glyph.triangle_down } else { k.glyph.triangle_right };
+            let glyph = if open {
+                k.glyph.triangle_down
+            } else {
+                k.glyph.triangle_right
+            };
             let key = match &what {
                 Twisty::Group(id) => format!("twisty-{id}"),
                 Twisty::Branch(pid) => format!("twisty-p{pid}"),
@@ -105,7 +109,11 @@ fn name_cell(n: Name, k: &Kit) -> Cell {
             row()
                 .key(key)
                 .role("button")
-                .label(format!("{} {}", if open { "Close" } else { "Open" }, n.name))
+                .label(format!(
+                    "{} {}",
+                    if open { "Close" } else { "Open" },
+                    n.name
+                ))
                 .cursor(Cursor::Pointer)
                 .size(18.0, 18.0)
                 .center()
@@ -162,7 +170,11 @@ fn name_cell(n: Name, k: &Kit) -> Cell {
 /// A tree row: the process, indented under its parent with a triangle when it has children,
 /// and in "With children" what its whole branch uses.
 fn tree_cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
-    let Some((r, node)) = s.rows.get(i).and_then(|r| Some((r, s.tree.nodes.get(r.group)?))) else {
+    let Some((r, node)) = s
+        .rows
+        .get(i)
+        .and_then(|r| Some((r, s.tree.nodes.get(r.group)?)))
+    else {
         return Cell::text("");
     };
     let Some(p) = s.process(node.pid) else {
@@ -170,15 +182,29 @@ fn tree_cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
     };
     match column {
         "name" => {
-            let twisty = s.tree_has_children(node.pid).then(|| (Twisty::Branch(node.pid), s.tree_is_open(node.pid)));
+            let twisty = s
+                .tree_has_children(node.pid)
+                .then(|| (Twisty::Branch(node.pid), s.tree_is_open(node.pid)));
             let kind = format!("{} · {}", p.runtime.label(), p.role.label());
-            name_cell(Name { name: p.name().into_owned(), hint: None, kind, depth: r.depth, twisty }, k)
+            name_cell(
+                Name {
+                    name: p.name().into_owned(),
+                    hint: None,
+                    kind,
+                    depth: r.depth,
+                    twisty,
+                },
+                k,
+            )
         }
         "sign" => Cell::el(sign_badge(p.trust(), k)),
         "cpu" => number(fmt_cpu(p.cpu_pct), k),
         "mem" => number(fmt_mem(p.rss_kib), k),
         "sub" if node.children.is_empty() => Cell::text("—").muted(),
-        "sub" => number(format!("{} · {}", fmt_cpu(node.sub_cpu), fmt_mem(node.sub_rss_kib)), k),
+        "sub" => number(
+            format!("{} · {}", fmt_cpu(node.sub_cpu), fmt_mem(node.sub_rss_kib)),
+            k,
+        ),
         "threads" => number(fmt_count(p.thread_count), k),
         "pid" => Cell::text(node.pid.to_string()).muted(),
         _ => Cell::text(""),
@@ -203,7 +229,13 @@ fn cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
                     };
                     let open = s.open_groups.contains(&g.id);
                     name_cell(
-                        Name { name: g.name.clone(), hint: g.hint.clone(), kind, depth: 0, twisty: Some((Twisty::Group(g.id.clone()), open)) },
+                        Name {
+                            name: g.name.clone(),
+                            hint: g.hint.clone(),
+                            kind,
+                            depth: 0,
+                            twisty: Some((Twisty::Group(g.id.clone()), open)),
+                        },
                         k,
                     )
                 }
@@ -228,8 +260,21 @@ fn cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
                         format!("{} · {}", p.runtime.label(), p.role.label())
                     };
                     // A process on its own row speaks for its group, hint and all.
-                    let hint = if r.depth == 0 { s.groups.get(r.group).and_then(|g| g.hint.clone()) } else { None };
-                    name_cell(Name { name: p.name().into_owned(), hint, kind, depth: r.depth, twisty: None }, k)
+                    let hint = if r.depth == 0 {
+                        s.groups.get(r.group).and_then(|g| g.hint.clone())
+                    } else {
+                        None
+                    };
+                    name_cell(
+                        Name {
+                            name: p.name().into_owned(),
+                            hint,
+                            kind,
+                            depth: r.depth,
+                            twisty: None,
+                        },
+                        k,
+                    )
                 }
                 "sign" => Cell::el(sign_badge(p.trust(), k)),
                 "cpu" => number(fmt_cpu(p.cpu_pct), k),
@@ -248,19 +293,47 @@ fn row_id(s: &App, i: usize) -> Cow<'_, str> {
 
 fn table(s: &App, k: &Kit) -> El {
     let ck = k.clone();
-    let num = |id: &str, title: &str, w: f32| TableColumn::new(id, title).width(w).min(w - 12.0).max(w + 60.0).align(Align::End);
-    let mut t = Table::new(|s: &App| &s.table, |s: &mut App| &mut s.table, |s: &App| s.rows.len(), row_id)
-        .name("Processes")
-        .column(TableColumn::new("name", "Name").flex(1.0).min(180.0).sortable());
+    let num = |id: &str, title: &str, w: f32| {
+        TableColumn::new(id, title)
+            .width(w)
+            .min(w - 12.0)
+            .max(w + 60.0)
+            .align(Align::End)
+    };
+    let mut t = Table::new(
+        |s: &App| &s.table,
+        |s: &mut App| &mut s.table,
+        |s: &App| s.rows.len(),
+        row_id,
+    )
+    .name("Processes")
+    .column(
+        TableColumn::new("name", "Name")
+            .flex(1.0)
+            .min(180.0)
+            .sortable(),
+    );
     // Linux has no code signatures to show.
     if s.stats.signed {
-        t = t.column(TableColumn::new("sign", "Signature").width(184.0).min(110.0).max(260.0));
+        t = t.column(
+            TableColumn::new("sign", "Signature")
+                .width(184.0)
+                .min(110.0)
+                .max(260.0),
+        );
     }
     // Moving the cursor (a click, an arrow key) only moves it; Return or a double click opens.
-    t = t.column(num("cpu", "CPU", 72.0).sortable()).column(num("mem", "Memory", 80.0).sortable());
+    t = t
+        .column(num("cpu", "CPU", 72.0).sortable())
+        .column(num("mem", "Memory", 80.0).sortable());
     t = match s.view {
-        View::Grouped => t.column(num("threads", "Threads", 74.0)).column(num("count", "Processes", 90.0)),
-        View::Tree => t.column(num("sub", "With children", 150.0)).column(num("threads", "Threads", 74.0)),
+        View::Grouped => {
+            t.column(num("threads", "Threads", 74.0))
+                .column(num("count", "Processes", 90.0))
+        }
+        View::Tree => t
+            .column(num("sub", "With children", 150.0))
+            .column(num("threads", "Threads", 74.0)),
     };
     t.column(num("pid", "PID", 64.0))
         .cell(move |s: &App, i, column| cell(s, i, column, &ck))
@@ -273,7 +346,13 @@ fn table(s: &App, k: &Kit) -> El {
 
 pub fn list(s: &App, k: &Kit) -> El {
     let c = &k.c;
-    let page = col().key("list").w_full().h_full().min_h(0.0).padding(16.0).gap(12.0);
+    let page = col()
+        .key("list")
+        .w_full()
+        .h_full()
+        .min_h(0.0)
+        .padding(16.0)
+        .gap(12.0);
     if let Some(n) = super::home::feed_notice(s, k) {
         return page.child(n);
     }
@@ -281,14 +360,25 @@ pub fn list(s: &App, k: &Kit) -> El {
         View::Grouped => (s.groups.iter().map(|g| g.pids.len()).sum(), s.groups.len()),
         View::Tree => (s.tree_matches, s.rows.len()),
     };
-    let what = if s.nav == Nav::All { "processes".to_owned() } else { format!("of {} processes", fmt_count(s.procs.len() as u64)) };
-    let count = format!("{} {what} · {} rows", fmt_count(shown as u64), fmt_count(rows as u64));
-    let views = SegmentedControl::new(&["Grouped", "Tree"], Some(usize::from(s.view == View::Tree)))
-        .label("Show processes")
-        .fit()
-        .on_pick(|s: &mut App, i: usize, _| s.set_view(if i == 1 { View::Tree } else { View::Grouped }))
-        .build(k)
-        .key("view-mode");
+    let what = if s.nav == Nav::All {
+        "processes".to_owned()
+    } else {
+        format!("of {} processes", fmt_count(s.procs.len() as u64))
+    };
+    let count = format!(
+        "{} {what} · {} rows",
+        fmt_count(shown as u64),
+        fmt_count(rows as u64)
+    );
+    let views = SegmentedControl::new(
+        &["Grouped", "Tree"],
+        Some(usize::from(s.view == View::Tree)),
+    )
+    .label("Show processes")
+    .fit()
+    .on_pick(|s: &mut App, i: usize, _| s.set_view(if i == 1 { View::Tree } else { View::Grouped }))
+    .build(k)
+    .key("view-mode");
     let search = TextInput::new(&s.query)
         .placeholder("Search name, pid, bundle id or path")
         .label("Search processes")
@@ -299,11 +389,23 @@ pub fn list(s: &App, k: &Kit) -> El {
         .on_change(|s: &mut App, _| s.rebuild())
         .build(k)
         .key("search");
-    let mut bar = row().w_full().gap(12.0).center_y().flex_wrap().child(search).child(views).child(el().grow(1.0));
+    let mut bar = row()
+        .w_full()
+        .gap(12.0)
+        .center_y()
+        .flex_wrap()
+        .child(search)
+        .child(views)
+        .child(el().grow(1.0));
     if let Some(actions) = super::quit::list_actions(s, k) {
         bar = bar.child(actions);
     }
-    let bar = bar.child(text(count).key("list-count").font(k.ty.small).color(c.text_muted));
+    let bar = bar.child(
+        text(count)
+            .key("list-count")
+            .font(k.ty.small)
+            .color(c.text_muted),
+    );
     let mut page = page.child(bar);
     if let Some(o) = super::quit::outcome(s, None, k) {
         page = page.child(o);
@@ -312,7 +414,11 @@ pub fn list(s: &App, k: &Kit) -> El {
         page = page.child(status);
     }
     let body = if s.rows.is_empty() {
-        col().w_full().child(notice("Nothing matches", "Try another word, or clear the search.", k))
+        col().w_full().child(notice(
+            "Nothing matches",
+            "Try another word, or clear the search.",
+            k,
+        ))
     } else {
         col()
             .key("frame")

@@ -1079,8 +1079,14 @@ pub mod tests {
         s.visible = false;
         assert!(!s.activity_wanted(), "nobody can see the page");
         s.toggle_keep_recording();
-        assert!(s.activity_wanted(), "keep recording is the one deliberate exception");
-        assert!(!s.activity_open(), "and it looks at the background interval");
+        assert!(
+            s.activity_wanted(),
+            "keep recording is the one deliberate exception"
+        );
+        assert!(
+            !s.activity_open(),
+            "and it looks at the background interval"
+        );
     }
 
     #[test]

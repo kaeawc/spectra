@@ -118,13 +118,7 @@ fn memory_by_kind(s: &App, k: &Kit) -> El {
                             .child(el().grow(1.0))
                             .child(text(fmt_mem(*kib)).font(figures).color(c.text_base)),
                     )
-                    .child(
-                        el().w_full()
-                            .h(4.0)
-                            .radius(2.0)
-                            .fill(c.layer_03)
-                            .child(bar),
-                    ),
+                    .child(el().w_full().h(4.0).radius(2.0).fill(c.layer_03).child(bar)),
             )
         },
     )
@@ -175,7 +169,9 @@ pub fn feed_status(s: &App, k: &Kit) -> Option<El> {
 fn action_link(s: &App, action: &Action) -> (String, String) {
     match action {
         Action::Process(pid) => {
-            let name = s.process(*pid).map_or_else(|| format!("pid {pid}"), |p| p.name().into_owned());
+            let name = s
+                .process(*pid)
+                .map_or_else(|| format!("pid {pid}"), |p| p.name().into_owned());
             (format!("{name} · {pid}"), format!("Open {name}"))
         }
         Action::App(path) => {
@@ -203,17 +199,12 @@ fn right_now_item(s: &App, i: usize, item: &Item, k: &Kit) -> El {
             Action::App(path) => s.open_app(path),
             Action::Machine => s.show(Nav::System),
         });
-    let mut words = col()
-        .grow(1.0)
-        .shrink()
-        .min_w(0.0)
-        .gap(2.0)
-        .child(
-            text(item.title.clone())
-                .key(format!("{key}-title"))
-                .font(k.ty.ui_medium)
-                .color(c.text_base),
-        );
+    let mut words = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(
+        text(item.title.clone())
+            .key(format!("{key}-title"))
+            .font(k.ty.ui_medium)
+            .color(c.text_base),
+    );
     if !item.evidence.is_empty() {
         words = words.child(
             text(item.evidence.clone())
@@ -275,22 +266,36 @@ fn right_now(s: &App, items: &[Item], k: &Kit) -> Option<El> {
         );
     }
     let mut section = col().key("right-now").w_full().gap(8.0).child(head);
-    let line = |key: &str, words: String| text(words).key(key.to_owned()).font(k.ty.small).color(c.text_muted).wrap();
+    let line = |key: &str, words: String| {
+        text(words)
+            .key(key.to_owned())
+            .font(k.ty.small)
+            .color(c.text_muted)
+            .wrap()
+    };
     match (&w.report, &w.error) {
         (None, Some(e)) => {
-            section = section.child(line("right-now-error", format!("Couldn't check what's slowing this Mac: {e}")));
+            section = section.child(line(
+                "right-now-error",
+                format!("Couldn't check what's slowing this Mac: {e}"),
+            ));
         }
         (None, None) => {
-            section = section.child(line("right-now-checking", "Asking Spectra what's slowing this Mac down…".into()));
+            section = section.child(line(
+                "right-now-checking",
+                "Asking Spectra what's slowing this Mac down…".into(),
+            ));
         }
         (Some(_), _) if items.is_empty() => {
-            section = section.child(line("right-now-clear", "Nothing is slowing this Mac down right now.".into()));
+            section = section.child(line(
+                "right-now-clear",
+                "Nothing is slowing this Mac down right now.".into(),
+            ));
         }
         (Some(_), _) => {
-            section = items
-                .iter()
-                .enumerate()
-                .fold(section, |sec, (i, item)| sec.child(right_now_item(s, i, item, k)));
+            section = items.iter().enumerate().fold(section, |sec, (i, item)| {
+                sec.child(right_now_item(s, i, item, k))
+            });
         }
     }
     Some(section)
@@ -300,8 +305,15 @@ pub fn home(s: &App, k: &Kit) -> El {
     let c = &k.c;
     let now = s.right_now();
     // A finding "Right now" already says is shown there, once.
-    let covered: HashSet<&str> = now.iter().flat_map(|i| i.covers.iter().map(String::as_str)).collect();
-    let findings: Vec<&Finding> = s.findings.iter().filter(|f| !covered.contains(f.id().as_str())).collect();
+    let covered: HashSet<&str> = now
+        .iter()
+        .flat_map(|i| i.covers.iter().map(String::as_str))
+        .collect();
+    let findings: Vec<&Finding> = s
+        .findings
+        .iter()
+        .filter(|f| !covered.contains(f.id().as_str()))
+        .collect();
     let mut list = col().key("findings").w_full().padding(24.0).gap(10.0);
     if let Some(n) = feed_notice(s, k) {
         list = list.child(n);
