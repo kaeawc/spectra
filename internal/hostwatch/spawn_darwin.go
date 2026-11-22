@@ -79,8 +79,15 @@ func readProcArgs2(pid int, buf []byte) ([]byte, error) {
 	}
 	mib := [3]int32{unix.CTL_KERN, kernProcArgs2, int32(pid)}
 	n := uintptr(len(buf))
-	_, _, e := syscall.Syscall6(syscall.SYS___SYSCTL, uintptr(unsafe.Pointer(&mib[0])), uintptr(len(mib)),
-		uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&n)), 0, 0)
+	_, _, e := syscall.Syscall6(syscall.SYS___SYSCTL,
+		uintptr(unsafe.Pointer(&mib[0])), // #nosec G103 -- kernel ABI mib array
+		uintptr(len(mib)),
+		uintptr(unsafe.Pointer(&buf[0])), // #nosec G103 -- kernel fills buf, bounded by n
+		uintptr(unsafe.Pointer(&n)),      // #nosec G103 -- in/out size_t length
+		0, 0)
+	if n > uintptr(len(buf)) {
+		n = uintptr(len(buf))
+	}
 	if e != 0 {
 		return nil, e
 	}
