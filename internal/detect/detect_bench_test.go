@@ -3,6 +3,7 @@ package detect
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -44,6 +45,39 @@ func benchBundle(b *testing.B) string {
 		}
 	}
 	return app
+}
+
+// BenchmarkDetectBundle measures Detect over a bundle whose main executable is
+// large and carries Rust panic-site markers, plus a wide Resources tree. It
+// exercises the binary marker scan (read once, streamed with a reused buffer)
+// and the bundle tree walk.
+func BenchmarkDetectBundle(b *testing.B) {
+	app := benchBundle(b)
+	exe := make([]byte, 48<<20)
+	marker := []byte("core::panicking rustc/ panicked at ")
+	for off := 0; off+len(marker) < len(exe); off += 1 << 18 {
+		copy(exe[off:], marker)
+	}
+	if err := os.WriteFile(filepath.Join(app, "Contents", "MacOS", "main"), exe, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	res := filepath.Join(app, "Contents", "Resources", "wide")
+	if err := os.MkdirAll(res, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < 2000; i++ {
+		p := filepath.Join(res, "f"+strconv.Itoa(i)+".dat")
+		if err := os.WriteFile(p, []byte("data"), 0o644); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := DetectWith(app, Options{}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 // BenchmarkDetectWith measures the full single-app inspection pipeline. It is
