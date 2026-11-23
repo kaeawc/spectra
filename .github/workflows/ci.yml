@@ -270,9 +270,12 @@ jobs:
           rc=0; spectra load --json --top 3 --root "$root" > load.json || rc=$?
           [ "$rc" = 0 ] || [ "$rc" = 3 ] || [ "$rc" = 4 ]
           jq -e '(.load1 | type) == "number" and .cpus >= 1 and (.devices | type) == "object"' load.json
-          spectra orphans --json --root "$root" | jq -e '.groups | type == "array"'
-          spectra owner --under --json "$root" | jq -e '.holders | type == "array"'
-          spectra idle --json --pids "$$" --min-age 1s | jq -e '.result.holders | type == "array"'
+          # verdict exits: orphans/idle 3 = some found; owner 3 = none, 4 = none
+          # but some processes unreadable (other users' on a non-root runner).
+          verdict() { want=$1; shift; rc=0; "$@" > out.json || rc=$?; case " 0 $want " in *" $rc "*) ;; *) echo "exit $rc"; return 1 ;; esac; }
+          verdict 3 spectra orphans --json --root "$root" && jq -e '.groups | type == "array"' out.json
+          verdict "3 4" spectra owner --under --json "$root" && jq -e '.holders | type == "array"' out.json
+          verdict 3 spectra idle --json --pids "$$" --min-age 1s && jq -e '.result.holders | type == "array"' out.json
           spectra lineage --json "$$" | jq -e '.pid > 0'
           spectra process --json | jq -e 'length > 0'
       - name: Install the pinned release with signature verification
