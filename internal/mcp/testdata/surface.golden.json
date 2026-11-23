@@ -2330,7 +2330,7 @@
       }
     },
     {
-      "description": "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+      "description": "Memory pressure and swap: VM compressor on macOS; MemAvailable, PSI stalls and zswap on Linux. Ask: \"Is the system under memory pressure?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"

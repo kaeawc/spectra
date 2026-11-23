@@ -84,7 +84,7 @@ func powerToolDef() ToolDefinition {
 func memoryToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "memory",
-		Description: "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+		Description: "Memory pressure and swap: VM compressor on macOS; MemAvailable, PSI stalls and zswap on Linux. Ask: \"Is the system under memory pressure?\"",
 		InputSchema: objectSchema(map[string]interface{}{}, nil),
 	}
 }
