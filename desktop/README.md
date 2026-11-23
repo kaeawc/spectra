@@ -149,10 +149,25 @@ What it shows:
     frames. It runs only on that press.
   - A frame in an open-source system library (libdispatch, xnu's libsystem_kernel, libpthread,
     libobjc, CoreFoundation's open part, the Swift runtime and a few more) has View source:
-    it searches that library's public repository for the symbol in your browser. Other frames
-    get no link; reports carry no file or line, so nothing guesses one. An opened crash from
+    it searches that library's public repository for the symbol in your browser. Reports carry
+    no file or line, so nothing guesses one. Every other frame has Show code (below). An opened crash from
     the last week also offers See what changed then: the Timeline over the shortest window that
     holds it, with the rows from just before it marked.
+  - Show code opens the frame's code in a panel, made here by the developer tools on this Mac
+    (not Spectra), only on that press: pseudo-C from a decompiler when one is installed (Ghidra's
+    analyzeHeadless, radare2 with r2ghidra or r2dec, RetDec) and the image is a file on disk;
+    otherwise lldb's disassembly, which also reads Apple's frameworks out of the shared cache by
+    loading the crashed process (or a stock app) with what it links; otherwise llvm-objdump or
+    otool. The frame's `+ N` is highlighted, and Copy takes every line. The same panel opens from
+    the flame graph's heaviest functions (looked up in the sampled process's executable and what
+    it links) and from a JVM thread dump's frames (CFR, Procyon, Fernflower or jadx when the
+    class is found on the JVM's classpath, else `javap -c -p -l` from the JVM's own JDK, with
+    the frame's line marked in the bytecode). JavaScript and Python frames, once a page lists
+    them, show their source file at the line (pretty-printed when minified), or a `.pyc`'s
+    bytecode. Tools are found on PATH, through `xcrun -f` and in their usual install folders;
+    nothing is installed. Each view has 30 s and 2 MB in all, writes only to a temp folder it
+    removes, and closing the panel or leaving the page stops it. When nothing can show the code,
+    the panel says why.
   - A row whose process is running now says so, from the process list the app already has: pid,
     how long it has been up, CPU, memory, and whether it started after its last crash. On a
     picked row, Open process opens its page and Sample now opens it and starts its Sample tool,

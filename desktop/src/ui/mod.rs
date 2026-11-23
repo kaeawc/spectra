@@ -5,6 +5,7 @@ mod activity;
 mod app_page;
 mod card;
 mod chart;
+mod codeview;
 mod compare;
 mod crash_strip;
 mod crashes;
@@ -23,6 +24,8 @@ mod system;
 mod tests;
 #[cfg(test)]
 mod tests_activity;
+#[cfg(test)]
+mod tests_codeview;
 #[cfg(test)]
 mod tests_compare;
 #[cfg(test)]
@@ -63,6 +66,16 @@ use card::dot;
 /// Keys nothing focused took: the sidebar toggle, Esc or Cmd-[ to go back from a page, and
 /// ⌥⌘Q to open the Quit confirmation (which a key never answers on its own).
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    // Esc closes the code view (and stops its tools) rather than going back, unless a
+    // confirmation is showing: Esc answers that first. Other keys work as without the panel.
+    if s.codeview.open.is_some()
+        && ev.key == Key::Escape
+        && s.confirm.is_none()
+        && s.startup.confirm.is_none()
+    {
+        s.close_code();
+        return true;
+    }
     if s.startup.confirm.is_some() {
         // Like Quit's: Esc cancels the Disable or Enable confirmation; nothing else answers it.
         if ev.key == Key::Escape {
@@ -316,6 +329,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .reduced_motion(cx.is_reduced_motion())
         .build(&k);
     let mut layer = Vec::new();
+    // Under the confirmations, so one opened over the panel takes Esc first.
+    codeview::dialog(s, &k, &mut layer);
     quit::dialog(s, &k, &mut layer);
     startup::dialog(s, &k, &mut layer);
     root(split, layer)

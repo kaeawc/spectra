@@ -1,0 +1,13 @@
+
+/* WARNING: Unknown calling convention */
+
+int ledger_flush(ledger_t *l)
+{
+  int n;
+
+  n = store_flush(l->store);
+  if (n < 0) {
+    log_error("flush failed: %d", n);
+  }
+  return n;
+}

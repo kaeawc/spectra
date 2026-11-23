@@ -385,6 +385,8 @@ pub struct App {
     pub timeline: crate::timeline::TimelinePage,
     /// What has been crashing, for the Crashes page.
     pub crashes: crate::crashes::CrashesPage,
+    /// The code view a "Show code" press opens.
+    pub codeview: crate::codeview::CodeView,
 }
 
 pub fn init() -> App {
@@ -470,6 +472,7 @@ pub fn init() -> App {
         growth: crate::growth::Growth::new(),
         timeline: crate::timeline::TimelinePage::new(),
         crashes: crate::crashes::CrashesPage::new(),
+        codeview: crate::codeview::CodeView::new(),
     }
 }
 

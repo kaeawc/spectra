@@ -427,8 +427,8 @@ fn item(
 }
 
 /// A decoded report: what happened, how it ended, and the crashed thread's top frames. A frame
-/// in an open-source system library links to a search of its public source, and a crash in the
-/// last week links to the Timeline around it.
+/// in an open-source system library links to a search of its public source, any other frame can
+/// show its code (`codeview.rs`), and a crash in the last week links to the Timeline around it.
 fn opened(s: &App, key: &str, r: &Inspected, k: &Kit) -> El {
     let wall = (s.wall)();
     let c = &k.c;
@@ -569,6 +569,18 @@ fn opened(s: &App, key: &str, r: &Inspected, k: &Kit) -> El {
                     })
                     .build(k)
                     .key(format!("{key}-frame-{n}-source")),
+            );
+        } else {
+            // No public source: the code itself, decompiled or disassembled here.
+            let (frame, path) = (f.clone(), r.path.clone());
+            line = line.child(
+                Button::new("Show code")
+                    .variant(ButtonVariant::GhostMuted)
+                    .control_size(ControlSize::Small)
+                    .help("Decompile or disassemble this function with the tools on this Mac")
+                    .on_press(move |s: &mut App| s.show_crash_code(&frame, &path))
+                    .build(k)
+                    .key(format!("{key}-frame-{n}-code")),
             );
         }
         frames = frames.child(line);

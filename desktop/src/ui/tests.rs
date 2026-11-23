@@ -971,6 +971,62 @@ fn the_shortcut_only_opens_the_confirmation() {
     assert!(r.sent().is_empty());
 }
 
+/// Opens the code view's panel on the page as it is, without running anything.
+fn open_code_panel(rt: &mut Runtime<App>) {
+    rt.update(|s, _| {
+        let req = crate::codeview_plan::Request::Script {
+            frame: "at /srv/web/a.js:2:1".into(),
+        };
+        s.codeview.open = Some(crate::codeview::Panel {
+            title: req.title(),
+            request: req,
+            origin: s.origin(),
+            state: crate::codeview::State::Running,
+            show_all: false,
+        });
+    });
+    settle(rt);
+}
+
+#[test]
+fn shortcuts_keep_working_while_the_code_view_is_open() {
+    let (mut rt, _) = recorded(quit_scene);
+    open_code_panel(&mut rt);
+    // ⌥⌘Q still opens Quit, and Esc answers Quit before it closes the panel.
+    rt.key(opt_cmd_q());
+    settle(&mut rt);
+    assert_eq!(rt.state.confirm.as_ref().map(|c| c.target.pid), Some(900));
+    key(&mut rt, Key::Escape);
+    assert!(rt.state.confirm.is_none());
+    assert!(rt.state.codeview.open.is_some());
+    key(&mut rt, Key::Escape);
+    assert!(rt.state.codeview.open.is_none());
+    assert_eq!(rt.state.selected, Some(900), "Esc closed only the panel");
+    // The sidebar toggle.
+    open_code_panel(&mut rt);
+    let was = rt.state.sidebar.is_open();
+    rt.key(KeyEvent {
+        key: Key::Command('b'),
+        mods: rune::Mods {
+            cmd: true,
+            shift: true,
+            ..rune::Mods::default()
+        },
+    });
+    settle(&mut rt);
+    assert_ne!(rt.state.sidebar.is_open(), was);
+    // Cmd-[ goes back.
+    rt.key(KeyEvent {
+        key: Key::Command('['),
+        mods: rune::Mods {
+            cmd: true,
+            ..rune::Mods::default()
+        },
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.selected, None);
+}
+
 #[test]
 fn typing_in_the_search_field_triggers_nothing() {
     let (mut rt, r) = recorded(quit_list_scene);

@@ -92,6 +92,8 @@ pub struct Resource {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Inspected {
     pub process: String,
+    /// The crashed process's executable, as the report names it.
+    pub path: String,
     pub version: String,
     pub pid: Option<i64>,
     pub at: Option<i64>,
@@ -250,6 +252,7 @@ struct RawResource {
 #[serde(default)]
 struct RawInspected {
     process: Option<String>,
+    path: Option<String>,
     version: Option<String>,
     pid: Option<i64>,
     time: Option<String>,
@@ -364,6 +367,7 @@ pub fn parse_inspect(json: &str) -> Result<Inspected, String> {
         .cloned();
     Ok(Inspected {
         process: text(r.process),
+        path: text(r.path),
         version: text(r.version),
         pid: r.pid.filter(|p| *p > 0),
         at: r.time.as_deref().and_then(parse_time),

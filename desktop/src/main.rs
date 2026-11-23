@@ -5,6 +5,10 @@
 
 mod app;
 mod bundle;
+mod codeview;
+mod codeview_parse;
+mod codeview_plan;
+mod codeview_tools;
 mod compare;
 mod crash_live;
 mod crash_source;
@@ -26,6 +30,7 @@ mod procs;
 mod run;
 mod sample;
 mod sample_activity;
+mod sample_codeview;
 mod sample_compare;
 mod sample_crashes;
 mod sample_flame;
@@ -132,6 +137,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.growth.cancel();
     s.timeline.cancel();
     s.crashes.cancel();
+    s.codeview.close();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -181,6 +187,8 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     landed |= s.land_timeline();
     // The Crashes page's reading and an opened report: only on opening the page or a press.
     landed |= s.land_crashes();
+    // A "Show code" press's tools; leaving the page closes the panel.
+    landed |= s.land_codeview();
     if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
         tx.wake_after(STATUS_TICK);
     }
@@ -373,6 +381,9 @@ fn main() {
                 "crashes-report-links",
                 sample_crashes::crashes_report_links_scene,
             ),
+            ("codeview-native", sample_codeview::codeview_native_scene),
+            ("codeview-jvm", sample_codeview::codeview_jvm_scene),
+            ("codeview-none", sample_codeview::codeview_none_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

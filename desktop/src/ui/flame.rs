@@ -5,7 +5,7 @@
 //! `flame.rs`, built when the result was read; drawing only turns its blocks into elements.
 
 use rune::{Color, Cursor, El, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, Kit};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use super::{Col, figure, grid, line, name};
 use crate::app::App;
@@ -160,14 +160,33 @@ fn rows(f: &Flame, k: &Kit) -> El {
     chart
 }
 
-fn heaviest(f: &Flame, k: &Kit) -> El {
+/// The functions that ran the most themselves; a named one can show its code.
+fn heaviest(f: &Flame, pid: u32, k: &Kit) -> El {
     let rows = f
         .view
         .heaviest
         .iter()
-        .map(|h| {
+        .enumerate()
+        .map(|(i, h)| {
+            let mut who = row()
+                .w_full()
+                .gap(8.0)
+                .center_y()
+                .child(col().grow(1.0).min_w(0.0).child(name(h.name.clone(), k)));
+            if !h.unnamed {
+                let symbol = h.name.clone();
+                who = who.child(
+                    Button::new("Show code")
+                        .variant(ButtonVariant::GhostMuted)
+                        .control_size(ControlSize::Small)
+                        .help("Disassemble this function with the tools on this Mac")
+                        .on_press(move |s: &mut App| s.show_sampled_code(pid, &symbol))
+                        .build(k)
+                        .key(format!("flame-heavy-{i}-code")),
+                );
+            }
             vec![
-                name(h.name.clone(), k),
+                who,
                 figure(pct(f.share(h.self_samples)), k),
                 figure(h.self_samples.to_string(), k),
             ]
@@ -299,5 +318,5 @@ pub fn chart(r: &SampleReport, k: &Kit) -> El {
     for (key, n) in notes {
         body = body.child(line(n, k).key(key));
     }
-    body.child(heaviest(f, k))
+    body.child(heaviest(f, r.pid, k))
 }

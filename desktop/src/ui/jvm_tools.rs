@@ -3,7 +3,7 @@
 //! Spectra's diagnosis, a heap dump with its analyses, and a flight recording.
 
 use rune::{Cursor, El, col, el, icon, row, text};
-use rune_kit::{Kit, SegmentedControl, TextInput};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, TextInput};
 
 use super::{Col, failed, figure, figures, grid, line, mono, name, status, tool_row, verdict};
 use crate::app::App;
@@ -260,13 +260,14 @@ pub(super) fn threads(s: &App, r: &ThreadDumpReport, k: &Kit) -> El {
                     .help_when_truncated(names),
             );
         if open {
-            let frames = g.frames.iter().fold(
+            let pid = s.selected.unwrap_or(0);
+            let frames = g.frames.iter().enumerate().fold(
                 col()
                     .key(format!("threads-frames-{i}"))
                     .w_full()
                     .gap(1.0)
                     .pl(66.0),
-                |l, f| l.child(mono(f.clone(), k)),
+                |l, (n, f)| l.child(java_frame(pid, f, &format!("threads-frames-{i}-{n}"), k)),
             );
             entry = entry.child(if g.frames.is_empty() {
                 frames.child(line(
@@ -290,6 +291,29 @@ pub(super) fn threads(s: &App, r: &ThreadDumpReport, k: &Kit) -> El {
 }
 
 // Heap histogram.
+
+/// A Java frame; one with bytecode can show its code (`codeview.rs`).
+fn java_frame(pid: u32, f: &str, key: &str, k: &Kit) -> El {
+    let has_code = crate::codeview_plan::parse_java(f).is_some_and(|j| !j.native);
+    if !has_code {
+        return mono(f.to_owned(), k);
+    }
+    let frame = f.to_owned();
+    row()
+        .w_full()
+        .gap(8.0)
+        .center_y()
+        .child(col().grow(1.0).min_w(0.0).child(mono(f.to_owned(), k)))
+        .child(
+            Button::new("Show code")
+                .variant(ButtonVariant::GhostMuted)
+                .control_size(ControlSize::Small)
+                .help("Decompile this method, or show its bytecode, with the tools on this Mac")
+                .on_press(move |s: &mut App| s.show_java_code(pid, &frame))
+                .build(k)
+                .key(format!("{key}-code")),
+        )
+}
 
 /// A signed size: `+4 KB`, `−1.2 MB`.
 fn signed_bytes(d: i64) -> String {
