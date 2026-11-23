@@ -92,6 +92,10 @@ func printMemoryErr(err error) int {
 }
 
 func printMemoryState(s, prev memstate.MemoryState) {
+	if s.OS == "linux" {
+		printLinuxMemoryState(s, prev)
+		return
+	}
 	parts := []string{
 		"phys=" + memoryBytes(s.PhysicalBytes),
 		"wired=" + memoryBytes(s.Wired),
@@ -115,6 +119,40 @@ func printMemoryState(s, prev memstate.MemoryState) {
 		}
 	}
 	fmt.Println(strings.Join(parts, "  "))
+}
+
+func printLinuxMemoryState(s, prev memstate.MemoryState) {
+	parts := []string{
+		"phys=" + memoryBytes(s.PhysicalBytes),
+		fmt.Sprintf("available=%s(%.0f%%)", memoryBytes(s.AvailableBytes), s.PressureFreePercent),
+		"anon=" + memoryBytes(s.Anonymous),
+		"file=" + memoryBytes(s.FileBacked),
+	}
+	if s.CompressorOccupied > 0 {
+		parts = append(parts, fmt.Sprintf("zswap=%s(stored=%s ratio=%.1fx)",
+			memoryBytes(s.CompressorOccupied), memoryBytes(s.CompressorStored), s.CompressorRatio))
+	}
+	parts = append(parts, fmt.Sprintf("swap=%s/%s", memoryBytes(s.Swap.UsedBytes), memoryBytes(s.Swap.TotalBytes)))
+	if s.PSI != nil {
+		psi := fmt.Sprintf("psi_some10=%.1f%%", s.PSI.Some.Avg10)
+		if s.PSI.Full != nil {
+			psi += fmt.Sprintf(" psi_full10=%.1f%%", s.PSI.Full.Avg10)
+		}
+		parts = append(parts, psi)
+	}
+	parts = append(parts, "pressure="+string(s.PressureLevel))
+	if !prev.CollectedAt.IsZero() {
+		if elapsed := s.CollectedAt.Sub(prev.CollectedAt).Seconds(); elapsed > 0 {
+			parts = append(parts,
+				fmt.Sprintf("swapins/s=%.0f", rate(s.SwapIns, prev.SwapIns, elapsed)),
+				fmt.Sprintf("swapouts/s=%.0f", rate(s.SwapOuts, prev.SwapOuts, elapsed)),
+			)
+		}
+	}
+	fmt.Println(strings.Join(parts, "  "))
+	if s.PressureReason != "" && prev.CollectedAt.IsZero() {
+		fmt.Println("pressure: " + s.PressureReason)
+	}
 }
 
 func rate(current, previous uint64, seconds float64) float64 {

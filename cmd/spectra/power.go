@@ -487,6 +487,7 @@ func powerStateFromReport(r PowerReport, fallback func() sysinfo.PowerState) sys
 	if r.Battery != nil {
 		s.OnBattery = r.Battery.OnBattery
 		s.BatteryPct = r.Battery.Pct
+		s.HasBattery = r.Battery.Present
 	}
 	if r.Thermal != nil {
 		s.ThermalPressure = r.Thermal.Pressure
@@ -575,9 +576,12 @@ func printSoCPower(w io.Writer, p sysinfo.SoCPower) {
 func printPowerState(w io.Writer, s sysinfo.PowerState) {
 	fmt.Fprintln(w, "=== Power state ===")
 
-	if s.OnBattery {
+	switch {
+	case s.HasBattery != nil && !*s.HasBattery:
+		fmt.Fprintf(w, "source:    AC power (no battery)\n")
+	case s.OnBattery:
 		fmt.Fprintf(w, "source:    battery (%d%%)\n", s.BatteryPct)
-	} else {
+	default:
 		fmt.Fprintf(w, "source:    AC power\n")
 		if s.BatteryPct > 0 {
 			fmt.Fprintf(w, "battery:   %d%% (charging)\n", s.BatteryPct)

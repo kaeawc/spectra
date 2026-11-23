@@ -21,7 +21,7 @@ list-changed notifications. Resource subscriptions are covered under
 Tools that only read carry the `readOnlyHint` annotation. `snapshot`,
 `diagnose`, `jvm`, `network`, `issues`, `cache`, `alerts` and `triage` do not,
 because some of their operations store snapshots or issues, acknowledge alerts,
-clear the cache, attach to a JVM, invoke an MBean, start a packet capture, or
+clear the cache, attach to a JVM, invoke an MBean, or
 save JVM and file-descriptor samples to the local store. Of the
 [job](#jobs) tools, `job_status`, `job_result` and `job_list` are read-only;
 `job_start` (which can wrap `snapshot`, `diagnose` and `triage`) and

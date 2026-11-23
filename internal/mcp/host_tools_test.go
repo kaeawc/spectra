@@ -371,3 +371,12 @@ func TestToolErrorFromStructuresUnsupported(t *testing.T) {
 		t.Errorf("plain error = %+v, want its text unchanged", res)
 	}
 }
+
+func TestPowerStateSaysNoBattery(t *testing.T) {
+	no := false
+	s := newHostServer(t, Collectors{Power: &fakePowerCollector{state: sysinfo.PowerState{HasBattery: &no}}})
+	res := s.toolPower(context.Background(), json.RawMessage(`{}`))
+	if res.IsError || !strings.Contains(res.Content[0].Text, "no battery") || !strings.Contains(res.Content[0].Text, `"has_battery": false`) {
+		t.Errorf("power state = %+v", res.Content)
+	}
+}

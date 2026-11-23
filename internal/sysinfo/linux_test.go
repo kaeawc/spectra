@@ -90,3 +90,28 @@ func TestCollectPowerLinuxMissingTree(t *testing.T) {
 		t.Errorf("missing tree should yield zero PowerState, got %+v", ps)
 	}
 }
+
+func TestCollectPowerLinuxHasBattery(t *testing.T) {
+	root := t.TempDir()
+	d := filepath.Join(root, "BAT0")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "type"), []byte("Battery\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ps := collectPowerLinux(root); ps.HasBattery == nil || !*ps.HasBattery {
+		t.Errorf("HasBattery = %v, want true", ps.HasBattery)
+	}
+}
+
+func TestCollectPowerLinuxNoBattery(t *testing.T) {
+	// A cloud VM: the class directory exists and is empty.
+	ps := collectPowerLinux(t.TempDir())
+	if ps.HasBattery == nil || *ps.HasBattery {
+		t.Errorf("empty power_supply: HasBattery = %v, want false", ps.HasBattery)
+	}
+	if ps := collectPowerLinux(filepath.Join(t.TempDir(), "nope")); ps.HasBattery != nil {
+		t.Errorf("unreadable tree: HasBattery = %v, want unknown", *ps.HasBattery)
+	}
+}
