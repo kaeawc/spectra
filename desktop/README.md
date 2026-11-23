@@ -31,7 +31,9 @@ Kill), JVMs from `jvm.list`, the load average from the host sample
 `alerts.subscribe` pushes (else `watch.current`), and the Machine page's memory, thermal, power
 and network readings from `memory.current`, `thermal.current`, `power.current` and
 `network.current`. A daemon without a method, or none at all,
-leaves that call to the CLI as before, and so does one error from it, for that call only. The
+leaves that call to the CLI as before. A daemon that has the method but fails a call (on a busy
+Mac its own collection can time out) gives a failed reading: the page keeps its last numbers,
+says so, and asks the daemon again next time; no `spectra` process is started for it. The
 connection is made on a thread of its own: a call never waits on another's reconnect, and waits
 at most half its deadline for one before the CLI runs it.
 

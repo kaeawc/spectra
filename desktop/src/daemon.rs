@@ -539,7 +539,8 @@ impl Daemon {
 
     /// Answers `args` from the daemon when [`route`] sends it there. `None` runs the CLI: the
     /// table doesn't name the call, the daemon is unreachable or still connecting after half the
-    /// deadline, or it refused or garbled the call.
+    /// deadline, or it doesn't know the call (an older daemon). Any other failure of a listed
+    /// method is a failed reading, never a CLI run.
     pub fn answer(
         &self,
         args: &[&str],
@@ -596,8 +597,12 @@ impl Daemon {
                 lock(&self.s.methods).remove(entry.method);
                 None
             }
-            // Anything else is this call's alone: the CLI runs it, and the daemon is asked next time.
-            Err(_) => None,
+            // The connection went away before the call was sent: no daemon to ask, so the CLI.
+            Err(Error::Unavailable(_)) => None,
+            // Anything else (its own collection timing out on a busy Mac, a dropped connection) is
+            // a failed reading from a daemon that has the method: it's asked again next time, and
+            // no process is started for it.
+            Err(e) => Some(Err(e)),
         }
     }
 }

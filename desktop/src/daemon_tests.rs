@@ -652,7 +652,8 @@ fn a_machine_reading_the_daemon_does_not_list_or_garbles_runs_the_cli() {
 
 #[test]
 fn one_failed_call_does_not_take_the_route_away() {
-    // A transient error (the daemon's own internal error) runs the CLI this once only.
+    // A transient error (the daemon's own internal error) is a failed reading: no CLI run, and
+    // the daemon is asked again next time.
     let failed = Arc::new(AtomicBool::new(false));
     let once = Arc::clone(&failed);
     let f = Fake::serve(
@@ -667,7 +668,14 @@ fn one_failed_call_does_not_take_the_route_away() {
     );
     let d = f.daemon();
     let args = ["memory", "--json"];
-    assert!(d.answer(&args, SEC, &never()).is_none(), "the CLI runs it");
+    assert_eq!(
+        d.answer(&args, SEC, &never()),
+        Some(Err(Error::Rpc {
+            code: -32000,
+            message: "collector busy".into()
+        })),
+        "a failed reading, not a CLI run"
+    );
     assert!(d.has("memory.current"));
     assert!(d.answer(&args, SEC, &never()).unwrap().is_ok());
     assert_eq!(f.calls("memory.current").len(), 2);
@@ -945,4 +953,34 @@ fn nothing_acknowledges_unless_asked() {
     d.answer(&LIST_ARGS, SEC, &never());
     assert!(d.answer(&["anomalies", "--json"], SEC, &never()).is_none());
     assert!(f.calls("alerts.ack").is_empty());
+}
+
+#[test]
+fn a_busy_daemon_timing_out_its_own_collection_starts_no_process() {
+    // What a starved daemon says on a loaded Mac: the reading fails, the CLI never runs.
+    let f = Fake::serve(
+        &["process.list", "whatswrong.current", "power.current"],
+        h(|m, _| {
+            Some(Err((
+                -32603,
+                format!("{m}: collection timed out after 15s: context deadline exceeded"),
+            )))
+        }),
+    );
+    let d = f.daemon();
+    for args in [
+        &["process", "-json", "--classify"][..],
+        &["whatswrong", "--json"][..],
+        &["power", "--json"][..],
+    ] {
+        let got = d.answer(args, SEC, &never());
+        assert!(
+            matches!(got, Some(Err(Error::Rpc { code: -32603, .. }))),
+            "{args:?}: {got:?}"
+        );
+    }
+    assert!(
+        d.has("process.list") && d.has("power.current"),
+        "still asked next time"
+    );
 }
