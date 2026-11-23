@@ -19,7 +19,7 @@ thread, so nothing needs setting up:
 The window asks for each reading after the last one landed and rested. While the window is
 hidden, minimised or covered, nothing is read: the feeds, the Machine readings, an open page's
 live charts and Logs' Follow, the Activity and Network pages, the Overview's "Right now" look and
-the Storage page's Time Machine read all rest (except Activity's "Keep recording"; a folder being
+the Storage page's Time Machine read and the Compare page's list all rest (except Activity's "Keep recording"; a folder being
 measured may finish), and coming back reads at once.
 
 **Spectra's daemon.** Where the daemon (`~/.spectra/daemon.sock`, started with
@@ -179,6 +179,27 @@ What it shows:
     when each was taken and its disk, and a backup being written now. Spectra doesn't report a
     snapshot's size, and the page says so.
   - Leaving the page or quitting stops a measurement or read on its way.
+- **Compare**, under Storage: what's different from when it was fine. It lists the snapshots and
+  baselines Spectra has stored (`spectra snapshot list --json`, read when the page opens, newest
+  first), and you pick an earlier one with From, optionally a later one with To (Now by default),
+  then press Compare: `spectra snapshot diff --json <earlier> <later|live>`. Against Now, Spectra
+  inspects every app first, which can take a minute; the page says how long it has been going and
+  Stop ends it. The differences come back in plain words, grouped by area, each group with its
+  counts and its first eight lines (Show all for the rest): apps added, removed, updated or with
+  a changed signature; Java installs; Homebrew packages; active language versions; listening
+  ports; VPN; resources in use (terminal sessions, open files, processes); the Mac itself (macOS
+  version, memory); PATH; kernel settings; and software installs. Areas with no change are left
+  out. Spectra's diff does not include login items or background services, and the page says
+  so; the Startup page shows those as they are now.
+  - Take a snapshot now and Take a baseline run `spectra snapshot create` (with `--baseline` for
+    the second) only on a press, and the page says where it went: Spectra's own store,
+    `~/.spectra/spectra.db`, as the id it printed. Spectra keeps the newest 100 snapshots and
+    never prunes a baseline. Spectra's snapshot code asks for no sudo; if it is refused for lack of access the
+    page says so, and the app still never runs sudo. A snapshot is left to finish if you leave the
+    page, since stopping it half-way could leave a partly written one.
+  - No daemon method exists for these yet, so they run through the same seam as every other
+    call, which runs the CLI, with a deadline (30 s for the list, 5 min for a diff or snapshot) and
+    a 4 MB output cap, off the UI thread. While the window is hidden nothing is read.
 - **All processes**, then by kind and by runtime in the sidebar, with live counts. Sort by CPU,
   memory or name; search by name, pid, bundle id or path. The table only builds the rows on
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
@@ -318,7 +339,9 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # system, system-pressure, system-failed, system-linux,
                             # activity, activity-storm, activity-unsupported, startup,
                             # startup-confirm, startup-failed, tree, tree-search,
-                            # storage, storage-measuring, storage-inside, storage-failed
+                            # storage, storage-measuring, storage-inside, storage-failed,
+                            # compare, compare-list, compare-diffing, compare-empty,
+                            # compare-failed, compare-no-list
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -351,6 +374,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/storage.rs`: the Storage page's `spectra du` and `spectra timemachine` runs, their JSON,
   the low-space rule and the measurement cache, behind a `Runner` trait that tests replace with
   a fake; `src/sample_storage.rs`: its sample data, from `tests/fixtures/storage`.
+- `src/compare.rs`: the Compare page's snapshot list, diff and snapshot runs, their JSON, and the
+  diff put into grouped plain words, behind the same `Runner` trait; `src/sample_compare.rs`: its
+  sample data, from `tests/fixtures/compare`.
 - `src/spawns.rs`: the Activity page's recording rounds, their JSON, the event buffer, the
   last-minute summary and the spawn-storm rule; `src/sample_activity.rs`: its sample data.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and

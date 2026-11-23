@@ -5,6 +5,7 @@
 
 mod app;
 mod bundle;
+mod compare;
 mod daemon;
 mod data;
 mod findings;
@@ -19,6 +20,7 @@ mod procs;
 mod run;
 mod sample;
 mod sample_activity;
+mod sample_compare;
 mod sample_jvm;
 mod sample_logs;
 mod sample_network;
@@ -110,6 +112,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.whatswrong.auto = false;
     s.whatswrong.cancel();
     s.cancel_storage();
+    s.cancel_compare();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -148,6 +151,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     // A folder's size or Time Machine's snapshots, for the Storage page; while a folder is
     // being measured, the page's "started … ago" keeps counting (tick_storage says when it changed).
     landed |= s.tick_storage();
+    // The Compare page's snapshot list, and a comparison or snapshot on its way.
+    landed |= s.tick_compare();
+    if s.window_shown() && s.compare.busy() {
+        tx.wake_after(STATUS_TICK);
+    }
     if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
         tx.wake_after(STATUS_TICK);
     }
@@ -289,6 +297,12 @@ fn main() {
             ("storage-measuring", sample_storage::storage_measuring_scene),
             ("storage-inside", sample_storage::storage_inside_scene),
             ("storage-failed", sample_storage::storage_failed_scene),
+            ("compare", sample_compare::compare_scene),
+            ("compare-list", sample_compare::compare_list_scene),
+            ("compare-diffing", sample_compare::compare_diffing_scene),
+            ("compare-empty", sample_compare::compare_empty_scene),
+            ("compare-failed", sample_compare::compare_failed_scene),
+            ("compare-no-list", sample_compare::compare_no_list_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

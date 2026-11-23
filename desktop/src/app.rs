@@ -375,6 +375,8 @@ pub struct App {
     pub whatswrong: crate::whatswrong::WhatsWrong,
     /// Where disk space went, for the Storage page.
     pub storage: crate::storage::Storage,
+    /// Stored snapshots and what differs from one, for the Compare page.
+    pub compare: crate::compare::Compare,
 }
 
 pub fn init() -> App {
@@ -455,6 +457,7 @@ pub fn init() -> App {
         startup: crate::startup::Startup::new(),
         whatswrong: crate::whatswrong::WhatsWrong::new(),
         storage: crate::storage::Storage::new(),
+        compare: crate::compare::Compare::new(),
     }
 }
 
@@ -701,6 +704,7 @@ impl App {
         };
         let nav = if nav == Nav::Network { Nav::All } else { nav };
         let nav = if nav == Nav::Storage { Nav::All } else { nav };
+        let nav = if nav == Nav::Compare { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -835,6 +839,10 @@ impl App {
         if self.nav == Nav::Storage && nav != Nav::Storage {
             self.cancel_storage();
         }
+        // Leaving Compare stops a comparison on its way.
+        if self.nav == Nav::Compare && nav != Nav::Compare {
+            self.cancel_compare();
+        }
         self.nav = nav;
         self.select(None);
         self.table.clear_selection();
@@ -846,6 +854,10 @@ impl App {
         // The Storage page reads Time Machine's snapshots each time it opens; sizing waits for a press.
         if nav == Nav::Storage {
             self.open_storage();
+        }
+        // The Compare page reads the stored snapshots each time it opens; the rest waits for a press.
+        if nav == Nav::Compare {
+            self.open_compare();
         }
     }
 
@@ -1111,6 +1123,7 @@ impl App {
             None if self.nav == Nav::Network => None,
             // The Storage page lists folders, not processes.
             None if self.nav == Nav::Storage => None,
+            None if self.nav == Nav::Compare => None,
             None if !matches!(
                 self.nav,
                 Nav::Overview | Nav::System | Nav::Activity | Nav::Startup

@@ -78,6 +78,8 @@ pub enum Nav {
     Startup,
     /// Where disk space went: free room, the biggest folders, Time Machine snapshots.
     Storage,
+    /// What changed since an earlier snapshot: apps, toolchains, ports and more.
+    Compare,
 }
 
 impl Nav {
@@ -93,6 +95,7 @@ impl Nav {
             Nav::Network => "Network",
             Nav::Startup => "Startup",
             Nav::Storage => "Storage",
+            Nav::Compare => "Compare",
         }
     }
 
@@ -104,6 +107,7 @@ impl Nav {
             Nav::Network => false,
             Nav::Startup => false,
             Nav::Storage => false,
+            Nav::Compare => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,

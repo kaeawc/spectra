@@ -1,0 +1,14 @@
+{
+  "AID": "snap-a",
+  "BID": "snap-b",
+  "Sections": [
+    {
+      "Name": "host",
+      "Changes": null
+    },
+    {
+      "Name": "apps",
+      "Changes": null
+    }
+  ]
+}
