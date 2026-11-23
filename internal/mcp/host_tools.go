@@ -9,6 +9,7 @@ import (
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/services"
 	"github.com/kaeawc/spectra/internal/storagestate"
@@ -77,7 +78,8 @@ func (s *Server) toolPowerImpact(ctx context.Context, pids []int, durationSecond
 	})
 }
 
-// toolMemory reports VM compressor, swap, and memory-pressure state.
+// toolMemory reports memory pressure and swap: the VM compressor on macOS,
+// MemAvailable, PSI and zswap on Linux.
 func (s *Server) toolMemory(_ context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
 		return toolErrorFrom(err)
@@ -87,10 +89,18 @@ func (s *Server) toolMemory(_ context.Context, raw json.RawMessage) ToolResult {
 		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
-		Summary:   "collected VM compressor, swap, and pressure state",
+		Summary:   memorySummary(state),
 		Raw:       state,
 		Timestamp: s.now(),
 	})
+}
+
+func memorySummary(m memstate.MemoryState) string {
+	s := fmt.Sprintf("memory pressure %s", m.PressureLevel)
+	if m.PressureReason != "" {
+		s += " (" + m.PressureReason + ")"
+	}
+	return s + fmt.Sprintf("; swap used %.1f of %.1f GiB", float64(m.Swap.UsedBytes)/(1<<30), float64(m.Swap.TotalBytes)/(1<<30))
 }
 
 // toolStorage reports disk volumes and the ~/Library storage footprint.
