@@ -41,7 +41,7 @@ func (fakeCoreFiles) Inspect(context.Context, string, string) (corefile.Report, 
 type fakeWatch struct{}
 
 func (fakeWatch) Current(context.Context) (hostwatch.Sample, []hostwatch.Alert, error) {
-	return hostwatch.Sample{NCPU: 8, Load1: 1}, []hostwatch.Alert{{ID: "a1", State: "firing"}}, nil
+	return hostwatch.Sample{At: reportNow, NCPU: 8, Load1: 1}, []hostwatch.Alert{{ID: "a1", State: "firing"}}, nil
 }
 func (fakeWatch) Samples(context.Context, time.Time, int) ([]hostwatch.Sample, error) {
 	return []hostwatch.Sample{{NCPU: 8}}, nil

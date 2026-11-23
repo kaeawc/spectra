@@ -35,6 +35,13 @@ func (c *sequenceCollector) Collect(context.Context) (Sample, error) {
 	}
 	return s, nil
 }
+
+// constCollector answers every host tick with the same sample, for tests
+// about something other than the host sample that still Run the service.
+type constCollector struct{}
+
+func (constCollector) Collect(context.Context) (Sample, error) { return baseSample(jvmT0), nil }
+
 func testDB(t *testing.T) *store.DB {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "w.db"))
@@ -363,4 +370,23 @@ func TestRPCSubscriptionAndHistory(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server stuck")
 	}
+}
+
+func TestServiceSamplesImmediatelyOnRun(t *testing.T) {
+	svc := NewService(ServiceOptions{Store: testDB(t), Collector: constCollector{}, Interval: time.Hour, Logger: logger.NewCapture(slog.LevelDebug)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if s, _ := svc.Current(); !s.At.IsZero() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no sample before the first interval (1h) elapsed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
 }

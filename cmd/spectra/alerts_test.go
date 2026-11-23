@@ -98,7 +98,7 @@ func TestAlertsModes(t *testing.T) {
 
 func TestHealthShowsSpawnStateAndParents(t *testing.T) {
 	spawn := &hostwatch.SpawnState{ProcsTotal: 912, UID: 501, ProcsUID: 480, UIDLimit: 10666, NewPerSec: 3, TopParents: []hostwatch.SpawnParent{{PID: 1234, Comm: "go", ChildCount: 30, Argv: "go test ./..."}}}
-	sample := hostwatch.Sample{Spawn: spawn}
+	sample := hostwatch.Sample{At: time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC), Spawn: spawn}
 	alerts := []hostwatch.Alert{{Key: "spawn.rate", State: "firing"}}
 	var out bytes.Buffer
 	if err := printHealth(&out, sample, alerts, false); err != nil {
@@ -189,5 +189,22 @@ func TestAlertsDaemonDisabled(t *testing.T) {
 				t.Fatalf("code=%d stderr=%q", code, stderr.String())
 			}
 		})
+	}
+}
+
+func TestHealthBeforeFirstSample(t *testing.T) {
+	var out bytes.Buffer
+	if err := printHealth(&out, hostwatch.Sample{}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "No host sample yet") || strings.Contains(out.String(), "0 cores") {
+		t.Errorf("text = %q", out.String())
+	}
+	out.Reset()
+	if err := printHealth(&out, hostwatch.Sample{}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"sample":null`) {
+		t.Errorf("json = %q", out.String())
 	}
 }
