@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -196,7 +197,7 @@ func TestStdioEndToEnd(t *testing.T) {
 			checkToolDefinition(t, name, tool)
 		}
 		// The host tools agent harnesses (waaagh) route their checks through.
-		for _, want := range []string{"load", "process", "orphans", "owner", "idle", "lineage", "spawns", "jvm", "memory", "system", "network", "storage", "diagnose", "triage", "alerts", "host_health"} {
+		for _, want := range []string{"load", "process", "orphans", "owner", "idle", "lineage", "spawns", "jvm", "memory", "system", "network", "storage", "diagnose", "triage", "alerts", "host_health", "devices"} {
 			if !names[want] {
 				t.Errorf("tools/list is missing %q", want)
 			}
@@ -220,6 +221,7 @@ func TestStdioEndToEnd(t *testing.T) {
 		{"network", map[string]any{}},
 		{"system", map[string]any{}},
 		{"toolchain", map[string]any{}},
+		{"devices", map[string]any{"roots": []any{root}}},
 	} {
 		t.Run(fmt.Sprintf("call %s %v", tc.name, tc.args), func(t *testing.T) {
 			res, took := c.callTool(tc.name, tc.args)
@@ -240,6 +242,17 @@ func TestStdioEndToEnd(t *testing.T) {
 		}
 		if isErr, _ := res["isError"].(bool); !isErr || !strings.Contains(resultText(res), "daemon_unavailable") {
 			t.Errorf("alerts without a daemon = %s", resultText(res))
+		}
+	})
+
+	t.Run("macOS-only tools are structured off macOS", func(t *testing.T) {
+		if runtime.GOOS == "darwin" {
+			t.Skip("timemachine runs on macOS")
+		}
+		res, _ := c.callTool("timemachine", map[string]any{})
+		var r map[string]any
+		if isErr, _ := res["isError"].(bool); !isErr || json.Unmarshal([]byte(resultText(res)), &r) != nil || r["error"] != "unsupported_platform" {
+			t.Errorf("timemachine off macOS = %s", resultText(res))
 		}
 	})
 
