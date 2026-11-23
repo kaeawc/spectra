@@ -197,7 +197,7 @@ func TestHealthBeforeFirstSample(t *testing.T) {
 	if err := printHealth(&out, hostwatch.Sample{}, nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "No host sample yet") || strings.Contains(out.String(), "0 cores") {
+	if !strings.Contains(out.String(), "No host sample yet") || !strings.Contains(out.String(), "Retry `spectra alerts health`") || strings.Contains(out.String(), "0 cores") {
 		t.Errorf("text = %q", out.String())
 	}
 	out.Reset()
