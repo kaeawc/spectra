@@ -1,13 +1,17 @@
 // Package memstate captures host-wide memory pressure, compressor, and swap
-// state on macOS.
+// state: from the Mach VM APIs on macOS, and from /proc (meminfo, vmstat and
+// PSI) on Linux.
 package memstate
 
 import (
 	"errors"
 	"time"
+
+	"github.com/kaeawc/spectra/internal/pressure"
 )
 
-// ErrNotSupported is returned on platforms without the macOS VM APIs.
+// ErrNotSupported is returned on hosts with no memory-state backend: neither
+// the macOS cgo build nor Linux.
 var ErrNotSupported = errors.New("memory state collection not supported")
 
 // PressureLevel is the kernel memorystatus pressure classification.
@@ -51,11 +55,25 @@ type MemoryState struct {
 	SwapIns             uint64        `json:"swap_ins"`
 	SwapOuts            uint64        `json:"swap_outs"`
 	CollectedAt         time.Time     `json:"collected_at"`
+
+	// Linux only. OS names the backend that filled the sample.
+	// AvailableBytes is MemAvailable: what can be allocated without
+	// swapping. PSI is the kernel's memory pressure-stall reading, absent
+	// when the kernel does not expose it. PressureReason says what decided
+	// PressureLevel.
+	OS             string             `json:"os,omitempty"`
+	AvailableBytes uint64             `json:"available_bytes,omitempty"`
+	PSI            *pressure.Resource `json:"psi,omitempty"`
+	PressureReason string             `json:"pressure_reason,omitempty"`
 }
 
 // Options configures collection for tests.
 type Options struct {
 	Now func() time.Time
+	// ProcRoot is the Linux procfs root (default "/proc").
+	ProcRoot string
+	// PageSize overrides the reported page size (Linux; default the host's).
+	PageSize uint64
 }
 
 func finish(ms MemoryState) MemoryState {

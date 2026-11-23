@@ -52,8 +52,8 @@ func uninstallFixture(t *testing.T) (uninstall.Options, string, string) {
 		Home: home, AppRoots: []string{filepath.Join(root, "Applications")},
 		SystemLibrary: filepath.Join(root, "Library"), Receipts: filepath.Join(root, "receipts"),
 		SystemRoots: []string{filepath.Join(root, "System")}, SystemAppRoots: []string{filepath.Join(root, "System", "Applications")},
-		UID: int64(os.Getuid()), GIDs: []int64{int64(os.Getgid())},
-		Runner: fake, FS: uninstall.OSFS{},
+		UID: testUserUID, GIDs: []int64{testUserGID},
+		Runner: fake, FS: testUserFS{},
 		Procs: func(context.Context) []process.Info { return nil },
 		Now:   func() time.Time { return time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC) },
 		OS:    hostos.Darwin,
@@ -205,4 +205,25 @@ func TestUninstallApplyExits3WhenBootoutFails(t *testing.T) {
 	if !strings.Contains(out.String(), "bootout failed") {
 		t.Fatalf("output does not report the failed bootout:\n%s", out.String())
 	}
+}
+
+// testUserUID and testUserGID are the user the uninstall fixture acts as:
+// the real one, or 501/20 when the tests run as root, which apply refuses.
+var testUserUID, testUserGID = func() (int64, int64) {
+	if os.Getuid() == 0 {
+		return 501, 20
+	}
+	return int64(os.Getuid()), int64(os.Getgid())
+}()
+
+// testUserFS presents the files the test process created as the test
+// user's.
+type testUserFS struct{ uninstall.OSFS }
+
+func (f testUserFS) Meta(path string) (uninstall.Meta, error) {
+	m, err := f.OSFS.Meta(path)
+	if err == nil && m.UID == int64(os.Getuid()) {
+		m.UID, m.GID = testUserUID, testUserGID
+	}
+	return m, err
 }

@@ -405,8 +405,10 @@ after the daemon starts, and any `refresh: true` call wait for a collection.
 ### `memory.current`
 
 The `spectra memory --json` object (`memstate.MemoryState`). Cached for 2
-seconds. macOS cgo builds only; elsewhere it returns the "not supported" error
-the CLI prints.
+seconds. macOS cgo builds read the Mach VM statistics; Linux reads
+`/proc/meminfo`, `/proc/vmstat` and `/proc/pressure/memory` (adding `os`,
+`available_bytes`, `psi` and `pressure_reason`). Other builds return the "not
+supported" error the CLI prints.
 
 ### `thermal.current`
 

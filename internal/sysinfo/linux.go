@@ -40,7 +40,9 @@ func collectSysctlsLinux(procSysRoot string) map[string]string {
 // collectPowerLinux reads battery and AC state from a power-supply tree
 // rooted at root (normally "/sys/class/power_supply"). Thermal pressure has
 // no standard Linux equivalent, so those fields are left zero. Best-effort:
-// a missing or unreadable tree yields a zero PowerState.
+// a missing or unreadable tree yields a zero PowerState with HasBattery
+// unknown; a readable tree with no Battery supply (servers, VMs) sets it
+// false.
 func collectPowerLinux(root string) PowerState {
 	var ps PowerState
 	entries, err := os.ReadDir(root)
@@ -82,5 +84,6 @@ func collectPowerLinux(root string) PowerState {
 	// On battery when discharging, or when an AC supply exists but none is
 	// online. A machine with no battery at all stays OnBattery=false.
 	ps.OnBattery = discharging || (batterySeen && acSeen && !acOnline)
+	ps.HasBattery = &batterySeen
 	return ps
 }

@@ -28,6 +28,9 @@ type Report struct {
 type BatteryInfo struct {
 	OnBattery bool `json:"on_battery"`
 	Pct       int  `json:"pct,omitempty"`
+	// Present is false on a machine with no battery (desktop, server, VM);
+	// absent when that could not be read.
+	Present *bool `json:"present,omitempty"`
 }
 
 type ThermalInfo struct {
@@ -64,8 +67,8 @@ type ProcessEnergy struct {
 }
 
 func FillState(r *Report, s sysinfo.PowerState) {
-	if s.OnBattery || s.BatteryPct > 0 {
-		r.Battery = &BatteryInfo{OnBattery: s.OnBattery, Pct: s.BatteryPct}
+	if s.OnBattery || s.BatteryPct > 0 || s.HasBattery != nil {
+		r.Battery = &BatteryInfo{OnBattery: s.OnBattery, Pct: s.BatteryPct, Present: s.HasBattery}
 	}
 	if s.ThermalPressure != "" || s.ThermalThrottled || s.CPUSpeedLimitPct > 0 {
 		r.Thermal = &ThermalInfo{

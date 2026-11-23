@@ -184,104 +184,17 @@
       "description": "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"",
       "inputSchema": {
         "properties": {
-          "agent": {
-            "description": "Path to spectra-agent.jar override.",
-            "type": "string"
-          },
-          "applied_by": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "attribute": {
-            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
-            "type": "string"
-          },
-          "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
-            "type": "boolean"
-          },
-          "bundles": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "command": {
-            "description": "Fix command.",
-            "type": "string"
-          },
           "confirm_sensitive": {
             "description": "Allow sensitive artifact.",
             "type": "boolean"
-          },
-          "deep": {
-            "description": "More process detail.",
-            "type": "boolean"
-          },
-          "dest": {
-            "description": "Output path.",
-            "type": "string"
           },
           "dsn": {
             "description": "Database DSN or URL.",
             "type": "string"
           },
-          "duration_seconds": {
-            "description": "Duration (process sample and jvm flamegraph: 1..60).",
-            "type": "integer"
-          },
-          "event": {
-            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
-            "type": "string"
-          },
-          "exit_code": {
-            "description": "Exit code.",
-            "type": "integer"
-          },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
-          "host": {
-            "description": "Host filter.",
-            "type": "string"
-          },
-          "id": {
-            "description": "ID.",
-            "type": "string"
-          },
-          "include_raw": {
-            "description": "Return raw data.",
-            "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
-          },
-          "interval_millis": {
-            "description": "Interval.",
-            "type": "integer"
-          },
-          "issue_id": {
-            "description": "Issue ID.",
-            "type": "string"
-          },
           "limit": {
             "description": "Limit.",
             "type": "integer"
-          },
-          "machine_uuid": {
-            "description": "Machine UUID.",
-            "type": "string"
-          },
-          "mbean_name": {
-            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
-            "type": "string"
-          },
-          "mbean_operation": {
-            "description": "MBean operation name. Required for mbean_invoke.",
-            "type": "string"
           },
           "operation": {
             "default": "discover",
@@ -295,43 +208,8 @@
             ],
             "type": "string"
           },
-          "output": {
-            "description": "Fix output.",
-            "type": "string"
-          },
-          "paths": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "pid": {
-            "description": "PID.",
-            "type": "integer"
-          },
-          "port": {
-            "description": "Port filter.",
-            "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
-          "samples": {
-            "description": "Number of samples.",
-            "type": "integer"
-          },
           "schema": {
             "description": "Database schema filter.",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "description": "Snapshot ID.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Issue status.",
             "type": "string"
           },
           "table": {
@@ -339,9 +217,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "db",
@@ -1129,103 +1004,28 @@
       "description": "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"",
       "inputSchema": {
         "properties": {
-          "agent": {
-            "description": "Path to spectra-agent.jar override.",
-            "type": "string"
-          },
           "applied_by": {
             "description": "Actor.",
             "type": "string"
           },
-          "attribute": {
-            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
-            "type": "string"
-          },
-          "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
-            "type": "boolean"
-          },
-          "bundles": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "command": {
             "description": "Fix command.",
-            "type": "string"
-          },
-          "confirm_sensitive": {
-            "description": "Allow sensitive artifact.",
-            "type": "boolean"
-          },
-          "deep": {
-            "description": "More process detail.",
-            "type": "boolean"
-          },
-          "dest": {
-            "description": "Output path.",
-            "type": "string"
-          },
-          "dsn": {
-            "description": "Database DSN or URL.",
-            "type": "string"
-          },
-          "duration_seconds": {
-            "description": "Duration (process sample and jvm flamegraph: 1..60).",
-            "type": "integer"
-          },
-          "event": {
-            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
           "exit_code": {
             "description": "Exit code.",
             "type": "integer"
           },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
-          "host": {
-            "description": "Host filter.",
-            "type": "string"
-          },
           "id": {
             "description": "ID.",
             "type": "string"
-          },
-          "include_raw": {
-            "description": "Return raw data.",
-            "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
-          },
-          "interval_millis": {
-            "description": "Interval.",
-            "type": "integer"
           },
           "issue_id": {
             "description": "Issue ID.",
             "type": "string"
           },
-          "limit": {
-            "description": "Limit.",
-            "type": "integer"
-          },
           "machine_uuid": {
             "description": "Machine UUID.",
-            "type": "string"
-          },
-          "mbean_name": {
-            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
-            "type": "string"
-          },
-          "mbean_operation": {
-            "description": "MBean operation name. Required for mbean_invoke.",
             "type": "string"
           },
           "operation": {
@@ -1244,33 +1044,6 @@
             "description": "Fix output.",
             "type": "string"
           },
-          "paths": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "pid": {
-            "description": "PID.",
-            "type": "integer"
-          },
-          "port": {
-            "description": "Port filter.",
-            "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
-          "samples": {
-            "description": "Number of samples.",
-            "type": "integer"
-          },
-          "schema": {
-            "description": "Database schema filter.",
-            "type": "string"
-          },
           "snapshot_id": {
             "description": "Snapshot ID.",
             "type": "string"
@@ -1278,15 +1051,8 @@
           "status": {
             "description": "Issue status.",
             "type": "string"
-          },
-          "table": {
-            "description": "Table name, optionally schema-qualified.",
-            "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "issues",
@@ -1759,10 +1525,6 @@
             "description": "Path to spectra-agent.jar override.",
             "type": "string"
           },
-          "applied_by": {
-            "description": "Actor.",
-            "type": "string"
-          },
           "attribute": {
             "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
             "type": "string"
@@ -1771,31 +1533,12 @@
             "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
             "type": "boolean"
           },
-          "bundles": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "command": {
-            "description": "Fix command.",
-            "type": "string"
-          },
           "confirm_sensitive": {
             "description": "Allow sensitive artifact.",
             "type": "boolean"
           },
-          "deep": {
-            "description": "More process detail.",
-            "type": "boolean"
-          },
           "dest": {
             "description": "Output path.",
-            "type": "string"
-          },
-          "dsn": {
-            "description": "Database DSN or URL.",
             "type": "string"
           },
           "duration_seconds": {
@@ -1806,45 +1549,17 @@
             "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
             "type": "string"
           },
-          "exit_code": {
-            "description": "Exit code.",
-            "type": "integer"
-          },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
-          "host": {
-            "description": "Host filter.",
-            "type": "string"
-          },
-          "id": {
-            "description": "ID.",
-            "type": "string"
-          },
           "include_raw": {
             "description": "Return raw data.",
             "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
           },
           "interval_millis": {
             "description": "Interval.",
             "type": "integer"
           },
-          "issue_id": {
-            "description": "Issue ID.",
-            "type": "string"
-          },
           "limit": {
             "description": "Limit.",
             "type": "integer"
-          },
-          "machine_uuid": {
-            "description": "Machine UUID.",
-            "type": "string"
           },
           "mbean_name": {
             "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
@@ -1875,53 +1590,15 @@
             ],
             "type": "string"
           },
-          "output": {
-            "description": "Fix output.",
-            "type": "string"
-          },
-          "paths": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "pid": {
             "description": "PID.",
             "type": "integer"
           },
-          "port": {
-            "description": "Port filter.",
-            "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
           "samples": {
             "description": "Number of samples.",
             "type": "integer"
-          },
-          "schema": {
-            "description": "Database schema filter.",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "description": "Snapshot ID.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Issue status.",
-            "type": "string"
-          },
-          "table": {
-            "description": "Table name, optionally schema-qualified.",
-            "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "jvm",
@@ -2599,7 +2276,7 @@
       }
     },
     {
-      "description": "VM compressor, swap, and memory pressure. Ask: \"Is the system under memory pressure?\"",
+      "description": "Memory pressure and swap: VM compressor on macOS; MemAvailable, PSI stalls and zswap on Linux. Ask: \"Is the system under memory pressure?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -2709,22 +2386,6 @@
       "description": "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"",
       "inputSchema": {
         "properties": {
-          "agent": {
-            "description": "Path to spectra-agent.jar override.",
-            "type": "string"
-          },
-          "applied_by": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "attribute": {
-            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
-            "type": "string"
-          },
-          "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
-            "type": "boolean"
-          },
           "bundles": {
             "description": "App paths.",
             "items": {
@@ -2732,81 +2393,13 @@
             },
             "type": "array"
           },
-          "command": {
-            "description": "Fix command.",
-            "type": "string"
-          },
-          "confirm_sensitive": {
-            "description": "Allow sensitive artifact.",
-            "type": "boolean"
-          },
-          "deep": {
-            "description": "More process detail.",
-            "type": "boolean"
-          },
-          "dest": {
-            "description": "Output path.",
-            "type": "string"
-          },
-          "dsn": {
-            "description": "Database DSN or URL.",
-            "type": "string"
-          },
-          "duration_seconds": {
-            "description": "Duration (process sample and jvm flamegraph: 1..60).",
-            "type": "integer"
-          },
-          "event": {
-            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
-            "type": "string"
-          },
-          "exit_code": {
-            "description": "Exit code.",
-            "type": "integer"
-          },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
           "host": {
             "description": "Host filter.",
-            "type": "string"
-          },
-          "id": {
-            "description": "ID.",
             "type": "string"
           },
           "include_raw": {
             "description": "Return raw data.",
             "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
-          },
-          "interval_millis": {
-            "description": "Interval.",
-            "type": "integer"
-          },
-          "issue_id": {
-            "description": "Issue ID.",
-            "type": "string"
-          },
-          "limit": {
-            "description": "Limit.",
-            "type": "integer"
-          },
-          "machine_uuid": {
-            "description": "Machine UUID.",
-            "type": "string"
-          },
-          "mbean_name": {
-            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
-            "type": "string"
-          },
-          "mbean_operation": {
-            "description": "MBean operation name. Required for mbean_invoke.",
-            "type": "string"
           },
           "operation": {
             "default": "state",
@@ -2814,15 +2407,8 @@
               "state",
               "connections",
               "by_app",
-              "firewall",
-              "diagnose",
-              "capture_start",
-              "capture_stop"
+              "diagnose"
             ],
-            "type": "string"
-          },
-          "output": {
-            "description": "Fix output.",
             "type": "string"
           },
           "paths": {
@@ -2832,42 +2418,11 @@
             },
             "type": "array"
           },
-          "pid": {
-            "description": "PID.",
-            "type": "integer"
-          },
           "port": {
             "description": "Port filter.",
             "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
-          "samples": {
-            "description": "Number of samples.",
-            "type": "integer"
-          },
-          "schema": {
-            "description": "Database schema filter.",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "description": "Snapshot ID.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Issue status.",
-            "type": "string"
-          },
-          "table": {
-            "description": "Table name, optionally schema-qualified.",
-            "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "network",
@@ -3386,22 +2941,6 @@
       "description": "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"",
       "inputSchema": {
         "properties": {
-          "agent": {
-            "description": "Path to spectra-agent.jar override.",
-            "type": "string"
-          },
-          "applied_by": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "attribute": {
-            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
-            "type": "string"
-          },
-          "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
-            "type": "boolean"
-          },
           "bundles": {
             "description": "App paths.",
             "items": {
@@ -3409,81 +2948,25 @@
             },
             "type": "array"
           },
-          "command": {
-            "description": "Fix command.",
-            "type": "string"
-          },
-          "confirm_sensitive": {
-            "description": "Allow sensitive artifact.",
-            "type": "boolean"
-          },
           "deep": {
             "description": "More process detail.",
             "type": "boolean"
-          },
-          "dest": {
-            "description": "Output path.",
-            "type": "string"
-          },
-          "dsn": {
-            "description": "Database DSN or URL.",
-            "type": "string"
           },
           "duration_seconds": {
             "description": "Duration (process sample and jvm flamegraph: 1..60).",
             "type": "integer"
           },
-          "event": {
-            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
-            "type": "string"
-          },
-          "exit_code": {
-            "description": "Exit code.",
-            "type": "integer"
-          },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
-          "host": {
-            "description": "Host filter.",
-            "type": "string"
-          },
-          "id": {
-            "description": "ID.",
-            "type": "string"
-          },
           "include_raw": {
             "description": "Return raw data.",
             "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
           },
           "interval_millis": {
             "description": "Interval.",
             "type": "integer"
           },
-          "issue_id": {
-            "description": "Issue ID.",
-            "type": "string"
-          },
           "limit": {
             "description": "Limit.",
             "type": "integer"
-          },
-          "machine_uuid": {
-            "description": "Machine UUID.",
-            "type": "string"
-          },
-          "mbean_name": {
-            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
-            "type": "string"
-          },
-          "mbean_operation": {
-            "description": "MBean operation name. Required for mbean_invoke.",
-            "type": "string"
           },
           "operation": {
             "default": "list",
@@ -3496,10 +2979,6 @@
             ],
             "type": "string"
           },
-          "output": {
-            "description": "Fix output.",
-            "type": "string"
-          },
           "paths": {
             "description": "App paths.",
             "items": {
@@ -3510,39 +2989,8 @@
           "pid": {
             "description": "PID.",
             "type": "integer"
-          },
-          "port": {
-            "description": "Port filter.",
-            "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
-          "samples": {
-            "description": "Number of samples.",
-            "type": "integer"
-          },
-          "schema": {
-            "description": "Database schema filter.",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "description": "Snapshot ID.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Issue status.",
-            "type": "string"
-          },
-          "table": {
-            "description": "Table name, optionally schema-qualified.",
-            "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "process",
@@ -3950,104 +3398,9 @@
       "description": "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"",
       "inputSchema": {
         "properties": {
-          "agent": {
-            "description": "Path to spectra-agent.jar override.",
-            "type": "string"
-          },
-          "applied_by": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "attribute": {
-            "description": "MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read.",
-            "type": "string"
-          },
-          "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
-            "type": "boolean"
-          },
-          "bundles": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "command": {
-            "description": "Fix command.",
-            "type": "string"
-          },
-          "confirm_sensitive": {
-            "description": "Allow sensitive artifact.",
-            "type": "boolean"
-          },
-          "deep": {
-            "description": "More process detail.",
-            "type": "boolean"
-          },
-          "dest": {
-            "description": "Output path.",
-            "type": "string"
-          },
-          "dsn": {
-            "description": "Database DSN or URL.",
-            "type": "string"
-          },
-          "duration_seconds": {
-            "description": "Duration (process sample and jvm flamegraph: 1..60).",
-            "type": "integer"
-          },
-          "event": {
-            "description": "Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer.",
-            "type": "string"
-          },
-          "exit_code": {
-            "description": "Exit code.",
-            "type": "integer"
-          },
-          "handle": {
-            "description": "Capture handle.",
-            "type": "string"
-          },
-          "host": {
-            "description": "Host filter.",
-            "type": "string"
-          },
-          "id": {
-            "description": "ID.",
-            "type": "string"
-          },
           "include_raw": {
             "description": "Return raw data.",
             "type": "boolean"
-          },
-          "interface": {
-            "description": "Network interface.",
-            "type": "string"
-          },
-          "interval_millis": {
-            "description": "Interval.",
-            "type": "integer"
-          },
-          "issue_id": {
-            "description": "Issue ID.",
-            "type": "string"
-          },
-          "limit": {
-            "description": "Limit.",
-            "type": "integer"
-          },
-          "machine_uuid": {
-            "description": "Machine UUID.",
-            "type": "string"
-          },
-          "mbean_name": {
-            "description": "MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke.",
-            "type": "string"
-          },
-          "mbean_operation": {
-            "description": "MBean operation name. Required for mbean_invoke.",
-            "type": "string"
           },
           "operation": {
             "default": "scan",
@@ -4060,54 +3413,8 @@
               "drift"
             ],
             "type": "string"
-          },
-          "output": {
-            "description": "Fix output.",
-            "type": "string"
-          },
-          "paths": {
-            "description": "App paths.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "pid": {
-            "description": "PID.",
-            "type": "integer"
-          },
-          "port": {
-            "description": "Port filter.",
-            "type": "integer"
-          },
-          "proto": {
-            "description": "Protocol.",
-            "type": "string"
-          },
-          "samples": {
-            "description": "Number of samples.",
-            "type": "integer"
-          },
-          "schema": {
-            "description": "Database schema filter.",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "description": "Snapshot ID.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Issue status.",
-            "type": "string"
-          },
-          "table": {
-            "description": "Table name, optionally schema-qualified.",
-            "type": "string"
           }
         },
-        "required": [
-          "operation"
-        ],
         "type": "object"
       },
       "name": "toolchain",

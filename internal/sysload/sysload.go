@@ -1,5 +1,6 @@
 // Package sysload reads the whole-machine memory-pressure and swap signals
-// macOS exposes without root. It complements the per-process and thermal
+// macOS (sysctl) and Linux (/proc, via memstate) expose without root. It
+// complements the per-process and thermal
 // collectors so a single "why is this Mac slow?" triage can rank causes.
 package sysload
 
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/proc"
 )
 
@@ -35,6 +38,9 @@ var (
 
 // Collect reads memory pressure and swap usage.
 func Collect(run Runner) Load {
+	if hostos.Current() == hostos.Linux {
+		return fromMemState(memstate.Collect())
+	}
 	l := Load{MemoryPressure: "unknown"}
 	if out, err := run("sysctl", "-n", "kern.memorystatus_vm_pressure_level"); err == nil {
 		if lvl, aerr := strconv.Atoi(strings.TrimSpace(string(out))); aerr == nil {
@@ -46,6 +52,29 @@ func Collect(run Runner) Load {
 		l.SwapUsedMB = parseSwapField(swapUsedRe, string(out))
 		l.SwapTotalMB = parseSwapField(swapTotalRe, string(out))
 	}
+	return l
+}
+
+// fromMemState maps a memstate sample onto Load, with the macOS
+// memorystatus level numbers (1 normal, 2 warn, 4 critical).
+func fromMemState(ms memstate.MemoryState, err error) Load {
+	l := Load{MemoryPressure: "unknown"}
+	if err != nil {
+		return l
+	}
+	switch ms.PressureLevel {
+	case memstate.PressureNormal:
+		l.PressureLevel = 1
+	case memstate.PressureWarning:
+		l.PressureLevel = 2
+	case memstate.PressureCritical:
+		l.PressureLevel = 4
+	}
+	if l.PressureLevel != 0 {
+		l.MemoryPressure = pressureLabel(l.PressureLevel)
+	}
+	l.SwapUsedMB = float64(ms.Swap.UsedBytes) / (1 << 20)
+	l.SwapTotalMB = float64(ms.Swap.TotalBytes) / (1 << 20)
 	return l
 }
 

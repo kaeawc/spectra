@@ -263,6 +263,7 @@ func (c LiveHostCollector) collectHostLinux(spectraVersion string) HostInfo {
 	if id := readMachineID(readFile); id != "" {
 		h.MachineUUID = id
 	}
+	h.Memory = collectHostMemory(hostDepsFromOptions(c.Options).memoryCollect)
 	h.Facts = HostFacts{
 		Hostname:         h.Hostname,
 		Architecture:     h.Architecture,
