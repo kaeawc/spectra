@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "time": "2026-11-20T05:42:05-06:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Example Helper (Renderer) [4420] started"
+    },
+    {
+      "time": "2026-11-20T05:44:12-06:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "examplecached [4431] started"
+    },
+    {
+      "time": "2026-11-20T11:45:00.25Z",
+      "source": "update",
+      "severity": "info",
+      "summary": "installed Security Payloads 17"
+    },
+    {
+      "time": "2026-11-20T05:46:22.933338-06:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:46:30-06:00",
+      "source": "log",
+      "severity": "warn",
+      "summary": "exampled: slow reply"
+    },
+    {
+      "time": "2026-11-20T05:47:00-06:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "a name without a pid started"
+    }
+  ]
+}

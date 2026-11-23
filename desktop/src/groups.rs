@@ -82,6 +82,8 @@ pub enum Nav {
     Compare,
     /// Memory that jumped past its usual level, and the daemon's alert history.
     Growth,
+    /// What changed before it got slow: starts, error bursts and installs, newest first.
+    Timeline,
 }
 
 impl Nav {
@@ -99,6 +101,7 @@ impl Nav {
             Nav::Storage => "Storage",
             Nav::Compare => "Compare",
             Nav::Growth => "Memory and alerts",
+            Nav::Timeline => "Timeline",
         }
     }
 
@@ -112,6 +115,7 @@ impl Nav {
             Nav::Storage => false,
             Nav::Compare => false,
             Nav::Growth => false,
+            Nav::Timeline => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,

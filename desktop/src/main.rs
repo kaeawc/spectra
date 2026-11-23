@@ -31,6 +31,7 @@ mod sample_network;
 mod sample_startup;
 mod sample_storage;
 mod sample_system;
+mod sample_timeline;
 mod sample_tree;
 mod sample_whatswrong;
 mod signal;
@@ -39,6 +40,7 @@ mod startup;
 mod storage;
 mod system;
 mod system_findings;
+mod timeline;
 mod tools;
 mod tree;
 mod ui;
@@ -120,6 +122,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.cancel_storage();
     s.cancel_compare();
     s.growth.cancel();
+    s.timeline.cancel();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -163,6 +166,8 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     if s.window_shown() && s.compare.busy() {
         tx.wake_after(STATUS_TICK);
     }
+    // The Timeline page's reading: only when it opens, its window changes or on Refresh.
+    landed |= s.land_timeline();
     if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
         tx.wake_after(STATUS_TICK);
     }
@@ -325,6 +330,10 @@ fn main() {
                 "growth-unavailable",
                 sample_growth::growth_unavailable_scene,
             ),
+            ("timeline", sample_timeline::timeline_scene),
+            ("timeline-empty", sample_timeline::timeline_empty_scene),
+            ("timeline-failed", sample_timeline::timeline_failed_scene),
+            ("timeline-reading", sample_timeline::timeline_reading_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

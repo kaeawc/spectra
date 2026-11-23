@@ -379,6 +379,8 @@ pub struct App {
     pub compare: crate::compare::Compare,
     /// Memory jumps and the daemon's alerts, for the Memory and alerts page.
     pub growth: crate::growth::Growth,
+    /// What changed before it got slow, for the Timeline page.
+    pub timeline: crate::timeline::TimelinePage,
 }
 
 pub fn init() -> App {
@@ -461,6 +463,7 @@ pub fn init() -> App {
         storage: crate::storage::Storage::new(),
         compare: crate::compare::Compare::new(),
         growth: crate::growth::Growth::new(),
+        timeline: crate::timeline::TimelinePage::new(),
     }
 }
 
@@ -709,6 +712,7 @@ impl App {
         let nav = if nav == Nav::Storage { Nav::All } else { nav };
         let nav = if nav == Nav::Compare { Nav::All } else { nav };
         let nav = if nav == Nav::Growth { Nav::All } else { nav };
+        let nav = if nav == Nav::Timeline { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -847,6 +851,8 @@ impl App {
         if self.nav == Nav::Compare && nav != Nav::Compare {
             self.cancel_compare();
         }
+        // The Timeline page reads each time it opens; leaving it stops a reading on its way.
+        self.timeline_nav(self.nav, nav);
         self.nav = nav;
         self.select(None);
         self.table.clear_selection();
@@ -1134,6 +1140,8 @@ impl App {
             None if self.nav == Nav::Compare => None,
             // The Memory and alerts page lists alerts and jumps, not a table.
             None if self.nav == Nav::Growth => None,
+            // Nor the Timeline page.
+            None if self.nav == Nav::Timeline => None,
             None if !matches!(
                 self.nav,
                 Nav::Overview | Nav::System | Nav::Activity | Nav::Startup

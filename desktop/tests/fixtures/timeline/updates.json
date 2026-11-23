@@ -1,0 +1,31 @@
+{
+  "entries": [
+    {
+      "name": "Security Data Update",
+      "version": "101",
+      "source": "Apple",
+      "install_date": "2026-11-18T15:59:08Z"
+    },
+    {
+      "name": "Security Payloads",
+      "version": "17",
+      "source": "Apple",
+      "install_date": "2026-11-18T15:59:16Z"
+    },
+    {
+      "name": "Example Audio Driver 0.7.1",
+      "source": "3rd Party",
+      "install_date": "2026-11-20T03:21:23Z"
+    },
+    {
+      "name": "Slack",
+      "version": "4.41.105",
+      "source": "3rd Party",
+      "install_date": "2026-11-20T11:52:00Z",
+      "package_ids": [
+        "com.tinyspeck.slackmacgap"
+      ]
+    }
+  ],
+  "collected_at": "2026-11-20T07:00:01.004-05:00"
+}

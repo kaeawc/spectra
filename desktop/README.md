@@ -118,6 +118,24 @@ What it shows:
     spawn storm), opening Activity filtered to that parent. The finding appears only while
     recording is on (the page open, or Keep recording): with both off nothing is watching, so
     there is nothing to find.
+- **Timeline**, under Activity: what changed before it got slow. `spectra timeline` (processes
+  that started in the window and are still running, error lines from the system log, installs)
+  merged with `spectra updates --history` (installs and updates, Apple or third party), newest
+  first, over the last hour, 6 h, 24 h or 7 days. Each row says how long ago and the clock time,
+  a glyph for its kind and one sentence; error lines one process wrote less than a minute apart
+  read as one burst ("examplesyncd logged 9 errors in 1 min: …").
+  - A start opens its process page while that pid still runs under the same name; errors open
+    the one running process with that name (or its app); an install opens the running app of the
+    same name. Filter by kind: Everything, Starts, Errors, Installs.
+  - Read when the page opens, when you pick a window and on Refresh; never on a timer, and a
+    reading on its way stops when you leave. Both commands go through the same seam as every
+    other call, with a deadline (90 s for the timeline) and a cap on output.
+  - When the load is past one per core now and the Machine page's six minutes of load history
+    saw it climb, a note says when, and rows from the five minutes before are marked "Around
+    when things got slow". Without a climb it saw, nothing is marked.
+  - If the install history can't be read, the timeline's own installs stand and the page says
+    so. Spectra keeps the first 5,000 error lines of a window; at that cap the page says later
+    errors may be missing.
 - **Network**, under Activity: which processes are moving bytes right now, and what is
   listening. A line of the network's state on top: interface and gateway, VPN, proxy and DNS.
   "Using the network": the processes that moved the most over the last 5 s, most first, each with
@@ -363,6 +381,7 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # storage, storage-measuring, storage-inside, storage-failed,
                             # compare, compare-list, compare-diffing, compare-empty,
                             # compare-failed, compare-no-list
+                            # timeline, timeline-empty, timeline-failed, timeline-reading
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -404,6 +423,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
   `tests/fixtures/growth`.
 - `src/spawns.rs`: the Activity page's recording rounds, their JSON, the event buffer, the
   last-minute summary and the spawn-storm rule; `src/sample_activity.rs`: its sample data.
+- `src/timeline.rs`: the Timeline page's `spectra timeline` and `spectra updates --history`
+  runs, their JSON, bursts, the merge and the load-climb marker; `src/sample_timeline.rs`: its
+  sample data, from invented fixtures in `tests/fixtures/timeline`.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
   flattening it into rows; `src/sample_tree.rs`: its sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.

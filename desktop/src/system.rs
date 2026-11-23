@@ -790,6 +790,9 @@ pub struct CpuPoint {
     /// None when there was no process feed to sum it from.
     pub cpu: Option<f64>,
     pub load1: f64,
+    /// The window clock when it landed: readings rest while the window is hidden and can fail,
+    /// so they aren't always `FAST` apart.
+    pub at: f64,
 }
 
 /// What changed between consecutive readings of a counter. A counter that went backwards (the
@@ -903,6 +906,7 @@ impl System {
                         CpuPoint {
                             cpu,
                             load1: l.load1,
+                            at: now,
                         },
                     );
                 }

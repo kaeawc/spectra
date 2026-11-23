@@ -36,7 +36,10 @@ mod tests_storage;
 #[cfg(test)]
 mod tests_system;
 #[cfg(test)]
+mod tests_timeline;
+#[cfg(test)]
 mod tests_whatswrong;
+mod timeline;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
@@ -109,6 +112,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::System, "system".into(), None, k));
     sb = sb.child(place(s, Nav::Growth, "growth".into(), None, k));
     sb = sb.child(place(s, Nav::Activity, "activity".into(), None, k));
+    sb = sb.child(place(s, Nav::Timeline, "timeline".into(), None, k));
     sb = sb.child(place(s, Nav::Network, "network".into(), None, k));
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
     sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
@@ -172,6 +176,8 @@ enum Page<'a> {
     Compare,
     /// Memory jumps and alerts.
     Growth,
+    /// What changed before it got slow.
+    Timeline,
     List,
 }
 
@@ -199,6 +205,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Storage => Page::Storage,
         Nav::Compare => Page::Compare,
         Nav::Growth => Page::Growth,
+        Nav::Timeline => Page::Timeline,
         _ => Page::List,
     }
 }
@@ -228,6 +235,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Storage => (storage::page(s, &k), s.nav.title().to_owned()),
         Page::Compare => (compare::page(s, &k), s.nav.title().to_owned()),
         Page::Growth => (growth::page(s, &k), s.nav.title().to_owned()),
+        Page::Timeline => (timeline::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             // Lines in "Right now" are something to look at too.
             let problems = match s.problems() {

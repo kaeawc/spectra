@@ -1,0 +1,178 @@
+{
+  "events": [
+    {
+      "time": "2026-11-19T08:41:04-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "launchd [1] started"
+    },
+    {
+      "time": "2026-11-19T14:12:07-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Example Sync Agent [4410] started"
+    },
+    {
+      "time": "2026-11-19T19:30:12-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Example Helper (Renderer) [4420] started"
+    },
+    {
+      "time": "2026-11-19T22:05:03.512-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "powerd: battery reading out of range"
+    },
+    {
+      "time": "2026-11-20T02:15:09-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "examplecached [4431] started"
+    },
+    {
+      "time": "2026-11-20T05:12:00.100000-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:09.100001-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:19.100002-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:29.100003-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:41.100004-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:50.100005-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:12:59.100006-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:13:08-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:13:17-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "examplesyncd: could not reach the sync service, will retry"
+    },
+    {
+      "time": "2026-11-20T05:40:22-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "exampled: connection refused by peer"
+    },
+    {
+      "time": "2026-11-20T06:10:05-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "ssh [4502] started"
+    },
+    {
+      "time": "2026-11-20T06:31:48-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Example Updater [4511] started"
+    },
+    {
+      "time": "2026-11-20T06:52:00-05:00",
+      "source": "update",
+      "severity": "info",
+      "summary": "installed Slack 4.41.105"
+    },
+    {
+      "time": "2026-11-20T06:52:20-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Slack [900] started"
+    },
+    {
+      "time": "2026-11-20T06:52:22-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Slack Helper (Renderer) [901] started"
+    },
+    {
+      "time": "2026-11-20T06:53:03-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:53:04-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:53:06-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:53:11-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:53:15-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:53:22-05:00",
+      "source": "log",
+      "severity": "error",
+      "summary": "WindowServer: display reconfiguration took too long"
+    },
+    {
+      "time": "2026-11-20T06:54:02-05:00",
+      "source": "log",
+      "severity": "warn",
+      "summary": "mds_stores: Failed to open index store at <private>"
+    },
+    {
+      "time": "2026-11-20T06:58:01-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "mdworker_shared [9911] started"
+    },
+    {
+      "time": "2026-11-20T06:58:30-05:00",
+      "source": "process",
+      "severity": "info",
+      "summary": "Example Helper (GPU) [4530] started"
+    }
+  ]
+}
