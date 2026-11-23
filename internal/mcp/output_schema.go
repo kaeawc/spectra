@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/kaeawc/spectra/internal/devices"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/idle"
 	"github.com/kaeawc/spectra/internal/lineage"
@@ -24,6 +25,7 @@ var reportOutputTypes = map[string]reflect.Type{
 	"lineage": reflect.TypeFor[lineage.Result](),
 	"spawns":  reflect.TypeFor[spawntrace.Report](),
 	"idle":    reflect.TypeFor[idle.Report](),
+	"devices": reflect.TypeFor[devices.Report](),
 	"owner":   nil,
 }
 

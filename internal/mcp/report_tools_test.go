@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/clock"
+	"github.com/kaeawc/spectra/internal/devices"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/idle"
 	"github.com/kaeawc/spectra/internal/lineage"
 	"github.com/kaeawc/spectra/internal/orphans"
 	"github.com/kaeawc/spectra/internal/owner"
+	"github.com/kaeawc/spectra/internal/proc"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/spawnorigin"
 	"github.com/kaeawc/spectra/internal/spawntrace"
@@ -354,5 +356,44 @@ func TestOwnerToolTrimsPathTarget(t *testing.T) {
 	res := callReportTool(t, s, "owner", `{"target":" /tmp"}`)
 	if res.IsError && len(res.Content) > 0 && strings.Contains(res.Content[0].Text, "must be absolute") {
 		t.Fatalf("a padded absolute path was rejected: %+v", res)
+	}
+}
+
+// fakeDevicesOptions reads no host: no adb, no xcrun, one emulator under /work.
+func fakeDevicesOptions() devices.Options {
+	return devices.Options{
+		OS:     hostos.Linux,
+		Runner: proc.NewFake(),
+		Procs: func(context.Context) []process.Info {
+			return []process.Info{{PID: 30, PPID: 1, Command: "qemu-system-x86_64", FullCommandLine: "qemu-system-x86_64 -avd Pixel_7"}}
+		},
+		Cwds:     func(context.Context, []int) map[int]string { return map[int]string{30: "/work/lane"} },
+		LookPath: func(string) (string, error) { return "", errors.New("not found") },
+		Getenv:   func(string) string { return "" },
+		Stat:     func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		Now:      func() time.Time { return reportNow },
+	}
+}
+
+func TestDevicesTool(t *testing.T) {
+	asked := 0
+	s := reportTestServer(t, &asked)
+	s.collect.Reports.Devices = fakeDevicesOptions
+	res := s.toolDevices(context.Background(), json.RawMessage(`{"roots":["/work"]}`))
+	if res.IsError {
+		t.Fatalf("devices errored: %+v", res.Content)
+	}
+	var rep devices.Report
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Android.Status != devices.StatusNotFound || rep.IOSSimulators.Status != devices.StatusUnsupported {
+		t.Errorf("statuses = %s / %s", rep.Android.Status, rep.IOSSimulators.Status)
+	}
+	if rep.Processes.Emulators != 1 || len(rep.Processes.ByRoot) != 1 || rep.Processes.ByRoot[0].Root != "/work" {
+		t.Errorf("processes = %+v", rep.Processes)
+	}
+	if res := s.toolDevices(context.Background(), json.RawMessage(`{"roots":["rel"]}`)); !res.IsError {
+		t.Error("relative root accepted")
 	}
 }

@@ -257,6 +257,275 @@
       }
     },
     {
+      "description": "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, and which worktree started them?\"",
+      "inputSchema": {
+        "properties": {
+          "roots": {
+            "description": "Absolute directories (worktree roots) to attribute emulator and simulator processes to.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "start_adb": {
+            "description": "Ask adb even when no adb server runs. This starts an adb server that keeps running.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "devices",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "android": {
+            "additionalProperties": false,
+            "properties": {
+              "adb": {
+                "type": "string"
+              },
+              "devices": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "type": "string"
+                    },
+                    "emulator": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "product": {
+                      "type": "string"
+                    },
+                    "remote": {
+                      "type": "boolean"
+                    },
+                    "serial": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "transport_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "serial",
+                    "state",
+                    "emulator",
+                    "remote"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "devices"
+            ],
+            "type": "object"
+          },
+          "ios_simulators": {
+            "additionalProperties": false,
+            "properties": {
+              "booted": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "runtime": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "udid": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "udid",
+                    "name",
+                    "runtime",
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "booted"
+            ],
+            "type": "object"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "os": {
+            "type": "string"
+          },
+          "processes": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_window_seconds": {
+                "type": "integer"
+              },
+              "booted": {
+                "type": "integer"
+              },
+              "booted_recently": {
+                "type": "integer"
+              },
+              "by_root": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "booted": {
+                      "type": "integer"
+                    },
+                    "booted_recently": {
+                      "type": "integer"
+                    },
+                    "root": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "root",
+                    "booted",
+                    "booted_recently"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "emulators": {
+                "type": "integer"
+              },
+              "list": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "age_seconds": {
+                      "type": "integer"
+                    },
+                    "avd": {
+                      "type": "string"
+                    },
+                    "booted_recently": {
+                      "type": "boolean"
+                    },
+                    "cpu_pct": {
+                      "type": "number"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "members": {
+                      "type": "integer"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    },
+                    "root": {
+                      "type": "string"
+                    },
+                    "rss_kib": {
+                      "type": "integer"
+                    },
+                    "started_at": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "udid": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "pid",
+                    "members",
+                    "cpu_pct",
+                    "rss_kib",
+                    "age_seconds",
+                    "booted_recently"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "simulators": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "simulators",
+              "emulators",
+              "booted",
+              "booted_recently",
+              "boot_window_seconds",
+              "by_root",
+              "list"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "os",
+          "android",
+          "ios_simulators",
+          "processes",
+          "limitations"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "description": "Run rules. Finds risky app, JVM, network, storage, and toolchain state. Ask: \"What needs attention?\"",
       "inputSchema": {
         "properties": {
@@ -661,7 +930,7 @@
       }
     },
     {
-      "description": "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
+      "description": "macOS only. Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
       "inputSchema": {
         "properties": {
           "assess_gatekeeper": {
@@ -1931,7 +2200,7 @@
       }
     },
     {
-      "description": "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
+      "description": "macOS only. Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
       "inputSchema": {
         "properties": {
           "allow_long_window": {
@@ -2669,7 +2938,7 @@
       }
     },
     {
-      "description": "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"",
+      "description": "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"",
       "inputSchema": {
         "properties": {
           "bundles": {
@@ -2762,7 +3031,7 @@
       }
     },
     {
-      "description": "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+      "description": "macOS only. launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -3083,7 +3352,7 @@
       }
     },
     {
-      "description": "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+      "description": "macOS only. Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -3262,7 +3531,7 @@
       }
     },
     {
-      "description": "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+      "description": "macOS only. macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
       "inputSchema": {
         "properties": {
           "grep": {
