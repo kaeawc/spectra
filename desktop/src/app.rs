@@ -377,6 +377,8 @@ pub struct App {
     pub storage: crate::storage::Storage,
     /// Stored snapshots and what differs from one, for the Compare page.
     pub compare: crate::compare::Compare,
+    /// The installed developer toolchains, for the Toolchains page.
+    pub toolchains: crate::toolchains::ToolchainsPage,
     /// Memory jumps and the daemon's alerts, for the Memory and alerts page.
     pub growth: crate::growth::Growth,
     /// What changed before it got slow, for the Timeline page.
@@ -462,6 +464,7 @@ pub fn init() -> App {
         whatswrong: crate::whatswrong::WhatsWrong::new(),
         storage: crate::storage::Storage::new(),
         compare: crate::compare::Compare::new(),
+        toolchains: crate::toolchains::ToolchainsPage::new(),
         growth: crate::growth::Growth::new(),
         timeline: crate::timeline::TimelinePage::new(),
     }
@@ -851,6 +854,10 @@ impl App {
         if self.nav == Nav::Compare && nav != Nav::Compare {
             self.cancel_compare();
         }
+        // Leaving Toolchains drops a read on its way.
+        if self.nav == Nav::Toolchains && nav != Nav::Toolchains {
+            self.cancel_toolchains();
+        }
         // The Timeline page reads each time it opens; leaving it stops a reading on its way.
         self.timeline_nav(self.nav, nav);
         self.nav = nav;
@@ -868,6 +875,10 @@ impl App {
         // The Compare page reads the stored snapshots each time it opens; the rest waits for a press.
         if nav == Nav::Compare {
             self.open_compare();
+        }
+        // The Toolchains page reads once, when first opened; Refresh reads again.
+        if nav == Nav::Toolchains {
+            self.open_toolchains();
         }
         // The Memory and alerts page looks at once each time it opens.
         if nav == Nav::Growth {

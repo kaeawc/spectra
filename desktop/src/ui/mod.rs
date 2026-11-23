@@ -38,8 +38,11 @@ mod tests_system;
 #[cfg(test)]
 mod tests_timeline;
 #[cfg(test)]
+mod tests_toolchains;
+#[cfg(test)]
 mod tests_whatswrong;
 mod timeline;
+mod toolchains;
 mod tools;
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col};
@@ -117,6 +120,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
     sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
     sb = sb.child(place(s, Nav::Compare, "compare".into(), None, k));
+    sb = sb.child(place(s, Nav::Toolchains, "toolchains".into(), None, k));
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
         let kinds = Category::ALL
@@ -174,6 +178,8 @@ enum Page<'a> {
     Storage,
     /// What changed since an earlier snapshot.
     Compare,
+    /// The developer toolchains installed here.
+    Toolchains,
     /// Memory jumps and alerts.
     Growth,
     /// What changed before it got slow.
@@ -204,6 +210,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Startup => Page::Startup,
         Nav::Storage => Page::Storage,
         Nav::Compare => Page::Compare,
+        Nav::Toolchains => Page::Toolchains,
         Nav::Growth => Page::Growth,
         Nav::Timeline => Page::Timeline,
         _ => Page::List,
@@ -234,6 +241,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
         Page::Storage => (storage::page(s, &k), s.nav.title().to_owned()),
         Page::Compare => (compare::page(s, &k), s.nav.title().to_owned()),
+        Page::Toolchains => (toolchains::page(s, &k), s.nav.title().to_owned()),
         Page::Growth => (growth::page(s, &k), s.nav.title().to_owned()),
         Page::Timeline => (timeline::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {

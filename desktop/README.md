@@ -199,6 +199,14 @@ What it shows:
     when each was taken and its disk, and a backup being written now. Spectra doesn't report a
     snapshot's size, and the page says so.
   - Leaving the page or quitting stops a measurement or read on its way.
+- **Toolchains**, after Compare: the developer tooling installed on this Mac, from
+  `spectra toolchain --json`. Java installs come first, then Node, Python, Go, Ruby, Rust and
+  build tools, then Homebrew formulae, casks and taps (closed to start with, since they are
+  long). Each group is collapsible with its count in the header, and the search narrows rows by
+  name, version or source. The page flags things worth a look: several JDKs of one major
+  version, a JAVA_HOME pointing at a folder that is gone, and deprecated Homebrew formulae. It
+  reads once when first opened and on Refresh, never on a timer; a failure says why and Refresh
+  tries again.
 - **Compare**, under Storage: what's different from when it was fine. It lists the snapshots and
   baselines Spectra has stored (`spectra snapshot list --json`, read when the page opens, newest
   first), and you pick an earlier one with From, optionally a later one with To (Now by default),
@@ -382,7 +390,8 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # startup-confirm, startup-failed, tree, tree-search,
                             # storage, storage-measuring, storage-inside, storage-failed,
                             # compare, compare-list, compare-diffing, compare-empty,
-                            # compare-failed, compare-no-list
+                            # compare-failed, compare-no-list, toolchains, toolchains-filtered,
+                            # toolchains-empty, toolchains-failed, toolchains-reading
                             # timeline, timeline-empty, timeline-failed, timeline-reading
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
@@ -419,6 +428,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/compare.rs`: the Compare page's snapshot list, diff and snapshot runs, their JSON, and the
   diff put into grouped plain words, behind the same `Runner` trait; `src/sample_compare.rs`: its
   sample data, from `tests/fixtures/compare`.
+- `src/toolchains.rs`: the Toolchains page's read, tolerant JSON parsing, sections, search and
+  flags, behind the same `Runner` trait; `src/sample_toolchains.rs`: its sample data, from
+  `tests/fixtures/toolchains`.
 - `src/growth.rs`: the Memory and alerts page's reads and its one write (acknowledge), their
   JSON, the rows and the 30 s schedule, behind the `Spectra` trait that tests replace with a
   fake; `src/sample_growth.rs`: its sample data (invented), with the shapes in

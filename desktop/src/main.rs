@@ -32,6 +32,7 @@ mod sample_startup;
 mod sample_storage;
 mod sample_system;
 mod sample_timeline;
+mod sample_toolchains;
 mod sample_tree;
 mod sample_whatswrong;
 mod signal;
@@ -41,6 +42,7 @@ mod storage;
 mod system;
 mod system_findings;
 mod timeline;
+mod toolchains;
 mod tools;
 mod tree;
 mod ui;
@@ -121,6 +123,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.whatswrong.cancel();
     s.cancel_storage();
     s.cancel_compare();
+    s.cancel_toolchains();
     s.growth.cancel();
     s.timeline.cancel();
     run::wait_idle(Duration::from_secs(2));
@@ -163,6 +166,8 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     landed |= s.tick_storage();
     // The Compare page's snapshot list, and a comparison or snapshot on its way.
     landed |= s.tick_compare();
+    // The Toolchains page reads when it first opens and on Refresh; this only lands the answer.
+    landed |= s.tick_toolchains();
     if s.window_shown() && s.compare.busy() {
         tx.wake_after(STATUS_TICK);
     }
@@ -323,6 +328,23 @@ fn main() {
             ("compare-empty", sample_compare::compare_empty_scene),
             ("compare-failed", sample_compare::compare_failed_scene),
             ("compare-no-list", sample_compare::compare_no_list_scene),
+            ("toolchains", sample_toolchains::toolchains_scene),
+            (
+                "toolchains-filtered",
+                sample_toolchains::toolchains_filtered_scene,
+            ),
+            (
+                "toolchains-empty",
+                sample_toolchains::toolchains_empty_scene,
+            ),
+            (
+                "toolchains-failed",
+                sample_toolchains::toolchains_failed_scene,
+            ),
+            (
+                "toolchains-reading",
+                sample_toolchains::toolchains_reading_scene,
+            ),
             ("growth", sample_growth::growth_scene),
             ("growth-empty", sample_growth::growth_empty_scene),
             ("growth-history", sample_growth::growth_history_scene),

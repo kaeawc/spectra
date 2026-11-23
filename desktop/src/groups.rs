@@ -80,6 +80,8 @@ pub enum Nav {
     Storage,
     /// What changed since an earlier snapshot: apps, toolchains, ports and more.
     Compare,
+    /// The developer toolchains installed here: Java, language runtimes, Homebrew.
+    Toolchains,
     /// Memory that jumped past its usual level, and the daemon's alert history.
     Growth,
     /// What changed before it got slow: starts, error bursts and installs, newest first.
@@ -100,6 +102,7 @@ impl Nav {
             Nav::Startup => "Startup",
             Nav::Storage => "Storage",
             Nav::Compare => "Compare",
+            Nav::Toolchains => "Toolchains",
             Nav::Growth => "Memory and alerts",
             Nav::Timeline => "Timeline",
         }
@@ -114,6 +117,7 @@ impl Nav {
             Nav::Startup => false,
             Nav::Storage => false,
             Nav::Compare => false,
+            Nav::Toolchains => false,
             Nav::Growth => false,
             Nav::Timeline => false,
             Nav::All => true,

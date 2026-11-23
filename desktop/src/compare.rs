@@ -465,7 +465,7 @@ pub fn groups(d: &Diff) -> Vec<Group> {
 }
 
 /// Why a command printed nothing to read.
-fn failure(what: &str, ran: &Ran) -> String {
+pub(crate) fn failure(what: &str, ran: &Ran) -> String {
     let said = ran
         .stderr
         .lines()
