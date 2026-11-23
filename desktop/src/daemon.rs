@@ -46,6 +46,11 @@ const THERMAL: &str = "thermal.current";
 const POWER: &str = "power.current";
 const NETWORK: &str = "network.current";
 const WHATSWRONG: &str = "whatswrong.current";
+/// The alert history: `[alert]`, asked with `{state, limit}`, as `spectra alerts --json` prints.
+const ALERTS_LIST: &str = "alerts.list";
+/// Acknowledges one alert, `{id}`, and answers it. A write: it only ever runs for an explicit
+/// press, and an answer to it that isn't a plain success is never retried through the CLI.
+const ALERTS_ACK: &str = "alerts.ack";
 /// JSON-RPC's "method not found" and "invalid params": the daemon can't take the call at all,
 /// so its route is dropped until the next connection. Any other error is this call's alone.
 const NOT_FOUND: i64 = -32601;
@@ -356,6 +361,17 @@ pub static TABLE: &[Entry] = &[
         method: WHATSWRONG,
         answer: whatswrong,
     },
+    // The Memory and alerts page: the alert history, and acknowledging one alert (a write).
+    Entry {
+        cli: &["alerts", "--json"],
+        method: ALERTS_LIST,
+        answer: alert_list,
+    },
+    Entry {
+        cli: &["alerts", "ack"],
+        method: ALERTS_ACK,
+        answer: alert_ack,
+    },
 ];
 
 /// The daemon's own management, which always runs the CLI.
@@ -563,6 +579,10 @@ impl Daemon {
         match (entry.answer)(self, args, left, cancel) {
             Ok(s) => Some(Ok(s)),
             Err(e @ (Error::Cancelled | Error::Timeout | Error::Warned(_))) => Some(Err(e)),
+            // A write the daemon may have taken is never run a second time through the CLI.
+            Err(e) if entry.method == ALERTS_ACK && !matches!(e, Error::Unavailable(_)) => {
+                Some(Err(e))
+            }
             // A daemon that lists the method but can't take this call the CLI's way (an older one
             // that doesn't classify processes) isn't asked again until it reconnects: the CLI
             // runs instead of a wasted round trip every reading.
@@ -740,6 +760,53 @@ fn whatswrong(
     cancel: &AtomicBool,
 ) -> Result<String, Error> {
     reading(d, WHATSWRONG, deadline, cancel)
+}
+
+/// The value after `flag` in `args`.
+fn flag_value<'a>(args: &[&'a str], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| *a == flag)
+        .and_then(|i| args.get(i + 1))
+        .copied()
+}
+
+/// `spectra alerts --json [--state S] [--limit N]`: the alert history.
+fn alert_list(
+    d: &Daemon,
+    args: &[&str],
+    deadline: Duration,
+    cancel: &AtomicBool,
+) -> Result<String, Error> {
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "state".into(),
+        json!(flag_value(args, "--state").unwrap_or("firing")),
+    );
+    if let Some(n) = flag_value(args, "--limit").and_then(|n| n.parse::<u32>().ok()) {
+        params.insert("limit".into(), json!(n));
+    }
+    match d.call(ALERTS_LIST, Value::Object(params), deadline, cancel)? {
+        v @ Value::Array(_) => Ok(v.to_string()),
+        Value::Null => Ok("[]".into()),
+        _ => Err(Error::Shape("alerts.list had no list".into())),
+    }
+}
+
+/// `spectra alerts ack <id> --json`: the acknowledged alert.
+fn alert_ack(
+    d: &Daemon,
+    args: &[&str],
+    deadline: Duration,
+    cancel: &AtomicBool,
+) -> Result<String, Error> {
+    let id = args
+        .get(2)
+        .filter(|id| !id.starts_with('-'))
+        .ok_or_else(|| Error::Shape("alerts ack had no id".into()))?;
+    match d.call(ALERTS_ACK, json!({"id": id}), deadline, cancel)? {
+        v @ Value::Object(_) => Ok(v.to_string()),
+        _ => Err(Error::Shape("alerts.ack had no alert".into())),
+    }
 }
 
 fn read_loop(

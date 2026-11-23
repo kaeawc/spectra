@@ -377,6 +377,8 @@ pub struct App {
     pub storage: crate::storage::Storage,
     /// Stored snapshots and what differs from one, for the Compare page.
     pub compare: crate::compare::Compare,
+    /// Memory jumps and the daemon's alerts, for the Memory and alerts page.
+    pub growth: crate::growth::Growth,
 }
 
 pub fn init() -> App {
@@ -458,6 +460,7 @@ pub fn init() -> App {
         whatswrong: crate::whatswrong::WhatsWrong::new(),
         storage: crate::storage::Storage::new(),
         compare: crate::compare::Compare::new(),
+        growth: crate::growth::Growth::new(),
     }
 }
 
@@ -705,6 +708,7 @@ impl App {
         let nav = if nav == Nav::Network { Nav::All } else { nav };
         let nav = if nav == Nav::Storage { Nav::All } else { nav };
         let nav = if nav == Nav::Compare { Nav::All } else { nav };
+        let nav = if nav == Nav::Growth { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -858,6 +862,10 @@ impl App {
         // The Compare page reads the stored snapshots each time it opens; the rest waits for a press.
         if nav == Nav::Compare {
             self.open_compare();
+        }
+        // The Memory and alerts page looks at once each time it opens.
+        if nav == Nav::Growth {
+            self.open_growth();
         }
     }
 
@@ -1124,6 +1132,8 @@ impl App {
             // The Storage page lists folders, not processes.
             None if self.nav == Nav::Storage => None,
             None if self.nav == Nav::Compare => None,
+            // The Memory and alerts page lists alerts and jumps, not a table.
+            None if self.nav == Nav::Growth => None,
             None if !matches!(
                 self.nav,
                 Nav::Overview | Nav::System | Nav::Activity | Nav::Startup

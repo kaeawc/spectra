@@ -200,6 +200,21 @@ What it shows:
   - No daemon method exists for these yet, so they run through the same seam as every other
     call, which runs the CLI, with a deadline (30 s for the list, 5 min for a diff or snapshot) and
     a 4 MB output cap, off the UI thread. While the window is hidden nothing is read.
+- **Memory and alerts**, under Machine: two sections, read when the page opens and every 30 s
+  while it is on screen and the window is visible (nothing while hidden or on another page).
+  - *Memory jumps*, from `spectra anomalies --json` (Spectra has no daemon method for it, so the
+    seam runs the CLI): processes whose memory is above their rolling baseline, each as "now X,
+    usually Y" with a plain phrase (above, well above, far above its usual) and a link to its
+    process page. Spectra compares the latest reading with a baseline, so this finds sudden
+    jumps, not slow creep, and the page never calls a row "growing". Processes that have ended,
+    drops, and rises under 1 MB are left out. With no stored history yet Spectra exits with an
+    error; the page says it hasn't stored enough history, which is neither an error nor "nothing
+    is jumping".
+  - *Alerts*, from the daemon's `alerts.list` (through the seam, like every Spectra call), newest
+    first, active, acknowledged or cleared, with Spectra's detail in plain words. When the daemon
+    isn't available the page says so. An active alert has an Acknowledge button: it calls
+    `alerts.ack` only when pressed, never retries it through the CLI, and says that it worked or
+    why it didn't. Acknowledging doesn't clear the alert.
 - **All processes**, then by kind and by runtime in the sidebar, with live counts. Sort by CPU,
   memory or name; search by name, pid, bundle id or path. The table only builds the rows on
   screen, so the full list stays quick. Rows group an app with its helpers, and processes of one
@@ -377,6 +392,10 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/compare.rs`: the Compare page's snapshot list, diff and snapshot runs, their JSON, and the
   diff put into grouped plain words, behind the same `Runner` trait; `src/sample_compare.rs`: its
   sample data, from `tests/fixtures/compare`.
+- `src/growth.rs`: the Memory and alerts page's reads and its one write (acknowledge), their
+  JSON, the rows and the 30 s schedule, behind the `Spectra` trait that tests replace with a
+  fake; `src/sample_growth.rs`: its sample data (invented), with the shapes in
+  `tests/fixtures/growth`.
 - `src/spawns.rs`: the Activity page's recording rounds, their JSON, the event buffer, the
   last-minute summary and the spawn-storm rule; `src/sample_activity.rs`: its sample data.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and

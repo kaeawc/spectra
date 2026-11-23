@@ -10,6 +10,7 @@ mod daemon;
 mod data;
 mod findings;
 mod groups;
+mod growth;
 mod inspect;
 mod jvm_tools;
 mod live;
@@ -21,6 +22,7 @@ mod run;
 mod sample;
 mod sample_activity;
 mod sample_compare;
+mod sample_growth;
 mod sample_jvm;
 mod sample_logs;
 mod sample_network;
@@ -74,6 +76,7 @@ fn setup(s: &mut App, wake: rune::Waker) {
     s.wake = Some(wake.clone());
     // "Right now" on the Overview looks while the Overview shows.
     s.whatswrong.auto = true;
+    s.growth.auto = true;
     if s.me.uid.is_none() {
         s.me.uid = signal::my_uid();
     }
@@ -110,9 +113,11 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.network.cancel();
     startup::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
     s.whatswrong.auto = false;
+    s.growth.auto = false;
     s.whatswrong.cancel();
     s.cancel_storage();
     s.cancel_compare();
+    s.growth.cancel();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -157,6 +162,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
         tx.wake_after(STATUS_TICK);
     }
     if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
+        tx.wake_after(STATUS_TICK);
+    }
+    // Memory jumps and alerts: a look when the page opens, then every 30 s while it shows.
+    landed |= s.tick_growth();
+    if s.window_shown() && s.growth_visible() {
         tx.wake_after(STATUS_TICK);
     }
     // An open page's live rounds rest while the window is hidden.
@@ -303,6 +313,13 @@ fn main() {
             ("compare-empty", sample_compare::compare_empty_scene),
             ("compare-failed", sample_compare::compare_failed_scene),
             ("compare-no-list", sample_compare::compare_no_list_scene),
+            ("growth", sample_growth::growth_scene),
+            ("growth-empty", sample_growth::growth_empty_scene),
+            ("growth-history", sample_growth::growth_history_scene),
+            (
+                "growth-unavailable",
+                sample_growth::growth_unavailable_scene,
+            ),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

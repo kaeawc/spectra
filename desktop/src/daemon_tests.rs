@@ -846,3 +846,103 @@ fn right_now_comes_from_the_daemon_in_the_shape_the_cli_prints() {
     let from_cli = crate::whatswrong::parse(crate::whatswrong::tests::BUSY).unwrap();
     assert_eq!(from_daemon, from_cli);
 }
+
+const LIST_ARGS: [&str; 6] = ["alerts", "--json", "--state", "all", "--limit", "100"];
+
+#[test]
+fn the_alert_calls_route_to_the_daemon_only_while_it_lists_them() {
+    assert_eq!(routed(&LIST_ARGS, &["alerts.list"]), "alerts.list");
+    assert_eq!(routed(&LIST_ARGS, &["alerts.ack"]), "cli");
+    assert_eq!(routed(&LIST_ARGS, &[]), "cli");
+    let ack = ["alerts", "ack", "abc", "--json"];
+    assert_eq!(routed(&ack, &["alerts.ack", "alerts.list"]), "alerts.ack");
+    assert_eq!(routed(&ack, &["alerts.list"]), "cli");
+    // `spectra anomalies` has no daemon method: it runs the CLI.
+    assert_eq!(
+        routed(&["anomalies", "--json"], &["alerts.list", "alerts.ack"]),
+        "cli"
+    );
+}
+
+#[test]
+fn the_alert_history_asks_for_the_state_and_limit_and_comes_back_as_the_cli_prints_it() {
+    let list = json!([{"id": "a", "title": "Load climbing", "state": "resolved"}]);
+    let reply = list.clone();
+    let f = Fake::serve(
+        &["alerts.list"],
+        h(move |m, _| (m == "alerts.list").then(|| Ok(reply.clone()))),
+    );
+    let d = f.daemon();
+    let out = d.answer(&LIST_ARGS, SEC, &never()).unwrap().unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&out).unwrap(), list);
+    assert_eq!(
+        f.calls("alerts.list"),
+        [json!({"state": "all", "limit": 100})]
+    );
+    // An empty history is an empty list, not a failure.
+    let f = Fake::serve(
+        &["alerts.list"],
+        h(|m, _| (m == "alerts.list").then_some(Ok(Value::Null))),
+    );
+    let out = f
+        .daemon()
+        .answer(&LIST_ARGS, SEC, &never())
+        .unwrap()
+        .unwrap();
+    assert_eq!(out, "[]");
+}
+
+#[test]
+fn acknowledging_sends_the_id_once_and_never_retries_through_the_cli() {
+    let f = Fake::serve(
+        &["alerts.ack"],
+        h(|m, p| {
+            (m == "alerts.ack").then(|| {
+                if p["id"] == "known" {
+                    Ok(json!({"id": "known", "acked_at": "2026-11-23T04:05:00Z"}))
+                } else {
+                    Err((-32602, "unknown alert id".into()))
+                }
+            })
+        }),
+    );
+    let d = f.daemon();
+    let ok = d
+        .answer(&["alerts", "ack", "known", "--json"], SEC, &never())
+        .unwrap()
+        .unwrap();
+    assert!(ok.contains("acked_at"));
+    // A refusal comes back as the answer: running the CLI would write a second time.
+    let refused = d
+        .answer(&["alerts", "ack", "nope", "--json"], SEC, &never())
+        .expect("not handed to the CLI");
+    assert_eq!(refused.unwrap_err().why(), "unknown alert id (-32602)");
+    assert!(
+        d.has("alerts.ack"),
+        "a refused id doesn't take the route away"
+    );
+    assert_eq!(f.calls("alerts.ack").len(), 2);
+    // No id, no call.
+    // An answer that is an error, not `None` (which would run the CLI and write).
+    assert!(
+        matches!(
+            d.answer(&["alerts", "ack", "--json"], SEC, &never()),
+            Some(Err(Error::Shape(_)))
+        ),
+        "a CLI fallback would fail this"
+    );
+    assert_eq!(f.calls("alerts.ack").len(), 2);
+}
+
+#[test]
+fn nothing_acknowledges_unless_asked() {
+    // Reading the history, the anomalies or anything else never sends alerts.ack.
+    let f = Fake::serve(
+        &["alerts.list", "alerts.ack"],
+        h(|m, _| (m == "alerts.list").then(|| Ok(json!([])))),
+    );
+    let d = f.daemon();
+    d.answer(&LIST_ARGS, SEC, &never());
+    assert!(d.answer(&["anomalies", "--json"], SEC, &never()).is_none());
+    assert!(f.calls("alerts.ack").is_empty());
+}

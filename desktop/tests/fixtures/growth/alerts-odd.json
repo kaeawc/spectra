@@ -1,0 +1,4 @@
+[
+ {"id":"a1","key":"disk.free","severity":"critical","title":"Disk nearly full","detail":null,"state":"firing","fired_at":"2026-11-23T04:00:00Z","acked_at":"2026-11-23T04:05:00Z","extra":{"future":true}},
+ {"id":"a2","severity":null,"state":"resolved","fired_at":"not a time","resolved_at":null}
+]

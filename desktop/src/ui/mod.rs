@@ -7,6 +7,7 @@ mod card;
 mod chart;
 mod compare;
 mod detail;
+mod growth;
 mod home;
 mod list;
 mod logs;
@@ -22,6 +23,8 @@ mod tests;
 mod tests_activity;
 #[cfg(test)]
 mod tests_compare;
+#[cfg(test)]
+mod tests_growth;
 #[cfg(test)]
 mod tests_logs;
 #[cfg(test)]
@@ -104,6 +107,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     let mut sb = Sidebar::new().header(overview);
     // The whole machine, right under the overview, whatever the process feed is doing.
     sb = sb.child(place(s, Nav::System, "system".into(), None, k));
+    sb = sb.child(place(s, Nav::Growth, "growth".into(), None, k));
     sb = sb.child(place(s, Nav::Activity, "activity".into(), None, k));
     sb = sb.child(place(s, Nav::Network, "network".into(), None, k));
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
@@ -166,6 +170,8 @@ enum Page<'a> {
     Storage,
     /// What changed since an earlier snapshot.
     Compare,
+    /// Memory jumps and alerts.
+    Growth,
     List,
 }
 
@@ -192,6 +198,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Startup => Page::Startup,
         Nav::Storage => Page::Storage,
         Nav::Compare => Page::Compare,
+        Nav::Growth => Page::Growth,
         _ => Page::List,
     }
 }
@@ -220,6 +227,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Startup => (startup::page(s, &k), s.nav.title().to_owned()),
         Page::Storage => (storage::page(s, &k), s.nav.title().to_owned()),
         Page::Compare => (compare::page(s, &k), s.nav.title().to_owned()),
+        Page::Growth => (growth::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             // Lines in "Right now" are something to look at too.
             let problems = match s.problems() {

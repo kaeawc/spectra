@@ -80,6 +80,8 @@ pub enum Nav {
     Storage,
     /// What changed since an earlier snapshot: apps, toolchains, ports and more.
     Compare,
+    /// Memory that jumped past its usual level, and the daemon's alert history.
+    Growth,
 }
 
 impl Nav {
@@ -96,6 +98,7 @@ impl Nav {
             Nav::Startup => "Startup",
             Nav::Storage => "Storage",
             Nav::Compare => "Compare",
+            Nav::Growth => "Memory and alerts",
         }
     }
 
@@ -108,6 +111,7 @@ impl Nav {
             Nav::Startup => false,
             Nav::Storage => false,
             Nav::Compare => false,
+            Nav::Growth => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,
