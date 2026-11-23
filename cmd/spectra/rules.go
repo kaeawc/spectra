@@ -71,9 +71,7 @@ func runRules(args []string) int {
 	findings := rules.Evaluate(snap, catalog)
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(findings)
+		writeFindingsJSON(os.Stdout, findings)
 		return 0
 	}
 
@@ -382,4 +380,14 @@ func printFindings(findings []rules.Finding) {
 		fmt.Printf("%-8s  %-30s  %s\n", f.Severity, truncate(f.RuleID, 30), msg)
 	}
 	fmt.Printf("\n%d finding(s)\n", len(findings))
+}
+
+// writeFindingsJSON encodes findings as an array, `[]` when none fired.
+func writeFindingsJSON(w io.Writer, findings []rules.Finding) {
+	if findings == nil {
+		findings = []rules.Finding{}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(findings)
 }

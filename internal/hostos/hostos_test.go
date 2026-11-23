@@ -2,6 +2,7 @@ package hostos
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 )
@@ -76,4 +77,32 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestReportUnsupported(t *testing.T) {
+	defer SetForTest(Linux)()
+	err := fmt.Errorf("sample failed for PID 1: %w", Unsupported("process sampling"))
+	r, ok := ReportUnsupported(err)
+	if !ok {
+		t.Fatal("wrapped Unsupported error not reported")
+	}
+	want := UnsupportedReport{Error: "unsupported_platform", Feature: "process sampling", OS: "linux", Message: err.Error()}
+	if r != want {
+		t.Errorf("report = %+v, want %+v", r, want)
+	}
+	if got := Unsupported("x").Error(); got != "x: unsupported on host OS (linux)" {
+		t.Errorf("message changed: %q", got)
+	}
+
+	other := errors.New("proc_pid_rusage unsupported on this platform")
+	if _, ok := ReportUnsupported(other); ok {
+		t.Error("an unrelated error was reported as unsupported")
+	}
+	r, ok = ReportUnsupported(fmt.Errorf("impact: %w", other), other)
+	if !ok || r.Feature != "" || r.OS != "linux" {
+		t.Errorf("extra sentinel: report = %+v ok=%v", r, ok)
+	}
+	if _, ok := ReportUnsupported(nil); ok {
+		t.Error("nil reported")
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/devices"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/idle"
 	"github.com/kaeawc/spectra/internal/lineage"
@@ -26,6 +27,7 @@ const (
 	loadToolTimeout    = time.Minute
 	orphansToolTimeout = 30 * time.Second
 	lineageToolTimeout = 30 * time.Second
+	devicesToolTimeout = 30 * time.Second
 	// spawnsMaxSeconds caps a trace: tools/call blocks the server meanwhile.
 	spawnsMaxSeconds     = 30
 	spawnsMinIntervalMS  = 50
@@ -45,6 +47,7 @@ type ReportDeps struct {
 	Find    owner.FindFunc
 	Under   owner.UnderFunc
 	Spawns  func() spawntrace.Deps
+	Devices func() devices.Options
 }
 
 func defaultReportDeps() ReportDeps {
@@ -55,6 +58,7 @@ func defaultReportDeps() ReportDeps {
 		Find:    owner.Finder{}.Find,
 		Under:   owner.Finder{}.Under,
 		Spawns:  spawntrace.DefaultDeps,
+		Devices: func() devices.Options { return devices.Options{} },
 	}
 }
 
@@ -76,6 +80,9 @@ func mergeReportDeps(c, d ReportDeps) ReportDeps {
 	}
 	if c.Spawns == nil {
 		c.Spawns = d.Spawns
+	}
+	if c.Devices == nil {
+		c.Devices = d.Devices
 	}
 	return c
 }
@@ -110,6 +117,14 @@ func reportToolDefinitions() []ToolDefinition {
 			Name:        "lineage",
 			Description: "Ancestors and descendant tree of one pid, with subtree RSS and CPU. Same JSON as `spectra lineage --json`. Ask: \"What started PID 123 and what is under it?\"",
 			InputSchema: objectSchema(map[string]interface{}{"pid": integerProp("Process ID (required).")}, []string{"pid"}),
+		},
+		{
+			Name:        "devices",
+			Description: "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, and which worktree started them?\"",
+			InputSchema: objectSchema(map[string]interface{}{
+				"roots":     arrayStringProp("Absolute directories (worktree roots) to attribute emulator and simulator processes to."),
+				"start_adb": boolProp("Ask adb even when no adb server runs. This starts an adb server that keeps running."),
+			}, nil),
 		},
 		{
 			Name:        "owner",
@@ -147,6 +162,7 @@ func (s *Server) reportToolHandlers() map[string]toolHandler {
 		"load":    s.toolLoad,
 		"orphans": s.toolOrphans,
 		"lineage": s.toolLineage,
+		"devices": s.toolDevices,
 		"owner":   s.toolOwner,
 		"spawns":  s.toolSpawns,
 		"idle":    s.toolIdle,
@@ -189,7 +205,7 @@ func (s *Server) toolLoad(ctx context.Context, raw json.RawMessage) ToolResult {
 		Top           *int     `json:"top"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts := hostload.DefaultReportOptions()
 	opts.Roots = p.Roots
@@ -198,13 +214,13 @@ func (s *Server) toolLoad(ctx context.Context, raw json.RawMessage) ToolResult {
 	setIf(&opts.BackoffFreeGB, p.BackoffFreeGB)
 	setIf(&opts.Top, p.Top)
 	if err := opts.Validate(); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if opts.Top > loadMaxTop {
 		return toolError(fmt.Sprintf("top must be 1..%d", loadMaxTop))
 	}
 	if err := absRoots("roots", opts.Roots); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, loadToolTimeout)
 	defer cancel()
@@ -251,7 +267,7 @@ func (s *Server) toolOrphans(ctx context.Context, raw json.RawMessage) ToolResul
 		NoDaemon bool     `json:"no_daemon"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	// The server's own cwd is arbitrary, so unlike the CLI there is no
 	// current-directory default.
@@ -259,11 +275,11 @@ func (s *Server) toolOrphans(ctx context.Context, raw json.RawMessage) ToolResul
 		return toolError("roots is required")
 	}
 	if err := absRoots("roots", p.Roots); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	minAge, err := durationArg("min_age", p.MinAge, orphans.DefaultMinAge)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if minAge < 0 {
 		return toolError("min_age must not be negative")
@@ -282,7 +298,7 @@ func (s *Server) toolLineage(ctx context.Context, raw json.RawMessage) ToolResul
 		PID int `json:"pid"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.PID <= 0 {
 		return toolError("pid must be a positive integer")
@@ -302,7 +318,7 @@ func (s *Server) toolOwner(ctx context.Context, raw json.RawMessage) ToolResult 
 		Under  []string `json:"under"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if (p.Target == "") == (len(p.Under) == 0) {
 		return toolError("pass exactly one of target or under")
@@ -311,7 +327,7 @@ func (s *Server) toolOwner(ctx context.Context, raw json.RawMessage) ToolResult 
 	defer cancel()
 	if len(p.Under) > 0 {
 		if err := absRoots("under", p.Under); err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		res, err := owner.BuildUnderReport(ctx, owner.AbsDirs(p.Under, "/"), s.collect.Reports.Under)
 		if err != nil {
@@ -340,7 +356,7 @@ func (s *Server) toolSpawns(ctx context.Context, raw json.RawMessage) ToolResult
 		IntervalMillis  *int `json:"interval_millis"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts := spawntrace.DefaultOptions()
 	opts.PID = p.PID
@@ -385,11 +401,11 @@ func (s *Server) toolIdle(ctx context.Context, raw json.RawMessage) ToolResult {
 		Window string   `json:"window"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts, err := idleOptions(p.Roots, p.PIDs, p.MinAge, p.Window, p.MaxCPU)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	stop := progressFrom(ctx).elapsed(ctx, opts.Window, "sampling CPU")
 	rep, err := idle.BuildReport(ctx, opts, s.collect.Reports.Idle())
@@ -424,4 +440,23 @@ func idleOptions(roots []string, pids []int, minAge, window string, maxCPU *floa
 		return opts, fmt.Errorf("window must be at most %s", idleMaxWindow)
 	}
 	return opts, opts.Validate()
+}
+
+func (s *Server) toolDevices(ctx context.Context, raw json.RawMessage) ToolResult {
+	var p struct {
+		Roots    []string `json:"roots"`
+		StartADB bool     `json:"start_adb"`
+	}
+	if err := decodeArgs(raw, &p); err != nil {
+		return toolError(err.Error())
+	}
+	if err := absRoots("roots", p.Roots); err != nil {
+		return toolError(err.Error())
+	}
+	opts := s.collect.Reports.Devices()
+	opts.StartADB = p.StartADB
+	opts.Roots = hostload.ResolveRoots(p.Roots, filepath.Abs, filepath.EvalSymlinks)
+	ctx, cancel := context.WithTimeout(ctx, devicesToolTimeout)
+	defer cancel()
+	return toolText(devices.Collect(ctx, opts))
 }

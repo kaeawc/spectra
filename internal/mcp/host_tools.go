@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/cache"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -27,7 +28,7 @@ func (s *Server) toolPower(ctx context.Context, raw json.RawMessage) ToolResult 
 		Limit           int    `json:"limit"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "state", "":
@@ -60,7 +61,7 @@ func (s *Server) toolPowerImpact(ctx context.Context, pids []int, durationSecond
 	deltas, err := s.collect.Power.SampleEnergy(ctx, time.Duration(durationSeconds)*time.Second, pids)
 	stop()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	inputs := make([]sysinfo.ImpactInput, 0, len(deltas))
 	for _, d := range deltas {
@@ -81,11 +82,11 @@ func (s *Server) toolPowerImpact(ctx context.Context, pids []int, durationSecond
 // MemAvailable, PSI and zswap on Linux.
 func (s *Server) toolMemory(_ context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	state, err := s.collect.Memory.Collect()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   memorySummary(state),
@@ -109,15 +110,19 @@ func (s *Server) toolStorage(_ context.Context, raw json.RawMessage) ToolResult 
 		LargestAppsN int      `json:"limit"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	n := p.LargestAppsN
 	if n <= 0 {
 		n = 10
 	}
 	state := s.collect.Storage.Collect(storagestate.CollectOptions{AppPaths: p.Paths, LargestAppsN: n})
+	summary := "collected disk volume and ~/Library storage footprint"
+	if hostos.Current() != hostos.Darwin {
+		summary = "collected disk volumes"
+	}
 	return toolText(toolEnvelope{
-		Summary:   "collected disk volume and ~/Library storage footprint",
+		Summary:   summary,
 		Raw:       state,
 		Timestamp: s.now(),
 	})
@@ -130,7 +135,7 @@ func (s *Server) toolSystem(ctx context.Context, raw json.RawMessage) ToolResult
 		Limit     int    `json:"limit"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "limits", "":
@@ -160,11 +165,14 @@ func (s *Server) toolSystem(ctx context.Context, raw json.RawMessage) ToolResult
 // toolServices reports launchd jobs and plist schedules.
 func (s *Server) toolServices(ctx context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
+	}
+	if res, gated := darwinOnlyTool("launchd services", "on Linux, use systemctl list-units"); gated {
+		return res
 	}
 	inv, err := s.collect.Services.List(ctx, services.Options{})
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   "collected launchd jobs and plist schedules",
@@ -186,7 +194,7 @@ func (s *Server) toolLogs(ctx context.Context, raw json.RawMessage) ToolResult {
 		AllowUnsafePredicate bool   `json:"allow_unsafe_predicate"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	q := logquery.Query{
 		Predicate:            p.Predicate,
@@ -202,7 +210,7 @@ func (s *Server) toolLogs(ctx context.Context, raw json.RawMessage) ToolResult {
 	}
 	result, err := s.collect.Logs.Run(ctx, q)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   "ran bounded unified-log query",
@@ -220,13 +228,13 @@ func (s *Server) toolUpdates(ctx context.Context, raw json.RawMessage) ToolResul
 		MaxLines  int    `json:"max_lines"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "history", "":
 		history, err := s.collect.Updates.CollectHistory(ctx)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{
 			Summary:     "collected macOS install/update history",
@@ -237,7 +245,7 @@ func (s *Server) toolUpdates(ctx context.Context, raw json.RawMessage) ToolResul
 	case "log":
 		result, err := s.collect.Updates.QueryInstallLog(updates.Query{Process: p.Process, Grep: p.Grep, MaxLines: p.MaxLines})
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{
 			Summary:   "queried macOS install log",
@@ -252,11 +260,14 @@ func (s *Server) toolUpdates(ctx context.Context, raw json.RawMessage) ToolResul
 // toolTimeMachine reports Time Machine status, destinations, and snapshots.
 func (s *Server) toolTimeMachine(ctx context.Context, raw json.RawMessage) ToolResult {
 	if err := decodeArgs(raw, &struct{}{}); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
+	}
+	if res, gated := darwinOnlyTool("Time Machine", ""); gated {
+		return res
 	}
 	state, err := s.collect.TimeMachine.Collect(ctx)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   "collected Time Machine status, destinations, and local snapshots",
@@ -272,7 +283,7 @@ func (s *Server) toolPlaybook(_ context.Context, raw json.RawMessage) ToolResult
 		ID        string `json:"id"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "list", "":
@@ -308,14 +319,14 @@ func (s *Server) toolCore(ctx context.Context, raw json.RawMessage) ToolResult {
 		Executable string `json:"executable"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.Path == "" {
 		return toolError("core inspect requires path")
 	}
 	report, err := s.collect.CoreFiles.Inspect(ctx, p.Path, p.Executable)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   "inspected core file " + p.Path,
@@ -331,18 +342,18 @@ func (s *Server) toolCache(_ context.Context, raw json.RawMessage) ToolResult {
 		Kind      string `json:"kind"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	root, err := cache.DefaultRoot()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	cache.NewStores(root, cache.Default)
 	switch p.Operation {
 	case "stats", "":
 		stats, err := cache.Default.Stats()
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("collected stats for %d cache kind(s)", len(stats)),
@@ -351,7 +362,7 @@ func (s *Server) toolCache(_ context.Context, raw json.RawMessage) ToolResult {
 		})
 	case "clear":
 		if err := cache.Default.Clear(p.Kind); err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		target := p.Kind
 		if target == "" {
@@ -375,7 +386,7 @@ func (s *Server) toolMetrics(ctx context.Context, raw json.RawMessage) ToolResul
 		Limit     int    `json:"limit"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	limit := p.Limit
 	if limit <= 0 {
@@ -383,7 +394,7 @@ func (s *Server) toolMetrics(ctx context.Context, raw json.RawMessage) ToolResul
 	}
 	db, err := openStore()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	defer db.Close()
 	switch p.Operation {
@@ -395,7 +406,7 @@ func (s *Server) toolMetrics(ctx context.Context, raw json.RawMessage) ToolResul
 			rows, err = db.GetAllProcessMetrics(ctx, limit)
 		}
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("found %d stored process-metric row(s)", len(rows)),
@@ -410,7 +421,7 @@ func (s *Server) toolMetrics(ctx context.Context, raw json.RawMessage) ToolResul
 			rows, err = db.GetAllAppChurn(ctx, limit)
 		}
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{
 			Summary:   fmt.Sprintf("found %d stored app-churn row(s)", len(rows)),

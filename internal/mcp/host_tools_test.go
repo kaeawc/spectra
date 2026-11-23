@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/playbook"
@@ -235,6 +237,7 @@ func TestUpdatesHistoryAndLogOps(t *testing.T) {
 }
 
 func TestServicesAndTimeMachineHappyPath(t *testing.T) {
+	defer hostos.SetForTest(hostos.Darwin)() // exercises the macOS paths with fakes
 	s := newHostServer(t, Collectors{
 		Services:    fakeServicesCollector{},
 		TimeMachine: fakeTimeMachineCollector{},
@@ -323,5 +326,48 @@ func TestNewToolSchemasParse(t *testing.T) {
 		if _, err := json.Marshal(def.InputSchema); err != nil {
 			t.Fatalf("tool %q schema failed to marshal: %v", def.Name, err)
 		}
+	}
+}
+
+func TestDarwinOnlyToolsAreStructuredOffDarwin(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	srv := newHostServer(t, Collectors{Services: fakeServicesCollector{}, TimeMachine: fakeTimeMachineCollector{}})
+	call := map[string]func(context.Context, json.RawMessage) ToolResult{
+		"services": srv.toolServices, "timemachine": srv.toolTimeMachine,
+		"inspect_app": srv.toolInspectApp, "process": srv.toolProcess,
+	}
+	for _, tc := range []struct {
+		tool    string
+		args    string
+		feature string
+	}{
+		{"services", `{}`, "launchd services"},
+		{"timemachine", `{}`, "Time Machine"},
+		{"inspect_app", `{"paths":["/Applications/Slack.app"]}`, "app-bundle inspection"},
+		{"process", `{"operation":"by_app","paths":["/Applications/Slack.app"]}`, "processes by .app bundle"},
+	} {
+		res := call[tc.tool](context.Background(), json.RawMessage(tc.args))
+		if !res.IsError || len(res.Content) != 1 {
+			t.Fatalf("%s: %+v, want one error block", tc.tool, res)
+		}
+		var r hostos.UnsupportedReport
+		if err := json.Unmarshal([]byte(res.Content[0].Text), &r); err != nil {
+			t.Fatalf("%s: not JSON: %q", tc.tool, res.Content[0].Text)
+		}
+		if r.Error != "unsupported_platform" || r.Feature != tc.feature || r.OS != "linux" {
+			t.Errorf("%s: report = %+v", tc.tool, r)
+		}
+	}
+}
+
+func TestToolErrorFromStructuresUnsupported(t *testing.T) {
+	defer hostos.SetForTest(hostos.Linux)()
+	res := toolErrorFrom(fmt.Errorf("query: %w", hostos.Unsupported("unified log queries")))
+	if !res.IsError || !strings.Contains(res.Content[0].Text, `"error":"unsupported_platform"`) {
+		t.Errorf("unsupported error = %+v", res)
+	}
+	res = toolErrorFrom(errors.New("boom"))
+	if !res.IsError || res.Content[0].Text != "boom" {
+		t.Errorf("plain error = %+v, want its text unchanged", res)
 	}
 }

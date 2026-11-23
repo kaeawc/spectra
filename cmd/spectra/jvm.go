@@ -48,40 +48,47 @@ func runJVM(args []string) int {
 
 	ctx := context.Background()
 	jvmOpts := jvmOptions(ctx)
-	var infos []jvm.Info
 
 	if fs.NArg() == 0 {
-		infos = jvm.CollectAll(ctx, jvmOpts)
-		if len(infos) == 0 {
-			fmt.Fprintln(os.Stderr, "no running JVMs found (is jps in your PATH?)")
-			return 0
-		}
-	} else {
-		pidStr := fs.Arg(0)
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid PID %q\n", pidStr)
-			return 2
-		}
-		info := jvm.InspectPID(ctx, pid, jvmOpts)
-		if info == nil {
-			fmt.Fprintf(os.Stderr, "could not inspect PID %d (process not found or jcmd unavailable)\n", pid)
-			return 1
-		}
-		infos = []jvm.Info{*info}
+		return emitJVMList(os.Stdout, os.Stderr, jvm.CollectAll(ctx, jvmOpts), *asJSON)
+	}
+	pidStr := fs.Arg(0)
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", pidStr)
+		return 2
+	}
+	info := jvm.InspectPID(ctx, pid, jvmOpts)
+	if info == nil {
+		fmt.Fprintf(os.Stderr, "could not inspect PID %d (process not found or jcmd unavailable)\n", pid)
+		return 1
 	}
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
+		_ = enc.Encode([]jvm.Info{*info})
+		return 0
+	}
+	printJVMDetail(*info)
+	return 0
+}
+
+// emitJVMList prints the running JVMs. With none, JSON is still an array
+// (`[]`), so `spectra jvm --json | jq '.[]'` needs no special case.
+func emitJVMList(stdout, stderr io.Writer, infos []jvm.Info, asJSON bool) int {
+	if len(infos) == 0 {
+		fmt.Fprintln(stderr, "no running JVMs found (is jps in your PATH?)")
+		infos = []jvm.Info{}
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
 		_ = enc.Encode(infos)
 		return 0
 	}
-
-	if fs.NArg() == 0 {
+	if len(infos) > 0 {
 		printJVMList(infos)
-	} else {
-		printJVMDetail(infos[0])
 	}
 	return 0
 }
