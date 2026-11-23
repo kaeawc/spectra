@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -258,6 +259,9 @@ func TestCollectHostLinuxFromProc(t *testing.T) {
 	c := LiveHostCollector{Options: HostCollectOptions{
 		OS:       hostos.Linux,
 		Hostname: func() (string, error) { return "linux-host", nil },
+		MemoryCollect: func() (memstate.MemoryState, error) {
+			return memstate.MemoryState{OS: "linux", PressureLevel: memstate.PressureNormal}, nil
+		},
 		ReadFile: func(name string) ([]byte, error) {
 			if b, ok := files[name]; ok {
 				return b, nil
@@ -287,13 +291,17 @@ func TestCollectHostLinuxFromProc(t *testing.T) {
 	if got.Facts.OSProductName != "Ubuntu" {
 		t.Errorf("Facts.OSProductName = %q", got.Facts.OSProductName)
 	}
+	if got.Memory.OS != "linux" || got.Memory.PressureLevel != memstate.PressureNormal {
+		t.Errorf("Memory = %+v, want the memstate sample", got.Memory)
+	}
 }
 
 func TestLinuxHostToleratesMissingSources(t *testing.T) {
 	c := LiveHostCollector{Options: HostCollectOptions{
-		OS:       hostos.Linux,
-		Hostname: func() (string, error) { return "bare", nil },
-		ReadFile: func(string) ([]byte, error) { return nil, fmt.Errorf("absent") },
+		OS:            hostos.Linux,
+		Hostname:      func() (string, error) { return "bare", nil },
+		MemoryCollect: func() (memstate.MemoryState, error) { return memstate.MemoryState{}, errors.New("absent") },
+		ReadFile:      func(string) ([]byte, error) { return nil, fmt.Errorf("absent") },
 	}}
 	got := c.CollectHost("v")
 	if got.OSName != "Linux" {
