@@ -42,9 +42,9 @@ func collectLinux(opts Options) (MemoryState, error) {
 	if err != nil {
 		return MemoryState{}, err
 	}
-	ms.PageSizeBytes = uint64(os.Getpagesize())
-	if opts.PageSize > 0 {
-		ms.PageSizeBytes = opts.PageSize
+	ms.PageSizeBytes = opts.PageSize
+	if p := os.Getpagesize(); ms.PageSizeBytes == 0 && p > 0 {
+		ms.PageSizeBytes = uint64(p)
 	}
 	ms.CollectedAt = now().UTC()
 	if vm, err := os.ReadFile(filepath.Join(root, "vmstat")); err == nil {
