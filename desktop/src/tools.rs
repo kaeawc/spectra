@@ -350,7 +350,11 @@ impl Tool {
     pub fn parse(self, json: &str) -> Result<Report, String> {
         use jvm_tools::read;
         Ok(match self {
-            Tool::Sample => Report::Sample(read(json)?),
+            Tool::Sample => {
+                let mut r: SampleReport = read(json)?;
+                r.flame = Box::new(crate::flame::Flame::build(&r.stacks, r.total_samples));
+                Report::Sample(r)
+            }
             Tool::Hang => Report::Hang(read(json)?),
             Tool::Vmmap => Report::Vmmap(read(json)?),
             Tool::Vmregions => Report::Regions(read(json)?),
@@ -483,6 +487,9 @@ pub struct SampleReport {
     pub stack_count: u64,
     pub stacks: Vec<Stack>,
     pub main_thread: Option<MainThread>,
+    /// The stacks as a call tree for the flame chart, built when the result is read.
+    #[serde(skip)]
+    pub flame: Box<crate::flame::Flame>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

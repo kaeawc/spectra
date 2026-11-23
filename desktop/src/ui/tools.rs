@@ -17,8 +17,13 @@ use crate::tools::{
     Report, RuntimeReport, SampleReport, Tool, VmmapReport, fmt_bytes,
 };
 
+#[path = "flame.rs"]
+mod flame;
 #[path = "jvm_tools.rs"]
 mod jvm;
+#[cfg(test)]
+#[path = "tests_flame.rs"]
+mod tests_flame;
 #[cfg(test)]
 #[path = "tests_jvm.rs"]
 mod tests_jvm;
@@ -442,28 +447,17 @@ fn sample(r: &SampleReport, k: &Kit) -> El {
         ),
         k,
     ))
+    .child(flame::chart(r, k))
     .child(grid(
         "sample-stacks",
         &[
-            ("Where the time went", Col::Flex),
+            ("Busiest stacks", Col::Flex),
             ("Share", Col::Fixed(56.0)),
             ("Samples", Col::Fixed(60.0)),
         ],
         rows,
         k,
     ))
-    .child(
-        row()
-            .gap(6.0)
-            .center_y()
-            .flex_wrap()
-            .child(
-                text("For a flame graph, run")
-                    .font(k.ty.small)
-                    .color(c.text_muted),
-            )
-            .child(mono(format!("spectra flamegraph {}", r.pid), k).key("sample-flamegraph")),
-    )
 }
 
 fn hang(r: &HangReport, k: &Kit) -> El {

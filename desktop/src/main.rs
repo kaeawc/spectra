@@ -9,6 +9,7 @@ mod compare;
 mod daemon;
 mod data;
 mod findings;
+mod flame;
 mod groups;
 mod growth;
 mod inspect;
@@ -22,6 +23,7 @@ mod run;
 mod sample;
 mod sample_activity;
 mod sample_compare;
+mod sample_flame;
 mod sample_growth;
 mod sample_jvm;
 mod sample_logs;
@@ -267,6 +269,9 @@ fn main() {
             ("tool-owner", sample::tool_owner_scene),
             ("tool-runtime", sample::tool_runtime_scene),
             ("tool-failed", sample::tool_failed_scene),
+            ("flame", sample_flame::flame_scene),
+            ("flame-zoomed", sample_flame::flame_zoomed_scene),
+            ("flame-unavailable", sample_flame::flame_unavailable_scene),
             ("logs", sample_logs::logs_scene),
             ("logs-empty", sample_logs::logs_empty_scene),
             ("logs-timeout", sample_logs::logs_timeout_scene),

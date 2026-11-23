@@ -258,8 +258,14 @@ What it shows:
 - **Tools** on a process page, run only when you press Run, one at a time, each with a deadline,
   Cancel (Spectra is stopped; the row says "Cancelled" once it has), and a result or the reason it
   failed. Leaving the page stops what it was running.
-  - CPU: Sample stacks (`spectra sample -json <pid>`): the main thread's verdict and the busiest
-    stacks with their share, plus the `spectra flamegraph` command to run for a flame graph.
+  - CPU: Sample stacks (`spectra sample -json <pid>`): the main thread's verdict, a flame graph
+    of where the time went, the heaviest functions and the busiest stacks with their share.
+    The flame graph is drawn in the window from the sample's stacks: the whole process on top,
+    each row a frame deeper, each frame as wide as its share. Hover a frame for its full name,
+    share and self time; press it to zoom in, and Back or Whole process to zoom out. Frames too
+    narrow to see merge into "…", and the samples in stacks Spectra didn't list are one block.
+    Frames with no symbol name show as `???` or an address and are counted; they can't be
+    resolved here, because the sample doesn't say which binary they're in.
     Hang check (`spectra hang --json <pid>`): idle, busy, or blocked on a lock or I/O, and where.
   - Memory: Memory map (`spectra vmmap --json`): footprint, peak, dirty and swapped, and region
     types by dirty size. Dirty regions (`spectra vmregions --json`): anonymous and file-backed

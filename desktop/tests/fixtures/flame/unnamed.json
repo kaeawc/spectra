@@ -1,0 +1,19 @@
+{"pid":1300,"process":"rust-analyzer","taken_at":"2026-11-20T10:50:23.944215Z","duration_ms":1000,"interval_ms":10,"total_samples":412,"stack_count":61,"stacks":[
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::method_resolution::iterate_method_candidates","chalk_solve::solve::Solver::solve"],"count":120,"percent":29.13},
+{"frames":["Thread_2202","start_wqthread","rayon_core::registry::WorkerThread::wait_until","ide_db::symbol_index::SymbolIndex::new","fst::raw::build::Builder::insert"],"count":70,"percent":16.99},
+{"frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","crossbeam_channel::select::Select::select","__psynch_cvwait"],"count":60,"percent":14.56},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::method_resolution::iterate_method_candidates","chalk_solve::solve::Solver::solve","chalk_recursive::fixed_point::RecursiveContext::solve_goal"],"count":40,"percent":9.71},
+{"frames":["Thread_2202","start_wqthread","rayon_core::registry::WorkerThread::wait_until","ide_db::symbol_index::SymbolIndex::new","alloc::slice::merge_sort"],"count":26,"percent":6.31},
+{"frames":["Thread_2203","start_wqthread","salsa::function::fetch::fetch_cold","hir_def::nameres::collector::collect_defs"],"count":25,"percent":6.07},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::infer::unify::InferenceTable::resolve_completely"],"count":18,"percent":4.37},
+{"frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","rust_analyzer::main_loop::GlobalState::handle_event","serde_json::ser::to_writer"],"count":10,"percent":2.43},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::lower::TyLoweringContext::lower_ty"],"count":9,"percent":2.18},
+{"frames":["Thread_2203","start_wqthread","salsa::function::fetch::fetch_cold","???","???"],"count":8,"percent":1.94},
+{"frames":["Thread_2204","start_wqthread","__workq_kernreturn"],"count":6,"percent":1.46},
+{"frames":["Thread_2203","start_wqthread","salsa::function::fetch::fetch_cold","0x10a3f2c40"],"count":4,"percent":0.97},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::infer::expr::InferenceContext::infer_expr_inner"],"count":1,"percent":0.24},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::infer::pat::InferenceContext::infer_pat"],"count":1,"percent":0.24},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::infer::coerce::InferenceContext::coerce"],"count":1,"percent":0.24},
+{"frames":["Thread_2201","start_wqthread","rayon_core::registry::WorkerThread::wait_until","hir_ty::infer::InferenceContext::infer_body","hir_ty::infer::closure::InferenceContext::infer_closure"],"count":1,"percent":0.24},
+{"frames":["Thread_2205","start_wqthread","???"],"count":1,"percent":0.24}
+],"main_thread":{"found":true,"verdict":"idle","reason":"main thread is waiting on a condition variable (crossbeam_channel::select → __psynch_cvwait), not blocked on I/O or a lock","leaf":"__psynch_cvwait","top_frames":["Thread_2190","start","main","rust_analyzer::main_loop::GlobalState::run","crossbeam_channel::select::Select::select","__psynch_cvwait"]}}
