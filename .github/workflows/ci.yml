@@ -229,14 +229,15 @@ jobs:
 
   # Spectra as a cloud agent VM runs it: static Linux binaries on amd64 and
   # arm64, spectra-mcp spawned over stdio the way an agent host's .mcp.json
-  # does, and the CLI commands agent harnesses (waaagh) script. Ubuntu 22.04
-  # matches common VM images and its OpenSSL 3.0, which the installer's
-  # signature check must work with.
+  # does, and the CLI commands agent harnesses (waaagh) script. The installer
+  # check runs in an ubuntu:22.04 container: that image matches common VM
+  # bases and ships OpenSSL 3.0, which the signature check must work with,
+  # without depending on the retiring ubuntu-22.04 runner labels.
   mcp-stdio-linux:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['ubuntu-22.04', 'ubuntu-22.04-arm']
+        runner: ['ubuntu-24.04', 'ubuntu-24.04-arm']
     runs-on: ${{ matrix.runner }}
     env:
       CGO_ENABLED: '0'
@@ -278,12 +279,16 @@ jobs:
           verdict 3 spectra idle --json --pids "$$" --min-age 1s && jq -e '.result.holders | type == "array"' out.json
           spectra lineage --json "$$" | jq -e '.pid > 0'
           spectra process --json | jq -e 'length > 0'
-      - name: Install the pinned release with signature verification
+      - name: Install the pinned release with signature verification (ubuntu:22.04, OpenSSL 3.0)
         run: |
-          set -euo pipefail
-          sh scripts/install.sh --version v0.1.1 --prefix "$RUNNER_TEMP/release" 2>&1 | tee install.log
-          grep -q 'Verified Ed25519 release signature' install.log
-          "$RUNNER_TEMP/release/bin/spectra-mcp" --version
+          ./scripts/retry.sh docker pull -q ubuntu:22.04
+          docker run --rm -v "$PWD/scripts:/scripts:ro" ubuntu:22.04 bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates openssl >/dev/null
+            openssl version
+            sh /scripts/install.sh --version v0.1.1 --prefix /opt/spectra 2>&1 | tee /tmp/install.log
+            grep -q "Verified Ed25519 release signature" /tmp/install.log
+            /opt/spectra/bin/spectra-mcp --version'
 
   # Runs the darwin/amd64 cross-compile (the macOS "build"; there is no
   # Xcode project, so no xcodebuild) and the test suite as Mach-O binaries

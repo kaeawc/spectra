@@ -44,9 +44,12 @@ JVM and toolchain diagnostics, SQLite-backed snapshots and diffs,
 recommendation rules, and issue tracking. Cross-machine operation lives in
 the separately distributed Spectra Remote project.
 
-The daemon currently exposes status and lifecycle over a Unix socket; it has
-no network listener. Run `spectra daemon start` and `spectra daemon status` to
-inspect it. CLI and MCP diagnostic data integration is planned separately.
+The daemon samples the host and keeps alerts and recent per-process metrics,
+served over a Unix socket; it has no network listener. Run `spectra daemon
+start` and `spectra daemon status` to inspect it. `spectra alerts`,
+`spectra whatswrong` and the MCP `host_health`, `alerts` and `process`
+(`history`) tools read it; without a daemon, `whatswrong` runs without its
+enrichment and the others report that the daemon is unavailable.
 
 Implemented code with passing tests is treated as complete in the docs.
 Code whose tests are failing or absent is documented as partial until the
@@ -85,16 +88,21 @@ Register the MCP server over stdio, for example in a repository's `.mcp.json`:
 ```
 
 `spectra-mcp` writes only JSON-RPC to stdout (logs go to stderr) and exits
-when stdin closes. Everything an agent asks about the host works on Linux
-from `/proc`, `/sys`, cgroups, `ip`/`ss` and `df`: load and its cause
-(`spectra load --json --root <worktrees>`), processes and their trees
-(`process`, `lineage`), leftover processes (`orphans`, `idle`), who holds a
-port or directory (`owner`), short-lived spawns (`spawns`), JVMs and Gradle
-daemons (`jvm`, needs a JDK's `jcmd`/`jps` on PATH), PSI and cgroup limits
-(`pressure`), network, storage and kernel limits. `spectra capabilities
+when stdin closes. These host checks work on Linux from `/proc`, `/sys`,
+cgroups, `ip`/`ss` and `df`: load and its cause
+(`spectra load --json --root <worktrees>`), memory pressure and swap
+(`memory`), processes and their trees (`process`, `lineage`), leftover
+processes (`orphans`, `idle`), who holds a port or directory (`owner`),
+short-lived spawns (`spawns`), JVMs and Gradle daemons (`jvm`, needs a JDK's
+`jcmd`/`jps` on PATH), emulators and adb devices (`devices`), PSI and cgroup
+limits (`pressure`), network, storage and kernel limits. Process sampling,
+flamegraphs and energy impact (`sample`, `flamegraph`, `power` `impact`) are
+macOS-only. `spectra capabilities
 --json` lists the machine-readable commands this build supports.
 `.app` inspection, the TCC database, launchd, unified logs and Time Machine
-are macOS-only and report that they are unsupported on Linux. `alerts` and
+are macOS-only too. On Linux every macOS-only command and tool answers with
+`{"error": "unsupported_platform", ...}` (CLI with `--json`; see
+[command schemas](docs/reference/command-schemas.md#unsupported-on-this-os)). `alerts` and
 `host_health` read the optional per-user daemon: `spectra daemon start` runs
 it without systemd; otherwise those tools return `daemon_unavailable`.
 

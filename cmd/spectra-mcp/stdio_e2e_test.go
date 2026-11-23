@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -48,7 +49,11 @@ func startServer(t *testing.T) *stdioClient {
 		cmd.Env = append(os.Environ(), childEnv+"=1")
 	}
 	// No daemon, so daemon-backed tools must degrade instead of hanging.
-	cmd.Env = append(cmd.Environ(), "HOME="+t.TempDir())
+	// SPECTRA_DAEMON_DIR and (on Linux) XDG_RUNTIME_DIR take precedence over
+	// HOME when the daemon socket is located, so all three point at an empty
+	// directory: a daemon running on the host must not answer.
+	home := t.TempDir()
+	cmd.Env = append(cmd.Environ(), "HOME="+home, "SPECTRA_DAEMON_DIR="+filepath.Join(home, "daemon"), "XDG_RUNTIME_DIR="+filepath.Join(home, "run"))
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +84,19 @@ func startServer(t *testing.T) *stdioClient {
 		}
 	})
 	return c
+}
+
+// run is t.Run with the client's helpers bound to the subtest, so a
+// failure inside one stops that subtest rather than calling FailNow on the
+// parent from the subtest's goroutine.
+func (c *stdioClient) run(t *testing.T, name string, fn func(t *testing.T)) {
+	t.Helper()
+	t.Run(name, func(st *testing.T) {
+		parent := c.t
+		c.t = st
+		defer func() { c.t = parent }()
+		fn(st)
+	})
 }
 
 func (c *stdioClient) send(method string, params any) int {
@@ -185,7 +203,7 @@ func TestStdioEndToEnd(t *testing.T) {
 		t.Errorf("capabilities do not advertise tools: %v", init["capabilities"])
 	}
 
-	t.Run("tools/list", func(t *testing.T) {
+	c.run(t, "tools/list", func(t *testing.T) {
 		r := c.reply(c.send("tools/list", map[string]any{}), 10*time.Second)
 		res, _ := r["result"].(map[string]any)
 		tools, _ := res["tools"].([]any)
@@ -220,10 +238,11 @@ func TestStdioEndToEnd(t *testing.T) {
 		{"jvm", map[string]any{"operation": "list"}},
 		{"network", map[string]any{}},
 		{"system", map[string]any{}},
+		{"memory", map[string]any{}},
 		{"toolchain", map[string]any{}},
 		{"devices", map[string]any{"roots": []any{root}}},
 	} {
-		t.Run(fmt.Sprintf("call %s %v", tc.name, tc.args), func(t *testing.T) {
+		c.run(t, fmt.Sprintf("call %s %v", tc.name, tc.args), func(t *testing.T) {
 			res, took := c.callTool(tc.name, tc.args)
 			if isErr, _ := res["isError"].(bool); isErr {
 				t.Fatalf("isError: %s", resultText(res))
@@ -235,7 +254,7 @@ func TestStdioEndToEnd(t *testing.T) {
 		})
 	}
 
-	t.Run("daemon tools degrade without a daemon", func(t *testing.T) {
+	c.run(t, "daemon tools degrade without a daemon", func(t *testing.T) {
 		res, took := c.callTool("alerts", map[string]any{})
 		if took > 10*time.Second {
 			t.Errorf("alerts took %s without a daemon", took)
@@ -245,7 +264,7 @@ func TestStdioEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("macOS-only tools are structured off macOS", func(t *testing.T) {
+	c.run(t, "macOS-only tools are structured off macOS", func(t *testing.T) {
 		if runtime.GOOS == "darwin" {
 			t.Skip("timemachine runs on macOS")
 		}
@@ -256,7 +275,7 @@ func TestStdioEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown tool is an error, not a hang", func(t *testing.T) {
+	c.run(t, "unknown tool is an error, not a hang", func(t *testing.T) {
 		r := c.reply(c.send("tools/call", map[string]any{"name": "no_such_tool", "arguments": map[string]any{}}), 10*time.Second)
 		res, _ := r["result"].(map[string]any)
 		isErr, _ := res["isError"].(bool)
@@ -265,8 +284,26 @@ func TestStdioEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("exits on stdin EOF", func(t *testing.T) {
+	c.run(t, "exits on stdin EOF", func(t *testing.T) {
 		_ = c.in.Close()
+		// Read stdout to its end before Wait, which closes the pipe: a
+		// stray line written just before exit must still be seen.
+		deadline := time.After(10 * time.Second)
+	drain:
+		for {
+			select {
+			case line, ok := <-c.lines:
+				if !ok {
+					break drain
+				}
+				var m map[string]any
+				if json.Unmarshal([]byte(line), &m) != nil {
+					t.Errorf("non-protocol line on stdout after EOF: %q", line)
+				}
+			case <-deadline:
+				t.Fatal("spectra-mcp kept stdout open 10s after stdin EOF")
+			}
+		}
 		done := make(chan error, 1)
 		go func() { done <- c.cmd.Wait() }()
 		select {
@@ -275,13 +312,7 @@ func TestStdioEndToEnd(t *testing.T) {
 				t.Errorf("exit after EOF: %v; stderr:\n%s", err, c.stderr)
 			}
 		case <-time.After(10 * time.Second):
-			t.Fatal("spectra-mcp still running 10s after stdin EOF")
-		}
-		for line := range c.lines {
-			var m map[string]any
-			if json.Unmarshal([]byte(line), &m) != nil {
-				t.Errorf("non-protocol line on stdout after EOF: %q", line)
-			}
+			t.Fatal("spectra-mcp still running 10s after closing stdout")
 		}
 	})
 }
