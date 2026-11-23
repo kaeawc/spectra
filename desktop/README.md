@@ -138,6 +138,18 @@ What it shows:
   - If the install history can't be read, the timeline's own installs stand and the page says
     so. Spectra keeps the first 5,000 error lines of a window; at that cap the page says later
     errors may be missing.
+- **Crashes**, under Timeline: what has been crashing on this Mac, and why, from the reports
+  macOS keeps. Repeated crashes first (`spectra crash signatures`: one process, one exception,
+  one top frame), most often then most recent, each with the process, what happened in plain
+  words ("killed", "bad memory access", "stopped on a check", "aborted itself"), how many times
+  and when last seen. Then each recent crash or hang report (`spectra crash list`), and the
+  processes ended for using too much memory (`spectra crash oom`).
+  - Pick a row and press Open report: `spectra crash inspect` decodes that one report and the
+    page shows, under the row, the exception, the reason it ended and the crashed thread's top
+    frames. It runs only on that press.
+  - Read when the page opens with nothing read yet or a reading 10 minutes old, and on Refresh;
+    never on a timer, and leaving the page stops a reading on its way. If the recent reports or
+    the memory kills can't be read, the rest still shows and that section says why.
 - **Network**, under Activity: which processes are moving bytes right now, and what is
   listening. A line of the network's state on top: interface and gateway, VPN, proxy and DNS.
   "Using the network": the processes that moved the most over the last 5 s, most first, each with
@@ -393,6 +405,7 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # compare-failed, compare-no-list, toolchains, toolchains-filtered,
                             # toolchains-empty, toolchains-failed, toolchains-reading
                             # timeline, timeline-empty, timeline-failed, timeline-reading
+                            # crashes, crashes-empty, crashes-report
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -440,6 +453,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/timeline.rs`: the Timeline page's `spectra timeline` and `spectra updates --history`
   runs, their JSON, bursts, the merge and the load-climb marker; `src/sample_timeline.rs`: its
   sample data, from invented fixtures in `tests/fixtures/timeline`.
+- `src/crashes.rs`: the Crashes page's `spectra crash` runs, their JSON, the sort and the plain
+  words for exceptions; `src/sample_crashes.rs`: its sample data, from invented fixtures in
+  `tests/fixtures/crashes`.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
   flattening it into rows; `src/sample_tree.rs`: its sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.

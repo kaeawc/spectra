@@ -1,0 +1,62 @@
+[
+  {
+    "process": "thumbnailagent",
+    "exception": "EXC_BAD_ACCESS (SIGSEGV)",
+    "top_frame": "ThumbnailKit`ImageDecoder.decodeTile(_:) + 412",
+    "count": 3,
+    "first_seen": "2026-11-18 22:10:05.00 -0500",
+    "last_seen": "2026-11-20 05:02:44.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/thumbnailagent-2026-11-20-050244.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0001"
+  },
+  {
+    "process": "syncbridged",
+    "exception": "EXC_CRASH (SIGKILL)",
+    "top_frame": "libsystem_kernel.dylib`mach_msg2_trap + 8",
+    "count": 14,
+    "first_seen": "2026-11-17 09:31:00.00 -0500",
+    "last_seen": "2026-11-20 06:48:10.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/syncbridged-2026-11-20-064810.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0002"
+  },
+  {
+    "process": "WidgetHostService",
+    "exception": "EXC_BREAKPOINT (SIGTRAP)",
+    "top_frame": "libswiftCore.dylib`_assertionFailure(_:_:file:line:flags:) + 208",
+    "count": 3,
+    "first_seen": "2026-11-19 14:00:31.00 -0500",
+    "last_seen": "2026-11-20 06:20:00.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/WidgetHostService-2026-11-20-062000.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0003"
+  },
+  {
+    "process": "Sketchpad",
+    "exception": "EXC_CRASH (SIGABRT)",
+    "top_frame": "libsystem_kernel.dylib`__pthread_kill + 8",
+    "count": 6,
+    "first_seen": "2026-11-16 11:12:13.00 -0500",
+    "last_seen": "2026-11-19 17:45:00.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/Sketchpad-2026-11-19-174500.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0004"
+  },
+  {
+    "process": "searchindexerd",
+    "exception": "EXC_CRASH (SIGKILL)",
+    "top_frame": "libsystem_kernel.dylib`mach_msg2_trap + 8",
+    "count": 14,
+    "first_seen": "2026-11-15 08:00:00.00 -0500",
+    "last_seen": "2026-11-20 02:14:59.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/searchindexerd-2026-11-20-021459.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0005"
+  },
+  {
+    "process": "notehelper",
+    "exception": "EXC_RESOURCE (SIGKILL)",
+    "top_frame": "(no frame)",
+    "count": 1,
+    "first_seen": "2026-11-20 04:30:00.00 -0500",
+    "last_seen": "2026-11-20 04:30:00.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/notehelper-2026-11-20-043000.ips",
+    "sample_incident": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0006"
+  }
+]

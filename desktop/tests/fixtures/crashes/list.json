@@ -1,0 +1,51 @@
+[
+  {
+    "time": "2026-11-20 06:48:10.00 -0500",
+    "process": "syncbridged",
+    "kind": "crash",
+    "exception": "EXC_CRASH (SIGKILL)",
+    "incident_id": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0002",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/syncbridged-2026-11-20-064810.ips"
+  },
+  {
+    "time": "2026-11-20 06:20:00.00 -0500",
+    "process": "WidgetHostService",
+    "kind": "crash",
+    "exception": "EXC_BREAKPOINT (SIGTRAP)",
+    "incident_id": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0003",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/WidgetHostService-2026-11-20-062000.ips"
+  },
+  {
+    "time": "2026-11-20 05:55:31.00 -0500",
+    "process": "Sketchpad",
+    "kind": "hang",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/Sketchpad-2026-11-20-055531.hang.ips"
+  },
+  {
+    "time": "2026-11-20 05:02:44.00 -0500",
+    "process": "thumbnailagent",
+    "kind": "crash",
+    "exception": "EXC_BAD_ACCESS (SIGSEGV)",
+    "incident_id": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0001",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/thumbnailagent-2026-11-20-050244.ips"
+  },
+  {
+    "time": "2026-11-20 04:30:00.00 -0500",
+    "process": "notehelper",
+    "kind": "crash",
+    "exception": "EXC_RESOURCE (SIGKILL)",
+    "incident_id": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0006",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/notehelper-2026-11-20-043000.ips"
+  },
+  {
+    "time": "2026-11-20 02:14:59.00 -0500",
+    "process": "searchindexerd",
+    "kind": "crash",
+    "exception": "EXC_CRASH (SIGKILL)",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/searchindexerd-2026-11-20-021459.ips"
+  },
+  {
+    "process": "lostreportd",
+    "kind": "crash report (bug_type 211)"
+  }
+]

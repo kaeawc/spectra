@@ -6,6 +6,7 @@
 mod app;
 mod bundle;
 mod compare;
+mod crashes;
 mod daemon;
 mod data;
 mod findings;
@@ -23,6 +24,7 @@ mod run;
 mod sample;
 mod sample_activity;
 mod sample_compare;
+mod sample_crashes;
 mod sample_flame;
 mod sample_growth;
 mod sample_jvm;
@@ -126,6 +128,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.cancel_toolchains();
     s.growth.cancel();
     s.timeline.cancel();
+    s.crashes.cancel();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -173,6 +176,8 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     }
     // The Timeline page's reading: only when it opens, its window changes or on Refresh.
     landed |= s.land_timeline();
+    // The Crashes page's reading and an opened report: only on opening the page or a press.
+    landed |= s.land_crashes();
     if s.window_shown() && (s.overview_visible() || s.storage.busy()) {
         tx.wake_after(STATUS_TICK);
     }
@@ -356,6 +361,9 @@ fn main() {
             ("timeline-empty", sample_timeline::timeline_empty_scene),
             ("timeline-failed", sample_timeline::timeline_failed_scene),
             ("timeline-reading", sample_timeline::timeline_reading_scene),
+            ("crashes", sample_crashes::crashes_scene),
+            ("crashes-empty", sample_crashes::crashes_empty_scene),
+            ("crashes-report", sample_crashes::crashes_report_scene),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

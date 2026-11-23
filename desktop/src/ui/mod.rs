@@ -6,6 +6,7 @@ mod app_page;
 mod card;
 mod chart;
 mod compare;
+mod crashes;
 mod detail;
 mod growth;
 mod home;
@@ -23,6 +24,8 @@ mod tests;
 mod tests_activity;
 #[cfg(test)]
 mod tests_compare;
+#[cfg(test)]
+mod tests_crashes;
 #[cfg(test)]
 mod tests_growth;
 #[cfg(test)]
@@ -116,6 +119,7 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::Growth, "growth".into(), None, k));
     sb = sb.child(place(s, Nav::Activity, "activity".into(), None, k));
     sb = sb.child(place(s, Nav::Timeline, "timeline".into(), None, k));
+    sb = sb.child(place(s, Nav::Crashes, "crashes".into(), None, k));
     sb = sb.child(place(s, Nav::Network, "network".into(), None, k));
     sb = sb.child(place(s, Nav::Startup, "startup".into(), None, k));
     sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
@@ -184,6 +188,8 @@ enum Page<'a> {
     Growth,
     /// What changed before it got slow.
     Timeline,
+    /// What has been crashing.
+    Crashes,
     List,
 }
 
@@ -213,6 +219,7 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Toolchains => Page::Toolchains,
         Nav::Growth => Page::Growth,
         Nav::Timeline => Page::Timeline,
+        Nav::Crashes => Page::Crashes,
         _ => Page::List,
     }
 }
@@ -244,6 +251,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Toolchains => (toolchains::page(s, &k), s.nav.title().to_owned()),
         Page::Growth => (growth::page(s, &k), s.nav.title().to_owned()),
         Page::Timeline => (timeline::page(s, &k), s.nav.title().to_owned()),
+        Page::Crashes => (crashes::page(s, &k), s.nav.title().to_owned()),
         Page::Home => {
             // Lines in "Right now" are something to look at too.
             let problems = match s.problems() {

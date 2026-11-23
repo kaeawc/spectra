@@ -383,6 +383,8 @@ pub struct App {
     pub growth: crate::growth::Growth,
     /// What changed before it got slow, for the Timeline page.
     pub timeline: crate::timeline::TimelinePage,
+    /// What has been crashing, for the Crashes page.
+    pub crashes: crate::crashes::CrashesPage,
 }
 
 pub fn init() -> App {
@@ -467,6 +469,7 @@ pub fn init() -> App {
         toolchains: crate::toolchains::ToolchainsPage::new(),
         growth: crate::growth::Growth::new(),
         timeline: crate::timeline::TimelinePage::new(),
+        crashes: crate::crashes::CrashesPage::new(),
     }
 }
 
@@ -716,6 +719,7 @@ impl App {
         let nav = if nav == Nav::Compare { Nav::All } else { nav };
         let nav = if nav == Nav::Growth { Nav::All } else { nav };
         let nav = if nav == Nav::Timeline { Nav::All } else { nav };
+        let nav = if nav == Nav::Crashes { Nav::All } else { nav };
         if self.view == View::Tree {
             self.rebuild_tree(nav, q);
             return;
@@ -860,6 +864,8 @@ impl App {
         }
         // The Timeline page reads each time it opens; leaving it stops a reading on its way.
         self.timeline_nav(self.nav, nav);
+        // The Crashes page reads when it opens with nothing read or an old reading.
+        self.crashes_nav(self.nav, nav);
         self.nav = nav;
         self.select(None);
         self.table.clear_selection();
@@ -1153,6 +1159,7 @@ impl App {
             None if self.nav == Nav::Growth => None,
             // Nor the Timeline page.
             None if self.nav == Nav::Timeline => None,
+            None if self.nav == Nav::Crashes => None,
             None if !matches!(
                 self.nav,
                 Nav::Overview | Nav::System | Nav::Activity | Nav::Startup

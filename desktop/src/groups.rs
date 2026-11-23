@@ -86,6 +86,8 @@ pub enum Nav {
     Growth,
     /// What changed before it got slow: starts, error bursts and installs, newest first.
     Timeline,
+    /// What has been crashing, and why: repeated crashes, recent reports and memory kills.
+    Crashes,
 }
 
 impl Nav {
@@ -105,6 +107,7 @@ impl Nav {
             Nav::Toolchains => "Toolchains",
             Nav::Growth => "Memory and alerts",
             Nav::Timeline => "Timeline",
+            Nav::Crashes => "Crashes",
         }
     }
 
@@ -120,6 +123,7 @@ impl Nav {
             Nav::Toolchains => false,
             Nav::Growth => false,
             Nav::Timeline => false,
+            Nav::Crashes => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,
