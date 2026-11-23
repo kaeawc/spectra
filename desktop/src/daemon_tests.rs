@@ -823,3 +823,26 @@ fn a_call_no_route_names_never_waits_for_the_first_connection() {
         at.elapsed()
     );
 }
+
+#[test]
+fn right_now_routes_to_the_daemon_only_while_it_lists_it() {
+    let m = ["whatswrong.current"];
+    assert_eq!(routed(&["whatswrong", "--json"], &m), "whatswrong.current");
+    assert_eq!(routed(&["whatswrong", "--json"], &[]), "cli");
+}
+
+#[test]
+fn right_now_comes_from_the_daemon_in_the_shape_the_cli_prints() {
+    let f = reading_daemon(
+        "whatswrong.current",
+        serde_json::from_str(crate::whatswrong::tests::BUSY).unwrap(),
+    );
+    let out = f
+        .daemon()
+        .answer(&["whatswrong", "--json"], SEC, &never())
+        .unwrap()
+        .unwrap();
+    let from_daemon = crate::whatswrong::parse(&out).unwrap();
+    let from_cli = crate::whatswrong::parse(crate::whatswrong::tests::BUSY).unwrap();
+    assert_eq!(from_daemon, from_cli);
+}

@@ -45,6 +45,7 @@ const MEMORY: &str = "memory.current";
 const THERMAL: &str = "thermal.current";
 const POWER: &str = "power.current";
 const NETWORK: &str = "network.current";
+const WHATSWRONG: &str = "whatswrong.current";
 /// JSON-RPC's "method not found" and "invalid params": the daemon can't take the call at all,
 /// so its route is dropped until the next connection. Any other error is this call's alone.
 const NOT_FOUND: i64 = -32601;
@@ -348,6 +349,12 @@ pub static TABLE: &[Entry] = &[
         cli: &["network", "--json"],
         method: NETWORK,
         answer: network,
+    },
+    // The Overview's "Right now", from the daemon's cached look (stale by at most minutes).
+    Entry {
+        cli: &["whatswrong", "--json"],
+        method: WHATSWRONG,
+        answer: whatswrong,
     },
 ];
 
@@ -723,6 +730,16 @@ fn network(
     cancel: &AtomicBool,
 ) -> Result<String, Error> {
     reading(d, NETWORK, deadline, cancel)
+}
+
+/// `spectra whatswrong --json`.
+fn whatswrong(
+    d: &Daemon,
+    _: &[&str],
+    deadline: Duration,
+    cancel: &AtomicBool,
+) -> Result<String, Error> {
+    reading(d, WHATSWRONG, deadline, cancel)
 }
 
 fn read_loop(
