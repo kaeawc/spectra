@@ -3,14 +3,14 @@ module github.com/kaeawc/spectra
 go 1.26.6
 
 require (
-	cel.dev/cel-go v0.33.2
-	github.com/go-sql-driver/mysql v1.10.1
+	cel.dev/cel-go v0.33.4
+	github.com/go-sql-driver/mysql v1.10.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/kaeawc/spectra-protocol v0.3.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/redis/go-redis/v9 v9.23.0
-	go.mongodb.org/mongo-driver/v2 v2.10.0
+	go.mongodb.org/mongo-driver/v2 v2.10.1
 	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	howett.net/plist v1.0.1
