@@ -227,6 +227,69 @@ jobs:
           sudo systemctl status spectra-helper.service --no-pager || true
           sudo journalctl -u spectra-helper.service --no-pager -n 100 || true
 
+  # Spectra as a cloud agent VM runs it: static Linux binaries on amd64 and
+  # arm64, spectra-mcp spawned over stdio the way an agent host's .mcp.json
+  # does, and the CLI commands agent harnesses (waaagh) script. The installer
+  # check runs in an ubuntu:22.04 container: that image matches common VM
+  # bases and ships OpenSSL 3.0, which the signature check must work with,
+  # without depending on the retiring ubuntu-22.04 runner labels.
+  mcp-stdio-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ['ubuntu-24.04', 'ubuntu-24.04-arm']
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Download modules
+        run: ./scripts/retry.sh go mod download
+      - name: Build spectra and spectra-mcp
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          go build -o "$RUNNER_TEMP/bin/spectra" ./cmd/spectra/
+          go build -o "$RUNNER_TEMP/bin/spectra-mcp" ./cmd/spectra-mcp/
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: stdio MCP end-to-end (initialize, tools/list, tools/call, EOF)
+        run: SPECTRA_MCP_BIN="$RUNNER_TEMP/bin/spectra-mcp" go test ./cmd/spectra-mcp/ -run TestStdioEndToEnd -count=1 -v
+      - name: mcpcheck tool schemas (live)
+        run: |
+          go run github.com/kaeawc/mcpcheck/cmd/mcpcheck@71ff641145e02636996a75890ed0691cffa05462 \
+            --live "$RUNNER_TEMP/bin/spectra-mcp"
+      - name: Agent CLI contract
+        run: |
+          set -euxo pipefail
+          root=$(mktemp -d)
+          spectra version
+          spectra capabilities --json | jq -e '.os == "linux" and ([.interfaces[].name] | index("load") and index("orphans") and index("owner"))'
+          # load exits 0 admit, 3 hold, 4 backoff; the JSON is the contract.
+          rc=0; spectra load --json --top 3 --root "$root" > load.json || rc=$?
+          [ "$rc" = 0 ] || [ "$rc" = 3 ] || [ "$rc" = 4 ]
+          jq -e '(.load1 | type) == "number" and .cpus >= 1 and (.devices | type) == "object"' load.json
+          # verdict exits: orphans/idle 3 = some found; owner 3 = none, 4 = none
+          # but some processes unreadable (other users' on a non-root runner).
+          verdict() { want=$1; shift; rc=0; "$@" > out.json || rc=$?; case " 0 $want " in *" $rc "*) ;; *) echo "exit $rc"; return 1 ;; esac; }
+          verdict 3 spectra orphans --json --root "$root" && jq -e '.groups | type == "array"' out.json
+          verdict "3 4" spectra owner --under --json "$root" && jq -e '.holders | type == "array"' out.json
+          verdict 3 spectra idle --json --pids "$$" --min-age 1s && jq -e '.result.holders | type == "array"' out.json
+          spectra lineage --json "$$" | jq -e '.pid > 0'
+          spectra process --json | jq -e 'length > 0'
+      - name: Install the pinned release with signature verification (ubuntu:22.04, OpenSSL 3.0)
+        run: |
+          ./scripts/retry.sh docker pull -q ubuntu:22.04
+          docker run --rm -v "$PWD/scripts:/scripts:ro" ubuntu:22.04 bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates openssl >/dev/null
+            openssl version
+            sh /scripts/install.sh --version v0.1.1 --prefix /opt/spectra 2>&1 | tee /tmp/install.log
+            grep -q "Verified Ed25519 release signature" /tmp/install.log
+            /opt/spectra/bin/spectra-mcp --version'
+
   # Runs the darwin/amd64 cross-compile (the macOS "build"; there is no
   # Xcode project, so no xcodebuild) and the test suite as Mach-O binaries
   # under Darling (https://darlinghq.org) on a Linux runner, via

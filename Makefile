@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
+.PHONY: build build-mcp mcp-smoke build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
 	release-check validate-workflows \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
@@ -40,6 +40,11 @@ notarize:
 
 test:
 	go test ./... -count=1
+
+# End-to-end: spawn the built spectra-mcp over stdio (initialize, tools/list,
+# tools/call, EOF shutdown).
+mcp-smoke: build-mcp
+	SPECTRA_MCP_BIN=$(CURDIR)/$(MCP_BIN) go test ./cmd/spectra-mcp/ -run TestStdioEndToEnd -count=1 -v
 
 vet:
 	go vet ./...

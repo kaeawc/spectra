@@ -44,9 +44,12 @@ JVM and toolchain diagnostics, SQLite-backed snapshots and diffs,
 recommendation rules, and issue tracking. Cross-machine operation lives in
 the separately distributed Spectra Remote project.
 
-The daemon currently exposes status and lifecycle over a Unix socket; it has
-no network listener. Run `spectra daemon start` and `spectra daemon status` to
-inspect it. CLI and MCP diagnostic data integration is planned separately.
+The daemon samples the host and keeps alerts and recent per-process metrics,
+served over a Unix socket; it has no network listener. Run `spectra daemon
+start` and `spectra daemon status` to inspect it. `spectra alerts`,
+`spectra whatswrong` and the MCP `host_health`, `alerts` and `process`
+(`history`) tools read it; without a daemon, `whatswrong` runs without its
+enrichment and the others report that the daemon is unavailable.
 
 Implemented code with passing tests is treated as complete in the docs.
 Code whose tests are failing or absent is documented as partial until the
@@ -65,6 +68,43 @@ Pin a release with `sh -s -- --version vX.Y.Z`; in GitHub Actions the bin
 directory is added to `PATH` automatically. Homebrew:
 `brew install kaeawc/tap/spectra`. See [docs/install.md](docs/install.md) and
 [Install release binaries](docs/operations/install-binaries.md).
+
+## Linux and cloud agent VMs
+
+The Linux builds are static (no cgo, no macOS frameworks), so they run on a
+bare amd64 or arm64 VM with no GUI. A setup script or VM snapshot can install
+them without prompts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/install.sh \
+  | sh -s -- --version v0.1.1 --prefix /usr/local   # or the default ~/.local, then add ~/.local/bin to PATH
+spectra version && spectra-mcp --version
+```
+
+Register the MCP server over stdio, for example in a repository's `.mcp.json`:
+
+```json
+{"mcpServers": {"spectra": {"command": "spectra-mcp", "args": []}}}
+```
+
+`spectra-mcp` writes only JSON-RPC to stdout (logs go to stderr) and exits
+when stdin closes. These host checks work on Linux from `/proc`, `/sys`,
+cgroups, `ip`/`ss` and `df`: load and its cause
+(`spectra load --json --root <worktrees>`), memory pressure and swap
+(`memory`), processes and their trees (`process`, `lineage`), leftover
+processes (`orphans`, `idle`), who holds a port or directory (`owner`),
+short-lived spawns (`spawns`), JVMs and Gradle daemons (`jvm`, needs a JDK's
+`jcmd`/`jps` on PATH), emulators and adb devices (`devices`), PSI and cgroup
+limits (`pressure`), network, storage and kernel limits. Process sampling,
+flamegraphs and energy impact (`sample`, `flamegraph`, `power` `impact`) are
+macOS-only. `spectra capabilities
+--json` lists the machine-readable commands this build supports.
+`.app` inspection, the TCC database, launchd, unified logs and Time Machine
+are macOS-only too. On Linux every macOS-only command and tool answers with
+`{"error": "unsupported_platform", ...}` (CLI with `--json`; see
+[command schemas](docs/reference/command-schemas.md#unsupported-on-this-os)). `alerts` and
+`host_health` read the optional per-user daemon: `spectra daemon start` runs
+it without systemd; otherwise those tools return `daemon_unavailable`.
 
 ## Documentation
 
