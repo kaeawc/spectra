@@ -46,12 +46,18 @@ func toolDefinitions() []ToolDefinition {
 		inspectAppToolDef(),
 		snapshotToolDef(),
 		diagnoseToolDef(),
-		operationToolDef("process", "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
-		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
-		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
-		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"}),
-		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"}),
+		operationToolDef("process", "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"},
+			"pid", "paths", "bundles", "deep", "limit", "duration_seconds", "interval_millis", "include_raw"),
+		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"},
+			"pid", "samples", "interval_millis", "dest", "event", "duration_seconds", "confirm_sensitive", "agent", "mbean_name", "attribute", "mbean_operation", "include_raw", "auto_attach", "limit"),
+		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "diagnose"},
+			"paths", "bundles", "host", "port", "include_raw"),
+		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"},
+			"dsn", "schema", "table", "limit", "confirm_sensitive"),
+		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"},
+			"include_raw"),
+		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"},
+			"snapshot_id", "machine_uuid", "status", "id", "issue_id", "applied_by", "command", "output", "exit_code"),
 		powerToolDef(),
 		memoryToolDef(),
 		storageToolDef(),
@@ -274,47 +280,58 @@ func diagnoseToolDef() ToolDefinition {
 	}
 }
 
-func operationToolDef(name, description string, operations []string) ToolDefinition {
+// operationProps is every argument an operation tool can take. Each tool
+// advertises only the ones its handler reads, so agents are not shown
+// MBean or issue-tracking fields on the process tool.
+var operationProps = map[string]map[string]interface{}{
+	"pid":               integerProp("PID."),
+	"paths":             arrayStringProp("App paths."),
+	"bundles":           arrayStringProp("App paths."),
+	"snapshot_id":       stringProp("Snapshot ID."),
+	"machine_uuid":      stringProp("Machine UUID."),
+	"status":            stringProp("Issue status."),
+	"id":                stringProp("ID."),
+	"issue_id":          stringProp("Issue ID."),
+	"duration_seconds":  integerProp("Duration (process sample and jvm flamegraph: 1..60)."),
+	"interval_millis":   integerProp("Interval."),
+	"event":             stringProp("Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer."),
+	"dest":              stringProp("Output path."),
+	"confirm_sensitive": boolProp("Allow sensitive artifact."),
+	"deep":              boolProp("More process detail."),
+	"include_raw":       boolProp("Return raw data."),
+	"command":           stringProp("Fix command."),
+	"output":            stringProp("Fix output."),
+	"exit_code":         integerProp("Exit code."),
+	"applied_by":        stringProp("Actor."),
+	"dsn":               stringProp("Database DSN or URL."),
+	"table":             stringProp("Table name, optionally schema-qualified."),
+	"schema":            stringProp("Database schema filter."),
+	"host":              stringProp("Host filter."),
+	"port":              integerProp("Port filter."),
+	"limit":             integerProp("Limit."),
+	"auto_attach":       boolProp("Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out."),
+	"mbean_name":        stringProp("MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke."),
+	"attribute":         stringProp("MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read."),
+	"mbean_operation":   stringProp("MBean operation name. Required for mbean_invoke."),
+	"agent":             stringProp("Path to spectra-agent.jar override."),
+	"samples":           integerProp("Number of samples."),
+}
+
+// operationToolDef is a tool whose operation argument selects what it
+// does; operation is optional and defaults to the first of operations.
+func operationToolDef(name, description string, operations []string, props ...string) ToolDefinition {
+	properties := map[string]interface{}{"operation": enumProp(operations, operations[0])}
+	for _, p := range props {
+		def, ok := operationProps[p]
+		if !ok {
+			panic("operationToolDef " + name + ": unknown property " + p)
+		}
+		properties[p] = def
+	}
 	return ToolDefinition{
 		Name:        name,
 		Description: description,
-		InputSchema: objectSchema(map[string]interface{}{
-			"operation":         enumProp(operations, operations[0]),
-			"pid":               integerProp("PID."),
-			"paths":             arrayStringProp("App paths."),
-			"bundles":           arrayStringProp("App paths."),
-			"snapshot_id":       stringProp("Snapshot ID."),
-			"machine_uuid":      stringProp("Machine UUID."),
-			"status":            stringProp("Issue status."),
-			"id":                stringProp("ID."),
-			"issue_id":          stringProp("Issue ID."),
-			"duration_seconds":  integerProp("Duration (process sample and jvm flamegraph: 1..60)."),
-			"interval_millis":   integerProp("Interval."),
-			"event":             stringProp("Profiler event (jvm flamegraph): cpu, wall, alloc, lock, itimer or ctimer."),
-			"dest":              stringProp("Output path."),
-			"confirm_sensitive": boolProp("Allow sensitive artifact."),
-			"deep":              boolProp("More process detail."),
-			"include_raw":       boolProp("Return raw data."),
-			"command":           stringProp("Fix command."),
-			"output":            stringProp("Fix output."),
-			"exit_code":         integerProp("Exit code."),
-			"applied_by":        stringProp("Actor."),
-			"dsn":               stringProp("Database DSN or URL."),
-			"table":             stringProp("Table name, optionally schema-qualified."),
-			"schema":            stringProp("Database schema filter."),
-			"interface":         stringProp("Network interface."),
-			"host":              stringProp("Host filter."),
-			"port":              integerProp("Port filter."),
-			"proto":             stringProp("Protocol."),
-			"handle":            stringProp("Capture handle."),
-			"limit":             integerProp("Limit."),
-			"auto_attach":       boolProp("Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out."),
-			"mbean_name":        stringProp("MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke."),
-			"attribute":         stringProp("MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read."),
-			"mbean_operation":   stringProp("MBean operation name. Required for mbean_invoke."),
-			"agent":             stringProp("Path to spectra-agent.jar override."),
-			"samples":           integerProp("Number of samples."),
-		}, []string{"operation"}),
+		InputSchema: objectSchema(properties, nil),
 	}
 }
 

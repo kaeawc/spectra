@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -483,5 +484,41 @@ func TestValidateHPROFPathRejectsSymlinkAndRelative(t *testing.T) {
 	}
 	if err := validateHPROFPath("rel/real.hprof"); err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Errorf("relative err = %v, want absolute error", err)
+	}
+}
+
+// TestOperationToolsAdvertiseOnlyDecodedArgs keeps each operation tool's
+// schema to the arguments its handler decodes, so a tool cannot again
+// advertise every other tool's fields.
+func TestOperationToolsAdvertiseOnlyDecodedArgs(t *testing.T) {
+	decoded := map[string]reflect.Type{
+		"jvm":    reflect.TypeFor[jvmParams](),
+		"db":     reflect.TypeFor[dbToolParams](),
+		"issues": reflect.TypeFor[issuesParams](),
+	}
+	defs := map[string]ToolDefinition{}
+	for _, d := range toolDefinitions() {
+		defs[d.Name] = d
+	}
+	for tool, typ := range decoded {
+		fields := map[string]bool{}
+		for i := range typ.NumField() {
+			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+			fields[name] = true
+		}
+		schema, _ := defs[tool].InputSchema.(map[string]interface{})
+		props, _ := schema["properties"].(map[string]interface{})
+		for p := range props {
+			if !fields[p] {
+				t.Errorf("%s advertises %q, which its handler does not decode", tool, p)
+			}
+		}
+	}
+	schema, _ := defs["process"].InputSchema.(map[string]interface{})
+	props, _ := schema["properties"].(map[string]interface{})
+	for _, foreign := range []string{"mbean_name", "dsn", "applied_by", "agent"} {
+		if _, ok := props[foreign]; ok {
+			t.Errorf("process advertises %q", foreign)
+		}
 	}
 }
