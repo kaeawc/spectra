@@ -48,32 +48,29 @@ func runJVM(args []string) int {
 
 	ctx := context.Background()
 	jvmOpts := jvmOptions(ctx)
-	var infos []jvm.Info
 
 	if fs.NArg() == 0 {
 		return emitJVMList(os.Stdout, os.Stderr, jvm.CollectAll(ctx, jvmOpts), *asJSON)
-	} else {
-		pidStr := fs.Arg(0)
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid PID %q\n", pidStr)
-			return 2
-		}
-		info := jvm.InspectPID(ctx, pid, jvmOpts)
-		if info == nil {
-			fmt.Fprintf(os.Stderr, "could not inspect PID %d (process not found or jcmd unavailable)\n", pid)
-			return 1
-		}
-		infos = []jvm.Info{*info}
+	}
+	pidStr := fs.Arg(0)
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid PID %q\n", pidStr)
+		return 2
+	}
+	info := jvm.InspectPID(ctx, pid, jvmOpts)
+	if info == nil {
+		fmt.Fprintf(os.Stderr, "could not inspect PID %d (process not found or jcmd unavailable)\n", pid)
+		return 1
 	}
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(infos)
+		_ = enc.Encode([]jvm.Info{*info})
 		return 0
 	}
-	printJVMDetail(infos[0])
+	printJVMDetail(*info)
 	return 0
 }
 
