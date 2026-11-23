@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/devices"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/idle"
 	"github.com/kaeawc/spectra/internal/lineage"
@@ -26,6 +27,7 @@ const (
 	loadToolTimeout    = time.Minute
 	orphansToolTimeout = 30 * time.Second
 	lineageToolTimeout = 30 * time.Second
+	devicesToolTimeout = 30 * time.Second
 	// spawnsMaxSeconds caps a trace: tools/call blocks the server meanwhile.
 	spawnsMaxSeconds     = 30
 	spawnsMinIntervalMS  = 50
@@ -45,6 +47,7 @@ type ReportDeps struct {
 	Find    owner.FindFunc
 	Under   owner.UnderFunc
 	Spawns  func() spawntrace.Deps
+	Devices func() devices.Options
 }
 
 func defaultReportDeps() ReportDeps {
@@ -55,6 +58,7 @@ func defaultReportDeps() ReportDeps {
 		Find:    owner.Finder{}.Find,
 		Under:   owner.Finder{}.Under,
 		Spawns:  spawntrace.DefaultDeps,
+		Devices: func() devices.Options { return devices.Options{} },
 	}
 }
 
@@ -76,6 +80,9 @@ func mergeReportDeps(c, d ReportDeps) ReportDeps {
 	}
 	if c.Spawns == nil {
 		c.Spawns = d.Spawns
+	}
+	if c.Devices == nil {
+		c.Devices = d.Devices
 	}
 	return c
 }
@@ -110,6 +117,14 @@ func reportToolDefinitions() []ToolDefinition {
 			Name:        "lineage",
 			Description: "Ancestors and descendant tree of one pid, with subtree RSS and CPU. Same JSON as `spectra lineage --json`. Ask: \"What started PID 123 and what is under it?\"",
 			InputSchema: objectSchema(map[string]interface{}{"pid": integerProp("Process ID (required).")}, []string{"pid"}),
+		},
+		{
+			Name:        "devices",
+			Description: "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, and which worktree started them?\"",
+			InputSchema: objectSchema(map[string]interface{}{
+				"roots":     arrayStringProp("Absolute directories (worktree roots) to attribute emulator and simulator processes to."),
+				"start_adb": boolProp("Ask adb even when no adb server runs. This starts an adb server that keeps running."),
+			}, nil),
 		},
 		{
 			Name:        "owner",
@@ -147,6 +162,7 @@ func (s *Server) reportToolHandlers() map[string]toolHandler {
 		"load":    s.toolLoad,
 		"orphans": s.toolOrphans,
 		"lineage": s.toolLineage,
+		"devices": s.toolDevices,
 		"owner":   s.toolOwner,
 		"spawns":  s.toolSpawns,
 		"idle":    s.toolIdle,
@@ -424,4 +440,23 @@ func idleOptions(roots []string, pids []int, minAge, window string, maxCPU *floa
 		return opts, fmt.Errorf("window must be at most %s", idleMaxWindow)
 	}
 	return opts, opts.Validate()
+}
+
+func (s *Server) toolDevices(ctx context.Context, raw json.RawMessage) ToolResult {
+	var p struct {
+		Roots    []string `json:"roots"`
+		StartADB bool     `json:"start_adb"`
+	}
+	if err := decodeArgs(raw, &p); err != nil {
+		return toolError(err.Error())
+	}
+	if err := absRoots("roots", p.Roots); err != nil {
+		return toolError(err.Error())
+	}
+	opts := s.collect.Reports.Devices()
+	opts.StartADB = p.StartADB
+	opts.Roots = hostload.ResolveRoots(p.Roots, filepath.Abs, filepath.EvalSymlinks)
+	ctx, cancel := context.WithTimeout(ctx, devicesToolTimeout)
+	defer cancel()
+	return toolText(devices.Collect(ctx, opts))
 }

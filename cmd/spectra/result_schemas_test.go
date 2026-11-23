@@ -16,6 +16,7 @@ import (
 	protocol "github.com/kaeawc/spectra-protocol/protocol/v1"
 
 	"github.com/kaeawc/spectra/internal/capabilities"
+	"github.com/kaeawc/spectra/internal/devices"
 	"github.com/kaeawc/spectra/internal/lineage"
 	"github.com/kaeawc/spectra/internal/owner"
 	"github.com/kaeawc/spectra/internal/spawntrace"
@@ -46,6 +47,7 @@ var resultSchemaTypes = map[string][]schemaRecord{
 	capabilities.SchemaOwnerUnder:    single(func() any { return filled[owner.UnderResult]() }),
 	capabilities.SchemaLineage:       single(func() any { return filled[lineage.Result]() }),
 	capabilities.SchemaIdle:          single(func() any { return filled[idleReport]() }),
+	capabilities.SchemaDevices:       single(func() any { return filled[devices.Report]() }),
 	capabilities.SchemaStartup:       single(func() any { return filled[startup.Report]() }),
 	capabilities.SchemaStartupChange: single(func() any { return filled[startup.ChangeResult]() }),
 	capabilities.SchemaUninstallPlan: single(func() any { return filled[uninstall.Plan]() }),
