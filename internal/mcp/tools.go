@@ -22,11 +22,13 @@ import (
 	"github.com/kaeawc/spectra/internal/hostos"
 	issueflow "github.com/kaeawc/spectra/internal/issues"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/rules"
 	"github.com/kaeawc/spectra/internal/snapshot"
 	"github.com/kaeawc/spectra/internal/store"
+	"github.com/kaeawc/spectra/internal/sysinfo"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -44,7 +46,7 @@ func toolDefinitions() []ToolDefinition {
 		inspectAppToolDef(),
 		snapshotToolDef(),
 		diagnoseToolDef(),
-		operationToolDef("process", "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
+		operationToolDef("process", "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"}),
 		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"}),
 		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "firewall", "diagnose", "capture_start", "capture_stop"}),
 		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"}),
@@ -114,7 +116,7 @@ func systemToolDef() ToolDefinition {
 func servicesToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "services",
-		Description: "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+		Description: "macOS only. launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
 		InputSchema: objectSchema(map[string]interface{}{}, nil),
 	}
 }
@@ -122,7 +124,7 @@ func servicesToolDef() ToolDefinition {
 func logsToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "logs",
-		Description: "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
+		Description: "macOS only. Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"process":                stringProp("Process name filter."),
 			"subsystem":              stringProp("Subsystem filter."),
@@ -139,7 +141,7 @@ func logsToolDef() ToolDefinition {
 func updatesToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "updates",
-		Description: "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+		Description: "macOS only. macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"history", "log"}, "history"),
 			"process":   stringProp("Process filter (log)."),
@@ -152,7 +154,7 @@ func updatesToolDef() ToolDefinition {
 func timeMachineToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "timemachine",
-		Description: "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+		Description: "macOS only. Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
 		InputSchema: objectSchema(map[string]interface{}{}, nil),
 	}
 }
@@ -222,7 +224,7 @@ func triageToolDef() ToolDefinition {
 func inspectAppToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "inspect_app",
-		Description: "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
+		Description: "macOS only. Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"paths":             arrayStringProp(".app paths. Optional when scan_all=true."),
 			"scan_all":          boolProp("Inspect every .app under /Applications instead of listing paths."),
@@ -350,7 +352,7 @@ func enumProp(values []string, def string) map[string]interface{} {
 func (s *Server) toolTriage(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p triageParams
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 
 	evidence, next, rawOut := s.collectTriage(ctx, p)
@@ -601,7 +603,10 @@ func (s *Server) toolInspectApp(ctx context.Context, raw json.RawMessage) ToolRe
 		AssessGK   bool     `json:"assess_gatekeeper"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
+	}
+	if res, gated := darwinOnlyTool("app-bundle inspection", "app inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS"); gated {
+		return res
 	}
 	opts := s.detectOptions(ctx, p.Network)
 	opts.AssessGatekeeper = p.AssessGK
@@ -653,7 +658,7 @@ func (s *Server) toolInspectApp(ctx context.Context, raw json.RawMessage) ToolRe
 func (s *Server) toolSnapshot(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p snapshotParams
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.Operation == "" {
 		p.Operation = "create"
@@ -704,7 +709,7 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 		}
 		progressFrom(ctx).step(ctx, "saving snapshot")
 		if err := saveSnapshot(ctx, snap); err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 	}
 	evidence := summarizeSnapshot(snap, p.LimitSummary)
@@ -730,12 +735,12 @@ func (s *Server) toolSnapshotCreate(ctx context.Context, p snapshotParams) ToolR
 func (s *Server) toolSnapshotList(p snapshotParams) ToolResult {
 	db, err := openStore()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	defer db.Close()
 	rows, err := db.ListSnapshots(context.Background(), p.Kind)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d stored snapshot(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 }
@@ -746,7 +751,7 @@ func (s *Server) toolSnapshotGet(p snapshotParams) ToolResult {
 	}
 	snap, err := loadStoredSnapshot(p.ID)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	env := toolEnvelope{Summary: "loaded snapshot " + p.ID, Evidence: summarizeSnapshot(snap, p.LimitSummary), Timestamp: s.now()}
 	if p.IncludeRaw {
@@ -765,11 +770,11 @@ func (s *Server) toolSnapshotDiff(p snapshotParams) ToolResult {
 	}
 	a, err := loadStoredSnapshot(p.IDA)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	b, err := loadStoredSnapshot(p.IDB)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	result := diff.Compare(a, b)
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("diffed %s against %s", p.IDA, p.IDB), Raw: result, Timestamp: s.now()})
@@ -784,14 +789,14 @@ func (s *Server) toolDiagnose(ctx context.Context, raw json.RawMessage) ToolResu
 		ThreadDumpPIDs []int  `json:"thread_dump_pids"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.SnapshotID != "" && len(p.ThreadDumpPIDs) > 0 {
 		return toolError("thread_dump_pids requires a live snapshot; omit snapshot_id")
 	}
 	snap, findings, err := s.evaluateRules(ctx, p.SnapshotID, p.RulesConfig, p.ThreadDumpPIDs...)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	evidence := summarizeFindings(findings, 10)
 	next := []string{"Use issues operation=check to persist these findings if they should be tracked."}
@@ -802,7 +807,7 @@ func (s *Server) toolDiagnose(ctx context.Context, raw json.RawMessage) ToolResu
 		progressFrom(ctx).step(ctx, "persisting findings")
 		ids, err := persistFindings(ctx, snap, findings)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		evidence = append(evidence, fmt.Sprintf("persisted %d issue(s)", len(ids)))
 		next = []string{"Use issues operation=list with this machine_uuid to inspect persisted issue lifecycle."}
@@ -827,7 +832,7 @@ func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResul
 		IncludeRaw      bool     `json:"include_raw"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	bundles := append([]string{}, p.Bundles...)
 	bundles = append(bundles, p.Paths...)
@@ -844,6 +849,9 @@ func (s *Server) toolProcess(ctx context.Context, raw json.RawMessage) ToolResul
 		tree := process.BuildTree(procs)
 		return toolText(toolEnvelope{Summary: "built process tree", Raw: tree, Timestamp: s.now()})
 	case "by_app":
+		if res, gated := darwinOnlyTool("processes by .app bundle", "use operation=list or tree, or the lineage and owner tools"); gated {
+			return res
+		}
 		if len(bundles) == 0 {
 			return toolError("process by_app requires paths or bundles")
 		}
@@ -877,7 +885,7 @@ func (s *Server) toolProcessSample(ctx context.Context, pid, durationSeconds, in
 	out, err := s.collect.Processes.SampleProcess(ctx, pid, duration, interval)
 	stop()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	res := toolText(toolEnvelope{Summary: fmt.Sprintf("sampled pid %d for %ds", pid, duration), Raw: map[string]interface{}{"pid": pid, "output": out}, Timestamp: s.now()})
 	if link, ok := s.saveArtifact(kindSample, fmt.Sprintf("sample-%d", pid), ".txt", fmt.Sprintf("Sample report for pid %d", pid), []byte(out)); ok {
@@ -889,7 +897,7 @@ func (s *Server) toolProcessSample(ctx context.Context, pid, durationSeconds, in
 func (s *Server) toolJVM(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p jvmParams
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	op := p.Operation
 	if op == "" {
@@ -973,7 +981,7 @@ func (s *Server) withAgentAttached(ctx context.Context, p jvmParams, op func() e
 	}
 	var notAttached *jvm.NotAttachedError
 	if !errors.As(err, &notAttached) {
-		return toolError(err.Error()), false
+		return toolErrorFrom(err), false
 	}
 	autoAttach := p.AutoAttach == nil || *p.AutoAttach
 	if autoAttach {
@@ -1034,7 +1042,7 @@ func (s *Server) toolJVMExplain(ctx context.Context, p jvmParams) ToolResult {
 	}
 	explanation, err := s.collect.JVMs.CollectExplanation(ctx, p.PID, jvm.ExplainOptions{Samples: p.Samples, Interval: time.Duration(p.IntervalMillis) * time.Millisecond, SoftRefs: true})
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("explained JVM pid %d", p.PID), Raw: explanation, Timestamp: s.now()})
 }
@@ -1045,7 +1053,7 @@ func (s *Server) toolJVMGCStats(ctx context.Context, p jvmParams) ToolResult {
 	}
 	stats, err := s.collect.JVMs.CollectGCStats(ctx, p.PID)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected GC stats for pid %d", p.PID), Raw: stats, Timestamp: s.now()})
 }
@@ -1063,7 +1071,7 @@ func (s *Server) toolJVMAttach(ctx context.Context, p jvmParams) ToolResult {
 	}
 	status, err := jvm.AttachAgent(p.PID, p.Agent, jvm.ContextRunner(ctx))
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("attached spectra agent to pid %d", p.PID), Raw: status, Timestamp: s.now()})
 }
@@ -1143,7 +1151,7 @@ func (s *Server) toolJVMHeapDump(ctx context.Context, p jvmParams) ToolResult {
 		p.Dest = fmt.Sprintf("/tmp/spectra-heap-%d.hprof", p.PID)
 	}
 	if err := s.collect.JVMs.HeapDump(ctx, p.PID, p.Dest); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	res := toolText(toolEnvelope{
 		Summary:     fmt.Sprintf("wrote heap dump for pid %d", p.PID),
@@ -1188,7 +1196,7 @@ func (s *Server) toolJVMHeapLeakSuspects(_ context.Context, p jvmParams) ToolRes
 		return toolError("jvm heap_leak_suspects requires dest (path to an .hprof heap dump)")
 	}
 	if err := validateHPROFPath(p.Dest); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	graph, err := heap.ParseObjectGraphFile(p.Dest)
 	if err != nil {
@@ -1243,7 +1251,7 @@ func checkFlamegraphArgs(p jvmParams) error {
 // out of the retention sweep's reach until it is published.
 func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult {
 	if err := checkFlamegraphArgs(p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	staging, out, id, err := s.newStagedArtifact(fmt.Sprintf("flamegraph-%d", p.PID), flamegraphExt(p.Dest))
 	linked := err == nil
@@ -1261,7 +1269,7 @@ func (s *Server) toolJVMFlamegraph(ctx context.Context, p jvmParams) ToolResult 
 		if linked {
 			_ = os.Remove(out)
 		}
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if !linked {
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("wrote flamegraph for pid %d", p.PID), Raw: map[string]interface{}{"pid": p.PID, "dest": out}, Timestamp: s.now()})
@@ -1300,7 +1308,7 @@ func (s *Server) toolNetwork(ctx context.Context, raw json.RawMessage) ToolResul
 		IncludeRaw bool     `json:"include_raw"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "state", "":
@@ -1346,7 +1354,7 @@ type dbToolParams struct {
 func (s *Server) toolDB(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p dbToolParams
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	switch p.Operation {
 	case "discover", "":
@@ -1361,7 +1369,7 @@ func (s *Server) toolDB(ctx context.Context, raw json.RawMessage) ToolResult {
 	case "overview":
 		overview, err := s.collect.DB.Overview(ctx, p.DSN)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		summary := fmt.Sprintf("postgres %s database %q: %d schema(s), %d/%d connections",
 			overview.ServerVersion, overview.Database, len(overview.Schemas), overview.Connections, overview.MaxConnections)
@@ -1369,19 +1377,19 @@ func (s *Server) toolDB(ctx context.Context, raw json.RawMessage) ToolResult {
 	case "schema":
 		report, err := s.collect.DB.Schema(ctx, p.DSN, p.Schema)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d relation(s)", len(report.Tables)), Raw: report, Timestamp: s.now()})
 	case "relations":
 		report, err := s.collect.DB.Relations(ctx, p.DSN, p.Schema)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d foreign key(s)", len(report.ForeignKeys)), Raw: report, Timestamp: s.now()})
 	case "stats":
 		report, err := s.collect.DB.Stats(ctx, p.DSN, p.Schema)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolText(toolEnvelope{Summary: fmt.Sprintf("collected stats for %d table(s)", len(report.Tables)), Raw: report, Timestamp: s.now()})
 	case "sample":
@@ -1400,7 +1408,7 @@ func (s *Server) toolDBSample(ctx context.Context, p dbToolParams) ToolResult {
 	}
 	report, err := s.collect.DB.Sample(ctx, p.DSN, p.Table, p.Limit)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{
 		Summary:   fmt.Sprintf("sampled %d row(s) from %s.%s", len(report.Rows), report.Schema, report.Table),
@@ -1415,7 +1423,7 @@ func (s *Server) toolToolchain(ctx context.Context, raw json.RawMessage) ToolRes
 		IncludeRaw bool   `json:"include_raw"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	tc := s.collect.Toolchain.CollectToolchains(ctx, toolchain.CollectOptions{})
 	switch p.Operation {
@@ -1440,11 +1448,11 @@ func (s *Server) toolToolchain(ctx context.Context, raw json.RawMessage) ToolRes
 func (s *Server) toolIssues(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p issuesParams
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	db, err := openStore()
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	defer db.Close()
 	switch p.Operation {
@@ -1479,14 +1487,14 @@ type issuesParams struct {
 func (s *Server) toolIssuesCheck(ctx context.Context, db *store.DB, p issuesParams) ToolResult {
 	snap, findings, err := s.evaluateRules(ctx, p.SnapshotID, "")
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if err := ctx.Err(); err != nil {
 		return toolError("issues check cancelled before findings were persisted")
 	}
 	ids, err := persistFindingsWithDB(ctx, db, snap, findings)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("persisted %d issue(s)", len(ids)), Evidence: summarizeFindings(findings, 10), Raw: map[string]interface{}{"snapshot_id": snap.ID, "ids": ids}, Timestamp: s.now()})
 }
@@ -1497,7 +1505,7 @@ func (s *Server) toolIssuesList(db *store.DB, p issuesParams) ToolResult {
 	}
 	rows, err := db.ListIssues(context.Background(), p.MachineUUID, store.IssueStatus(p.Status))
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d issue(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 }
@@ -1512,7 +1520,7 @@ func (s *Server) toolIssuesUpdateStatus(db *store.DB, p issuesParams) ToolResult
 	}
 	svc := issueflow.Service{Store: db}
 	if err := svc.Update(context.Background(), p.ID, status); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("set issue %s to %s", p.ID, status), Timestamp: s.now()})
 }
@@ -1524,7 +1532,7 @@ func (s *Server) toolIssuesRecordFix(db *store.DB, p issuesParams) ToolResult {
 	svc := issueflow.Service{Store: db}
 	id, err := svc.RecordFix(context.Background(), store.AppliedFixInput{IssueID: p.IssueID, AppliedBy: p.AppliedBy, Command: p.Command, Output: p.Output, ExitCode: p.ExitCode})
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: "recorded applied fix", Raw: map[string]interface{}{"id": id}, Timestamp: s.now()})
 }
@@ -1536,7 +1544,7 @@ func (s *Server) toolIssuesFixHistory(db *store.DB, p issuesParams) ToolResult {
 	svc := issueflow.Service{Store: db}
 	rows, err := svc.FixHistory(context.Background(), p.IssueID)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("found %d fix attempt(s)", len(rows)), Raw: rows, Timestamp: s.now()})
 }
@@ -1732,6 +1740,27 @@ func toolError(msg string) ToolResult {
 	return ToolResult{IsError: true, Content: []ContentBlock{{Type: "text", Text: msg}}}
 }
 
+// toolErrorFrom is toolError for err, except that a "not on this OS" error
+// becomes the structured hostos.UnsupportedReport (error
+// "unsupported_platform"), so agents can tell it from a failure.
+func toolErrorFrom(err error) ToolResult {
+	if r, ok := hostos.ReportUnsupported(err, sysinfo.ErrRusageUnsupported, memstate.ErrNotSupported); ok {
+		return toolTextError(r)
+	}
+	return toolError(err.Error())
+}
+
+// darwinOnlyTool answers a macOS-only tool or operation off macOS with the
+// structured unsupported result; ok is false when the call should run.
+func darwinOnlyTool(feature, hint string) (ToolResult, bool) {
+	if hostos.Current() == hostos.Darwin {
+		return ToolResult{}, false
+	}
+	r, _ := hostos.ReportUnsupported(hostos.Unsupported(feature))
+	r.Hint = hint
+	return toolTextError(r), true
+}
+
 func optionalRaw(include bool, value interface{}) interface{} {
 	if include {
 		return value
@@ -1924,7 +1953,7 @@ func (s *Server) jcmdText(ctx context.Context, pid int, label string, fn func(co
 	}
 	out, err := fn(ctx, pid)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("collected %s for pid %d", label, pid), Raw: map[string]interface{}{"pid": pid, "output": string(out)}, Timestamp: s.now()})
 }

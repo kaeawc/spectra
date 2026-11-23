@@ -189,7 +189,7 @@ func (s *Server) toolLoad(ctx context.Context, raw json.RawMessage) ToolResult {
 		Top           *int     `json:"top"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts := hostload.DefaultReportOptions()
 	opts.Roots = p.Roots
@@ -198,13 +198,13 @@ func (s *Server) toolLoad(ctx context.Context, raw json.RawMessage) ToolResult {
 	setIf(&opts.BackoffFreeGB, p.BackoffFreeGB)
 	setIf(&opts.Top, p.Top)
 	if err := opts.Validate(); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if opts.Top > loadMaxTop {
 		return toolError(fmt.Sprintf("top must be 1..%d", loadMaxTop))
 	}
 	if err := absRoots("roots", opts.Roots); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, loadToolTimeout)
 	defer cancel()
@@ -251,7 +251,7 @@ func (s *Server) toolOrphans(ctx context.Context, raw json.RawMessage) ToolResul
 		NoDaemon bool     `json:"no_daemon"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	// The server's own cwd is arbitrary, so unlike the CLI there is no
 	// current-directory default.
@@ -259,11 +259,11 @@ func (s *Server) toolOrphans(ctx context.Context, raw json.RawMessage) ToolResul
 		return toolError("roots is required")
 	}
 	if err := absRoots("roots", p.Roots); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	minAge, err := durationArg("min_age", p.MinAge, orphans.DefaultMinAge)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if minAge < 0 {
 		return toolError("min_age must not be negative")
@@ -282,7 +282,7 @@ func (s *Server) toolLineage(ctx context.Context, raw json.RawMessage) ToolResul
 		PID int `json:"pid"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.PID <= 0 {
 		return toolError("pid must be a positive integer")
@@ -302,7 +302,7 @@ func (s *Server) toolOwner(ctx context.Context, raw json.RawMessage) ToolResult 
 		Under  []string `json:"under"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if (p.Target == "") == (len(p.Under) == 0) {
 		return toolError("pass exactly one of target or under")
@@ -311,7 +311,7 @@ func (s *Server) toolOwner(ctx context.Context, raw json.RawMessage) ToolResult 
 	defer cancel()
 	if len(p.Under) > 0 {
 		if err := absRoots("under", p.Under); err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		res, err := owner.BuildUnderReport(ctx, owner.AbsDirs(p.Under, "/"), s.collect.Reports.Under)
 		if err != nil {
@@ -340,7 +340,7 @@ func (s *Server) toolSpawns(ctx context.Context, raw json.RawMessage) ToolResult
 		IntervalMillis  *int `json:"interval_millis"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts := spawntrace.DefaultOptions()
 	opts.PID = p.PID
@@ -385,11 +385,11 @@ func (s *Server) toolIdle(ctx context.Context, raw json.RawMessage) ToolResult {
 		Window string   `json:"window"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	opts, err := idleOptions(p.Roots, p.PIDs, p.MinAge, p.Window, p.MaxCPU)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	stop := progressFrom(ctx).elapsed(ctx, opts.Window, "sampling CPU")
 	rep, err := idle.BuildReport(ctx, opts, s.collect.Reports.Idle())

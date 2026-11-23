@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/kaeawc/spectra/internal/corefile"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
@@ -129,6 +130,7 @@ var structuredCalls = map[string]string{
 // outputSchema, carries the same value as the text content, and that the
 // text is exactly what the handler renders.
 func TestStructuredContentValidatesForEveryTool(t *testing.T) {
+	defer hostos.SetForTest(hostos.Darwin)() // exercises the macOS paths with fakes
 	srv := structuredTestServer(t)
 	cs := startServerSession(t, srv, "2025-11-25", nil)
 	ctx := context.Background()

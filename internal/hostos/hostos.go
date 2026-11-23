@@ -84,10 +84,58 @@ func SetForTest(k Kind) func() {
 // errors.Is(err, hostos.ErrUnsupported).
 var ErrUnsupported = errors.New("unsupported on host OS")
 
+// UnsupportedError is the error Unsupported returns. errors.As recovers the
+// feature and OS, for example to report them as structured output.
+type UnsupportedError struct {
+	Feature string
+	OS      Kind
+}
+
+func (e *UnsupportedError) Error() string {
+	return fmt.Sprintf("%s: %s (%s)", e.Feature, ErrUnsupported, e.OS)
+}
+
+// Unwrap makes errors.Is(err, ErrUnsupported) hold.
+func (e *UnsupportedError) Unwrap() error { return ErrUnsupported }
+
 // Unsupported reports that feature has no implementation on the current
 // host OS. The returned error wraps ErrUnsupported and names both the
 // feature and the OS, e.g. "codesign inspection: unsupported on host OS
 // (linux)".
 func Unsupported(feature string) error {
-	return fmt.Errorf("%s: %w (%s)", feature, ErrUnsupported, Current())
+	return &UnsupportedError{Feature: feature, OS: Current()}
+}
+
+// UnsupportedReport is the machine-readable form of an unsupported-feature
+// failure, shared by `spectra <cmd> --json` and spectra-mcp tool errors so
+// agents can tell "not on this OS" from "failed".
+type UnsupportedReport struct {
+	Error   string `json:"error"` // always "unsupported_platform"
+	Feature string `json:"feature,omitempty"`
+	OS      string `json:"os"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// ReportUnsupported returns the report for err when it wraps
+// ErrUnsupported, or for any of also (other packages' "not on this
+// platform" sentinels); ok is false otherwise.
+func ReportUnsupported(err error, also ...error) (UnsupportedReport, bool) {
+	if err == nil {
+		return UnsupportedReport{}, false
+	}
+	matched := errors.Is(err, ErrUnsupported)
+	for _, sentinel := range also {
+		matched = matched || errors.Is(err, sentinel)
+	}
+	if !matched {
+		return UnsupportedReport{}, false
+	}
+	r := UnsupportedReport{Error: "unsupported_platform", OS: Current().String(), Message: err.Error()}
+	var ue *UnsupportedError
+	if errors.As(err, &ue) {
+		r.Feature = ue.Feature
+		r.OS = ue.OS.String()
+	}
+	return r, true
 }

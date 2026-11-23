@@ -29,6 +29,24 @@ marker below) in the same change. Consumers must check the advertised
 `result_schema` name and version before decoding and must ignore unknown
 fields.
 
+## Unsupported on this OS
+
+Subcommands that only exist on macOS (`spectra help` marks them
+`[macOS only]`) exit 1 off macOS. With `--json` they print one object on
+stdout instead of a stderr line, so a script can tell "not on this OS" from
+a failure:
+
+```json
+{"command": "vmmap", "error": "unsupported_platform", "feature": "vmmap memory composition",
+ "os": "linux", "message": "vmmap memory composition: unsupported on host OS (linux)",
+ "hint": "on Linux, read /proc/<pid>/smaps_rollup; `spectra procdiag <pid>` covers cgroup memory limits"}
+```
+
+`hint` is present when there is a Linux alternative. Commands that work on
+both systems but have nothing to report still print valid JSON:
+`spectra jvm --json` prints `[]` with no JVMs, and `spectra rules --json`
+prints `[]` with no findings.
+
 ## spectra.load
 
 `spectra load --json` emits one object: whether this machine can take another

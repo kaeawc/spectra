@@ -51,11 +51,7 @@ func runJVM(args []string) int {
 	var infos []jvm.Info
 
 	if fs.NArg() == 0 {
-		infos = jvm.CollectAll(ctx, jvmOpts)
-		if len(infos) == 0 {
-			fmt.Fprintln(os.Stderr, "no running JVMs found (is jps in your PATH?)")
-			return 0
-		}
+		return emitJVMList(os.Stdout, os.Stderr, jvm.CollectAll(ctx, jvmOpts), *asJSON)
 	} else {
 		pidStr := fs.Arg(0)
 		pid, err := strconv.Atoi(pidStr)
@@ -77,11 +73,25 @@ func runJVM(args []string) int {
 		_ = enc.Encode(infos)
 		return 0
 	}
+	printJVMDetail(infos[0])
+	return 0
+}
 
-	if fs.NArg() == 0 {
+// emitJVMList prints the running JVMs. With none, JSON is still an array
+// (`[]`), so `spectra jvm --json | jq '.[]'` needs no special case.
+func emitJVMList(stdout, stderr io.Writer, infos []jvm.Info, asJSON bool) int {
+	if len(infos) == 0 {
+		fmt.Fprintln(stderr, "no running JVMs found (is jps in your PATH?)")
+		infos = []jvm.Info{}
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(infos)
+		return 0
+	}
+	if len(infos) > 0 {
 		printJVMList(infos)
-	} else {
-		printJVMDetail(infos[0])
 	}
 	return 0
 }

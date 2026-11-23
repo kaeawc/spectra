@@ -130,11 +130,17 @@ func dispatch(args []string) int {
 	if !strings.HasPrefix(first, "-") {
 		for _, sc := range subcommandList() {
 			if first == sc.name {
+				if code, gated := gateDarwinOnly(sc.name, args[1:], os.Stdout, os.Stderr); gated {
+					return code
+				}
 				return sc.run(args[1:])
 			}
 		}
 	}
 	// No subcommand matched — default to inspect with the full arg list.
+	if code, gated := gateDarwinOnly("inspect", args, os.Stdout, os.Stderr); gated {
+		return code
+	}
 	return runInspect(args)
 }
 
@@ -170,7 +176,11 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {
-		fmt.Fprintf(w, "  %-10s %s\n", sc.name, sc.desc)
+		desc := sc.desc
+		if _, macOnly := darwinOnlyCommands[sc.name]; macOnly {
+			desc += " [macOS only]"
+		}
+		fmt.Fprintf(w, "  %-10s %s\n", sc.name, desc)
 	}
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Flag-only invocations route to `inspect`:")
