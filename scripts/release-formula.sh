@@ -49,8 +49,9 @@ darwin_amd64="$(checksum_for darwin amd64)"
 linux_arm64="$(checksum_for linux arm64)"
 linux_amd64="$(checksum_for linux amd64)"
 
+# The first expression drops the template's header comment.
 rendered="$(sed \
-    -e "s/@VERSION@/${TAG#v}/g" \
+    -e '/^class /,$!d' \
     -e "s/@TAG@/${TAG}/g" \
     -e "s/@SHA256_DARWIN_ARM64@/${darwin_arm64}/g" \
     -e "s/@SHA256_DARWIN_AMD64@/${darwin_amd64}/g" \

@@ -5,10 +5,12 @@
 # release archive from checksums.txt, and attaches the result to the GitHub
 # release as spectra.rb. Copying it into the tap is a manual maintainer step
 # (see packaging/release/README.md); this template is not installable as is.
+# Rendering drops this header so the asset can be copied verbatim. There is
+# no `version` line: Homebrew scans it from the URLs, and `brew audit
+# --strict` rejects an explicit one as redundant.
 class Spectra < Formula
   desc "Host-aware app and JVM diagnostics (macOS + Linux)"
   homepage "https://github.com/kaeawc/spectra"
-  version "@VERSION@"
   license "MIT"
 
   on_macos do

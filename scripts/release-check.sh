@@ -37,6 +37,22 @@ sign_binary() {
     codesign --force --timestamp --options runtime --sign "$SPECTRA_SIGN_IDENTITY" "$path"
 }
 
+# formula_is_tap_ready renders the formula from synthetic checksums and
+# requires output that can be copied into the tap verbatim: no template
+# header, and no `version` line for `brew audit --strict` to reject.
+formula_is_tap_ready() {
+    local dir out goos arch
+    dir="$(mktemp -d)"
+    for goos in darwin linux; do
+        for arch in amd64 arm64; do
+            printf '%064d  spectra_v0.0.0_%s_%s.tar.gz\n' 0 "$goos" "$arch" >> "$dir/checksums.txt"
+        done
+    done
+    out="$(bash scripts/release-formula.sh v0.0.0 "$dir")"
+    rm -rf "$dir"
+    [[ "$(head -n 1 <<<"$out")" == "class Spectra < Formula" ]] && ! grep -Eq '^[[:space:]]*version[[:space:]]' <<<"$out"
+}
+
 notarize_archive() {
     local archive="$1"
     local submit_args=(notarytool submit "$archive" --wait)
@@ -111,6 +127,7 @@ check "dist script exists" test -x scripts/dist.sh
 check "notarize script exists" test -x scripts/notarize-archives.sh
 check "Homebrew formula template exists" test -f packaging/homebrew/spectra.rb
 check "formula render script exists" test -x scripts/release-formula.sh
+check "rendered formula is tap-ready" formula_is_tap_ready
 check "install script exists" test -x scripts/install.sh
 
 echo ""
