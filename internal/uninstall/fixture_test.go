@@ -80,13 +80,33 @@ type ownerFS struct {
 	rootOwned []string
 }
 
+// testUID and testGID are the user the fixtures act as: the real one, or
+// 501/20 (the first macOS user) when the tests run as root. apply refuses
+// to run as root, so a root test run would otherwise test only that.
+var testUID, testGID = nonRootIDs(int64(os.Getuid()), int64(os.Getgid()))
+
+func nonRootIDs(uid, gid int64) (int64, int64) {
+	if uid == 0 {
+		return 501, 20
+	}
+	return uid, gid
+}
+
 func (f ownerFS) Meta(path string) (Meta, error) {
 	m, err := f.OSFS.Meta(path)
-	if err == nil && underAny(path, f.rootOwned) {
+	if err != nil {
+		return m, err
+	}
+	if underAny(path, f.rootOwned) {
 		m.UID = 0
 		m.GID = 0
+		return m, nil
 	}
-	return m, err
+	// Files the test process created belong to the test user.
+	if m.UID == int64(os.Getuid()) {
+		m.UID, m.GID = testUID, testGID
+	}
+	return m, nil
 }
 
 type fixture struct {
@@ -137,7 +157,7 @@ func newFixture(t *testing.T) *fixture {
 		SystemRoots: []string{filepath.Join(root, "System")},
 		SystemAppRoots: []string{filepath.Join(root, "System", "Applications"), f.coreServices,
 			filepath.Join(f.coreServices, "Applications")},
-		UID: int64(os.Getuid()), GIDs: []int64{int64(os.Getgid())},
+		UID: testUID, GIDs: []int64{testGID},
 		Runner: f.runner, FS: ownerFS{rootOwned: []string{f.sysLib, filepath.Join(root, "var"), filepath.Join(root, "System")}},
 		Procs:   func(context.Context) []process.Info { return f.procs() },
 		Now:     func() time.Time { return f.now },
