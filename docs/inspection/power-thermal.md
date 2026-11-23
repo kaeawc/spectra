@@ -18,6 +18,7 @@ spectra power --json
 type PowerState struct {
     OnBattery               bool  `json:"on_battery"`
     BatteryPct              int   `json:"battery_pct"`
+    HasBattery              *bool `json:"has_battery,omitempty"`
     ThermalPressure         string `json:"thermal_pressure,omitempty"`
     ThermalThrottled        bool   `json:"thermal_throttled"`
     CPUSpeedLimitPct        int    `json:"cpu_speed_limit_pct,omitempty"`
@@ -35,7 +36,8 @@ The JSON fields are:
 | Field | Meaning |
 |---|---|
 | `on_battery` | Whether macOS reports the current power source as battery |
-| `battery_pct` | Current battery percentage when reported by `pmset` |
+| `battery_pct` | Current battery percentage when reported by `pmset` (macOS) or `/sys/class/power_supply` (Linux) |
+| `has_battery` | `false` on a machine with no battery (desktop Mac, server, cloud VM), so `battery_pct: 0` is not read as an empty battery; absent when the power source could not be read. `spectra power --json` reports it as `battery.present` |
 | `thermal_pressure` | macOS thermal state such as `nominal`, `fair`, `serious`, or `critical` |
 | `thermal_throttled` | Whether any observed CPU speed-limit sample is below 100% |
 | `cpu_speed_limit_pct` | Latest CPU speed-limit percentage reported by macOS |

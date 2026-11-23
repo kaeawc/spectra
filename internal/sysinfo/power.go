@@ -12,8 +12,12 @@ import (
 // PowerState captures battery and thermal facts.
 // See docs/design/system-inventory.md#powerstate.
 type PowerState struct {
-	OnBattery               bool             `json:"on_battery"`
-	BatteryPct              int              `json:"battery_pct"`
+	OnBattery  bool `json:"on_battery"`
+	BatteryPct int  `json:"battery_pct"`
+	// HasBattery says whether the machine has a battery at all, so a
+	// desktop, server or VM is not read as a battery at 0%. nil when the
+	// power source could not be read.
+	HasBattery              *bool            `json:"has_battery,omitempty"`
 	ThermalPressure         string           `json:"thermal_pressure,omitempty"` // "nominal", "fair", "serious", "critical"
 	ThermalThrottled        bool             `json:"thermal_throttled"`
 	CPUSpeedLimitPct        int              `json:"cpu_speed_limit_pct,omitempty"`
@@ -178,6 +182,8 @@ func parseEnergyTop(out string) []EnergyUser {
 // Example line: "Now drawing from 'Battery Power'"
 // Percentage line: " -InternalBattery-0 (id=...)	85%; discharging; ..."
 func parseBatt(out string, ps *PowerState) {
+	hasBattery := strings.Contains(out, "InternalBattery")
+	ps.HasBattery = &hasBattery
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "Battery Power") {
 			ps.OnBattery = true
