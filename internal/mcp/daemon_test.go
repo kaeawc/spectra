@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func mcpTestDaemon(t *testing.T) daemon.Paths {
 	s := daemon.New(daemon.Options{Paths: p})
 	a := hostwatch.Alert{ID: "a1", Title: "High load", State: "firing"}
 	s.Register("watch.current", func(context.Context, *daemon.Request) (any, error) {
-		return map[string]any{"sample": hostwatch.Sample{NCPU: 8, Load1: 4}, "active_alerts": []hostwatch.Alert{a}}, nil
+		return map[string]any{"sample": hostwatch.Sample{At: time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC), NCPU: 8, Load1: 4}, "active_alerts": []hostwatch.Alert{a}}, nil
 	})
 	s.Register("watch.samples", func(context.Context, *daemon.Request) (any, error) { return []hostwatch.Sample{{NCPU: 8}}, nil })
 	s.Register("alerts.list", func(context.Context, *daemon.Request) (any, error) { return []hostwatch.Alert{a}, nil })
@@ -139,7 +140,7 @@ func registerCurrent(d *daemon.Server, load float64, handler func(context.Contex
 		if handler != nil {
 			return handler(ctx, req)
 		}
-		return map[string]any{"sample": hostwatch.Sample{NCPU: 2, Load1: load}, "active_alerts": []hostwatch.Alert{}}, nil
+		return map[string]any{"sample": hostwatch.Sample{At: time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC), NCPU: 2, Load1: load}, "active_alerts": []hostwatch.Alert{}}, nil
 	})
 }
 
@@ -182,7 +183,7 @@ func TestDaemonTimeoutDropsConnectionAndReconnectsNextCall(t *testing.T) {
 			if requests.Add(1) == 1 {
 				<-release
 			}
-			return map[string]any{"sample": hostwatch.Sample{NCPU: 2, Load1: 3}, "active_alerts": []hostwatch.Alert{}}, nil
+			return map[string]any{"sample": hostwatch.Sample{At: time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC), NCPU: 2, Load1: 3}, "active_alerts": []hostwatch.Alert{}}, nil
 		})
 	})
 	defer func() { releaseOnce.Do(func() { close(release) }); stop() }()
@@ -207,4 +208,24 @@ func TestDaemonTimeoutDropsConnectionAndReconnectsNextCall(t *testing.T) {
 	if got := connects.Load(); got != 2 {
 		t.Fatalf("connector calls = %d, want 2", got)
 	}
+}
+
+func TestHostHealthBeforeFirstSample(t *testing.T) {
+	s := NewServer(strings.NewReader(""), io.Discard)
+	s.SetDaemonConnector(func(context.Context) (daemonWatchClient, bool) { return pendingWatch{}, true })
+	res := s.toolHostHealth(context.Background(), json.RawMessage(`{"samples":0}`))
+	if res.IsError {
+		t.Fatalf("errored: %+v", res.Content)
+	}
+	text := res.Content[0].Text
+	if !strings.Contains(text, "has not taken its first host sample yet") || !strings.Contains(text, `"sample": null`) || strings.Contains(text, "0 cores") {
+		t.Errorf("pending health = %s", text)
+	}
+}
+
+// pendingWatch is a daemon that has not finished its first host sample.
+type pendingWatch struct{ fakeWatch }
+
+func (pendingWatch) Current(context.Context) (hostwatch.Sample, []hostwatch.Alert, error) {
+	return hostwatch.Sample{}, nil, nil
 }

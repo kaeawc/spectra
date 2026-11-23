@@ -136,6 +136,14 @@ func (s *Server) toolHostHealth(ctx context.Context, raw json.RawMessage) ToolRe
 	if err != nil {
 		return daemonToolError(err)
 	}
+	if sample.At.IsZero() {
+		return toolText(toolEnvelope{
+			Summary:     fmt.Sprintf("the daemon has not taken its first host sample yet; %d active alerts", len(alerts)),
+			NextActions: []string{"Retry host_health in a few seconds, or use load for a direct reading."},
+			Raw:         map[string]any{"sample": nil, "active_alerts": alerts, "recent_samples": recent},
+			Timestamp:   s.now(),
+		})
+	}
 	return toolText(toolEnvelope{Summary: fmt.Sprintf("host load %.2f across %d cores; memory pressure %s; %d active alerts", sample.Load1, sample.NCPU, sample.MemoryPressure, len(alerts)), Raw: map[string]any{"sample": sample, "active_alerts": alerts, "recent_samples": recent}, Timestamp: s.now()})
 }
 

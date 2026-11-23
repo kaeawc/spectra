@@ -196,11 +196,23 @@ func printAlerts(out io.Writer, alerts []hostwatch.Alert, asJSON bool, now time.
 }
 
 func printHealth(out io.Writer, s hostwatch.Sample, alerts []hostwatch.Alert, asJSON bool) error {
+	// The daemon has no sample until its first tick; a zero Sample would
+	// read as 0 cores and no memory pressure.
+	pending := s.At.IsZero()
 	if asJSON {
+		var sample *hostwatch.Sample
+		if !pending {
+			sample = &s
+		}
 		return json.NewEncoder(out).Encode(struct {
-			Sample       hostwatch.Sample  `json:"sample"`
+			Sample       *hostwatch.Sample `json:"sample"`
 			ActiveAlerts []hostwatch.Alert `json:"active_alerts"`
-		}{s, alerts})
+		}{sample, alerts})
+	}
+	if pending {
+		fmt.Fprintf(out, "No host sample yet: the daemon has not finished its first collection. %d active alerts.\n", len(alerts))
+		fmt.Fprintln(out, "Retry `spectra alerts health` in a few seconds, or run `spectra load` for a direct reading.")
+		return nil
 	}
 	fmt.Fprintf(out, "Load: %.2f / %.2f / %.2f across %d cores\nMemory: %s, swap %.0f MB, free %.1f%%\nDisk free: %.1f GB\n", s.Load1, s.Load5, s.Load15, s.NCPU, s.MemoryPressure, s.SwapUsedMB, s.MemFreePct, s.DataFreeGB)
 	printSpawnHealth(out, s.Spawn, alerts)

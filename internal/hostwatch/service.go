@@ -186,7 +186,9 @@ func (s *Service) Run(ctx context.Context) error {
 		stopJVM()
 	}()
 	var inFlight <-chan error
-	timer := time.NewTimer(s.interval)
+	// Sample at once: until the first tick, Current has only a zero Sample,
+	// which clients would otherwise report as 0 cores and no pressure.
+	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
 		select {

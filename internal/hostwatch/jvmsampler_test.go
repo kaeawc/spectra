@@ -60,7 +60,7 @@ func newJVMFixture(t *testing.T, mutate func(*Config)) *jvmFixture {
 	}
 	f.svc = NewService(ServiceOptions{
 		Store: f.db, Config: cfg, ConfigSet: true, Logger: f.log, Clock: f.clk,
-		Collector:  &sequenceCollector{},
+		Collector:  constCollector{},
 		JVMHistory: persistRecorder{f: f, db: f.db},
 		JVMSource: func(context.Context) (snapshot.Snapshot, error) {
 			f.calls.Add(1)
