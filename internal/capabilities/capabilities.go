@@ -14,6 +14,7 @@ const (
 	SchemaLineage        = "spectra.lineage"
 	SchemaSpawns         = "spectra.spawns"
 	SchemaIdle           = "spectra.idle"
+	SchemaDevices        = "spectra.devices"
 	SchemaStartup        = "spectra.startup"
 	SchemaStartupChange  = "spectra.startup.change"
 	SchemaUninstallPlan  = "spectra.uninstall.plan"
@@ -28,6 +29,7 @@ var localSchemaVersions = map[string]int{
 	SchemaLineage:        1,
 	SchemaSpawns:         1,
 	SchemaIdle:           1,
+	SchemaDevices:        1,
 	SchemaStartup:        1,
 	SchemaStartupChange:  1,
 	SchemaUninstallPlan:  1,
@@ -71,6 +73,7 @@ var commandEntries = []entry{
 	{name: "lineage", schema: SchemaLineage, argv: []string{"lineage", "--json", "<pid>"}},
 	{name: "spawns", schema: SchemaSpawns, argv: []string{"spawns", "--json", "[--interval <duration>]", "[--duration <duration>]", "[--pid <pid>]"}},
 	{name: "idle", schema: SchemaIdle, argv: []string{"idle", "--json", "[--root <dir>]...", "[--pids <pid,...>]", "[--min-age <duration>]", "[--max-cpu <pct>]", "[--window <duration>]", "[--timeout <duration>]"}},
+	{name: "devices", schema: SchemaDevices, argv: []string{"devices", "--json", "[--root <dir>]...", "[--start-adb]"}},
 	{name: "startup", schema: SchemaStartup, darwinOnly: true, argv: []string{"startup", "list", "--json", "[--scope user|system|all]", "[--include-apple]"}},
 	{name: "startup.disable", schema: SchemaStartupChange, darwinOnly: true, argv: []string{"startup", "disable", "<label>", "--json", "[--scope user]"}},
 	{name: "startup.enable", schema: SchemaStartupChange, darwinOnly: true, argv: []string{"startup", "enable", "<label>", "--json", "[--scope user]"}},

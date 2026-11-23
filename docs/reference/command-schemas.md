@@ -29,6 +29,24 @@ marker below) in the same change. Consumers must check the advertised
 `result_schema` name and version before decoding and must ignore unknown
 fields.
 
+## Unsupported on this OS
+
+Subcommands that only exist on macOS (`spectra help` marks them
+`[macOS only]`) exit 1 off macOS. With `--json` they print one object on
+stdout instead of a stderr line, so a script can tell "not on this OS" from
+a failure:
+
+```json
+{"command": "vmmap", "error": "unsupported_platform", "feature": "vmmap memory composition",
+ "os": "linux", "message": "vmmap memory composition: unsupported on host OS (linux)",
+ "hint": "on Linux, read /proc/<pid>/smaps_rollup; `spectra procdiag <pid>` covers cgroup memory limits"}
+```
+
+`hint` is present when there is a Linux alternative. Commands that work on
+both systems but have nothing to report still print valid JSON:
+`spectra jvm --json` prints `[]` with no JVMs, and `spectra rules --json`
+prints `[]` with no findings.
+
 ## spectra.load
 
 `spectra load --json` emits one object: whether this machine can take another
@@ -387,6 +405,80 @@ summary: shortest_lived[].pid number
 summary: skipped_ticks number
 summary: starts number
 summary: type string
+```
+
+## spectra.devices
+
+`spectra devices --json` emits one object listing the mobile devices work on
+this host may be using, from three sources, each with its own `status` (`ok`,
+`not_found`, `server_not_running`, `unsupported` or `error`) and `message`:
+
+- `android`: `adb devices -l` (USB, emulators, and devices reached through
+  `adb connect`, marked `remote`). adb is asked only when an adb server is
+  already running, or `ADB_SERVER_SOCKET`/`ANDROID_ADB_SERVER_ADDRESS` points
+  at one, or `--start-adb` is given; otherwise the status is
+  `server_not_running`, because asking would start a server that keeps
+  running after Spectra exits.
+- `ios_simulators`: booted simulators from `xcrun simctl` (macOS;
+  `unsupported` elsewhere).
+- `processes`: emulator and simulator processes on this host, the same block
+  as `spectra.load`'s `devices`, attributed to each `--root`.
+
+Lists are `[]` when empty. Exit 0.
+
+<!-- fields: spectra.devices v1 -->
+```text
+android object
+android.adb string
+android.devices array
+android.devices[] object
+android.devices[].device string
+android.devices[].emulator bool
+android.devices[].model string
+android.devices[].product string
+android.devices[].remote bool
+android.devices[].serial string
+android.devices[].state string
+android.devices[].transport_id string
+android.message string
+android.status string
+ios_simulators object
+ios_simulators.booted array
+ios_simulators.booted[] object
+ios_simulators.booted[].name string
+ios_simulators.booted[].runtime string
+ios_simulators.booted[].state string
+ios_simulators.booted[].udid string
+ios_simulators.message string
+ios_simulators.status string
+limitations array
+limitations[] string
+os string
+processes object
+processes.boot_window_seconds number
+processes.booted number
+processes.booted_recently number
+processes.by_root array
+processes.by_root[] object
+processes.by_root[].booted number
+processes.by_root[].booted_recently number
+processes.by_root[].root string
+processes.emulators number
+processes.list array
+processes.list[] object
+processes.list[].age_seconds number
+processes.list[].avd string
+processes.list[].booted_recently bool
+processes.list[].cpu_pct number
+processes.list[].id string
+processes.list[].kind string
+processes.list[].members number
+processes.list[].pid number
+processes.list[].root string
+processes.list[].rss_kib number
+processes.list[].started_at string
+processes.list[].udid string
+processes.simulators number
 ```
 
 ## spectra.idle

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/netstate"
 	"github.com/kaeawc/spectra/internal/process"
@@ -121,6 +122,7 @@ func TestToolDefinitionsExposeWorkflowSurface(t *testing.T) {
 }
 
 func TestInspectAppRequiresPaths(t *testing.T) {
+	defer hostos.SetForTest(hostos.Darwin)() // exercises the macOS paths with fakes
 	s := NewServer(strings.NewReader(""), &strings.Builder{})
 	result := s.toolInspectApp(context.Background(), json.RawMessage(`{}`))
 	if !result.IsError {
@@ -190,6 +192,7 @@ func TestJVMFlamegraphRejectsAsprofPath(t *testing.T) {
 }
 
 func TestInspectAppDeepUsesInjectedCollectors(t *testing.T) {
+	defer hostos.SetForTest(hostos.Darwin)() // exercises the macOS paths with fakes
 	appPath := "/Applications/Codex.app"
 	apps := &fakeAppInspector{
 		result: detect.Result{

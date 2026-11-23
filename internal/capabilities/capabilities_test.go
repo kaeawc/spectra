@@ -52,6 +52,7 @@ func TestBuildDeclaresWaaaghCommands(t *testing.T) {
 		"lineage":         {Name: "spectra.lineage", Version: 1},
 		"spawns":          {Name: "spectra.spawns", Version: 1},
 		"idle":            {Name: "spectra.idle", Version: 1},
+		"devices":         {Name: "spectra.devices", Version: 1},
 		"startup":         {Name: "spectra.startup", Version: 1},
 		"startup.disable": {Name: "spectra.startup.change", Version: 1},
 		"startup.enable":  {Name: "spectra.startup.change", Version: 1},
@@ -92,7 +93,7 @@ func TestBuildOmitsMacOSOnlyCommandsOffMacOS(t *testing.T) {
 			t.Errorf("linux manifest advertises %s", name)
 		}
 	}
-	for _, name := range []string{"load", "orphans", "owner", "owner.under", "lineage", "spawns", "idle"} {
+	for _, name := range []string{"load", "orphans", "owner", "owner.under", "lineage", "spawns", "idle", "devices"} {
 		if _, ok := m.Interface(name); !ok {
 			t.Errorf("linux manifest omits %s", name)
 		}

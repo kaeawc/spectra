@@ -156,7 +156,7 @@ func (s *Server) jobTool(ctx context.Context, name string, owner any, raw json.R
 		JobID string `json:"job_id"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.JobID == "" {
 		return toolError("job_id is required")
@@ -169,7 +169,7 @@ func (s *Server) jobTool(ctx context.Context, name string, owner any, raw json.R
 	case "job_result":
 		res, err := s.jobs.result(owner, p.JobID)
 		if err != nil {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return res
 	default:
@@ -179,7 +179,7 @@ func (s *Server) jobTool(ctx context.Context, name string, owner any, raw json.R
 
 func recordResult(r jobRecord, err error) ToolResult {
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	return toolText(r)
 }
@@ -190,7 +190,7 @@ func (s *Server) jobStart(ctx context.Context, owner any, raw json.RawMessage) T
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	spec, ok := jobTools[p.Tool]
 	if !ok {
@@ -201,7 +201,7 @@ func (s *Server) jobStart(ctx context.Context, owner any, raw json.RawMessage) T
 	}
 	op, err := spec.validate(p.Arguments)
 	if err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	handler := s.toolHandlers()[p.Tool]
 	rec, err := s.jobs.startCtx(ctx, owner, p.Tool, op, p.Arguments, handler)

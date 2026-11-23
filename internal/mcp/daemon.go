@@ -116,7 +116,7 @@ func (s *Server) toolHostHealth(ctx context.Context, raw json.RawMessage) ToolRe
 		Samples int `json:"samples"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.Samples < 0 || p.Samples > 240 {
 		return toolError("samples must be 0..240")
@@ -147,7 +147,7 @@ func (s *Server) toolAlerts(ctx context.Context, raw json.RawMessage) ToolResult
 		ID     string `json:"id"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
-		return toolError(err.Error())
+		return toolErrorFrom(err)
 	}
 	if p.Action == "" {
 		p.Action = "list"
@@ -199,7 +199,7 @@ func (s *Server) toolProcessHistory(ctx context.Context, pid, limit int) ToolRes
 			return daemonToolError(err)
 		}
 		if !errors.Is(err, errDaemonUnavailable) {
-			return toolError(err.Error())
+			return toolErrorFrom(err)
 		}
 		return toolError("process history is unavailable in the local-only MCP server; start it with `spectra daemon start` or install it with `spectra daemon install`")
 	}

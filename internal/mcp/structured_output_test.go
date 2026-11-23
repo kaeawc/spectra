@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/kaeawc/spectra/internal/corefile"
 	"github.com/kaeawc/spectra/internal/detect"
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
 	"github.com/kaeawc/spectra/internal/jvm"
 	"github.com/kaeawc/spectra/internal/metrics"
@@ -84,6 +85,7 @@ func structuredTestServer(t *testing.T) *Server {
 	c.Playbooks = fakePlaybookCatalog{list: []playbook.Playbook{{ID: "p1", Title: "P"}}}
 	c.Reports.Orphans = func() orphans.ReportDeps { return fakeOrphansReportDeps(&asked) }
 	c.Reports.Find = func(_ context.Context, tg owner.Target) (owner.Result, error) { return owner.Result{Target: tg}, nil }
+	c.Reports.Devices = fakeDevicesOptions
 	c.Clock = fixedClock{t: reportNow}
 	s.collect = c
 	s.SetDaemonConnector(func(context.Context) (daemonWatchClient, bool) { return fakeWatch{}, true })
@@ -122,6 +124,7 @@ var structuredCalls = map[string]string{
 	"owner":       `{"target":":8080"}`,
 	"spawns":      `{"duration_seconds":3,"interval_millis":1000}`,
 	"idle":        `{"pids":[20],"min_age":"1m","window":"100ms"}`,
+	"devices":     `{"roots":["/work"]}`,
 }
 
 // TestStructuredContentValidatesForEveryTool runs every tool over the wire
@@ -129,6 +132,7 @@ var structuredCalls = map[string]string{
 // outputSchema, carries the same value as the text content, and that the
 // text is exactly what the handler renders.
 func TestStructuredContentValidatesForEveryTool(t *testing.T) {
+	defer hostos.SetForTest(hostos.Darwin)() // exercises the macOS paths with fakes
 	srv := structuredTestServer(t)
 	cs := startServerSession(t, srv, "2025-11-25", nil)
 	ctx := context.Background()
