@@ -147,6 +147,19 @@ What it shows:
   - Pick a row and press Open report: `spectra crash inspect` decodes that one report and the
     page shows, under the row, the exception, the reason it ended and the crashed thread's top
     frames. It runs only on that press.
+  - A frame in an open-source system library (libdispatch, xnu's libsystem_kernel, libpthread,
+    libobjc, CoreFoundation's open part, the Swift runtime and a few more) has View source:
+    it searches that library's public repository for the symbol in your browser. Other frames
+    get no link; reports carry no file or line, so nothing guesses one. An opened crash from
+    the last week also offers See what changed then: the Timeline over the shortest window that
+    holds it, with the rows from just before it marked.
+  - A row whose process is running now says so, from the process list the app already has: pid,
+    how long it has been up, CPU, memory, and whether it started after its last crash. On a
+    picked row, Open process opens its page and Sample now opens it and starts its Sample tool,
+    the flame graph's.
+  - On top, a strip of crashes over the last week (further back if a report is older), one bar
+    per three hours. Hover a bar for its time and count; press one or drag across several to
+    keep the lists to that window, and Clear to see everything again.
   - Read when the page opens with nothing read yet or a reading 10 minutes old, and on Refresh;
     never on a timer, and leaving the page stops a reading on its way. If the recent reports or
     the memory kills can't be read, the rest still shows and that section says why.
@@ -406,6 +419,7 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # toolchains-empty, toolchains-failed, toolchains-reading
                             # timeline, timeline-empty, timeline-failed, timeline-reading
                             # crashes, crashes-empty, crashes-report
+                            # crashes-live, crashes-scrub, crashes-report-links
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
@@ -456,6 +470,9 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/crashes.rs`: the Crashes page's `spectra crash` runs, their JSON, the sort and the plain
   words for exceptions; `src/sample_crashes.rs`: its sample data, from invented fixtures in
   `tests/fixtures/crashes`.
+- `src/crash_source.rs`: which system libraries a frame can link to and the search it opens;
+  `src/crash_live.rs`: matching crashed processes to running ones, Sample now and the way to the
+  Timeline; `src/crash_strip.rs`: the strip's bars and the window it keeps the lists to.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
   flattening it into rows; `src/sample_tree.rs`: its sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.

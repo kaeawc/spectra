@@ -6,6 +6,9 @@
 mod app;
 mod bundle;
 mod compare;
+mod crash_live;
+mod crash_source;
+mod crash_strip;
 mod crashes;
 mod daemon;
 mod data;
@@ -364,6 +367,12 @@ fn main() {
             ("crashes", sample_crashes::crashes_scene),
             ("crashes-empty", sample_crashes::crashes_empty_scene),
             ("crashes-report", sample_crashes::crashes_report_scene),
+            ("crashes-live", sample_crashes::crashes_live_scene),
+            ("crashes-scrub", sample_crashes::crashes_scrub_scene),
+            (
+                "crashes-report-links",
+                sample_crashes::crashes_report_links_scene,
+            ),
             ("tree", sample_tree::tree_scene),
             ("tree-search", sample_tree::tree_search_scene),
             ("right-now", sample_whatswrong::right_now_scene),

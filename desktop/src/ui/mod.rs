@@ -6,6 +6,7 @@ mod app_page;
 mod card;
 mod chart;
 mod compare;
+mod crash_strip;
 mod crashes;
 mod detail;
 mod growth;
@@ -26,6 +27,8 @@ mod tests_activity;
 mod tests_compare;
 #[cfg(test)]
 mod tests_crashes;
+#[cfg(test)]
+mod tests_crashes_plus;
 #[cfg(test)]
 mod tests_growth;
 #[cfg(test)]

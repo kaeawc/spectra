@@ -54,6 +54,15 @@ pub fn page(s: &App, k: &Kit) -> El {
         );
         page = page.child(callout("tl-slow", "Things got slow", &body, k));
     }
+    if let Some(at) = s.timeline.anchor {
+        let body = format!(
+            "Opened from the Crashes page for a crash {} ({}). Rows from the {} minutes before it are marked.",
+            ago(wall - at),
+            clock(at, wall, s.timeline_offset(at)),
+            SLOW_BEFORE / 60
+        );
+        page = page.child(callout("tl-crash", "Around a crash", &body, k));
+    }
     let t = &s.timeline;
     if let Some(w) = t.reading() {
         page = page.child(
@@ -201,8 +210,14 @@ fn rows(s: &App, tl: &Timeline, w: Window, read_at: i64, onset: Option<Slow>, k:
         .fill(c.bg_base)
         .py(4.0);
     for (i, r) in shown.iter().take(SHOWN).enumerate() {
-        let slow = onset.is_some_and(|o| around(r, o.at));
-        list = list.child(line(s, i, r, now, s.timeline_offset(r.at), slow, k));
+        let mark = if s.timeline.anchor.is_some_and(|a| around(r, a)) {
+            Some("Around the crash")
+        } else if onset.is_some_and(|o| around(r, o.at)) {
+            Some("Around when things got slow")
+        } else {
+            None
+        };
+        list = list.child(line(s, i, r, now, s.timeline_offset(r.at), mark, k));
     }
     body = body.child(list);
     if shown.len() > SHOWN {
@@ -220,7 +235,8 @@ fn rows(s: &App, tl: &Timeline, w: Window, read_at: i64, onset: Option<Slow>, k:
     body
 }
 
-fn line(s: &App, i: usize, r: &Row, now: i64, offset: i64, slow: bool, k: &Kit) -> El {
+fn line(s: &App, i: usize, r: &Row, now: i64, offset: i64, mark: Option<&str>, k: &Kit) -> El {
+    let slow = mark.is_some();
     let c = &k.c;
     let id = r.id();
     let (glyph, ink) = match r.kind {
@@ -251,9 +267,9 @@ fn line(s: &App, i: usize, r: &Row, now: i64, offset: i64, slow: bool, k: &Kit) 
             .selection_color(k.selection())
             .wrap_anywhere(),
     );
-    if slow {
+    if let Some(mark) = mark {
         what = what.child(
-            text("Around when things got slow")
+            text(mark.to_owned())
                 .key(format!("tl-mark-{id}"))
                 .font(k.ty.small_medium)
                 .color(c.warning.fg),

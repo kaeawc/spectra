@@ -790,6 +790,11 @@ pub struct TimelinePage {
     pub threaded: bool,
     /// The Mac's offset from UTC at a time; sample scenes fix it so they render the same anywhere.
     pub local: fn(i64) -> Option<i64>,
+    /// A crash the Crashes page opened this page around, in Unix seconds: rows near it are
+    /// marked. Leaving the page forgets it.
+    pub anchor: Option<i64>,
+    /// The window the page was on before an anchor widened it, put back when the anchor goes.
+    pub prior_window: Option<Window>,
     flight: Option<Flight>,
     job: u64,
     tx: Sender<Landed>,
@@ -813,6 +818,8 @@ impl TimelinePage {
             spectra: Arc::new(crate::inspect::System),
             threaded: true,
             local: local_offset,
+            anchor: None,
+            prior_window: None,
             flight: None,
             job: 0,
             tx,
@@ -888,6 +895,8 @@ impl App {
 
     /// A different window reads again at once.
     pub fn set_timeline_window(&mut self, w: Window) {
+        // A window the person picks is theirs to keep.
+        self.timeline.prior_window = None;
         if self.timeline.window != w {
             self.timeline.window = w;
             self.read_timeline();
@@ -925,6 +934,10 @@ impl App {
     pub fn timeline_nav(&mut self, from: Nav, to: Nav) {
         if from == Nav::Timeline && to != Nav::Timeline {
             self.timeline.cancel();
+            self.timeline.anchor = None;
+            if let Some(w) = self.timeline.prior_window.take() {
+                self.timeline.window = w;
+            }
         }
         if to == Nav::Timeline {
             self.read_timeline();
