@@ -442,3 +442,16 @@ func TestPowerCollectorWithFakeSource(t *testing.T) {
 		t.Fatalf("EnergyTopUsers = %+v, want Google Chrome Helper entry", ps.EnergyTopUsers)
 	}
 }
+
+func TestParseBattHasBattery(t *testing.T) {
+	var laptop PowerState
+	parseBatt("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4653155)\t85%; discharging; 4:12 remaining present: true\n", &laptop)
+	if laptop.HasBattery == nil || !*laptop.HasBattery || !laptop.OnBattery || laptop.BatteryPct != 85 {
+		t.Errorf("laptop = %+v", laptop)
+	}
+	var desktop PowerState
+	parseBatt("Now drawing from 'AC Power'\n", &desktop)
+	if desktop.HasBattery == nil || *desktop.HasBattery || desktop.OnBattery {
+		t.Errorf("desktop = %+v, want has_battery false", desktop)
+	}
+}

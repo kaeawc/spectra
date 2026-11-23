@@ -32,8 +32,12 @@ func (s *Server) toolPower(ctx context.Context, raw json.RawMessage) ToolResult 
 	switch p.Operation {
 	case "state", "":
 		state := s.collect.Power.CollectPower(ctx)
+		summary := "collected battery and thermal state"
+		if state.HasBattery != nil && !*state.HasBattery {
+			summary = "collected power state: no battery (AC power)"
+		}
 		return toolText(toolEnvelope{
-			Summary:     "collected battery and thermal state",
+			Summary:     summary,
 			NextActions: []string{"Use power operation=impact to rank processes by energy use."},
 			Raw:         state,
 			Timestamp:   s.now(),
