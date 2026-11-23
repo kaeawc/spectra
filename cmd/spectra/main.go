@@ -49,6 +49,7 @@ func subcommandList() []subcommand {
 		{"power", "Show current battery and thermal state", runPower},
 		{"thermal", "Detect thermal throttling and CPU speed limits (exit 0 nominal, 3 warm, 4 throttled)", runThermal},
 		{"impact", "Compute the documented per-pid energy impact score from delta records", runImpact},
+		{"devices", "List Android devices/emulators (adb), booted iOS simulators, and emulator processes by worktree", runDevices},
 		{"memory", "Show VM compressor, swap, and pressure state", runMemory},
 		{"storage", "Show disk volumes and ~/Library footprint", runStorage},
 		{"du", "Show the largest directories and files under a path by allocated size", runDU},

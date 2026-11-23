@@ -84,6 +84,7 @@ func structuredTestServer(t *testing.T) *Server {
 	c.Playbooks = fakePlaybookCatalog{list: []playbook.Playbook{{ID: "p1", Title: "P"}}}
 	c.Reports.Orphans = func() orphans.ReportDeps { return fakeOrphansReportDeps(&asked) }
 	c.Reports.Find = func(_ context.Context, tg owner.Target) (owner.Result, error) { return owner.Result{Target: tg}, nil }
+	c.Reports.Devices = fakeDevicesOptions
 	c.Clock = fixedClock{t: reportNow}
 	s.collect = c
 	s.SetDaemonConnector(func(context.Context) (daemonWatchClient, bool) { return fakeWatch{}, true })
@@ -122,6 +123,7 @@ var structuredCalls = map[string]string{
 	"owner":       `{"target":":8080"}`,
 	"spawns":      `{"duration_seconds":3,"interval_millis":1000}`,
 	"idle":        `{"pids":[20],"min_age":"1m","window":"100ms"}`,
+	"devices":     `{"roots":["/work"]}`,
 }
 
 // TestStructuredContentValidatesForEveryTool runs every tool over the wire

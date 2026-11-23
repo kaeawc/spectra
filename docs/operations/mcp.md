@@ -290,7 +290,8 @@ prompt or the template.
 These tools answer with exactly the JSON document the matching CLI command
 prints with `--json` (not the `summary`/`raw` envelope other tools use),
 built by the same package function, so a script and an agent parse one
-shape. None of them starts the daemon, and none signals or kills anything.
+shape. None of them starts the daemon, and none signals or kills anything
+(`devices` with `start_adb` starts an adb server, which keeps running).
 Durations are Go duration strings such as `"90s"` or `"10m"`. Paths must be
 absolute because the server's working directory is arbitrary.
 
@@ -301,6 +302,7 @@ absolute because the server's working directory is arbitrary.
 | `lineage` | `pid` (required) | `spectra lineage --json`: ancestors, descendant tree, subtree totals |
 | `owner` | exactly one of `target` (`:PORT`, `tcp:PORT`, `udp:PORT`, an absolute path, or a pid) or `under` (directories) | `spectra owner --json`, or `spectra owner --under --json` |
 | `spawns` | `pid` (0 = all), `duration_seconds` (1–30, default 10), `interval_millis` (50 up to the duration, default 250) | `{events: [...], summary: {...}}` (see below) |
+| `devices` | `roots` (optional), `start_adb` | `spectra devices --json`: adb devices (USB, emulator, remote), booted iOS simulators (macOS), emulator/simulator processes by root; adb is asked only when its server already runs unless `start_adb` |
 | `idle` | `roots` and/or `pids` (one is required), `min_age` (default `"10m"`), `max_cpu` (default 1), `window` (100ms–30s, default `"5s"`) | `spectra idle --json`: holders with parent chain, descendants, waits |
 
 Verdicts and findings that the CLI reports through a non-zero exit code
