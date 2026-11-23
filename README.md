@@ -66,6 +66,38 @@ directory is added to `PATH` automatically. Homebrew:
 `brew install kaeawc/tap/spectra`. See [docs/install.md](docs/install.md) and
 [Install release binaries](docs/operations/install-binaries.md).
 
+## Linux and cloud agent VMs
+
+The Linux builds are static (no cgo, no macOS frameworks), so they run on a
+bare amd64 or arm64 VM with no GUI. A setup script or VM snapshot can install
+them without prompts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/install.sh \
+  | sh -s -- --version v0.1.1 --prefix /usr/local   # or the default ~/.local, then add ~/.local/bin to PATH
+spectra version && spectra-mcp --version
+```
+
+Register the MCP server over stdio, for example in a repository's `.mcp.json`:
+
+```json
+{"mcpServers": {"spectra": {"command": "spectra-mcp", "args": []}}}
+```
+
+`spectra-mcp` writes only JSON-RPC to stdout (logs go to stderr) and exits
+when stdin closes. Everything an agent asks about the host works on Linux
+from `/proc`, `/sys`, cgroups, `ip`/`ss` and `df`: load and its cause
+(`spectra load --json --root <worktrees>`), processes and their trees
+(`process`, `lineage`), leftover processes (`orphans`, `idle`), who holds a
+port or directory (`owner`), short-lived spawns (`spawns`), JVMs and Gradle
+daemons (`jvm`, needs a JDK's `jcmd`/`jps` on PATH), PSI and cgroup limits
+(`pressure`), network, storage and kernel limits. `spectra capabilities
+--json` lists the machine-readable commands this build supports.
+`.app` inspection, the TCC database, launchd, unified logs and Time Machine
+are macOS-only and report that they are unsupported on Linux. `alerts` and
+`host_health` read the optional per-user daemon: `spectra daemon start` runs
+it without systemd; otherwise those tools return `daemon_unavailable`.
+
 ## Documentation
 
 Full living docs at [`docs/`](docs/index.md):

@@ -118,15 +118,17 @@ sha256_of() {
 }
 
 # ed25519_ok: succeeds when openssl can verify a raw Ed25519 signature. Checked
-# against RFC 8032 test vector 1 (empty message) so LibreSSL, which lacks
-# pkeyutl -rawin Ed25519, is detected instead of failing mid-install.
+# against RFC 8032 test vector 2 (the one-byte message 0x72) so LibreSSL, which
+# lacks pkeyutl -rawin Ed25519, is detected instead of failing mid-install.
+# Not vector 1: OpenSSL 3.0.x (Ubuntu 22.04) cannot -rawin an empty message
+# ("Could not allocate 0 bytes"), which would skip verification there.
 ed25519_ok() {
     command -v openssl >/dev/null 2>&1 || return 1
-    printf '%s' 302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a |
+    printf '%s' 302a300506032b65700321003d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c |
         xxd_r > "$TMP/selftest.pub.der" || return 1
-    printf '%s' e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b |
+    printf '%s' 92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00 |
         xxd_r > "$TMP/selftest.sig" || return 1
-    : > "$TMP/selftest.msg"
+    printf 'r' > "$TMP/selftest.msg"
     openssl pkeyutl -verify -rawin -pubin -inkey "$TMP/selftest.pub.der" -keyform DER \
         -sigfile "$TMP/selftest.sig" -in "$TMP/selftest.msg" >/dev/null 2>&1
 }
