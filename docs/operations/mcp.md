@@ -149,6 +149,23 @@ retains its unavailable error with the same hint. Daemon calls have a two-second
 timeout and reconnect once after a broken connection. The existing MCP tools
 using in-process collectors remain available without the daemon.
 
+## Tools that are macOS-only
+
+`inspect_app`, `services`, `logs`, `updates` and `timemachine`, and the
+`process` operations `by_app` and `sample`, read macOS-only sources (`.app`
+bundles, launchd, the unified log, Time Machine, `sample(1)`). Their
+descriptions say so. Off macOS they return a structured tool error rather
+than empty data or a failed exec:
+
+```json
+{"error": "unsupported_platform", "feature": "launchd services", "os": "linux",
+ "message": "launchd services: unsupported on host OS (linux)",
+ "hint": "on Linux, use systemctl list-units"}
+```
+
+`feature` and `hint` may be absent. Any other tool error caused by a feature
+missing on the host OS uses the same shape.
+
 ## Live resources
 
 Two resources describe this host and change while the server runs. A client

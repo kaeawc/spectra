@@ -786,7 +786,7 @@
       }
     },
     {
-      "description": "Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
+      "description": "macOS only. Inspect .app bundles: runtime, security, helpers, deps, storage, processes. Ask: \"What is this app built with?\"",
       "inputSchema": {
         "properties": {
           "assess_gatekeeper": {
@@ -2254,7 +2254,7 @@
       }
     },
     {
-      "description": "Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
+      "description": "macOS only. Bounded unified-log queries. Ask: \"Show recent errors from backupd.\"",
       "inputSchema": {
         "properties": {
           "allow_long_window": {
@@ -3114,7 +3114,7 @@
       }
     },
     {
-      "description": "Live processes. Ops: list, tree, by_app, sample. Ask: \"What is using memory?\" \"Sample PID 123.\"",
+      "description": "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"",
       "inputSchema": {
         "properties": {
           "agent": {
@@ -3314,7 +3314,7 @@
       }
     },
     {
-      "description": "launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
+      "description": "macOS only. launchd jobs and plist schedules. Ask: \"What launch agents are installed?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -3635,7 +3635,7 @@
       }
     },
     {
-      "description": "Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
+      "description": "macOS only. Time Machine status, destinations, and local snapshots. Ask: \"When did Time Machine last back up?\"",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -3955,7 +3955,7 @@
       }
     },
     {
-      "description": "macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+      "description": "macOS only. macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
       "inputSchema": {
         "properties": {
           "grep": {
