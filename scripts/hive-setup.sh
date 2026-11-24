@@ -1,13 +1,16 @@
 #!/bin/sh
 # Install Spectra into a Hive VM's persistent /workspaces and start the daemon.
 #
-#   curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/hive-setup.sh \
-#     | sh -s -- --version v0.1.3
+#   curl -fsSL -o /tmp/hive-setup.sh \
+#     https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/hive-setup.sh &&
+#     sh /tmp/hive-setup.sh --version v0.1.3
 #
 # Safe to run on every boot. Only /workspaces survives when a sleeping VM is
 # replaced, so the binaries go there; running processes do not survive, so the
 # daemon is started each time (a no-op when it is already up). The download is
-# skipped when the installed spectra already reports the requested version.
+# skipped when the installed spectra and spectra-mcp both report the requested
+# version. The installer itself is always fetched at that tag, so the tag pins
+# both the binaries and the install.sh that verifies them.
 #
 # Register the MCP server once, as a stdio server with the command
 # <home>/bin/spectra-mcp and no arguments.
@@ -47,9 +50,14 @@ done
 
 BIN="$SPECTRA_HOME/bin"
 
+# installed_version prints the tag only when both binaries report it, so a
+# half-finished install is redone.
 installed_version() {
-    [ -x "$BIN/spectra" ] || return 0
-    "$BIN/spectra" version 2>/dev/null || true
+    [ -x "$BIN/spectra" ] && [ -x "$BIN/spectra-mcp" ] || return 0
+    cli="$("$BIN/spectra" version 2>/dev/null)" || return 0
+    mcp="$("$BIN/spectra-mcp" --version 2>/dev/null)" || return 0
+    [ "$mcp" = "spectra-mcp $cli" ] && echo "$cli"
+    return 0
 }
 
 resolve_latest() {
@@ -71,25 +79,23 @@ if [ "$want" = latest ]; then
         want="$have"
     fi
 fi
+case "$want" in
+    v[0-9]*) ;;
+    *) die "version must be a tag like v0.1.3, got '$want'" ;;
+esac
+case "${want#v}" in
+    *[!0-9A-Za-z.+-]*) die "version contains characters outside [0-9A-Za-z.+-]: '$want'" ;;
+esac
 
 if [ "$have" = "$want" ]; then
     echo "spectra $have already installed in $BIN"
 else
-    # Run from a checkout, use its install.sh. Piped into sh, $0 is the shell,
-    # so fetch the installer at the tag rather than trusting the current dir.
-    installer=""
-    case "$0" in
-        */hive-setup.sh) installer="$(dirname "$0")/install.sh" ;;
-    esac
-    if [ -z "$installer" ] || [ ! -f "$installer" ]; then
-        TMP="$(mktemp -d)"
-        trap 'rm -rf "$TMP"' EXIT
-        installer="$TMP/install.sh"
-        curl -fsSL --proto '=https' --retry 3 -o "$installer" \
-            "https://raw.githubusercontent.com/${REPO}/${want}/scripts/install.sh" ||
-            die "could not download install.sh for $want"
-    fi
-    sh "$installer" --version "$want" --prefix "$SPECTRA_HOME"
+    TMP="$(mktemp -d)"
+    trap 'rm -rf "$TMP"' EXIT
+    curl -fsSL --proto '=https' --retry 3 -o "$TMP/install.sh" \
+        "https://raw.githubusercontent.com/${REPO}/${want}/scripts/install.sh" ||
+        die "could not download install.sh for $want"
+    sh "$TMP/install.sh" --version "$want" --prefix "$SPECTRA_HOME"
 fi
 
 if [ "$START_DAEMON" = 1 ]; then

@@ -11,16 +11,26 @@ every run.
 Run it at the start of every session, or from whatever runs at boot:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/hive-setup.sh \
-  | sh -s -- --version v0.1.3
+curl -fsSL -o /tmp/hive-setup.sh \
+  https://raw.githubusercontent.com/kaeawc/spectra/main/scripts/hive-setup.sh &&
+  sh /tmp/hive-setup.sh --version v0.1.3
 ```
+
+Downloading to a file first means a failed download stops the command. Piped
+into `sh`, a failed `curl` would leave `sh` with empty input, and the pipeline
+would still succeed.
 
 The script:
 
-1. Skips the download when `/workspaces/.spectra/bin/spectra version` already
-   prints the requested tag. Otherwise it runs that tag's
-   [`install.sh`](install-binaries.md), which checks the archive's SHA-256 and
-   the release signature.
+1. Skips the download when the installed `spectra` and `spectra-mcp` both
+   report the requested tag, so a half-finished install is redone. Otherwise
+   it downloads [`install.sh`](install-binaries.md) from that tag, wherever the
+   setup script itself came from, and runs it. The installer always checks the
+   archive's SHA-256 against the release's `checksums.txt`. It also checks the
+   Ed25519 signature when the release has `spectra-release.json` and its
+   `.sig`, the public key can be fetched, and `openssl` supports Ed25519. If
+   any of those is missing, it prints a warning and installs after only the
+   SHA-256 check.
 2. Runs `spectra daemon start`. It needs no systemd and does nothing when the
    daemon is already running.
 3. Prints the `spectra-mcp` path to register.
@@ -42,9 +52,11 @@ MCP, as a stdio server with the command `/workspaces/.spectra/bin/spectra-mcp`
 and no arguments. The absolute path means it does not depend on `PATH`. A
 repository's `.mcp.json` works too, but only for that repository.
 
-`spectra-mcp` does not start the daemon. Without it, `alerts`, `host_health`
-and `process` history return `daemon_unavailable`, and `load` and `idle` take a fresh
-sample on every call instead of answering from the daemon's CPU tracker.
+`spectra-mcp` does not start the daemon. Without it, `alerts` and
+`host_health` return `daemon_unavailable`, and `process` with
+`operation: "history"` returns an error that says to start the daemon. `load`
+and `idle` still work, but only from `spectra-mcp`'s own CPU readings, so the
+first call takes a full sample.
 
 The daemon's socket and history live outside `/workspaces`, so a replaced VM
 starts with an empty history.
