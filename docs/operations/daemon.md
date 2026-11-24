@@ -320,8 +320,10 @@ command prints for one JVM. The CLI and the daemon build it with the same
 function, so a client can switch from spawning `spectra` to calling the daemon
 without changing its parser. Every method takes `pid` (required, positive
 integer). Absent or `null` params, a missing pid, a pid of zero or less, or a
-field of the wrong type is an invalid-params error (`-32602`). Nothing is
-cached: each call runs `jcmd` or `jstat` against the target again.
+field of the wrong type is an invalid-params error (`-32602`). Each call runs
+`jcmd` or `jstat` against the target again, except that `jvm.explain` reuses
+`VM.system_properties` and `VM.command_line` already read for the same pid and
+process start time, since they cannot change for the life of a JVM.
 
 | Method | CLI command | Extra params |
 | --- | --- | --- |
