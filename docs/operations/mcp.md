@@ -129,8 +129,17 @@ text only. The report tools' schemas are inferred from the Go result types
 the CLI's `--json` output uses; a field whose type marshals itself (a
 custom JSON or text marshaler) is left unconstrained, and `lineage` (a
 recursive tree) and `owner` (two result shapes) get a plain object schema.
+To keep `tools/list` small, inferred schemas spell out two levels of nested
+properties (array rows do not count as a level) and leave `required` and
+closed objects to the top level; deeper values are typed but not detailed.
+`job_status` carries the job record schema; `job_start` and `job_cancel`
+return the same record under a plain object schema.
+
 Every other tool returns the `summary`/`evidence`/`next_actions`/`raw`/
-`timestamp` envelope, whose `raw` is free-form.
+`timestamp` envelope and lists a plain object schema rather than repeating
+the envelope in each entry: `summary` and `timestamp` are always present,
+`evidence` and `next_actions` are string arrays, and `raw` is free-form.
+A `toolsListBudget` test caps the encoded `tools/list` size.
 
 ## Daemon-backed tools
 

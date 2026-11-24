@@ -167,6 +167,11 @@ func TestStructuredContentValidatesForEveryTool(t *testing.T) {
 			if err := resolved.Validate(res.StructuredContent); err != nil {
 				t.Fatalf("structuredContent does not validate: %v\n%s", err, text)
 			}
+			if _, isReport := reportOutputTypes[tool.Name]; !isReport {
+				if err := resolveOutputSchema(t, envelopeSchema()).Validate(res.StructuredContent); err != nil {
+					t.Fatalf("structuredContent is not the envelope: %v\n%s", err, text)
+				}
+			}
 			var fromText any
 			if err := json.Unmarshal([]byte(text), &fromText); err != nil {
 				t.Fatal(err)
@@ -214,7 +219,7 @@ func TestErrorResultsCarryNoStructuredContent(t *testing.T) {
 }
 
 func TestEnvelopeSchemaRejectsWrongShape(t *testing.T) {
-	resolved := resolveOutputSchema(t, outputSchema("memory"))
+	resolved := resolveOutputSchema(t, envelopeSchema())
 	if err := resolved.Validate(map[string]any{"summary": 1, "timestamp": "x"}); err == nil {
 		t.Fatal("a numeric summary validated against the envelope schema")
 	}

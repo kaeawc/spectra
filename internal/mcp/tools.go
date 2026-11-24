@@ -46,17 +46,17 @@ func toolDefinitions() []ToolDefinition {
 		inspectAppToolDef(),
 		snapshotToolDef(),
 		diagnoseToolDef(),
-		operationToolDef("process", "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"},
+		operationToolDef("process", "Live processes; by_app and sample are macOS only. Ask: \"What is using memory?\" \"Sample PID 123.\"", []string{"list", "tree", "history", "sample", "by_app"},
 			"pid", "paths", "bundles", "deep", "limit", "duration_seconds", "interval_millis", "include_raw"),
-		operationToolDef("jvm", "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"},
+		operationToolDef("jvm", "JVM debug. heap_leak_suspects analyzes the .hprof at dest (leak suspects by retained size, accumulation points, GC-root paths; needs confirm_sensitive). mbeans, mbean_read, mbean_invoke and probe need the spectra agent, auto-attached unless auto_attach=false. Ask: \"Why is PID 123 using heap?\"", []string{"list", "inspect", "explain", "thread_dump", "gc_stats", "vm_memory", "heap_histogram", "heap_dump", "heap_leak_suspects", "flamegraph", "attach", "mbeans", "mbean_read", "mbean_invoke", "probe"},
 			"pid", "samples", "interval_millis", "dest", "event", "duration_seconds", "confirm_sensitive", "agent", "mbean_name", "attribute", "mbean_operation", "include_raw", "auto_attach", "limit"),
-		operationToolDef("network", "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "diagnose"},
+		operationToolDef("network", "Network state and sockets. Ask: \"What is this app connected to?\"", []string{"state", "connections", "by_app", "diagnose"},
 			"paths", "bundles", "host", "port", "include_raw"),
-		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"},
+		operationToolDef("db", "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ask: \"What database does this app use?\" \"Show its schema.\"", []string{"discover", "overview", "schema", "relations", "stats", "sample"},
 			"dsn", "schema", "table", "limit", "confirm_sensitive"),
-		operationToolDef("toolchain", "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"},
+		operationToolDef("toolchain", "Dev tools (JDKs, runtimes, build tools, brew) and drift. Ask: \"Which JDKs are installed?\"", []string{"scan", "jdk", "runtimes", "build_tools", "brew", "drift"},
 			"include_raw"),
-		operationToolDef("issues", "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"},
+		operationToolDef("issues", "Persisted findings and fix history. Ask: \"What issues are open?\"", []string{"check", "list", "acknowledge", "dismiss", "record_fix", "fix_history"},
 			"snapshot_id", "machine_uuid", "status", "id", "issue_id", "applied_by", "command", "output", "exit_code"),
 		powerToolDef(),
 		memoryToolDef(),
@@ -79,7 +79,7 @@ func toolDefinitions() []ToolDefinition {
 func powerToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "power",
-		Description: "Battery, thermal, and energy impact. Ops: state, impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
+		Description: "Battery, thermal, and energy impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation":        enumProp([]string{"state", "impact"}, "state"),
 			"pids":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "integer"}, "description": "PIDs to score (impact). Defaults to all processes."},
@@ -111,7 +111,7 @@ func storageToolDef() ToolDefinition {
 func systemToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "system",
-		Description: "Kernel resource limits and saturation. Ops: limits, top. Ask: \"Are we running out of file descriptors or PTYs?\"",
+		Description: "Kernel resource limits and saturation; top lists the holders. Ask: \"Are we running out of file descriptors or PTYs?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"limits", "top"}, "limits"),
 			"limit":     integerProp("Top-holder rows per saturated resource (default 10)."),
@@ -147,7 +147,7 @@ func logsToolDef() ToolDefinition {
 func updatesToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "updates",
-		Description: "macOS only. macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+		Description: "macOS only. Install/update history and install.log. Ask: \"When was the last OS update?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"history", "log"}, "history"),
 			"process":   stringProp("Process filter (log)."),
@@ -168,7 +168,7 @@ func timeMachineToolDef() ToolDefinition {
 func playbookToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "playbook",
-		Description: "Built-in diagnostic playbooks and command plans. Ops: list, get. Ask: \"How do I triage an fseventsd leak?\"",
+		Description: "Built-in diagnostic playbooks and command plans. Ask: \"How do I triage an fseventsd leak?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"list", "get"}, "list"),
 			"id":        stringProp("Playbook id (get)."),
@@ -179,7 +179,7 @@ func playbookToolDef() ToolDefinition {
 func cacheToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "cache",
-		Description: "Local blob cache. Ops: stats, clear. Ask: \"How big is the cache?\"",
+		Description: "Local blob cache: stats or clear. Ask: \"How big is the cache?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"stats", "clear"}, "stats"),
 			"kind":      stringProp("Cache kind to clear; empty clears all."),
@@ -201,7 +201,7 @@ func coreToolDef() ToolDefinition {
 func metricsToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "metrics",
-		Description: "Locally stored process metrics and app churn. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
+		Description: "Locally stored process metrics and app churn. Ask: \"How has PID 123's memory trended?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation": enumProp([]string{"process", "churn"}, "process"),
 			"pid":       integerProp("PID filter (process)."),
@@ -236,7 +236,7 @@ func inspectAppToolDef() ToolDefinition {
 			"scan_all":          boolProp("Inspect every .app under /Applications instead of listing paths."),
 			"network":           boolProp("Scan app URLs."),
 			"deep":              boolProp("Join live process, open-FD/listening-port, and connection state for each app."),
-			"assess_gatekeeper": boolProp("Run the real spctl Gatekeeper assessment (slow, 15s cap per app). Default infers it from the signature."),
+			"assess_gatekeeper": boolProp("Run spctl's Gatekeeper assessment (slow, 15s cap per app) instead of inferring it from the signature."),
 			"include_raw":       boolProp("Return raw data."),
 		}, nil),
 	}
@@ -245,7 +245,7 @@ func inspectAppToolDef() ToolDefinition {
 func snapshotToolDef() ToolDefinition {
 	return ToolDefinition{
 		Name:        "snapshot",
-		Description: "Capture or compare host state. Ops: create, list, get, diff, baseline. Ask: \"What changed since baseline?\"",
+		Description: "Capture, list or diff host state snapshots and baselines. Ask: \"What changed since baseline?\"",
 		InputSchema: objectSchema(map[string]interface{}{
 			"operation":     enumProp([]string{"create", "list", "get", "diff", "baseline"}, "create"),
 			"id":            stringProp("Snapshot ID."),
@@ -309,7 +309,7 @@ var operationProps = map[string]map[string]interface{}{
 	"host":              stringProp("Host filter."),
 	"port":              integerProp("Port filter."),
 	"limit":             integerProp("Limit."),
-	"auto_attach":       boolProp("Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out."),
+	"auto_attach":       boolProp("Auto-attach the spectra agent for agent-only ops (default true)."),
 	"mbean_name":        stringProp("MBean ObjectName (e.g. java.lang:type=Memory). Required for mbean_read and mbean_invoke."),
 	"attribute":         stringProp("MBean attribute name (e.g. HeapMemoryUsage). Required for mbean_read."),
 	"mbean_operation":   stringProp("MBean operation name. Required for mbean_invoke."),

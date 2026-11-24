@@ -34,22 +34,25 @@ var (
 	outputSchemas     map[string]*jsonschema.Schema
 )
 
-// outputSchema is the tool's outputSchema: inferred from its Go result type,
-// or a permissive object schema where inference would not match the JSON the
-// type produces.
+// outputSchema is the tool's outputSchema: inferred from its Go result type
+// for the report tools, and a plain object schema otherwise. The envelope
+// tools all share one shape (envelopeSchema), documented once in
+// docs/operations/mcp.md rather than repeated in every tools/list entry.
 func outputSchema(tool string) *jsonschema.Schema {
 	outputSchemasOnce.Do(func() {
 		outputSchemas = map[string]*jsonschema.Schema{}
 		for name, t := range reportOutputTypes {
 			outputSchemas[name] = schemaForType(t)
 		}
-		outputSchemas[""] = schemaForType(reflect.TypeFor[toolEnvelope]())
 	})
 	if s, ok := outputSchemas[tool]; ok {
 		return s.CloneSchemas()
 	}
-	return outputSchemas[""].CloneSchemas()
+	return permissiveObjectSchema()
 }
+
+// envelopeSchema is the shape of every non-report tool's structuredContent.
+func envelopeSchema() *jsonschema.Schema { return schemaForType(reflect.TypeFor[toolEnvelope]()) }
 
 func permissiveObjectSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "object"} }
 
@@ -81,7 +84,42 @@ func schemaForType(t reflect.Type) *jsonschema.Schema {
 		return permissiveObjectSchema()
 	}
 	allowNullMaps(s)
+	trimOutputSchema(s, 0)
 	return s
+}
+
+// outputSchemaDepth is how many levels of nested properties an outputSchema
+// spells out. Every client loads every tool's schema on each session, and
+// the deep report shapes (load, orphans, idle, devices) cost more tokens
+// than they help: the result itself shows the nested fields. Below the
+// root, required and additionalProperties are dropped too; arrays do not
+// count as a level, so a table's row fields stay listed.
+const outputSchemaDepth = 2
+
+// trimOutputSchema loosens s below the root so it still validates every
+// result: nested objects keep their type (and enum), lose required and the
+// closed-struct additionalProperties, and past outputSchemaDepth lose their
+// properties. Map value schemas are kept.
+func trimOutputSchema(s *jsonschema.Schema, depth int) {
+	if s == nil {
+		return
+	}
+	if depth > 0 {
+		s.Required = nil
+		if s.AdditionalProperties != nil && s.AdditionalProperties.Not != nil {
+			s.AdditionalProperties = nil
+		}
+	}
+	if depth >= outputSchemaDepth {
+		s.Properties, s.PropertyOrder = nil, nil
+	}
+	for _, p := range s.Properties {
+		trimOutputSchema(p, depth+1)
+	}
+	trimOutputSchema(s.Items, depth)
+	if s.AdditionalProperties != nil {
+		trimOutputSchema(s.AdditionalProperties, depth+1)
+	}
 }
 
 func implementsMarshaler(t reflect.Type) bool {

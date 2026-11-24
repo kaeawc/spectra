@@ -85,6 +85,11 @@ func validateAgainst(t *testing.T, tool *sdk.Tool, res *sdk.CallToolResult) {
 	if err := resolveOutputSchema(t, tool.OutputSchema).Validate(res.StructuredContent); err != nil {
 		t.Fatalf("%s: structuredContent does not validate: %v", tool.Name, err)
 	}
+	if tool.Name == "job_start" || tool.Name == "job_cancel" {
+		if err := resolveOutputSchema(t, jobRecordSchema()).Validate(res.StructuredContent); err != nil {
+			t.Fatalf("%s: structuredContent is not a job record: %v", tool.Name, err)
+		}
+	}
 }
 
 func TestJobStartStatusResult(t *testing.T) {
