@@ -31,6 +31,9 @@ type Handler func(context.Context, *Request) (any, error)
 
 type invalidParamsError struct{ error }
 
+// Unwrap exposes the cause, such as a %w-wrapped JSON decode error.
+func (e invalidParamsError) Unwrap() error { return e.error }
+
 func InvalidParams(format string, args ...any) error {
 	return invalidParamsError{fmt.Errorf(format, args...)}
 }

@@ -54,6 +54,7 @@ func TestServerProtocolLifecycle(t *testing.T) {
 	s.Register("test.data", func(context.Context, *Request) (any, error) {
 		return nil, fmt.Errorf("wrapped: %w", testDataError{})
 	})
+	s.Register("test.baddata", func(context.Context, *Request) (any, error) { return nil, badDataError{} })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -72,6 +73,8 @@ func TestServerProtocolLifecycle(t *testing.T) {
 	r := bufio.NewReader(c)
 	request := func(payload string) map[string]json.RawMessage {
 		t.Helper()
+		// A request the server never answers fails instead of hanging.
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 		if _, err := c.Write([]byte(payload + "\n")); err != nil {
 			t.Fatal(err)
 		}
@@ -114,6 +117,10 @@ func TestServerProtocolLifecycle(t *testing.T) {
 	dataResp := request(`{"jsonrpc":"2.0","id":6,"method":"test.data"}`)
 	if got := string(dataResp["error"]); got != `{"code":-32603,"message":"wrapped: unsupported here","data":{"error":"unsupported_platform"}}` {
 		t.Fatalf("data error = %s", got)
+	}
+	badData := request(`{"jsonrpc":"2.0","id":7,"method":"test.baddata"}`)
+	if got := string(badData["error"]); got != `{"code":-32603,"message":"unencodable detail"}` {
+		t.Fatalf("unencodable data error = %s", got)
 	}
 	_ = request(`{"jsonrpc":"2.0","id":5,"method":"daemon.status"}`)
 	_ = request(`{"jsonrpc":"2.0","id":6,"method":"daemon.shutdown"}`)
@@ -262,3 +269,58 @@ type testDataError struct{}
 
 func (testDataError) Error() string  { return "unsupported here" }
 func (testDataError) ErrorData() any { return map[string]string{"error": "unsupported_platform"} }
+
+type badDataError struct{}
+
+func (badDataError) Error() string  { return "unencodable detail" }
+func (badDataError) ErrorData() any { return make(chan int) }
+
+// Shutdown hooks run when shutdown starts, before the drain: a handler that
+// only returns once the hook has run must not hold Run for the drain timeout.
+func TestOnShutdownRunsBeforeDrain(t *testing.T) {
+	p := testPaths(t)
+	s := New(Options{Paths: p, Version: "v1", SocketCheckInterval: 20 * time.Millisecond})
+	hookRan := make(chan struct{})
+	s.OnShutdown(func() { close(hookRan) })
+	entered := make(chan struct{})
+	s.Register("test.block", func(context.Context, *Request) (any, error) {
+		close(entered)
+		<-hookRan // ignores its own ctx, like a job waiting on its service
+		return nil, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	var c net.Conn
+	for i := 0; i < 100; i++ {
+		var err error
+		if c, err = net.Dial("unix", p.Socket); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c == nil {
+		t.Fatal("server did not start")
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test.block"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return")
+	}
+	if waited := time.Since(start); waited > 3*time.Second {
+		t.Fatalf("Run took %s: the hook ran only after the drain timed out", waited)
+	}
+	select {
+	case <-hookRan:
+	default:
+		t.Fatal("shutdown hook never ran")
+	}
+}
