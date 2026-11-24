@@ -104,7 +104,10 @@ are macOS-only too. On Linux every macOS-only command and tool answers with
 `{"error": "unsupported_platform", ...}` (CLI with `--json`; see
 [command schemas](docs/reference/command-schemas.md#unsupported-on-this-os)). `alerts` and
 `host_health` read the optional per-user daemon: `spectra daemon start` runs
-it without systemd; otherwise those tools return `daemon_unavailable`.
+it without systemd; otherwise those tools return `daemon_unavailable`. Start
+it in an agent VM's setup too: `spectra load` and `spectra idle` then answer
+from its running CPU readings in tens of milliseconds instead of sampling for
+0.5 s and 5 s on every call.
 
 ## Documentation
 

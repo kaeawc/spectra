@@ -449,3 +449,30 @@ same probes as the CLI (memory pressure, `pmset` and `top`, the process list,
 and XPC attribution of a busy service) and is capped at 15 seconds. The
 process list leaves out the daemon's own probe subprocesses, such as the `top`
 that runs alongside it.
+
+## Load and idle reports
+
+`load.report` and `idle.report` return exactly what `spectra load --json` and
+`spectra idle --json` print, for the flags in the params. The CLI commands
+call them when a daemon is running (unless `--no-daemon` or
+`SPECTRA_NO_DAEMON=1`), and fall back to measuring locally when no daemon
+answers or it predates these methods.
+
+They are not cached. On Linux both share one CPU tracker: from the first call
+it reads every process's `/proc/<pid>/stat` once a second, keeps 12 seconds of
+readings, and stops after 10 minutes without a call. A call whose window has a
+reading at least that old (and not much older) diffs against it instead of
+sleeping; otherwise it samples as the CLI does. macOS samples as the CLI does.
+
+Durations are milliseconds and roots must be absolute (the daemon's working
+directory is not the caller's).
+
+- `load.report` params: `top`, `roots`, `max_load_per_cpu`, `min_free_gb`,
+  `backoff_free_gb`, `sample_ms`, `boot_window_ms`, as the CLI flags. Capped
+  at 30 seconds.
+- `idle.report` params: `roots` and/or `pids` (one is required), `min_age_ms`,
+  `max_cpu`, `window_ms`, `timeout_ms` (at most 5 minutes; the call's cap) and
+  `exclude_pid`: the caller, whose ancestors and descendants are left out as a
+  local run leaves out its own.
+
+Both stop when the client disconnects. Invalid params return `-32602`.
