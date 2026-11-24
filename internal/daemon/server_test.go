@@ -55,6 +55,7 @@ func TestServerProtocolLifecycle(t *testing.T) {
 		return nil, fmt.Errorf("wrapped: %w", testDataError{})
 	})
 	s.Register("test.baddata", func(context.Context, *Request) (any, error) { return nil, badDataError{} })
+	s.Register("test.oncedata", func(context.Context, *Request) (any, error) { return nil, onceDataError{calls: new(int)} })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -121,6 +122,10 @@ func TestServerProtocolLifecycle(t *testing.T) {
 	badData := request(`{"jsonrpc":"2.0","id":7,"method":"test.baddata"}`)
 	if got := string(badData["error"]); got != `{"code":-32603,"message":"unencodable detail"}` {
 		t.Fatalf("unencodable data error = %s", got)
+	}
+	onceData := request(`{"jsonrpc":"2.0","id":8,"method":"test.oncedata"}`)
+	if got := string(onceData["error"]); got != `{"code":-32603,"message":"once detail","data":{"n":1}}` {
+		t.Fatalf("once-encodable data error = %s", got)
 	}
 	_ = request(`{"jsonrpc":"2.0","id":5,"method":"daemon.status"}`)
 	_ = request(`{"jsonrpc":"2.0","id":6,"method":"daemon.shutdown"}`)
@@ -275,6 +280,22 @@ type badDataError struct{}
 func (badDataError) Error() string  { return "unencodable detail" }
 func (badDataError) ErrorData() any { return make(chan int) }
 
+// onceMarshaler encodes once, then fails, as a stateful MarshalJSON might.
+type onceMarshaler struct{ calls *int }
+
+func (m onceMarshaler) MarshalJSON() ([]byte, error) {
+	*m.calls++
+	if *m.calls > 1 {
+		return nil, errors.New("second encode")
+	}
+	return []byte(`{"n":1}`), nil
+}
+
+type onceDataError struct{ calls *int }
+
+func (onceDataError) Error() string    { return "once detail" }
+func (e onceDataError) ErrorData() any { return onceMarshaler(e) }
+
 // Shutdown hooks run when shutdown starts, before the drain: a handler that
 // only returns once the hook has run must not hold Run for the drain timeout.
 func TestOnShutdownRunsBeforeDrain(t *testing.T) {
@@ -307,7 +328,11 @@ func TestOnShutdownRunsBeforeDrain(t *testing.T) {
 	if _, err := c.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test.block"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test.block handler never started")
+	}
 	start := time.Now()
 	cancel()
 	select {

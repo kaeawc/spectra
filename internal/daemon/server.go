@@ -402,9 +402,11 @@ func (s *Server) sendError(c net.Conn, mu *sync.Mutex, id json.RawMessage, err e
 	if errors.As(err, &de) {
 		// Detail that cannot be encoded would make the whole response
 		// unwritable; the code and message still go out without it.
+		// The validated encoding is sent as is, so a MarshalJSON that would
+		// fail on a second call cannot break the response.
 		if detail := de.ErrorData(); detail != nil {
-			if _, merr := json.Marshal(detail); merr == nil {
-				data = detail
+			if b, merr := json.Marshal(detail); merr == nil {
+				data = json.RawMessage(b)
 			}
 		}
 	}
