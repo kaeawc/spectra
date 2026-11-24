@@ -627,8 +627,8 @@ as visible, or as hidden, as they are to the CLI run without `sudo`.
 
 `services.list` and `logs.query` are macOS-only, as are the CLI commands. Off
 macOS they fail (-32603) with the CLI's message, and the error's `data` is the
-object `spectra services|logs --json` prints there:
-`{"command", "error": "unsupported_platform", "feature", "os", "message", "hint"}`.
+object `spectra services|logs --json` prints there, with `command`, `error`
+(`"unsupported_platform"`), `feature`, `os`, `message` and `hint` fields.
 
 ### `lineage.report`
 
@@ -705,9 +705,9 @@ Without `dir` they read the caller's `~/Library/Logs/DiagnosticReports` on
 macOS (the daemon runs as the caller's user). Off macOS there is no default
 directory, as with the CLI: the call fails (-32603) with
 `macOS DiagnosticReports: ... (linux); pass dir with an absolute directory of
-.ips reports`, and the error's `data` is the unsupported object
-`{"command", "error": "unsupported_platform", "feature", "os", "message",
-"hint"}`. With `dir` they work on Linux too.
+.ips reports`, and the error's `data` is the unsupported object, with
+`command`, `error` (`"unsupported_platform"`), `feature`, `os`, `message`
+and `hint` fields. With `dir` they work on Linux too.
 
 ### `crash.inspect`
 
@@ -768,12 +768,13 @@ Jobs are bounded:
 - Each job has a deadline of its capture duration plus 30 seconds. A job
   that passes it fails with `profile <kind>: timed out after <limit>`.
 - A finished job, with its result, is kept for 10 minutes, and only the 16
-  most recently finished are kept. After that, its `id` is an
-  invalid-params error (-32602), as is an `id` the daemon never issued. A
-  result over 8 MiB fails the job.
+  most recently finished are kept (the cap applies as each job finishes, and
+  expired results are released every 30 seconds even if nobody asks). After
+  that, its `id` is an invalid-params error (-32602), as is an `id` the
+  daemon never issued. A result over 8 MiB fails the job.
 - Jobs are not tied to the connection that started them. Any client of the
   daemon (the daemon only accepts its own user) can poll or cancel by `id`.
-  Stopping the daemon cancels every job.
+  Stopping the daemon cancels every job as soon as shutdown starts.
 
 Parameters (durations are milliseconds, a whole number of seconds up to
 60000, as the CLI's `--duration`; paths must be absolute):
@@ -792,10 +793,25 @@ Parameters (durations are milliseconds, a whole number of seconds up to
   existing sample report to fold, plus `out` (required), where the SVG is
   written as the caller's user. The result is the
   `spectra flamegraph --json` object (`svg`, `stack_count`, `stacks`). The
-  SVG at `out` is the only file a profiling job writes.
+  SVG at `out` is the only file a profiling job writes. It is staged next to
+  `out` and renamed into place only if the job is still running: a job
+  reported `cancelled` never leaves an SVG at `out`, and once the SVG is in
+  place `profile.cancel` no longer cancels the job, which then completes.
 
 The three are macOS-only, as are the CLI commands. Off macOS `profile.start`
 fails at once (-32603) without starting a job, and the error's `data` is the
-object `spectra <kind> --json` prints there: `{"command", "error":
-"unsupported_platform", "feature", "os", "message", "hint"}`. Bad parameters
-are an invalid-params error (-32602).
+object `spectra <kind> --json` prints there, for example on Linux:
+
+```json
+{
+  "command": "sample",
+  "error": "unsupported_platform",
+  "feature": "process sampling (sample(1))",
+  "os": "linux",
+  "message": "process sampling (sample(1)): unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}
+```
+
+Bad parameters are an invalid-params error (-32602), including an `input`
+that exists but is not a regular file. An `input` over 64 MiB fails the job.
