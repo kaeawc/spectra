@@ -439,6 +439,41 @@ Spectra has no `serve`, `connect`, `fan`, `hosts`, or `install-daemon`
 commands. Cross-machine operations use the separately distributed Spectra
 Remote project.
 
+## spectra crash inspect
+
+`spectra crash inspect [--json] [--all] <report.ips>` decodes a macOS `.ips`
+crash report on any host. With `--json`, each thread keeps `frames`, one
+string per frame (``Image`symbol + 12`` or `Image + 0x1a2b`), and adds
+`frame_details`, one object per frame in the same order:
+
+| Field | Meaning |
+|---|---|
+| `image`, `image_path`, `image_uuid`, `arch` | The binary the frame is in, from the report's `usedImages`. |
+| `image_base` | Load address of that binary, hex string. |
+| `image_offset` | Offset of the frame in the binary, hex string. Always present; when the frame has no image it is the raw value from the report. |
+| `address` | `image_base + image_offset`, hex string. |
+| `symbol`, `symbol_offset` | Symbol name and decimal offset into it, when the report has a symbol. |
+
+Fields the report lacks are omitted: a frame with `imageIndex` -1, an image
+with no name, an all-zero UUID or a zero base.
+
+The report-level `images` array lists each named image as `{name, path, uuid,
+arch, base, image_on_disk}`. `image_on_disk` compares the `LC_UUID` of the
+binary at `path` on the machine running Spectra (read with Go's `debug/macho`;
+for a universal binary, the slice matching `arch`) with the report's UUID:
+
+- `match`: the binary on disk is the one that crashed.
+- `changed`: the binary was rebuilt or updated since the crash. Do not
+  disassemble it as if it were the crashed binary.
+- `missing`: no file at `path`.
+- `shared_cache`: the image was in the dyld shared cache (its base is inside
+  the report's `sharedCache` range, its `source` is `S`, or it is under
+  `/System/Library/` or `/usr/lib/` and not on disk).
+
+`image_on_disk` is absent when the report has no path or UUID for the image,
+or the file cannot be read as a Mach-O. A report copied from another Mac and
+inspected on Linux reports `missing` for app binaries.
+
 ## spectra sample
 
 `spectra sample [--duration <s>] [--interval <ms>] [--no-cache] [--json] <pid>`

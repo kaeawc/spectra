@@ -41,6 +41,36 @@ type Report struct {
 	Resource        *ResourceKill `json:"resource,omitempty"`
 	FaultingThread  int           `json:"faulting_thread"`
 	Threads         []Thread      `json:"threads"`
+	Images          []Image       `json:"images,omitempty"`
+}
+
+// Image is one binary from the report's usedImages list. Base is a hex
+// string. OnDisk is filled by CheckImagesOnDisk and is empty until then.
+type Image struct {
+	Name   string `json:"name,omitempty"`
+	Path   string `json:"path,omitempty"`
+	UUID   string `json:"uuid,omitempty"`
+	Arch   string `json:"arch,omitempty"`
+	Base   string `json:"base,omitempty"`
+	OnDisk string `json:"image_on_disk,omitempty"`
+
+	// inSharedCache records the report's own evidence (sharedCache range or
+	// source "S") that the image was mapped from the dyld shared cache.
+	inSharedCache bool
+}
+
+// FrameDetail is the structured form of one entry in Thread.Frames. Fields
+// the report does not carry are omitted; addresses and offsets are hex.
+type FrameDetail struct {
+	Image        string `json:"image,omitempty"`
+	ImagePath    string `json:"image_path,omitempty"`
+	ImageUUID    string `json:"image_uuid,omitempty"`
+	Arch         string `json:"arch,omitempty"`
+	ImageBase    string `json:"image_base,omitempty"`
+	ImageOffset  string `json:"image_offset"`
+	Address      string `json:"address,omitempty"`
+	Symbol       string `json:"symbol,omitempty"`
+	SymbolOffset *int64 `json:"symbol_offset,omitempty"`
 }
 
 // ResourceKill describes an EXC_RESOURCE / watchdog-class termination: the OS
@@ -62,6 +92,8 @@ type Thread struct {
 	Queue     string   `json:"queue,omitempty"`
 	Triggered bool     `json:"triggered,omitempty"`
 	Frames    []string `json:"frames"`
+	// FrameDetails is parallel to Frames: FrameDetails[i] describes Frames[i].
+	FrameDetails []FrameDetail `json:"frame_details,omitempty"`
 }
 
 // --- raw .ips shapes (best-effort; any field may be absent) ---
@@ -86,6 +118,12 @@ type ipsBody struct {
 	FaultingThread int          `json:"faultingThread"`
 	Threads        []ipsThread  `json:"threads"`
 	UsedImages     []ipsImage   `json:"usedImages"`
+	SharedCache    ipsCache     `json:"sharedCache"`
+}
+
+type ipsCache struct {
+	Base uint64 `json:"base"`
+	Size uint64 `json:"size"`
 }
 
 type ipsException struct {
@@ -119,11 +157,12 @@ type ipsFrame struct {
 }
 
 type ipsImage struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-	Base int64  `json:"base"`
-	UUID string `json:"uuid"`
-	Arch string `json:"arch"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Base   uint64 `json:"base"`
+	UUID   string `json:"uuid"`
+	Arch   string `json:"arch"`
+	Source string `json:"source"`
 }
 
 // Parse decodes a modern .ips crash report. It returns ErrLegacyFormat for
@@ -188,10 +227,73 @@ func build(h ipsHeader, b ipsBody) *Report {
 		}
 		for _, f := range t.Frames {
 			th.Frames = append(th.Frames, formatFrame(f, b.UsedImages))
+			th.FrameDetails = append(th.FrameDetails, frameDetail(f, b.UsedImages))
 		}
 		r.Threads = append(r.Threads, th)
 	}
+	r.Images = buildImages(b.UsedImages, b.SharedCache)
 	return r
+}
+
+func buildImages(images []ipsImage, cache ipsCache) []Image {
+	var out []Image
+	for _, im := range images {
+		if im.Name == "" && im.Path == "" {
+			continue
+		}
+		out = append(out, Image{
+			Name:          im.Name,
+			Path:          im.Path,
+			UUID:          reportUUID(im.UUID),
+			Arch:          im.Arch,
+			Base:          hexAddr(im.Base),
+			inSharedCache: im.Source == "S" || cache.contains(im.Base),
+		})
+	}
+	return out
+}
+
+func (c ipsCache) contains(addr uint64) bool {
+	return c.Size > 0 && addr >= c.Base && addr-c.Base < c.Size
+}
+
+// frameDetail mirrors formatFrame without flattening: it keeps the image
+// identity and the offsets so a consumer can locate the exact instruction.
+func frameDetail(f ipsFrame, images []ipsImage) FrameDetail {
+	d := FrameDetail{ImageOffset: fmt.Sprintf("0x%x", f.ImageOffset), Symbol: f.Symbol}
+	if f.Symbol != "" {
+		loc := f.SymbolLocation
+		d.SymbolOffset = &loc
+	}
+	if f.ImageIndex < 0 || f.ImageIndex >= len(images) {
+		return d
+	}
+	im := images[f.ImageIndex]
+	d.Image = im.Name
+	d.ImagePath = im.Path
+	d.ImageUUID = reportUUID(im.UUID)
+	d.Arch = im.Arch
+	d.ImageBase = hexAddr(im.Base)
+	if im.Base != 0 && f.ImageOffset >= 0 {
+		d.Address = hexAddr(im.Base + uint64(f.ImageOffset))
+	}
+	return d
+}
+
+func hexAddr(v uint64) string {
+	if v == 0 {
+		return ""
+	}
+	return fmt.Sprintf("0x%x", v)
+}
+
+// reportUUID drops the all-zero placeholder UUID that reports use for
+// images they could not identify.
+func reportUUID(u string) string {
+	if strings.Trim(u, "0-") == "" {
+		return ""
+	}
+	return u
 }
 
 // Snapshot normalizes the report's threads into a threadinspect.Snapshot so the

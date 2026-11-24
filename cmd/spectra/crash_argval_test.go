@@ -11,7 +11,7 @@ func okRead(string) ([]byte, error) { return []byte("{}\n{}"), nil }
 
 func TestCrashInspectRejectsExtraPaths(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	if code := runCrashInspect([]string{"a.ips", "b.ips"}, &out, &errBuf, okRead); code != 2 {
+	if code := runCrashInspect([]string{"a.ips", "b.ips"}, &out, &errBuf, okRead, nil); code != 2 {
 		t.Fatalf("exit = %d, want 2 for two positional paths", code)
 	}
 }
@@ -26,7 +26,7 @@ func TestCrashResourceRejectsExtraPaths(t *testing.T) {
 func TestCrashInspectReadFailure(t *testing.T) {
 	fail := func(string) ([]byte, error) { return nil, errors.New("boom") }
 	var out, errBuf bytes.Buffer
-	code := runCrashInspect([]string{"missing.ips"}, &out, &errBuf, fail)
+	code := runCrashInspect([]string{"missing.ips"}, &out, &errBuf, fail, nil)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 on read failure", code)
 	}

@@ -30,7 +30,7 @@ func runCrashWithIO(args []string, stdout, stderr io.Writer, inspect func(string
 	case "", "readiness":
 		return runCrashReadiness(rest, stdout, stderr, inspect)
 	case "inspect":
-		return runCrashInspect(rest, stdout, stderr, os.ReadFile)
+		return runCrashInspect(rest, stdout, stderr, os.ReadFile, crashreport.OpenOS)
 	case "resource":
 		return runCrashResource(rest, stdout, stderr, os.ReadFile)
 	case "list":
@@ -121,7 +121,7 @@ func orDash(s string) string {
 	return s
 }
 
-func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error)) int {
+func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error), openBinary crashreport.OpenFunc) int {
 	fs := flag.NewFlagSet("crash inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
@@ -142,6 +142,7 @@ func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(stri
 		return code
 	}
 	if *asJSON {
+		report.CheckImagesOnDisk(openBinary)
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
