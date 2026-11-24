@@ -674,3 +674,60 @@ and `allow_long_window` (bool), and returns the `spectra logs --json` object
 without `allow_long_window`, or a `grep` that does not compile, is an
 invalid-params error with the CLI's message. Raw `--predicate` queries and
 `--stream` are not served. Capped at 2 minutes.
+
+## Crash and symbolication methods
+
+Five methods serve crash-report reads and `atos` symbolication, so clients
+skip spawning `spectra crash list|signatures|oom|inspect --json` and
+`spectra symbolicate --json`. Each returns exactly the JSON the matching CLI
+command prints with `--json` for the same flags, because the CLI and the
+daemon build it with the same function. Nothing is cached: every call reads
+the reports anew. Each call has its own server-side cap; when it passes, or the
+client's connection closes, the call's context is cancelled, the directory
+walk stops, any `atos` or `mdfind` child is killed, and the call fails
+(`<method>: timed out after <cap>` or `<method>: context canceled`) instead of
+returning partial data. Parameters are an object; paths must be absolute,
+because the daemon's working directory is not the caller's. Bad parameters are
+an invalid-params error (-32602). An error the CLI prints on stderr, such as an
+unreadable or legacy report, comes back as the error message with the same
+text. All five are read-only.
+
+### `crash.list`, `crash.signatures`, `crash.oom`
+
+Take optional `dir` (an absolute directory of `.ips` reports, searched
+recursively, including `Retired/` and dotfiles) and `limit` (default 25, the
+CLI's `--limit`; `0` keeps every row). They return the arrays `spectra crash
+list|signatures|oom --json` print: reports newest first, recurring signatures
+ranked by count, and memory or jetsam kills newest first. Unreadable or
+unparseable reports are skipped, as in the CLI. Capped at 2 minutes.
+
+Without `dir` they read the caller's `~/Library/Logs/DiagnosticReports` on
+macOS (the daemon runs as the caller's user). Off macOS there is no default
+directory, as with the CLI: the call fails (-32603) with
+`macOS DiagnosticReports: ... (linux); pass dir with an absolute directory of
+.ips reports`, and the error's `data` is the unsupported object
+`{"command", "error": "unsupported_platform", "feature", "os", "message",
+"hint"}`. With `dir` they work on Linux too.
+
+### `crash.inspect`
+
+Takes `path` (required, an absolute `.ips` file), `source_lines` (bool, as
+`--source-lines`) and `all` (bool, as `--all`, which only changes the CLI's
+text output: the JSON always holds every thread). Returns the
+`spectra crash inspect --json` object: the decoded report with `frame_details`
+per thread, `images` with `image_on_disk`, and with `source_lines` the
+`file`, `line`, `column` and `resolved_by` of each frame. Off macOS
+`source_lines` resolves nothing and sets `source_lines_unsupported`, as in
+the CLI. Capped at 3 minutes; each `atos` or `mdfind` call also has the CLI's
+10 second limit.
+
+### `symbolicate.addresses`
+
+Takes `binary` (required, an absolute Mach-O or `.dSYM` path, the CLI's `-o`),
+`load_address` (required, hex, `-l`), optional `arch` (`--arch`, such as
+`arm64`) and `addresses` (required, hex, at most 4096), and returns the
+`spectra symbolicate --json` object (`binary`, `load_address`, `arch`,
+`frames`). Addresses must be hex values (the CLI passes anything through to
+`atos`), so no parameter can reach `atos` as a flag. Capped at 1 minute.
+macOS-only, as is the CLI: off macOS it fails (-32603) with the CLI's message,
+and the error's `data` is the object `spectra symbolicate --json` prints there.

@@ -19,6 +19,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
+	"github.com/kaeawc/spectra/internal/daemoncrash"
 	"github.com/kaeawc/spectra/internal/daemonhost"
 	"github.com/kaeawc/spectra/internal/daemoninventory"
 	"github.com/kaeawc/spectra/internal/daemonjvm"
@@ -195,6 +196,7 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	daemonjvm.RegisterReadMethods(server, jvmService)
 	daemonprocess.RegisterMethods(server, daemonprocess.NewService(daemonprocess.Options{Interval: *watchInterval}))
 	daemonhost.RegisterMethods(server, daemonhost.NewService(daemonhost.Options{Whatswrong: daemonhost.DefaultWhatswrong(watch)}))
+	daemoncrash.RegisterMethods(server, daemoncrash.NewService(daemoncrash.Options{}))
 	daemonhost.RegisterReports(server, daemonhost.NewReports())
 	daemoninventory.RegisterMethods(server, daemoninventory.NewService(daemoninventory.Options{Snapshots: db, Live: daemoninventory.DefaultLive(version), Logger: log}))
 	daemonprocinfo.RegisterMethods(server, daemonprocinfo.NewService(daemonprocinfo.Options{}))
