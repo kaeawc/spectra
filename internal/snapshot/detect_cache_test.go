@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -203,7 +204,7 @@ func TestDetectWithCacheHitRefreshesLiveFields(t *testing.T) {
 		On(proc.MatchPrefix("ps"), proc.Response{Result: proc.Result{
 			Stdout: []byte("4242 9000 Mon Nov 16 10:00:00 2026 " + app + "/Contents/MacOS/LiveFields\n"),
 		}}).
-		On(proc.MatchPrefix("sqlite3"), proc.Response{Result: proc.Result{Stdout: []byte("kTCCServiceCamera\n")}})
+		On(proc.MatchPrefix("sqlite3"), proc.Response{Result: proc.Result{Stdout: []byte(fmt.Sprintf("%X|%X\n", "com.livefields.app", "kTCCServiceCamera"))}})
 	opts := detect.Options{OS: hostos.Darwin, Runner: runner, Home: home, Now: func() time.Time { return now }}
 
 	r, err := detectWithCache(app, opts, st, nil, false)
