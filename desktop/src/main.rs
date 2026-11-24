@@ -27,6 +27,7 @@ mod logs;
 mod network;
 mod proc_findings;
 mod procs;
+mod remote;
 mod run;
 mod sample;
 mod sample_activity;
@@ -35,6 +36,7 @@ mod sample_compare;
 mod sample_crashes;
 mod sample_flame;
 mod sample_growth;
+mod sample_hosts;
 mod sample_jvm;
 mod sample_logs;
 mod sample_network;
@@ -73,6 +75,10 @@ fn setup(s: &mut App, wake: rune::Waker) {
     }
     // Calls Spectra's daemon already answers go to it instead of a new process.
     daemon::install();
+    // The other Macs listed on the Hosts page, kept next to Spectra's own files.
+    if let Some(file) = remote::default_file() {
+        s.hosts.load(file);
+    }
     // Each feed reads once per ask; the window asks after the last reading rested, and not
     // while it's hidden.
     if let (Some(tx), Some(go)) = (s.feed_tx.take(), s.jvm_go_rx.take()) {
@@ -138,6 +144,7 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     s.timeline.cancel();
     s.crashes.cancel();
     s.codeview.close();
+    s.hosts.cancel();
     run::wait_idle(Duration::from_secs(2));
 }
 
@@ -195,6 +202,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     // Memory jumps and alerts: a look when the page opens, then every 30 s while it shows.
     landed |= s.tick_growth();
     if s.window_shown() && s.growth_visible() {
+        tx.wake_after(STATUS_TICK);
+    }
+    // Other Macs: one Spectra Remote call at a time, only while their pages show.
+    landed |= s.tick_hosts();
+    if s.window_shown() && s.hosts_visible() {
         tx.wake_after(STATUS_TICK);
     }
     // An open page's live rounds rest while the window is hidden.
@@ -381,6 +393,13 @@ fn main() {
                 "crashes-report-links",
                 sample_crashes::crashes_report_links_scene,
             ),
+            ("hosts", sample_hosts::hosts_scene),
+            ("hosts-empty", sample_hosts::hosts_empty_scene),
+            ("hosts-missing", sample_hosts::hosts_missing_scene),
+            ("host", sample_hosts::host_scene),
+            ("host-group", sample_hosts::host_group_scene),
+            ("host-unsupported", sample_hosts::host_unsupported_scene),
+            ("host-unreachable", sample_hosts::host_unreachable_scene),
             ("codeview-native", sample_codeview::codeview_native_scene),
             ("codeview-jvm", sample_codeview::codeview_jvm_scene),
             ("codeview-none", sample_codeview::codeview_none_scene),

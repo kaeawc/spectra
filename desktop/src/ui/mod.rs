@@ -12,6 +12,7 @@ mod crashes;
 mod detail;
 mod growth;
 mod home;
+mod hosts;
 mod list;
 mod logs;
 mod network;
@@ -34,6 +35,8 @@ mod tests_crashes;
 mod tests_crashes_plus;
 #[cfg(test)]
 mod tests_growth;
+#[cfg(test)]
+mod tests_hosts;
 #[cfg(test)]
 mod tests_logs;
 #[cfg(test)]
@@ -141,6 +144,12 @@ fn sidebar(s: &App, k: &Kit) -> El {
     sb = sb.child(place(s, Nav::Storage, "storage".into(), None, k));
     sb = sb.child(place(s, Nav::Compare, "compare".into(), None, k));
     sb = sb.child(place(s, Nav::Toolchains, "toolchains".into(), None, k));
+    let listed = Some(s.hosts.list.len()).filter(|n| *n > 0);
+    sb = sb.child(place(s, Nav::Hosts, "hosts".into(), listed, k));
+    // Each other Mac right under the list of them, ahead of this Mac's long process sections.
+    for row in hosts::sidebar_rows(s, k) {
+        sb = sb.child(row);
+    }
     if s.has_processes() {
         sb = sb.child(place(s, Nav::All, "all".into(), Some(s.procs.len()), k));
         let kinds = Category::ALL
@@ -206,6 +215,10 @@ enum Page<'a> {
     Timeline,
     /// What has been crashing.
     Crashes,
+    /// Other Macs through Spectra Remote.
+    Hosts,
+    /// One other Mac, read-only.
+    Host(&'a crate::remote::HostState),
     List,
 }
 
@@ -236,6 +249,8 @@ fn page_of(s: &App) -> Page<'_> {
         Nav::Growth => Page::Growth,
         Nav::Timeline => Page::Timeline,
         Nav::Crashes => Page::Crashes,
+        Nav::Hosts => Page::Hosts,
+        Nav::Host(id) => s.hosts.get(id).map_or(Page::Hosts, Page::Host),
         _ => Page::List,
     }
 }
@@ -268,6 +283,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Page::Growth => (growth::page(s, &k), s.nav.title().to_owned()),
         Page::Timeline => (timeline::page(s, &k), s.nav.title().to_owned()),
         Page::Crashes => (crashes::page(s, &k), s.nav.title().to_owned()),
+        Page::Hosts => (hosts::page(s, &k), Nav::Hosts.title().to_owned()),
+        Page::Host(h) => (hosts::host_page(s, h, &k), h.host.name.clone()),
         Page::Home => {
             // Lines in "Right now" are something to look at too.
             let problems = match s.problems() {

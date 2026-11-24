@@ -88,6 +88,10 @@ pub enum Nav {
     Timeline,
     /// What has been crashing, and why: repeated crashes, recent reports and memory kills.
     Crashes,
+    /// Other Macs, reached through Spectra Remote: the list and each one's health.
+    Hosts,
+    /// One other Mac's processes and JVMs, read-only, by its id in the hosts list.
+    Host(u64),
 }
 
 impl Nav {
@@ -108,6 +112,8 @@ impl Nav {
             Nav::Growth => "Memory and alerts",
             Nav::Timeline => "Timeline",
             Nav::Crashes => "Crashes",
+            Nav::Hosts => "Other Macs",
+            Nav::Host(_) => "Other Mac",
         }
     }
 
@@ -124,6 +130,8 @@ impl Nav {
             Nav::Growth => false,
             Nav::Timeline => false,
             Nav::Crashes => false,
+            // Another Mac's processes are its own list, not this Mac's.
+            Nav::Hosts | Nav::Host(_) => false,
             Nav::All => true,
             Nav::Category(c) => c.holds(p.role),
             Nav::Runtime(r) => p.runtime == r,

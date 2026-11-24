@@ -247,6 +247,31 @@ What it shows:
   version, a JAVA_HOME pointing at a folder that is gone, and deprecated Homebrew formulae. It
   reads once when first opened and on Refresh, never on a timer; a failure says why and Refresh
   tries again.
+- **Other Macs**, after Toolchains: processes and JVMs on your other Macs, read-only, through
+  [Spectra Remote](https://github.com/kaeawc/spectra-proxy). Each Mac runs its agent
+  (`spectra-remote-agent serve-tsnet`) on your tailnet, and this Mac asks it with the controller,
+  `spectra-remote call --target <host:port> --operation <op>`, which joins the tailnet as its own
+  node and checks the protocol and each result's schema. The agent decides who may ask (Tailscale
+  ACLs and its own allowlist), audits each request and answers from its Spectra daemon. The app has
+  no transport of its own and asks for nothing that changes the other Mac: `health`, `process.list`
+  and `jvm.list` only.
+  - The list: add a Mac by its tailnet name (`work-mac`, `work-mac:7878`, an address; port 7878
+    unless given), optionally with a name to show; Remove takes it off the list and changes nothing
+    on that Mac. It is kept in `~/.spectra/desktop-hosts.json`. Each Mac shows whether it answered,
+    its Spectra and agent versions and what its agent offers; while this page is open each is
+    checked every 30 s.
+  - A Mac's page (each listed under Other Macs in the sidebar): its processes grouped as on this
+    Mac (an app with its helpers, same-named processes together, each group opening onto its
+    processes), busiest first, with a search, and its JVMs with heap, threads and GC. Read-only: no
+    Quit, tools, logs or process pages on another Mac. Processes are read every 10 s and JVMs every
+    60 s while the page is open; Refresh asks again now.
+  - One controller call at a time (each brings up a tailnet node, which takes seconds, and two would
+    share one node's state), off the UI thread with a deadline (45 s for health, 60 s for processes,
+    120 s for JVMs) and an output cap. Leaving the page, hiding the window or quitting stops the call
+    on its way. A failed reading keeps the last list and says why; a Mac that can't be reached says
+    so with what to check; an agent without `process.list` (or started without `--allow-processes`, which it needs to offer process and JVM lists) says it can't list processes yet; a Mac
+    without `spectra-remote` gets a notice saying how to install it. Set `SPECTRA_REMOTE_BIN` if
+    `spectra-remote` isn't on `PATH`.
 - **Compare**, under Storage: what's different from when it was fine. It lists the snapshots and
   baselines Spectra has stored (`spectra snapshot list --json`, read when the page opens, newest
   first), and you pick an earlier one with From, optionally a later one with To (Now by default),
@@ -435,10 +460,14 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # timeline, timeline-empty, timeline-failed, timeline-reading
                             # crashes, crashes-empty, crashes-report
                             # crashes-live, crashes-scrub, crashes-report-links
+                            # hosts, hosts-empty, hosts-missing, host, host-group,
+                            # host-unsupported, host-unreachable
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
                             # runs every tool on a `sleep` the test starts and then stops
+SPECTRA_REMOTE_TARGET=work-mac:7878 cargo test -- --ignored remote_live --nocapture
+                            # asks a real agent for its health, processes and JVMs
 ```
 
 - `src/procs.rs`: the process feed and its parsing; `src/run.rs`: running Spectra with a
@@ -488,6 +517,10 @@ SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both l
 - `src/crash_source.rs`: which system libraries a frame can link to and the search it opens;
   `src/crash_live.rs`: matching crashed processes to running ones, Sample now and the way to the
   Timeline; `src/crash_strip.rs`: the strip's bars and the window it keeps the lists to.
+- `src/remote.rs`: Other Macs: the hosts list and its file, the `spectra-remote call` seam
+  behind a `Remote` trait that tests replace with a fake, reading the agent's answers with this
+  Mac's own process and JVM parsers, and the one-call-at-a-time schedule;
+  `src/sample_hosts.rs`: its sample data, from invented fixtures in `tests/fixtures/remote`.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
   flattening it into rows; `src/sample_tree.rs`: its sample data.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.

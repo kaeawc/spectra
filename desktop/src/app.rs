@@ -387,6 +387,8 @@ pub struct App {
     pub crashes: crate::crashes::CrashesPage,
     /// The code view a "Show code" press opens.
     pub codeview: crate::codeview::CodeView,
+    /// Other Macs through Spectra Remote, for the Hosts page and each host's page.
+    pub hosts: crate::remote::Hosts,
 }
 
 pub fn init() -> App {
@@ -473,6 +475,7 @@ pub fn init() -> App {
         timeline: crate::timeline::TimelinePage::new(),
         crashes: crate::crashes::CrashesPage::new(),
         codeview: crate::codeview::CodeView::new(),
+        hosts: crate::remote::Hosts::new(),
     }
 }
 
