@@ -22,6 +22,8 @@ type Request struct {
 	Arch string
 	// Addresses are the raw addresses to resolve.
 	Addresses []string
+	// FullPath asks atos for absolute source paths instead of base names.
+	FullPath bool
 }
 
 // Runner executes a command and returns its combined stdout.
@@ -70,6 +72,9 @@ func Symbolicate(ctx context.Context, req Request, runner Runner) (Result, error
 	args := []string{"-o", req.Binary, "-l", req.LoadAddress}
 	if req.Arch != "" {
 		args = append(args, "-arch", req.Arch)
+	}
+	if req.FullPath {
+		args = append(args, "-fullPath")
 	}
 	args = append(args, req.Addresses...)
 

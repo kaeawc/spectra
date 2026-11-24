@@ -44,6 +44,24 @@ func TestSymbolicateParsesFrames(t *testing.T) {
 	}
 }
 
+func TestSymbolicateFullPath(t *testing.T) {
+	var gotArgs []string
+	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte("main (in MyApp) (/src/My App/main.swift:42:7)\n"), nil
+	}
+	res, err := Symbolicate(context.Background(), Request{Binary: "/b", LoadAddress: "0x1", Addresses: []string{"0x2"}, FullPath: true}, runner)
+	if err != nil {
+		t.Fatalf("Symbolicate: %v", err)
+	}
+	if !strings.Contains(strings.Join(gotArgs, " "), "-fullPath") {
+		t.Errorf("atos args missing -fullPath: %v", gotArgs)
+	}
+	if f := res.Frames[0]; f.Symbol != "main" || f.Location != "/src/My App/main.swift:42:7" {
+		t.Errorf("frame = %+v", f)
+	}
+}
+
 func TestSymbolicatePassesArch(t *testing.T) {
 	var gotArgs []string
 	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {

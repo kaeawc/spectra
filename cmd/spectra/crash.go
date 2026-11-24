@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"github.com/kaeawc/spectra/internal/crashreport"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 func runCrash(args []string) int {
@@ -30,7 +32,7 @@ func runCrashWithIO(args []string, stdout, stderr io.Writer, inspect func(string
 	case "", "readiness":
 		return runCrashReadiness(rest, stdout, stderr, inspect)
 	case "inspect":
-		return runCrashInspect(rest, stdout, stderr, os.ReadFile, crashreport.OpenOS)
+		return runCrashInspect(rest, stdout, stderr, os.ReadFile, crashreport.OpenOS, defaultSourceLineOptions())
 	case "resource":
 		return runCrashResource(rest, stdout, stderr, os.ReadFile)
 	case "list":
@@ -121,13 +123,19 @@ func orDash(s string) string {
 	return s
 }
 
-func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error), openBinary crashreport.OpenFunc) int {
+func defaultSourceLineOptions() crashreport.SourceLineOptions {
+	home, _ := os.UserHomeDir()
+	return crashreport.SourceLineOptions{Runner: proc.Default, FS: crashreport.OSSourceFS(), Home: home}
+}
+
+func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(string) ([]byte, error), openBinary crashreport.OpenFunc, srcOpts crashreport.SourceLineOptions) int {
 	fs := flag.NewFlagSet("crash inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
 	all := fs.Bool("all", false, "show every thread (default: the faulting thread only)")
+	sourceLines := fs.Bool("source-lines", false, "resolve frames to source file:line with atos and dSYMs (macOS)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: spectra crash inspect [--json] [--all] <report.ips>")
+		fmt.Fprintln(stderr, "usage: spectra crash inspect [--json] [--all] [--source-lines] <report.ips>")
 		fmt.Fprintln(stderr, "Decode a macOS .ips crash report into a readable summary.")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -141,6 +149,9 @@ func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(stri
 	if code != 0 {
 		return code
 	}
+	if *sourceLines {
+		report.ResolveSourceLines(context.Background(), srcOpts)
+	}
 	if *asJSON {
 		report.CheckImagesOnDisk(openBinary)
 		enc := json.NewEncoder(stdout)
@@ -150,6 +161,9 @@ func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(stri
 			return 1
 		}
 		return 0
+	}
+	if u := report.SourceLinesUnsupported; u != nil {
+		fmt.Fprintf(stderr, "spectra crash inspect: --source-lines skipped: %s\n", u.Message)
 	}
 	renderCrashReport(stdout, report, *all)
 	return 0
@@ -221,12 +235,28 @@ func renderCrashThreads(w io.Writer, r *crashreport.Report, allThreads bool) {
 		}
 		fmt.Fprintf(w, "\n%s\n", label)
 		for i, f := range t.Frames {
-			fmt.Fprintf(w, "  %2d  %s\n", i, f)
+			fmt.Fprintf(w, "  %2d  %s%s\n", i, f, frameSource(t, i))
 		}
 	}
 	if !allThreads && len(r.Threads) > 1 {
 		fmt.Fprintf(w, "\n(%d threads total; pass --all to show them)\n", len(r.Threads))
 	}
+}
+
+// frameSource is the "  at file:line[:col]" suffix for frame i once
+// --source-lines resolved a path that exists.
+func frameSource(t crashreport.Thread, i int) string {
+	if i >= len(t.FrameDetails) {
+		return ""
+	}
+	d := t.FrameDetails[i]
+	if d.File == "" || d.Line == 0 {
+		return ""
+	}
+	if d.Column > 0 {
+		return fmt.Sprintf("  at %s:%d:%d", d.File, d.Line, d.Column)
+	}
+	return fmt.Sprintf("  at %s:%d", d.File, d.Line)
 }
 
 func runCrashReadiness(args []string, stdout, stderr io.Writer, inspect func(string) (detect.Result, error)) int {

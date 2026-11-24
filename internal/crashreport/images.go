@@ -85,22 +85,26 @@ func imageOnDisk(im Image, open OpenFunc) string {
 // MachOUUID returns the LC_UUID of a thin Mach-O, or of the slice of a
 // universal binary that matches arch (a crash report arch such as "arm64e").
 func MachOUUID(r io.ReaderAt, arch string) (string, error) {
+	f, err := machoSlice(r, arch)
+	if err != nil {
+		return "", err
+	}
+	return loadUUID(f)
+}
+
+func machoSlice(r io.ReaderAt, arch string) (*macho.File, error) {
 	fat, err := macho.NewFatFile(r)
 	if err == nil {
-		f, err := fatSlice(fat, arch)
-		if err != nil {
-			return "", err
-		}
-		return loadUUID(f)
+		return fatSlice(fat, arch)
 	}
 	if !errors.Is(err, macho.ErrNotFat) {
-		return "", fmt.Errorf("read universal header: %w", err)
+		return nil, fmt.Errorf("read universal header: %w", err)
 	}
 	f, err := macho.NewFile(r)
 	if err != nil {
-		return "", fmt.Errorf("read mach-o: %w", err)
+		return nil, fmt.Errorf("read mach-o: %w", err)
 	}
-	return loadUUID(f)
+	return f, nil
 }
 
 type archSpec struct {
