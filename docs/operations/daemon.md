@@ -313,6 +313,61 @@ Known limitations of `jvm.findings`:
 - It takes no thread dump, so `jvm-deadlock` does not fire. Use
   `spectra rules --thread-dump-pid <pid>`.
 
+### Per-pid reads
+
+Six methods return exactly the JSON that the matching `spectra jvm ... --json`
+command prints for one JVM. The CLI and the daemon build it with the same
+function, so a client can switch from spawning `spectra` to calling the daemon
+without changing its parser. Every method takes `pid` (required, positive
+integer). Absent or `null` params, a missing pid, a pid of zero or less, or a
+field of the wrong type is an invalid-params error (`-32602`). Nothing is
+cached: each call runs `jcmd` or `jstat` against the target again.
+
+| Method | CLI command | Extra params |
+| --- | --- | --- |
+| `jvm.explain` | `spectra jvm explain --json <pid>` | `samples`, `interval_ms`, `soft_refs` |
+| `jvm.gc_stats` | `spectra jvm gc-stats --json <pid>` | none |
+| `jvm.heap_histogram` | `spectra jvm heap-histogram --json <pid>` | `suspects` |
+| `jvm.thread_dump` | `spectra jvm thread-dump --json <pid>` | none |
+| `jvm.vm_memory` | `spectra jvm vm-memory --json <pid>` | none |
+| `jvm.nmt` | `spectra jvm nmt [detail\|diff] --json <pid>` | `mode` |
+
+- `jvm.explain`: `samples` (default 1, at most 120) and `interval_ms` (default
+  1000) match `--samples` and `--interval`. A trend is sampled when `samples`
+  is above 1, and `(samples - 1) * interval_ms` may not exceed 10 minutes.
+  `soft_refs` (default `true`) matches `--soft-refs`. It runs
+  `GC.class_histogram`, which makes the target JVM do a full GC, just as the
+  CLI does.
+- `jvm.heap_histogram`: `suspects` (default 20, may not be negative) is the
+  number of largest classes to rank, like `--suspects`. Like the CLI, it runs
+  `GC.class_histogram`, which makes the target do a full GC. `heap-histogram
+  compare` reads saved files and is not served.
+- `jvm.thread_dump`: returns `{"summary": ..., "dump": ...}`. `captured_at` is
+  the daemon's clock. The CLI's raw and `--summary` text modes have no RPC
+  form. The daemon does not save the dump to the blob cache or the artifact
+  manifest, as the CLI does.
+- `jvm.vm_memory`: when every section fails (for example, the pid is not a
+  JVM), the CLI still prints the JSON but exits 1. The method returns that same
+  JSON as a success, so read the per-section `error` fields.
+- `jvm.nmt`: `mode` is `summary` (the default), `detail`, or `diff`, matching
+  `spectra jvm nmt`, `nmt detail`, and `nmt diff`. `diff` reports growth since
+  a baseline that `spectra jvm nmt baseline <pid>` recorded earlier.
+  `baseline` changes state in the target JVM, so the daemon does not offer it.
+  `compare` reads saved files and is not served either. `--top` affects only
+  the text output.
+
+When the CLI fails, the method fails with the CLI's stderr line as the error
+message (`-32603`). Examples: `gc-stats failed for PID 42: jstat: ...`,
+`explain failed for PID 42: JVM PID 42 not found or not inspectable`, or
+`native memory tracking is not enabled; restart the JVM with ...`. No method
+writes files, takes a heap dump, starts JFR, or attaches an agent. Each call
+is capped at 60 seconds; `jvm.explain` gets its trend window on top of that.
+JDK tool children are killed at the deadline or when the client's connection
+closes. The error is then `<method>: timed out after <d>: context deadline
+exceeded` or `<method>: context canceled`. The methods behave the same on
+Linux and macOS, since `jcmd` and `jstat` are the only backends. They are
+looked up on the daemon's `PATH`, which can differ from your shell's.
+
 ## Clients
 
 The CLI and stdio MCP server discover the running local daemon through its Unix
