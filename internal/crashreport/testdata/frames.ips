@@ -1,0 +1,30 @@
+{"app_name":"MyApp","app_version":"3.0","bundleID":"com.example.myapp","timestamp":"2026-11-20 09:30:00.00 -0800","os_version":"macOS 15.6.1 (24G90)","bug_type":"309","incident_id":"FIXTURE-0705","name":"MyApp"}
+{
+  "procName" : "MyApp",
+  "procPath" : "/Applications/MyApp.app/Contents/MacOS/MyApp",
+  "pid" : 7050,
+  "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT", "codes" : "0x0000000000000000, 0x0000000000000000"},
+  "termination" : {"namespace" : "SIGNAL", "indicator" : "Abort trap: 6", "code" : 6},
+  "faultingThread" : 1,
+  "sharedCache" : {"base" : 6442450944, "size" : 1073741824, "uuid" : "9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4"},
+  "threads" : [
+    {"id" : 9001, "queue" : "com.apple.main-thread", "frames" : [
+      {"imageIndex" : 0, "imageOffset" : 16384, "symbol" : "main", "symbolLocation" : 0}
+    ]},
+    {"id" : 9002, "queue" : "sync.queue", "triggered" : true, "frames" : [
+      {"imageIndex" : 1, "imageOffset" : 37580, "symbol" : "__pthread_kill", "symbolLocation" : 8},
+      {"imageIndex" : 3, "imageOffset" : 74000, "symbol" : "UpdatedThing.run()", "symbolLocation" : 120},
+      {"imageIndex" : 2, "imageOffset" : 4660},
+      {"imageIndex" : 0, "imageOffset" : 171856},
+      {"imageIndex" : -1, "imageOffset" : 123456789},
+      {"imageIndex" : 4, "imageOffset" : 4096}
+    ]}
+  ],
+  "usedImages" : [
+    {"source" : "P", "arch" : "arm64", "base" : 4294967296, "size" : 524288, "uuid" : "11111111-2222-3333-4444-555555555555", "path" : "/Applications/MyApp.app/Contents/MacOS/MyApp", "name" : "MyApp"},
+    {"source" : "P", "arch" : "arm64e", "base" : 6678003712, "size" : 241664, "uuid" : "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "path" : "/usr/lib/system/libsystem_kernel.dylib", "name" : "libsystem_kernel.dylib"},
+    {"source" : "P", "arch" : "arm64", "base" : 4311744512, "size" : 16384, "uuid" : "22222222-3333-4444-5555-666666666666", "path" : "/Applications/MyApp.app/Contents/PlugIns/Gone.bundle/Contents/MacOS/Gone", "name" : "Gone"},
+    {"source" : "P", "arch" : "arm64", "base" : 4312793088, "size" : 131072, "uuid" : "33333333-4444-5555-6666-777777777777", "path" : "/Applications/MyApp.app/Contents/Frameworks/Updated.framework/Versions/A/Updated", "name" : "Updated"},
+    {"size" : 0, "source" : "A", "base" : 0, "uuid" : "00000000-0000-0000-0000-000000000000"}
+  ]
+}

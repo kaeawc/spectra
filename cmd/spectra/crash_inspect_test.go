@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaeawc/spectra/internal/crashreport"
 )
 
 const inspectSampleIPS = `{"app_name":"MyApp","app_version":"2.1","bug_type":"309","os_version":"macOS 15.6.1","incident_id":"ABC-123","name":"MyApp"}
@@ -44,6 +48,31 @@ func TestCrashInspectJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"exception": "EXC_BAD_ACCESS (SIGSEGV)"`) {
 		t.Errorf("json output missing decoded exception; got:\n%s", out.String())
+	}
+}
+
+func TestCrashInspectJSONImagesOnDisk(t *testing.T) {
+	notExist := func(p string) (crashreport.BinaryFile, error) {
+		return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrNotExist}
+	}
+	var out, errBuf bytes.Buffer
+	code := runCrashInspect([]string{"--json", "../../internal/crashreport/testdata/frames.ips"}, &out, &errBuf, os.ReadFile, notExist)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, errBuf.String())
+	}
+	var r crashreport.Report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, im := range r.Images {
+		got[im.Name] = im.OnDisk
+	}
+	if got["MyApp"] != "missing" || got["libsystem_kernel.dylib"] != "shared_cache" {
+		t.Errorf("image_on_disk = %v", got)
+	}
+	if n := len(r.Threads[1].FrameDetails); n != len(r.Threads[1].Frames) {
+		t.Errorf("frame_details = %d, want one per frame", n)
 	}
 }
 
