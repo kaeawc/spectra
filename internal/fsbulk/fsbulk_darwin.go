@@ -29,8 +29,13 @@ func PutBuf(b *[]byte) { bufPool.Put(b) }
 
 // fsobj_type_t values from <sys/vnode.h>.
 const (
-	VREG = 1
-	VDIR = 2
+	VREG  = 1
+	VDIR  = 2
+	VBLK  = 3
+	VCHR  = 4
+	VLNK  = 5
+	VSOCK = 6
+	VFIFO = 7
 )
 
 // Record layout shared by every attribute set that requests
@@ -212,9 +217,17 @@ func (l *Lister) Release() {
 // opened delivers nothing and reports true, as os.Open failing would; an
 // error after the first batch keeps what was delivered, as ReadDir does.
 func (l *Lister) ReadDir(path string, fn func(*Entry)) bool {
+	ok, _ := l.ReadDirErr(path, fn)
+	return ok
+}
+
+// ReadDirErr is ReadDir that also returns the error that ended a listing it
+// handled: the open failure, or the read error after the first batch. It is
+// nil when the listing completed or when ok is false.
+func (l *Lister) ReadDirErr(path string, fn func(*Entry)) (ok bool, err error) {
 	fd, err := OpenDir(path)
 	if err != nil {
-		return true
+		return true, err
 	}
 	defer unix.Close(fd) //nolint:errcheck // read-only directory descriptor
 	if l.bp == nil {
@@ -227,10 +240,13 @@ func (l *Lister) ReadDir(path string, fn func(*Entry)) bool {
 			l.entries, err = decodeEntries(buf, n, l.entries[:0])
 		}
 		if err != nil {
-			return !first
+			if first {
+				return false, nil
+			}
+			return true, err
 		}
 		if n == 0 {
-			return true
+			return true, nil
 		}
 		for i := range l.entries {
 			fn(&l.entries[i])

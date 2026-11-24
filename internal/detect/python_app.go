@@ -70,12 +70,18 @@ type pythonAppScanner struct {
 	// tests shrink them to exercise chunk boundaries and the long-token path.
 	chunk    int
 	tokenCap int
+	// tree, when it recorded a complete listing of Contents from the real
+	// filesystem, stands in for walking Contents again.
+	tree *treeRecord
 }
 
-func scanPythonApp(appPath string) *PythonApp {
+// scanPythonApp scans the bundle; tree is the Contents listing recorded by
+// the bundle-size walk, or nil.
+func scanPythonApp(appPath string, tree *treeRecord) *PythonApp {
 	return pythonAppScanner{
 		fs:       osPythonAppFS{},
 		commands: execPythonCommandRunner{},
+		tree:     tree,
 	}.Scan(appPath)
 }
 
@@ -157,6 +163,12 @@ func (s *pythonScan) entries(root string) []pythonWalkEntry {
 func (s *pythonScan) walk(root string) []pythonWalkEntry {
 	if w, ok := s.walks[root]; ok {
 		return w
+	}
+	if root == s.contents {
+		if w, ok := s.tree.walkEntries(root); ok {
+			s.walks[root] = w
+			return w
+		}
 	}
 	var w []pythonWalkEntry
 	_ = s.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

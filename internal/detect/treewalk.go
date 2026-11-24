@@ -1,6 +1,8 @@
 package detect
 
 import (
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +20,12 @@ const readDirBatch = 256
 // getattrlistbulk; lstatOnly forces one lstat per entry instead, so tests
 // can compare the two.
 func walkNonDirsWith(lstatOnly bool, root string, visit treeVisit) {
+	walkTree(lstatOnly, root, visit, nil)
+}
+
+// walkTree is walkNonDirsWith that also records into rec every directory
+// listing under rec's root. A nil rec records nothing.
+func walkTree(lstatOnly bool, root string, visit treeVisit, rec *treeRecord) {
 	var st statBuf
 	fi, err := os.Lstat(root)
 	if err != nil {
@@ -35,16 +43,18 @@ func walkNonDirsWith(lstatOnly bool, root string, visit treeVisit) {
 	for len(stack) > 0 {
 		dir := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+		ls := rec.listing(dir)
 		var ok bool
-		if stack, ok = bulk.readDir(dir, stack, &st, visit); !ok {
-			stack = readTreeDir(dir, stack, &st, visit)
+		if stack, ok = bulk.readDir(dir, stack, &st, visit, ls); !ok {
+			stack = readTreeDir(dir, stack, &st, visit, ls)
 		}
 	}
 }
 
-func readTreeDir(dir string, stack []string, st *statBuf, visit treeVisit) []string {
+func readTreeDir(dir string, stack []string, st *statBuf, visit treeVisit, ls *treeListing) []string {
 	f, err := os.Open(dir)
 	if err != nil {
+		ls.fail()
 		return stack
 	}
 	defer f.Close()
@@ -53,6 +63,7 @@ func readTreeDir(dir string, stack []string, st *statBuf, visit treeVisit) []str
 		for _, e := range ents {
 			p := dir + "/" + e.Name()
 			if e.IsDir() {
+				ls.add(p, len(dir), fs.ModeDir, 0)
 				stack = append(stack, p)
 				continue
 			}
@@ -60,12 +71,18 @@ func readTreeDir(dir string, stack []string, st *statBuf, visit treeVisit) []str
 			if !ok {
 				// Matches WalkDir + Info(): the entry is visited but
 				// contributes no size.
+				ls.fail()
 				visit(p, e.Name(), false, 0, 0)
 				continue
 			}
+			// e.Type() is the type filepath.WalkDir's DirEntry reports.
+			ls.add(p, len(dir), e.Type(), apparent)
 			visit(p, e.Name(), regular, actual, apparent)
 		}
 		if err != nil {
+			if err != io.EOF {
+				ls.fail()
+			}
 			return stack
 		}
 	}
@@ -93,12 +110,23 @@ func bundleTreeStats(appPath string) bundleTree {
 	return bundleTreeStatsWith(false, appPath)
 }
 
+// bundleTreeStatsRecorded is bundleTreeStats that also records the listing
+// of Contents, so the Python scan can replay it instead of walking again.
+func bundleTreeStatsRecorded(appPath string) (bundleTree, *treeRecord) {
+	rec := newTreeRecord(filepath.Join(appPath, "Contents"))
+	return bundleTreeStatsRec(false, appPath, rec), rec
+}
+
 func bundleTreeStatsWith(lstatOnly bool, appPath string) bundleTree {
+	return bundleTreeStatsRec(lstatOnly, appPath, nil)
+}
+
+func bundleTreeStatsRec(lstatOnly bool, appPath string, rec *treeRecord) bundleTree {
 	root := filepath.Clean(appPath)
 	contents := root + "/Contents"
 	var t bundleTree
 	var jvmFile string
-	walkNonDirsWith(lstatOnly, appPath, func(path, name string, regular bool, actual, apparent int64) {
+	walkTree(lstatOnly, appPath, func(path, name string, regular bool, actual, apparent int64) {
 		if strings.HasPrefix(path, contents) {
 			if strings.HasSuffix(name, ".jar") {
 				t.jars++
@@ -112,7 +140,7 @@ func bundleTreeStatsWith(lstatOnly bool, appPath string) bundleTree {
 			t.actual += actual
 			t.apparent += apparent
 		}
-	})
+	}, rec)
 	if jvmFile != "" {
 		t.libjvmDir = jvmFile[:strings.LastIndexByte(jvmFile, '/')]
 	}
