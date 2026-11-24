@@ -26,6 +26,25 @@ Call graph:
           100 work  (in App) + 3  [0x3]
 `
 
+// newTestService is NewService whose jobs and sweep are joined, bounded, when
+// the test ends. A test whose fake ignores cancellation must release it
+// before then.
+func newTestService(t *testing.T, opts Options) *Service {
+	t.Helper()
+	s := NewService(opts)
+	t.Cleanup(func() { s.Close(5 * time.Second) })
+	return s
+}
+
+// rpcCtx bounds a wire call, so a handler that never answers fails the test
+// instead of hanging it.
+func rpcCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // serve registers s on a real daemon socket and returns a client.
 func serve(t *testing.T, s *Service) *daemonclient.Client {
 	t.Helper()
@@ -128,7 +147,7 @@ func waitDone(t *testing.T, s *Service, id string) Job {
 }
 
 func TestInvalidParamsRejected(t *testing.T) {
-	c := serve(t, NewService(Options{OS: hostos.Darwin, SampleCapture: fixedSample}))
+	c := serve(t, newTestService(t, Options{OS: hostos.Darwin, SampleCapture: fixedSample}))
 	for _, tc := range []struct{ name, method, params string }{
 		{"start no kind", MethodStart, `{}`},
 		{"start null", MethodStart, `null`},
@@ -160,7 +179,7 @@ func TestInvalidParamsRejected(t *testing.T) {
 		{"cancel wrong type", MethodCancel, `{"id":7}`},
 		{"list wrong type", MethodList, `[1]`},
 	} {
-		err := c.Call(context.Background(), tc.method, json.RawMessage(tc.params), nil)
+		err := c.Call(rpcCtx(t), tc.method, json.RawMessage(tc.params), nil)
 		var rpcErr *daemonclient.RPCError
 		if !errors.As(err, &rpcErr) || rpcErr.Code != daemon.CodeInvalidParams {
 			t.Errorf("%s: err = %v, want invalid params", tc.name, err)
@@ -169,7 +188,7 @@ func TestInvalidParamsRejected(t *testing.T) {
 }
 
 func TestUnsupportedOffDarwinStartsNothing(t *testing.T) {
-	s := NewService(Options{OS: hostos.Linux, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) {
+	s := newTestService(t, Options{OS: hostos.Linux, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) {
 		t.Error("capture ran off macOS")
 		return process.SampleResult{}, nil
 	}})
@@ -179,7 +198,7 @@ func TestUnsupportedOffDarwinStartsNothing(t *testing.T) {
 		KindSpindump:   {Kind: KindSpindump, Input: "/r.txt"},
 		KindFlamegraph: {Kind: KindFlamegraph, PID: 1, Out: "/g.svg"},
 	} {
-		err := c.Call(context.Background(), MethodStart, params, nil)
+		err := c.Call(rpcCtx(t), MethodStart, params, nil)
 		var rpcErr *daemonclient.RPCError
 		if !errors.As(err, &rpcErr) || rpcErr.Code != daemon.CodeInternalError {
 			t.Fatalf("%s: err = %v", kind, err)
@@ -193,14 +212,14 @@ func TestUnsupportedOffDarwinStartsNothing(t *testing.T) {
 		}
 	}
 	var list JobList
-	if err := c.Call(context.Background(), MethodList, nil, &list); err != nil || len(list.Jobs) != 0 {
+	if err := c.Call(rpcCtx(t), MethodList, nil, &list); err != nil || len(list.Jobs) != 0 {
 		t.Fatalf("list = %+v, %v; want no jobs", list, err)
 	}
 }
 
 func TestSampleJobLifecycle(t *testing.T) {
 	var got process.SampleOptions
-	s := NewService(Options{OS: hostos.Darwin, SampleCapture: func(ctx context.Context, o process.SampleOptions) (process.SampleResult, error) {
+	s := newTestService(t, Options{OS: hostos.Darwin, SampleCapture: func(ctx context.Context, o process.SampleOptions) (process.SampleResult, error) {
 		got = o
 		return fixedSample(ctx, o)
 	}})
@@ -232,7 +251,7 @@ func TestSampleJobLifecycle(t *testing.T) {
 
 func TestResultWhileWorkingAndCancel(t *testing.T) {
 	g := newGate()
-	s := NewService(Options{OS: hostos.Darwin, SampleCapture: g.sample})
+	s := newTestService(t, Options{OS: hostos.Darwin, SampleCapture: g.sample})
 	v, err := call(t, s, start, StartParams{Kind: KindSample, PID: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +282,7 @@ func TestResultWhileWorkingAndCancel(t *testing.T) {
 
 func TestJobDeadlineFailsJob(t *testing.T) {
 	g := newGate()
-	s := NewService(Options{OS: hostos.Darwin, Slack: 20 * time.Millisecond, FlamegraphCapture: func(ctx context.Context, _, _ int) (string, error) {
+	s := newTestService(t, Options{OS: hostos.Darwin, Slack: 20 * time.Millisecond, FlamegraphCapture: func(ctx context.Context, _, _ int) (string, error) {
 		return "", g.wait(ctx)
 	}})
 	v, err := call(t, s, start, StartParams{Kind: KindFlamegraph, PID: 1, DurationMS: 1000, Out: filepath.Join(t.TempDir(), "g.svg")})
@@ -281,7 +300,7 @@ func TestJobDeadlineFailsJob(t *testing.T) {
 }
 
 func TestFailedJobCarriesCLIError(t *testing.T) {
-	s := NewService(Options{OS: hostos.Darwin, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) {
+	s := newTestService(t, Options{OS: hostos.Darwin, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) {
 		return process.SampleResult{}, errors.New("sample: no such process")
 	}})
 	v, err := call(t, s, start, StartParams{Kind: KindSample, PID: 9})
@@ -300,7 +319,7 @@ func TestFailedJobCarriesCLIError(t *testing.T) {
 
 func TestMaxRunningBoundsJobs(t *testing.T) {
 	g := newGate()
-	s := NewService(Options{OS: hostos.Darwin, MaxRunning: 1, SampleCapture: g.sample})
+	s := newTestService(t, Options{OS: hostos.Darwin, MaxRunning: 1, SampleCapture: g.sample})
 	v, err := call(t, s, start, StartParams{Kind: KindSample, PID: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +352,7 @@ func TestFinishedJobsExpireAndAreCapped(t *testing.T) {
 	now := time.Now().UTC()
 	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
 	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
-	s := NewService(Options{OS: hostos.Darwin, Now: clock, MaxFinished: 2, ResultTTL: time.Minute, SampleCapture: fixedSample})
+	s := newTestService(t, Options{OS: hostos.Darwin, Now: clock, MaxFinished: 2, ResultTTL: time.Minute, SampleCapture: fixedSample})
 	var ids []string
 	for i := 0; i < 3; i++ {
 		v, err := call(t, s, start, StartParams{Kind: KindSample, PID: 1})
@@ -361,12 +380,12 @@ func TestFinishedJobsExpireAndAreCapped(t *testing.T) {
 }
 
 func TestPanicAndOversizedResultFailJob(t *testing.T) {
-	s := NewService(Options{OS: hostos.Darwin, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) { panic("boom") }})
+	s := newTestService(t, Options{OS: hostos.Darwin, SampleCapture: func(context.Context, process.SampleOptions) (process.SampleResult, error) { panic("boom") }})
 	v, _ := call(t, s, start, StartParams{Kind: KindSample, PID: 1})
 	if rec := waitDone(t, s, v.(Job).ID); rec.Status != StatusFailed || !strings.Contains(rec.Error, "panicked: boom") {
 		t.Fatalf("panic record = %+v", rec)
 	}
-	s = NewService(Options{OS: hostos.Darwin, MaxResultBytes: 10, SampleCapture: fixedSample})
+	s = newTestService(t, Options{OS: hostos.Darwin, MaxResultBytes: 10, SampleCapture: fixedSample})
 	v, _ = call(t, s, start, StartParams{Kind: KindSample, PID: 1})
 	if rec := waitDone(t, s, v.(Job).ID); rec.Status != StatusFailed || !strings.Contains(rec.Error, "over the 10-byte limit") {
 		t.Fatalf("oversized record = %+v", rec)
@@ -375,7 +394,7 @@ func TestPanicAndOversizedResultFailJob(t *testing.T) {
 
 func TestCloseCancelsJobs(t *testing.T) {
 	g := newGate()
-	s := NewService(Options{OS: hostos.Darwin, SampleCapture: g.sample})
+	s := newTestService(t, Options{OS: hostos.Darwin, SampleCapture: g.sample})
 	v, err := call(t, s, start, StartParams{Kind: KindSample, PID: 1})
 	if err != nil {
 		t.Fatal(err)

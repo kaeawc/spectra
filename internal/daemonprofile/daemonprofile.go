@@ -87,6 +87,10 @@ type Options struct {
 	MaxRunning, MaxFinished, MaxResultBytes int
 	// MaxInputBytes caps an input report.
 	MaxInputBytes int64
+	// CreatePerm is the mode of a newly created flamegraph out; the default
+	// is 0644 less the process umask, as the CLI creates it. A replaced out
+	// keeps its own mode.
+	CreatePerm os.FileMode
 	// SweepInterval is how often expired results are released.
 	ResultTTL, Slack, PollInterval, SweepInterval time.Duration
 }
@@ -101,7 +105,11 @@ type Service struct {
 	mu     sync.Mutex
 	jobs   map[string]*job
 	active int // goroutines still running a capture, cancelled or not
-	closed bool
+
+	// beforeCommit, set only by tests before any job starts, runs just
+	// before a worker takes mu to record its terminal status.
+	beforeCommit func()
+	closed       bool
 }
 
 // NewService fills defaults into opts.
@@ -120,6 +128,9 @@ func NewService(opts Options) *Service {
 	}
 	if opts.MaxInputBytes <= 0 {
 		opts.MaxInputBytes = DefaultMaxInputBytes
+	}
+	if opts.CreatePerm == 0 {
+		opts.CreatePerm = umaskCreatePerm()
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -248,9 +259,12 @@ type job struct {
 	rec    Job
 	cancel context.CancelFunc
 	result json.RawMessage
-	// published is set, under mu, once a flamegraph's SVG is in place at
-	// out; from then on the job can no longer be cancelled or time out.
-	published bool
+	// reserved is set, under mu, once the job has claimed publication of
+	// its SVG; from then on it can no longer be cancelled or time out.
+	reserved bool
+	// staged is the private staging file of a flamegraph SVG not yet moved
+	// to out. Only the worker touches staged and out.
+	staged, out string
 }
 
 func (s *Service) startRPC(ctx context.Context, req *daemon.Request) (any, error) {
@@ -355,46 +369,121 @@ func (s *Service) planFlamegraph(p StartParams) (runFunc, time.Duration, error) 
 		return nil, 0, err
 	}
 	return func(ctx context.Context, j *job) (any, error) {
-		return nativeprofile.Flamegraph(ctx, nativeprofile.FlamegraphOptions{
+		rep, err := nativeprofile.Flamegraph(ctx, nativeprofile.FlamegraphOptions{
 			Input: p.Input, ReadFile: s.readInput,
 			PID: p.PID, DurationSec: int(d / time.Second), Capture: s.opts.FlamegraphCapture,
 			Out: p.Out,
-			WriteFile: func(path string, data []byte, perm os.FileMode) error {
-				return s.publish(ctx, j, path, data, perm)
-			},
+			// The SVG is only staged here; run publishes it once the
+			// result has been encoded within its cap.
+			WriteFile: func(path string, data []byte, _ os.FileMode) error { return s.stage(j, path, data) },
 		})
+		if err != nil {
+			return nil, err
+		}
+		if n := minFlamegraphJSON(rep); n > s.opts.MaxResultBytes {
+			return nil, fmt.Errorf("profile %s: result is at least %d bytes, over the %d-byte limit", KindFlamegraph, n, s.opts.MaxResultBytes)
+		}
+		return rep, nil
 	}, d, nil
 }
 
-// publish stages the SVG next to path and renames it into place only while
-// j is still working and inside its deadline, deciding under mu so a
-// concurrent profile.cancel either prevents the write or is refused. A
-// write that loses leaves path untouched.
-func (s *Service) publish(ctx context.Context, j *job, path string, data []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+// minFlamegraphJSON is a lower bound on the encoded size of r, cheap to
+// compute, so a report that cannot fit the result cap is refused before
+// json.Marshal expands every shared frame name.
+func minFlamegraphJSON(r nativeprofile.FlamegraphReport) int {
+	n := len(r.SVG)
+	for _, st := range r.Stacks {
+		n += len(`{"frames":[],"count":0}`)
+		for _, f := range st.Frames {
+			n += len(f) + len(`"",`)
+		}
+		for _, d := range st.FrameDetails {
+			for _, v := range []string{d.Image, d.ImagePath, d.ImageUUID, d.Arch, d.ImageBase, d.ImageOffset, d.Address} {
+				if v != "" {
+					n += len(v) + len(`"":"",`)
+				}
+			}
+		}
+	}
+	return n
+}
+
+// stagePattern names the private staging file in the destination
+// directory; it is short so it fits wherever out's own name does.
+const stagePattern = ".spectra-svg-*"
+
+// stage writes the SVG to a private (0600) file next to path. Only the
+// job's worker touches j.staged and j.out.
+func (s *Service) stage(j *job, path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), stagePattern)
 	if err != nil {
 		return err
 	}
-	staged := tmp.Name()
-	defer func() { _ = os.Remove(staged) }() // a no-op once renamed
+	j.staged, j.out = tmp.Name(), path
 	_, werr := tmp.Write(data)
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr, os.Chmod(staged, perm)); err != nil {
-		return err
+	return errors.Join(werr, tmp.Close())
+}
+
+// discardStaged removes a staged SVG that was not published.
+func discardStaged(j *job) {
+	if j.staged != "" {
+		_ = os.Remove(j.staged)
+		j.staged = ""
 	}
+}
+
+// errPublishLost reports that cancellation or the deadline won the race to
+// publish; run then records the job as cancelled or timed out.
+var errPublishLost = errors.New("profile: SVG not published")
+
+// publish reserves publication under mu (only while j is still working and
+// inside its deadline, so a concurrent profile.cancel either prevents it or
+// is refused) and then moves the staged SVG to out outside the lock. A
+// replaced out keeps its mode; a new one gets CreatePerm, as the CLI's
+// write honours the umask. A failed move fails the job.
+func (s *Service) publish(ctx context.Context, j *job) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if j.rec.Status != StatusWorking {
-		return context.Canceled
+	if j.rec.Status != StatusWorking || ctx.Err() != nil {
+		s.mu.Unlock()
+		return errPublishLost
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	j.reserved = true
+	s.mu.Unlock()
+	perm := s.opts.CreatePerm
+	if fi, err := os.Stat(j.out); err == nil {
+		perm = fi.Mode().Perm()
 	}
-	if err := os.Rename(staged, path); err != nil {
-		return err
+	if err := os.Chmod(j.staged, perm); err != nil {
+		return fmt.Errorf("flamegraph: write %s: %w", j.out, err)
 	}
-	j.published = true
+	if err := os.Rename(j.staged, j.out); err != nil {
+		return fmt.Errorf("flamegraph: write %s: %w", j.out, err)
+	}
+	j.staged = ""
 	return nil
+}
+
+// umaskCreatePerm is 0644 less the process umask, read by creating a probe
+// file rather than with umask(2), which would briefly change it for every
+// goroutine.
+func umaskCreatePerm() os.FileMode {
+	const want = 0o644
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return want &^ 0o022
+	}
+	p := filepath.Join(os.TempDir(), ".spectra-umask-"+hex.EncodeToString(b[:]))
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o777) // #nosec G302 G304 -- probe, removed at once
+	if err != nil {
+		return want &^ 0o022
+	}
+	defer os.Remove(p)
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return want &^ 0o022
+	}
+	return want &^ (0o777 &^ fi.Mode().Perm())
 }
 
 func (s *Service) readInput(path string) ([]byte, error) {
@@ -444,12 +533,9 @@ func (s *Service) captureOrInput(p StartParams, def time.Duration) (time.Duratio
 	case !filepath.IsAbs(p.Input):
 		return 0, daemon.InvalidParams("input %q must be absolute", p.Input)
 	}
-	// A missing file fails the job with the CLI's read error; anything that
-	// is there but not a regular file (a FIFO could block the read) is
-	// refused before a job starts.
-	if fi, err := os.Stat(p.Input); err == nil && !fi.Mode().IsRegular() {
-		return 0, daemon.InvalidParams("input %q is not a regular file", p.Input)
-	}
+	// The file itself is only touched by the bounded worker, so a hung mount
+	// cannot stall profile.start; a missing or non-regular input fails the
+	// job (ReadInputFile checks the opened descriptor).
 	return 0, nil
 }
 
@@ -498,6 +584,7 @@ func (s *Service) start(p StartParams, capture time.Duration, run runFunc) (Job,
 func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runFunc) {
 	defer s.wg.Done()
 	defer j.cancel()
+	defer discardStaged(j)
 	var (
 		v   any
 		err error
@@ -510,12 +597,9 @@ func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runF
 		}()
 		v, err = run(ctx, j)
 	}()
-	var raw json.RawMessage
-	if err == nil {
-		raw, err = json.Marshal(v)
-	}
-	if err == nil && len(raw) > s.opts.MaxResultBytes {
-		err = fmt.Errorf("profile %s: result is %d bytes, over the %d-byte limit", j.rec.Kind, len(raw), s.opts.MaxResultBytes)
+	raw, err := s.encode(ctx, j, v, err)
+	if s.beforeCommit != nil {
+		s.beforeCommit()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -525,11 +609,12 @@ func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runF
 	}
 	status, msg := StatusCompleted, ""
 	// ctx is read once, under mu: a deadline that passed while this worker
-	// waited for the lock is still a timeout. A published SVG is final.
+	// waited for the lock is still a timeout. A reserved publication is
+	// final: its outcome is err.
 	switch ctxErr := ctx.Err(); {
-	case !j.published && errors.Is(ctxErr, context.DeadlineExceeded):
+	case !j.reserved && errors.Is(ctxErr, context.DeadlineExceeded):
 		status, msg = StatusFailed, fmt.Sprintf("profile %s: timed out after %s: %v", j.rec.Kind, limit, ctxErr)
-	case !j.published && ctxErr != nil:
+	case !j.reserved && ctxErr != nil:
 		status = StatusCancelled
 	case err != nil:
 		status, msg = StatusFailed, err.Error()
@@ -537,6 +622,27 @@ func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runF
 		j.result = raw
 	}
 	s.finish(j, status, msg)
+}
+
+// encode turns a successful result into JSON within the result cap and only
+// then publishes a staged SVG, so a job that fails never replaces out.
+func (s *Service) encode(ctx context.Context, j *job, v any, err error) (json.RawMessage, error) {
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > s.opts.MaxResultBytes {
+		return nil, fmt.Errorf("profile %s: result is %d bytes, over the %d-byte limit", j.rec.Kind, len(raw), s.opts.MaxResultBytes)
+	}
+	if j.staged != "" {
+		if err := s.publish(ctx, j); err != nil {
+			return nil, err
+		}
+	}
+	return raw, nil
 }
 
 // finish marks j done and enforces MaxFinished; the caller holds mu.
@@ -625,9 +731,9 @@ func (s *Service) cancelRPC(_ context.Context, req *daemon.Request) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	// Once the SVG is published the job is about to complete; reporting it
-	// cancelled would misdescribe the file now at out.
-	if j.rec.Status == StatusWorking && !j.published {
+	// Once the job has reserved publication its SVG is being moved to out;
+	// reporting it cancelled would misdescribe that file.
+	if j.rec.Status == StatusWorking && !j.reserved {
 		j.cancel()
 		s.finish(j, StatusCancelled, "")
 	}

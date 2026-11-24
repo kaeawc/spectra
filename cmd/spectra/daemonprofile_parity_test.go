@@ -47,11 +47,20 @@ func profileClient(t *testing.T, opts daemonprofile.Options) *daemonclient.Clien
 	return nil
 }
 
+// profileCtx bounds a wire call, so a handler that never answers fails the
+// test instead of hanging it.
+func profileCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // profileRun starts a job, polls it to the end and returns its result
 // indented as the CLI's --json encoder writes it, or the result error.
 func profileRun(t *testing.T, c *daemonclient.Client, params daemonprofile.StartParams) (string, error) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := profileCtx(t)
 	var rec daemonprofile.Job
 	if err := c.Call(ctx, daemonprofile.MethodStart, params, &rec); err != nil {
 		t.Fatalf("start %+v: %v", params, err)
@@ -252,7 +261,7 @@ func TestDaemonProfileMatchesCLIUnsupported(t *testing.T) {
 		if !gated || code != 1 {
 			t.Fatalf("%s not gated", kind)
 		}
-		err := c.Call(context.Background(), daemonprofile.MethodStart, params, nil)
+		err := c.Call(profileCtx(t), daemonprofile.MethodStart, params, nil)
 		var rpcErr *daemonclient.RPCError
 		if !errors.As(err, &rpcErr) || rpcErr.Code != daemon.CodeInternalError {
 			t.Fatalf("%s: err = %v", kind, err)
