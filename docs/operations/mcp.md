@@ -314,7 +314,7 @@ absolute because the server's working directory is arbitrary.
 
 | Tool | Parameters | Result |
 | --- | --- | --- |
-| `load` | `roots`, `max_load_per_cpu` (default 1.5), `min_free_gb` (default 8), `backoff_free_gb` (default 4), `top` (1–50, default 5) | `spectra load --json`: verdict, reason, exit_code, cause, top tables, families, dirs, devices |
+| `load` | `roots`, `max_load_per_cpu` (default 1.5), `min_free_gb` (default 8), `backoff_free_gb` (default 4), `top` (1–50, default 5) | `spectra load --json`: verdict, reason, exit_code, cause, top tables, families, dirs, devices; on Linux under a cgroup limit, `cgroup`, `effective_cpus`, `effective_available_bytes` |
 | `orphans` | `roots` (required), `min_age` (default `"1m"`), `no_daemon` | `spectra orphans --json`: groups of candidates and by-design daemons, totals, limitations |
 | `lineage` | `pid` (required) | `spectra lineage --json`: ancestors, descendant tree, subtree totals |
 | `owner` | exactly one of `target` (`:PORT`, `tcp:PORT`, `udp:PORT`, an absolute path, or a pid) or `under` (directories) | `spectra owner --json`, or `spectra owner --under --json` |

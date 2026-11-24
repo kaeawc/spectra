@@ -95,7 +95,7 @@ func reportToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{
 			Name:        "load",
-			Description: "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. Ask: \"Should I start another lane?\"",
+			Description: "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. On Linux under a cgroup CPU or memory limit, also cgroup (quota, limit, used/available, PSI) and effective_cpus / effective_available_bytes (min of host and cgroup); the verdict still uses host-wide figures. Ask: \"Should I start another lane?\"",
 			InputSchema: objectSchema(map[string]interface{}{
 				"roots":            arrayStringProp("Absolute directories holding worktrees; cause is \"roots\" when load leads there."),
 				"max_load_per_cpu": numberProp("Hold when 1-minute load is at or above this times the CPU count (default 1.5)."),

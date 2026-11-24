@@ -1658,7 +1658,7 @@
       }
     },
     {
-      "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. Ask: \"Should I start another lane?\"",
+      "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. On Linux under a cgroup CPU or memory limit, also cgroup (quota, limit, used/available, PSI) and effective_cpus / effective_available_bytes (min of host and cgroup); the verdict still uses host-wide figures. Ask: \"Should I start another lane?\"",
       "inputSchema": {
         "properties": {
           "backoff_free_gb": {
@@ -1731,6 +1731,64 @@
               "cpu_pct"
             ],
             "type": "object"
+          },
+          "cgroup": {
+            "additionalProperties": false,
+            "properties": {
+              "cpu_pressure": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "cpu_quota_cpus": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "memory_available_bytes": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_limit_bytes": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_pressure": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "memory_used_bytes": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "version",
+              "path"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "cpu_basis": {
             "type": "string"
@@ -1886,6 +1944,19 @@
             "type": [
               "null",
               "array"
+            ]
+          },
+          "effective_available_bytes": {
+            "minimum": 0,
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "effective_cpus": {
+            "type": [
+              "null",
+              "number"
             ]
           },
           "elapsed_ms": {
