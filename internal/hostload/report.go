@@ -85,8 +85,12 @@ type ReportDeps struct {
 	Procs func(ctx context.Context) []process.Info
 	FS    FS
 	Now   func() time.Time
-	// Sleep waits between the two CPU readings; nil disables sampling.
+	// Sleep waits between the two CPU readings; nil disables sampling
+	// unless Baseline supplies the first reading.
 	Sleep func(ctx context.Context, d time.Duration)
+	// Baseline supplies an earlier CPU reading (a Tracker's) so sampling
+	// need not sleep; nil always sleeps.
+	Baseline func(window time.Duration) (Baseline, bool)
 	// Abs makes roots absolute (cwds are absolute); nil leaves them as typed.
 	Abs func(string) (string, error)
 	// EvalSymlinks resolves roots; nil means no resolution.
@@ -209,7 +213,7 @@ func BuildReport(ctx context.Context, opts ReportOptions, deps ReportDeps) (Repo
 	}
 	dec := Decide(reading, Thresholds{MaxLoadPerCPU: opts.MaxLoadPerCPU, MinFreeGB: opts.MinFreeGB, BackoffFreeGB: opts.BackoffFreeGB})
 
-	sampler := Sampler{Host: deps.Host, Collect: deps.Procs, Now: deps.Now, Sleep: deps.Sleep}
+	sampler := Sampler{Host: deps.Host, Collect: deps.Procs, Now: deps.Now, Sleep: deps.Sleep, Baseline: deps.Baseline}
 	procs, window, basis := sampler.Sample(ctx, opts.Sample)
 	pids := make([]int, len(procs))
 	for i, p := range procs {
