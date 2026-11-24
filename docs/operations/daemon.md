@@ -731,3 +731,71 @@ Takes `binary` (required, an absolute Mach-O or `.dSYM` path, the CLI's `-o`),
 `atos`), so no parameter can reach `atos` as a flag. Capped at 1 minute.
 macOS-only, as is the CLI: off macOS it fails (-32603) with the CLI's message,
 and the error's `data` is the object `spectra symbolicate --json` prints there.
+
+## Profiling jobs
+
+`spectra sample`, `spindump` and `flamegraph` capture for seconds, so the
+daemon runs them as background jobs instead of holding a call open: start a
+job, poll it, then read the result. The result is exactly the JSON the
+matching CLI command prints with `--json` for the same flags, because the CLI
+and the daemon build it with the same function. Polling (rather than progress
+notifications on one long call) lets a client reconnect or poll from another
+connection, and keeps every call short.
+
+- `profile.start` takes `kind` (`sample`, `spindump` or `flamegraph`) and
+  that kind's parameters, checks them, and returns the job record at once.
+- `profile.status` `{id}` returns the record: `id`, `kind`, `pid` or `input`,
+  `status` (`working`, `completed`, `failed`, `cancelled`), `error` (a failed
+  job's error, the text the CLI prints on stderr), `created_at`,
+  `updated_at`, `deadline_at`, `expires_at` (once finished),
+  `poll_interval_ms` (a suggested poll interval, 1000) and
+  `result_available`.
+- `profile.result` `{id}` returns a completed job's result. For a job that is
+  still working, failed, or was cancelled, it fails (-32603) with the job's
+  error (or `still working` / `was cancelled`), and the error's `data` is the
+  job record.
+- `profile.cancel` `{id}` cancels a working job: its capture's child process
+  (`sample`, `spindump`) is killed and the job ends `cancelled`. On a finished
+  job it does nothing. It returns the record.
+- `profile.list` returns `{"jobs": [...]}`, every job still held, newest
+  first.
+
+Jobs are bounded:
+
+- At most 2 captures run at once. `profile.start` beyond that fails until one
+  ends (a cancelled capture holds its slot until its child process has
+  exited). There is no queue.
+- Each job has a deadline of its capture duration plus 30 seconds. A job
+  that passes it fails with `profile <kind>: timed out after <limit>`.
+- A finished job, with its result, is kept for 10 minutes, and only the 16
+  most recently finished are kept. After that, its `id` is an
+  invalid-params error (-32602), as is an `id` the daemon never issued. A
+  result over 8 MiB fails the job.
+- Jobs are not tied to the connection that started them. Any client of the
+  daemon (the daemon only accepts its own user) can poll or cancel by `id`.
+  Stopping the daemon cancels every job.
+
+Parameters (durations are milliseconds, a whole number of seconds up to
+60000, as the CLI's `--duration`; paths must be absolute):
+
+- `sample`: `pid` (required), `duration_ms` (default 1000), `interval_ms`
+  (default 10, at most 1000). The result is the `spectra sample --json`
+  object. The daemon does not cache the raw report or record an artifact
+  (the CLI's default without `--no-cache` does both).
+- `spindump`: `pid` with `duration_ms` (default 2000), or `input`, an
+  existing spindump report to parse. The result is the
+  `spectra spindump --json` object. The daemon runs as the caller's user,
+  without `sudo`: a live capture needs root, so for most daemons it fails
+  with the CLI's `spindump requires root` error and only `input` succeeds.
+  `--out` is not served.
+- `flamegraph`: `pid` with `duration_ms` (default 2000), or `input`, an
+  existing sample report to fold, plus `out` (required), where the SVG is
+  written as the caller's user. The result is the
+  `spectra flamegraph --json` object (`svg`, `stack_count`, `stacks`). The
+  SVG at `out` is the only file a profiling job writes.
+
+The three are macOS-only, as are the CLI commands. Off macOS `profile.start`
+fails at once (-32603) without starting a job, and the error's `data` is the
+object `spectra <kind> --json` prints there: `{"command", "error":
+"unsupported_platform", "feature", "os", "message", "hint"}`. Bad parameters
+are an invalid-params error (-32602).
