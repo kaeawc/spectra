@@ -50,6 +50,11 @@ const (
 	// outliving the client.
 	DefaultPowerTimeout      = 15 * time.Second
 	DefaultWhatswrongTimeout = 15 * time.Second
+	// DefaultAnswerWithin is how long a call waits on a collection before
+	// answering with the last good reading, marked stale, when it has one.
+	// Under heavy load (and the daemon's background priority) a collection
+	// can take most of its timeout; a monitor wants an answer now.
+	DefaultAnswerWithin = 3 * time.Second
 )
 
 // CollectFunc collects one reply payload. It should honor ctx so a timed-out
@@ -73,6 +78,8 @@ type Options struct {
 	// TTLs and stale windows override the per-method defaults when positive.
 	MemoryTTL, ThermalTTL, PowerTTL, NetworkTTL, WhatswrongTTL time.Duration
 	PowerStale, WhatswrongStale                                time.Duration
+	// AnswerWithin overrides DefaultAnswerWithin when positive.
+	AnswerWithin time.Duration
 }
 
 // Service owns the per-method caches.
@@ -99,7 +106,8 @@ func NewService(opts Options) *Service {
 		return def
 	}
 	mk := func(name string, f CollectFunc, t, stale, timeout time.Duration) *cached {
-		return &cached{name: name, collect: f, ttl: t, stale: stale, timeout: ttl(opts.Timeout, timeout), clock: clk}
+		return &cached{name: name, collect: f, ttl: t, stale: stale, timeout: ttl(opts.Timeout, timeout),
+			answerWithin: ttl(opts.AnswerWithin, DefaultAnswerWithin), clock: clk}
 	}
 	return &Service{methods: map[string]*cached{
 		MethodMemory:  mk(MethodMemory, pick(opts.Memory, DefaultMemory), ttl(opts.MemoryTTL, DefaultMemoryTTL), 0, DefaultTimeout),
@@ -205,9 +213,10 @@ type cached struct {
 	ttl     time.Duration
 	// stale is how long past ttl a value is still served while a background
 	// refresh runs; zero disables stale-while-revalidate.
-	stale   time.Duration
-	timeout time.Duration
-	clock   clock.Clock
+	stale        time.Duration
+	timeout      time.Duration
+	answerWithin time.Duration
+	clock        clock.Clock
 
 	mu       sync.Mutex
 	value    any
@@ -226,7 +235,10 @@ type call struct {
 // window past it returns the old value at once while starting a background
 // refresh. Concurrent callers share one collection detached from any single
 // caller's cancellation but bounded by the timeout; refresh skips the cache
-// yet joins a collection in flight.
+// yet joins a collection in flight. When a collection fails, or (without
+// refresh) runs past answerWithin, a caller holding an older good value gets
+// that value marked stale instead of an error; the collection carries on and
+// refills the cache for the next call.
 func (c *cached) get(ctx context.Context, refresh bool) (any, error) {
 	c.mu.Lock()
 	if !refresh && c.valid {
@@ -241,13 +253,47 @@ func (c *cached) get(ctx context.Context, refresh bool) (any, error) {
 		}
 	}
 	cl := c.startLocked(ctx)
+	old, oldAt, hasOld := c.value, c.at, c.valid
 	c.mu.Unlock()
+	var answer <-chan time.Time
+	if hasOld && !refresh {
+		t := time.NewTimer(c.answerWithin)
+		defer t.Stop()
+		answer = t.C
+	}
 	select {
 	case <-cl.done:
+		if cl.err != nil && hasOld {
+			return markStale(old, oldAt, cl.err.Error())
+		}
 		return cl.value, cl.err
+	case <-answer:
+		return markStale(old, oldAt, fmt.Sprintf("collection still running after %s", c.answerWithin))
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%s: %w", c.name, ctx.Err())
 	}
+}
+
+// markStale adds stale, stale_reason and (unless the payload has its own)
+// sampled_at to a cached object payload, so a caller can tell an old
+// reading from a fresh one without the reply's shape changing otherwise.
+func markStale(v any, at time.Time, reason string) (any, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("stale reading: %w", err)
+	}
+	obj, ok := jsonObject(data)
+	if !ok {
+		return v, nil
+	}
+	obj["stale"] = json.RawMessage("true")
+	r, _ := json.Marshal(reason)
+	obj["stale_reason"] = r
+	if _, ok := obj["sampled_at"]; !ok {
+		t, _ := json.Marshal(at.UTC())
+		obj["sampled_at"] = t
+	}
+	return obj, nil
 }
 
 // startLocked returns the collection in flight, starting one if none is.
@@ -321,4 +367,10 @@ func (c *cached) rpc(ctx context.Context, req *daemon.Request) (any, error) {
 		}()
 	}
 	return c.get(ctx, p.Refresh)
+}
+
+func jsonObject(data []byte) (map[string]json.RawMessage, bool) {
+	var obj map[string]json.RawMessage
+	err := json.Unmarshal(data, &obj)
+	return obj, err == nil && obj != nil
 }
