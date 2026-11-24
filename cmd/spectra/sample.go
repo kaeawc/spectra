@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/artifact"
+	"github.com/kaeawc/spectra/internal/binaryimages"
 	"github.com/kaeawc/spectra/internal/cache"
 	"github.com/kaeawc/spectra/internal/flamegraph"
 	"github.com/kaeawc/spectra/internal/hangcapture"
@@ -38,9 +39,10 @@ func (s sampleCacheStore) PutSample(_ context.Context, sample process.SampleResu
 const sampleTopStacks = 50
 
 type sampleStack struct {
-	Frames  []string `json:"frames"`
-	Count   int      `json:"count"`
-	Percent float64  `json:"percent"`
+	Frames       []string                `json:"frames"`
+	Count        int                     `json:"count"`
+	Percent      float64                 `json:"percent"`
+	FrameDetails []binaryimages.Location `json:"frame_details,omitempty"`
 }
 
 // sampleReport is the structured form of one sample capture. The raw text
@@ -89,7 +91,7 @@ func buildSampleReport(res process.SampleResult) sampleReport {
 		if total > 0 {
 			pct = float64(int(float64(f.Count)/float64(total)*10000+0.5)) / 100
 		}
-		rep.Stacks = append(rep.Stacks, sampleStack{Frames: f.Frames, Count: f.Count, Percent: pct})
+		rep.Stacks = append(rep.Stacks, sampleStack{Frames: f.Frames, Count: f.Count, Percent: pct, FrameDetails: f.FrameDetails})
 	}
 	return rep
 }

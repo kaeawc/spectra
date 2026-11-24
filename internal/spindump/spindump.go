@@ -9,12 +9,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/binaryimages"
 )
 
-// Frame is one symbol and how many samples landed on it.
+// Frame is one symbol and how many samples landed on it. When the process's
+// Binary Images section places the frame's address in a known image, the
+// embedded Location identifies the image and the offset into it.
 type Frame struct {
 	Symbol  string `json:"symbol"`
 	Samples int    `json:"samples"`
+	binaryimages.Location
 }
 
 // ProcessReport summarizes one process in a spindump report.
@@ -44,47 +49,115 @@ var (
 
 // Parse turns a raw spindump report into a summary.
 func Parse(report string) Report {
-	var rep Report
-	var cur *ProcessReport
-	// samplesBySymbol accumulates the max sample count seen per symbol for the
-	// current process.
-	var samplesBySymbol map[string]int
-
-	flush := func() {
-		if cur != nil {
-			cur.Heaviest = topFrames(samplesBySymbol, defaultTopFrames)
-			rep.Processes = append(rep.Processes, *cur)
-		}
-	}
-
+	p := parser{}
 	for _, line := range strings.Split(report, "\n") {
-		if m := durationLine.FindStringSubmatch(line); m != nil && rep.Duration == "" {
-			rep.Duration = strings.TrimSpace(m[1])
-			continue
+		p.line(line)
+	}
+	p.flush()
+	return p.rep
+}
+
+// parser holds the state of one pass over a report. Images and the
+// architecture are per process; an Architecture line before the first
+// process is the fallback for processes that do not print their own.
+type parser struct {
+	rep        Report
+	cur        *ProcessReport
+	globalArch string
+	arch       string
+	inImages   bool
+	images     []binaryimages.Image
+	// samplesBySymbol accumulates the max sample count seen per symbol for
+	// the current process; addrBySymbol is the frame address on that line.
+	samplesBySymbol map[string]int
+	addrBySymbol    map[string]uint64
+}
+
+func (p *parser) line(line string) {
+	if m := durationLine.FindStringSubmatch(line); m != nil && p.rep.Duration == "" {
+		p.rep.Duration = strings.TrimSpace(m[1])
+		return
+	}
+	if m := processHeader.FindStringSubmatch(line); m != nil {
+		p.flush()
+		pid, _ := strconv.Atoi(m[2])
+		p.cur = &ProcessReport{Name: sanitize(strings.TrimSpace(m[1])), PID: pid}
+		p.samplesBySymbol = map[string]int{}
+		p.addrBySymbol = map[string]uint64{}
+		p.arch, p.images, p.inImages = "", nil, false
+		return
+	}
+	if arch, ok := binaryimages.HeaderArch(line); ok {
+		if p.cur == nil {
+			p.globalArch = arch
+		} else if p.arch == "" {
+			p.arch = arch
 		}
-		if m := processHeader.FindStringSubmatch(line); m != nil {
-			flush()
-			pid, _ := strconv.Atoi(m[2])
-			cur = &ProcessReport{Name: sanitize(strings.TrimSpace(m[1])), PID: pid}
-			samplesBySymbol = map[string]int{}
-			continue
+		return
+	}
+	if p.cur == nil || p.imageLine(line) {
+		return
+	}
+	if m := frameLine.FindStringSubmatch(line); m != nil {
+		p.frame(m)
+	}
+}
+
+// imageLine consumes Binary Images header and entry lines.
+func (p *parser) imageLine(line string) bool {
+	if binaryimages.IsSectionHeader(line) {
+		p.inImages = true
+		return true
+	}
+	if !p.inImages {
+		return false
+	}
+	if im, ok := binaryimages.ParseLine(line); ok {
+		p.images = append(p.images, im)
+		return true
+	}
+	if strings.TrimSpace(line) != "" {
+		p.inImages = false
+	}
+	return false
+}
+
+func (p *parser) frame(m []string) {
+	samples, _ := strconv.Atoi(m[2])
+	sym := frameSymbol(m[3])
+	if sym == "" || isThreadHeader(m[3]) {
+		return
+	}
+	if samples <= p.samplesBySymbol[sym] {
+		return
+	}
+	p.samplesBySymbol[sym] = samples
+	if addr, ok := binaryimages.FrameAddress(m[3]); ok {
+		p.addrBySymbol[sym] = addr
+	} else {
+		delete(p.addrBySymbol, sym)
+	}
+}
+
+func (p *parser) flush() {
+	if p.cur == nil {
+		return
+	}
+	p.cur.Heaviest = topFrames(p.samplesBySymbol, defaultTopFrames)
+	if len(p.images) > 0 {
+		arch := p.arch
+		if arch == "" {
+			arch = p.globalArch
 		}
-		if cur == nil {
-			continue
-		}
-		if m := frameLine.FindStringSubmatch(line); m != nil {
-			samples, _ := strconv.Atoi(m[2])
-			sym := frameSymbol(m[3])
-			if sym == "" || isThreadHeader(m[3]) {
-				continue
-			}
-			if samples > samplesBySymbol[sym] {
-				samplesBySymbol[sym] = samples
+		table := binaryimages.NewTable(p.images, arch)
+		for i, f := range p.cur.Heaviest {
+			if addr, ok := p.addrBySymbol[f.Symbol]; ok {
+				p.cur.Heaviest[i].Location, _ = table.Lookup(addr)
 			}
 		}
 	}
-	flush()
-	return rep
+	p.rep.Processes = append(p.rep.Processes, *p.cur)
+	p.cur = nil
 }
 
 // frameSymbol extracts the symbol name from a call-tree frame's text, dropping

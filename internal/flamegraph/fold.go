@@ -6,12 +6,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/binaryimages"
 )
 
 // Folded is one collapsed stack (root→leaf) and its self sample count.
+// FrameDetails is parallel to Frames and present only when the report's
+// Binary Images section placed at least one frame in a known image.
 type Folded struct {
-	Frames []string `json:"frames"`
-	Count  int      `json:"count"`
+	Frames       []string                `json:"frames"`
+	Count        int                     `json:"count"`
+	FrameDetails []binaryimages.Location `json:"frame_details,omitempty"`
 }
 
 var (
@@ -28,6 +33,7 @@ var (
 type foldNode struct {
 	indent   int
 	sym      string
+	loc      binaryimages.Location
 	count    int
 	childSum int
 }
@@ -37,21 +43,14 @@ type foldNode struct {
 func Fold(sampleOutput string) []Folded {
 	var folded []Folded
 	var stack []foldNode
+	images := binaryimages.FromReport(sampleOutput)
 
-	// path returns the symbols currently on the stack (a node's ancestors).
-	path := func() []string {
-		out := make([]string, len(stack))
-		for i, n := range stack {
-			out[i] = n.sym
-		}
-		return out
-	}
 	pop := func() {
 		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
 		if self := n.count - n.childSum; self > 0 {
-			folded = append(folded, Folded{Frames: append(path(), n.sym), Count: self})
+			folded = append(folded, foldStack(stack, self))
 		}
+		stack = stack[:len(stack)-1]
 		if len(stack) > 0 {
 			stack[len(stack)-1].childSum += n.count
 		}
@@ -79,12 +78,31 @@ func Fold(sampleOutput string) []Folded {
 		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
 			pop()
 		}
-		stack = append(stack, foldNode{indent: indent, sym: sym, count: count})
+		loc, _ := images.LookupFrame(m[3])
+		stack = append(stack, foldNode{indent: indent, sym: sym, loc: loc, count: count})
 	}
 	for len(stack) > 0 {
 		pop()
 	}
 	return folded
+}
+
+// foldStack copies the symbols (and, when any is known, the locations) of
+// stack root→leaf.
+func foldStack(stack []foldNode, count int) Folded {
+	f := Folded{Frames: make([]string, len(stack)), Count: count}
+	known := false
+	for i, n := range stack {
+		f.Frames[i] = n.sym
+		known = known || !n.loc.IsZero()
+	}
+	if known {
+		f.FrameDetails = make([]binaryimages.Location, len(stack))
+		for i, n := range stack {
+			f.FrameDetails[i] = n.loc
+		}
+	}
+	return f
 }
 
 // cleanSymbol reduces a call-graph frame's text to a bare symbol name.

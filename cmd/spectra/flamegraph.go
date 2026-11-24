@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ func runFlamegraphWithIO(args []string, stdout, stderr io.Writer, deps flamegrap
 	input := fs.String("input", "", "Fold an existing sample report file instead of capturing")
 	duration := fs.Int("duration", 2, "Capture duration in seconds")
 	out := fs.String("out", "", "Write the SVG here (default <pid>.flamegraph.svg)")
+	asJSON := fs.Bool("json", false, "After writing the SVG, print its folded stacks (with frame image details) as JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -59,7 +61,7 @@ func runFlamegraphWithIO(args []string, stdout, stderr io.Writer, deps flamegrap
 		}
 	} else {
 		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, "usage: spectra flamegraph [--duration <s>] [--out <file>] <pid>   (or --input <file>)")
+			fmt.Fprintln(stderr, "usage: spectra flamegraph [--duration <s>] [--out <file>] [--json] <pid>   (or --input <file>)")
 			return 2
 		}
 		pid, err := strconv.Atoi(fs.Arg(0))
@@ -89,8 +91,25 @@ func runFlamegraphWithIO(args []string, stdout, stderr io.Writer, deps flamegrap
 		fmt.Fprintf(stderr, "flamegraph: write %s: %v\n", outPath, err)
 		return 1
 	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(flamegraphReport{SVG: outPath, StackCount: len(folded), Stacks: folded}); err != nil {
+			fmt.Fprintf(stderr, "flamegraph: encode: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	fmt.Fprintf(stdout, "wrote %s (%d folded stacks)\n", outPath, len(folded))
 	return 0
+}
+
+// flamegraphReport is the --json shape: the SVG written and every folded
+// stack behind it.
+type flamegraphReport struct {
+	SVG        string              `json:"svg"`
+	StackCount int                 `json:"stack_count"`
+	Stacks     []flamegraph.Folded `json:"stacks"`
 }
 
 func defaultSampleCapture(ctx context.Context, pid, durationSec int) (string, error) {
