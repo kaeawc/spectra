@@ -58,6 +58,9 @@ type Options struct {
 	Runner RunnerFunc
 	// ReadTimeout bounds one per-pid read. Zero means DefaultReadTimeout.
 	ReadTimeout time.Duration
+	// CodeSources fills thread-dump code_sources; nil uses
+	// jvm.DefaultCodeSourceFinder, whose jar index cache the service keeps.
+	CodeSources func(ctx context.Context, pid int, dump jvm.ParsedThreadDump) map[string]jvm.CodeSource
 }
 
 // Service owns the jvm.list cache and the jvm.findings evaluation.
@@ -71,6 +74,7 @@ type Service struct {
 	findingsTimeout time.Duration
 	runner          RunnerFunc
 	readTimeout     time.Duration
+	codeSources     func(ctx context.Context, pid int, dump jvm.ParsedThreadDump) map[string]jvm.CodeSource
 
 	mu       sync.Mutex
 	cached   []jvm.Info
@@ -95,7 +99,10 @@ type FindingsResult struct {
 
 func NewService(opts Options) *Service {
 	s := &Service{list: opts.List, snapshot: opts.Snapshot, catalog: opts.Catalog, clock: opts.Clock, ttl: opts.TTL,
-		listTimeout: opts.ListTimeout, findingsTimeout: opts.FindingsTimeout, runner: opts.Runner, readTimeout: opts.ReadTimeout}
+		listTimeout: opts.ListTimeout, findingsTimeout: opts.FindingsTimeout, runner: opts.Runner, readTimeout: opts.ReadTimeout, codeSources: opts.CodeSources}
+	if s.codeSources == nil {
+		s.codeSources = jvm.DefaultCodeSourceFinder().Find
+	}
 	if s.runner == nil {
 		s.runner = jvm.ContextRunner
 	}

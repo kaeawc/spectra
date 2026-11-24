@@ -344,7 +344,7 @@ process start time, since they cannot change for the life of a JVM.
   number of largest classes to rank, like `--suspects`. Like the CLI, it runs
   `GC.class_histogram`, which makes the target do a full GC. `heap-histogram
   compare` reads saved files and is not served.
-- `jvm.thread_dump`: returns `{"summary": ..., "dump": ...}`. `captured_at` is
+- `jvm.thread_dump`: returns `{"summary": ..., "dump": ..., "code_sources": ...}` (`code_sources` as the CLI fills it, from the JVM's launch class path; the daemon keeps its jar index cache between calls). `captured_at` is
   the daemon's clock. The CLI's raw and `--summary` text modes have no RPC
   form. The daemon does not save the dump to the blob cache or the artifact
   manifest, as the CLI does.

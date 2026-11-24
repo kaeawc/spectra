@@ -227,3 +227,25 @@ func TestReadPanicBecomesError(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestThreadDumpCarriesCodeSources(t *testing.T) {
+	const dump = "\"main\" #1 prio=5 os_prio=31 tid=0x1 nid=0x103 runnable\n   java.lang.Thread.State: RUNNABLE\n\tat com.example.App.serve(App.java:42)\n"
+	var gotPID int
+	s := NewService(Options{
+		Runner: func(context.Context) jvm.CmdRunner {
+			return func(string, ...string) ([]byte, error) { return []byte(dump), nil }
+		},
+		CodeSources: func(_ context.Context, pid int, d jvm.ParsedThreadDump) map[string]jvm.CodeSource {
+			gotPID = pid
+			return map[string]jvm.CodeSource{"com.example.App": {Jar: "/srv/app.jar", JarEntry: "com/example/App.class"}}
+		},
+	})
+	v, err := s.threadDumpRPC(context.Background(), pidReq(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := v.(jvm.ThreadDumpReport)
+	if gotPID != 12 || rep.CodeSources["com.example.App"].Jar != "/srv/app.jar" {
+		t.Fatalf("pid=%d code_sources=%v, want the dump's classes resolved as the CLI does", gotPID, rep.CodeSources)
+	}
+}

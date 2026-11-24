@@ -115,7 +115,9 @@ func (s *Service) threadDumpRPC(ctx context.Context, req *daemon.Request) (any, 
 		if err != nil {
 			return nil, err
 		}
-		return jvm.NewThreadDumpReport(raw, s.clock.Now()), nil
+		report := jvm.NewThreadDumpReport(raw, s.clock.Now())
+		report.CodeSources = s.codeSources(ctx, p.PID, report.Dump)
+		return report, nil
 	})
 }
 
