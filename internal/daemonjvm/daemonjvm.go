@@ -53,6 +53,14 @@ type Options struct {
 	TTL             time.Duration
 	ListTimeout     time.Duration
 	FindingsTimeout time.Duration
+	// Runner runs the JDK tools behind the per-pid reads; the default,
+	// jvm.ContextRunner, kills them when the call ends.
+	Runner RunnerFunc
+	// ReadTimeout bounds one per-pid read. Zero means DefaultReadTimeout.
+	ReadTimeout time.Duration
+	// CodeSources fills thread-dump code_sources; nil uses
+	// jvm.DefaultCodeSourceFinder, whose jar index cache the service keeps.
+	CodeSources func(ctx context.Context, pid int, dump jvm.ParsedThreadDump) map[string]jvm.CodeSource
 }
 
 // Service owns the jvm.list cache and the jvm.findings evaluation.
@@ -64,6 +72,9 @@ type Service struct {
 	ttl             time.Duration
 	listTimeout     time.Duration
 	findingsTimeout time.Duration
+	runner          RunnerFunc
+	readTimeout     time.Duration
+	codeSources     func(ctx context.Context, pid int, dump jvm.ParsedThreadDump) map[string]jvm.CodeSource
 
 	mu       sync.Mutex
 	cached   []jvm.Info
@@ -88,7 +99,16 @@ type FindingsResult struct {
 
 func NewService(opts Options) *Service {
 	s := &Service{list: opts.List, snapshot: opts.Snapshot, catalog: opts.Catalog, clock: opts.Clock, ttl: opts.TTL,
-		listTimeout: opts.ListTimeout, findingsTimeout: opts.FindingsTimeout}
+		listTimeout: opts.ListTimeout, findingsTimeout: opts.FindingsTimeout, runner: opts.Runner, readTimeout: opts.ReadTimeout, codeSources: opts.CodeSources}
+	if s.codeSources == nil {
+		s.codeSources = jvm.DefaultCodeSourceFinder().Find
+	}
+	if s.runner == nil {
+		s.runner = jvm.ContextRunner
+	}
+	if s.readTimeout <= 0 {
+		s.readTimeout = DefaultReadTimeout
+	}
 	if s.list == nil {
 		s.list = DefaultList
 	}
