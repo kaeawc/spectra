@@ -31,7 +31,11 @@ func Run(ctx context.Context, q Query) (Result, error) {
 		return Result{}, err
 	}
 	args := buildArgs(q)
-	started := time.Now()
+	now := q.Now
+	if now == nil {
+		now = time.Now
+	}
+	started := now()
 	var result Result
 	var stderr []byte
 	var err error
@@ -42,7 +46,7 @@ func Run(ctx context.Context, q Query) (Result, error) {
 	} else {
 		result, stderr, err = runLogShow(ctx, args, q.MaxRows)
 	}
-	result.QueryDuration = time.Since(started)
+	result.QueryDuration = now().Sub(started)
 	result.Clock.WallClockAdjusted = bytes.Contains(stderr, []byte("Wall Clock adjustment detected"))
 	if err != nil && len(result.Entries) == 0 {
 		return result, err

@@ -211,12 +211,19 @@ func (f Finder) selfPID() int {
 	return os.Getpid()
 }
 
+// skipped reports the pids Under leaves out with their children: Spectra
+// itself and ExcludePID.
+func (f Finder) skipped() func(int) bool {
+	self := f.selfPID()
+	return func(pid int) bool { return pid == self || (f.ExcludePID > 0 && pid == f.ExcludePID) }
+}
+
 // Under lists every visible process whose working directory is one of dirs
 // or below it. Both the directories and the process cwds are compared as
 // given and with symlinks resolved; on macOS a cwd that still does not match
 // is compared by file identity, so a different letter case on a
 // case-insensitive volume matches. Spectra itself and its own children (the
-// lsof it runs) are left out. Each dir must be an absolute path to an
+// lsof it runs) are left out, and so are ExcludePID and its children. Each dir must be an absolute path to an
 // existing directory. An empty process table is an error, never "none".
 func (f Finder) Under(ctx context.Context, dirs []string) (UnderResult, error) {
 	osk := hostos.Resolve(f.OS)
@@ -264,7 +271,7 @@ func (f Finder) underHolders(entries map[int]cwdEntry, procs []process.Info, roo
 	for _, p := range procs {
 		byPID[p.PID] = p
 	}
-	self := f.selfPID()
+	skip := f.skipped()
 	m := f.NewCwdMatcher()
 	var hs, unknown []Holder
 	for pid, e := range entries {
@@ -273,7 +280,7 @@ func (f Finder) underHolders(entries map[int]cwdEntry, procs []process.Info, roo
 		if known {
 			ppid = p.PPID
 		}
-		if pid == self || ppid == self {
+		if skip(pid) || skip(ppid) {
 			continue
 		}
 		cwd := strings.TrimSuffix(e.Cwd, deletedSuffix)

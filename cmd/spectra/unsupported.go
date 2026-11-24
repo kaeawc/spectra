@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	"github.com/kaeawc/spectra/internal/hostos"
+	"github.com/kaeawc/spectra/internal/logquery"
+	"github.com/kaeawc/spectra/internal/services"
 )
 
 // darwinOnly describes a subcommand with no implementation off macOS.
@@ -24,9 +26,9 @@ var darwinOnlyCommands = map[string]darwinOnly{
 	"inspect":        {"app-bundle inspection", "app inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS"},
 	"list":           {"app-bundle inspection", "app inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS"},
 	"timemachine":    {"Time Machine", ""},
-	"services":       {"launchd services", "on Linux, use systemctl list-units"},
+	"services":       {services.Feature, services.OffDarwinHint},
 	"startup":        {"startup items", ""},
-	"logs":           {"unified log queries", "on Linux, use journalctl"},
+	"logs":           {logquery.Feature, logquery.OffDarwinHint},
 	"updates":        {"macOS install history", ""},
 	"uninstall":      {"app uninstall", ""},
 	"schedule":       {"launchd snapshot scheduling", "run `spectra snapshot` from cron or a systemd timer instead"},
@@ -60,20 +62,16 @@ func gateDarwinOnly(name string, args []string, stdout, stderr io.Writer) (code 
 // else one line on stderr. It exits 1, like any other failed command; the
 // JSON's "error": "unsupported_platform" is what tells the cases apart.
 func reportUnsupported(cmd string, err error, hint string, asJSON bool, stdout, stderr io.Writer) int {
-	r, ok := hostos.ReportUnsupported(err)
+	r, ok := hostos.ReportCommandUnsupported(cmd, err, hint)
 	if !ok {
 		fmt.Fprintf(stderr, "spectra %s: %v\n", cmd, err)
 		return 1
 	}
-	r.Hint = hint
 	if asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
-		_ = enc.Encode(struct {
-			Command string `json:"command"`
-			hostos.UnsupportedReport
-		}{cmd, r})
+		_ = enc.Encode(r)
 		return 1
 	}
 	msg := fmt.Sprintf("spectra %s: %s", cmd, r.Message)

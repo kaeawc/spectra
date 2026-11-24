@@ -126,6 +126,24 @@ func TestUnderResolvesProcessCwd(t *testing.T) {
 	}
 }
 
+// ExcludePID (a daemon's client) is left out with its children, as Spectra
+// itself is.
+func TestUnderExcludePID(t *testing.T) {
+	fsys := underFS()
+	fsys.links["/proc/30/cwd"] = "/work/repo"
+	f := underFinder(hostos.Linux, nil)
+	f.FS = fsys
+	f.SelfPID = func() int { return 4242 }
+	f.ExcludePID = 99
+	res, err := f.Under(context.Background(), []string{"/work/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pidsOf(res.Holders); !equalInts(got, []int{20, 30}) {
+		t.Errorf("pids = %v, want 20 and 30 without 99 and its child 100", got)
+	}
+}
+
 func TestUnderDarwin(t *testing.T) {
 	lsofOut := "p10\nfcwd\nn/Users/me\np20\nfcwd\nn/work/repo/app\np30\nfcwd\nn/work/repository\np99\nfcwd\nn/work/repo\np100\nfcwd\nn/work/repo\n"
 	f := underFinder(hostos.Darwin, lsofCwdRunner(lsofOut, 0))

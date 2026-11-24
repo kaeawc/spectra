@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"regexp"
@@ -15,8 +16,14 @@ import (
 )
 
 func runLogs(args []string) int {
+	return runLogsWithIO(args, os.Stdout, os.Stderr, logquery.Query{})
+}
+
+// runLogsWithIO runs the query the flags describe on top of base, which
+// supplies the backend seams (OS, Runner, Now) in tests.
+func runLogsWithIO(args []string, stdout, stderr io.Writer, base logquery.Query) int {
 	fs := flag.NewFlagSet("spectra logs", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	processName := fs.String("process", "", "Filter by process")
 	subsystem := fs.String("subsystem", "", "Filter by subsystem")
 	level := fs.String("level", "", "Minimum level: Default, Info, Error, Fault")
@@ -31,43 +38,37 @@ func runLogs(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	q := logquery.Query{
-		Process:              *processName,
-		Subsystem:            *subsystem,
-		MinLevel:             *level,
-		Last:                 *last,
-		MaxRows:              *top,
-		Predicate:            *predicate,
-		AllowUnsafePredicate: *unsafePredicate,
-		AllowLongWindow:      *allowLongWindow,
-	}
+	q := base
+	q.Process, q.Subsystem, q.MinLevel = *processName, *subsystem, *level
+	q.Last, q.MaxRows = *last, *top
+	q.Predicate, q.AllowUnsafePredicate, q.AllowLongWindow = *predicate, *unsafePredicate, *allowLongWindow
 	if *stream {
 		return runLogStream(q, *grep, *asJSON)
 	}
-	result, err := logquery.Run(context.Background(), q)
-	if err != nil {
-		if errors.Is(err, logquery.ErrWindowTooLarge) || errors.Is(err, logquery.ErrUnsafePredicate) {
-			fmt.Fprintln(os.Stderr, err)
+	var re *regexp.Regexp
+	if *grep != "" {
+		compiled, err := regexp.Compile(*grep)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
 			return 2
 		}
-		fmt.Fprintln(os.Stderr, err)
+		re = compiled
+	}
+	result, err := logquery.Report(context.Background(), q, re)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		if errors.Is(err, logquery.ErrWindowTooLarge) || errors.Is(err, logquery.ErrUnsafePredicate) {
+			return 2
+		}
 		return 1
 	}
-	if *grep != "" {
-		filtered, err := grepLogEntries(result.Entries, *grep)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		result.Entries = filtered
-	}
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(result)
 		return 0
 	}
-	printLogs(result)
+	printLogs(stdout, result)
 	return 0
 }
 
@@ -97,7 +98,7 @@ func runLogStream(q logquery.Query, grep string, asJSON bool) int {
 			_ = enc.Encode(entry)
 			continue
 		}
-		printLogEntry(entry)
+		printLogEntry(os.Stdout, entry)
 	}
 	for err := range errs {
 		if err != nil {
@@ -108,36 +109,22 @@ func runLogStream(q logquery.Query, grep string, asJSON bool) int {
 	return 0
 }
 
-func grepLogEntries(entries []logquery.LogEntry, expr string) ([]logquery.LogEntry, error) {
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]logquery.LogEntry, 0, len(entries))
-	for _, entry := range entries {
-		if re.MatchString(entry.EventMessage) || re.MatchString(entry.FormatString) {
-			out = append(out, entry)
-		}
-	}
-	return out, nil
-}
-
-func printLogs(result logquery.Result) {
-	fmt.Printf("entries: %d", len(result.Entries))
+func printLogs(w io.Writer, result logquery.Result) {
+	fmt.Fprintf(w, "entries: %d", len(result.Entries))
 	if result.Truncated {
-		fmt.Print(" (truncated)")
+		fmt.Fprint(w, " (truncated)")
 	}
 	if result.Clock.WallClockAdjusted {
-		fmt.Print(" wall-clock-adjusted")
+		fmt.Fprint(w, " wall-clock-adjusted")
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 	for _, entry := range result.Entries {
-		printLogEntry(entry)
+		printLogEntry(w, entry)
 	}
 }
 
-func printLogEntry(entry logquery.LogEntry) {
-	fmt.Printf("%s  pid=%d  %-7s  %-18s  %s\n",
+func printLogEntry(w io.Writer, entry logquery.LogEntry) {
+	fmt.Fprintf(w, "%s  pid=%d  %-7s  %-18s  %s\n",
 		entry.Timestamp.Format(time.RFC3339),
 		entry.PID,
 		entry.LogType,

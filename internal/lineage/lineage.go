@@ -4,6 +4,7 @@
 package lineage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -53,6 +54,13 @@ type Result struct {
 	Flags     []string   `json:"flags,omitempty"`
 	Ancestors []Ancestor `json:"ancestors"`
 	Tree      *Node      `json:"tree"`
+}
+
+// Collect snapshots the processes with c and builds pid's lineage. It is
+// what `spectra lineage --json` prints and what the daemon's lineage.report
+// returns, so both build it here.
+func Collect(ctx context.Context, c process.Collector, opts process.CollectOptions, pid int) (*Result, error) {
+	return Build(c.Collect(ctx, opts), pid)
 }
 
 // Build computes the lineage of pid from procs.

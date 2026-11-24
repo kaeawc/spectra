@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -12,8 +13,14 @@ import (
 )
 
 func runServices(args []string) int {
+	return runServicesWithIO(args, os.Stdout, os.Stderr, services.Options{})
+}
+
+// runServicesWithIO lists jobs on top of base, which supplies the runner and
+// plist directories in tests.
+func runServicesWithIO(args []string, stdout, stderr io.Writer, base services.Options) int {
 	fs := flag.NewFlagSet("spectra services", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	domain := fs.String("domain", "system", "Domain: system, user, or all")
 	label := fs.String("label", "", "Filter labels by substring")
 	running := fs.Bool("running", false, "Only show running jobs")
@@ -22,54 +29,34 @@ func runServices(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	inv, err := services.List(context.Background(), services.Options{Domain: *domain})
+	opts := base
+	opts.Domain = *domain
+	inv, err := services.Report(context.Background(), opts, services.Filter{Label: *label, Running: *running, OnDemand: *onDemand})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	inv.Jobs = filterServiceJobs(inv.Jobs, *label, *running, *onDemand)
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(inv)
 		return 0
 	}
-	printServices(inv)
+	printServices(stdout, inv)
 	return 0
 }
 
-func filterServiceJobs(jobs []services.LaunchJob, label string, running, onDemand bool) []services.LaunchJob {
-	if label == "" && !running && !onDemand {
-		return jobs
-	}
-	label = strings.ToLower(label)
-	out := make([]services.LaunchJob, 0, len(jobs))
-	for _, job := range jobs {
-		if label != "" && !strings.Contains(strings.ToLower(job.Label), label) {
-			continue
-		}
-		if running && job.PID == 0 {
-			continue
-		}
-		if onDemand && !job.OnDemand {
-			continue
-		}
-		out = append(out, job)
-	}
-	return out
-}
-
-func printServices(inv services.LaunchInventory) {
-	fmt.Println("=== Services ===")
-	fmt.Printf("jobs: %d\n", len(inv.Jobs))
-	fmt.Printf("  %-48s  %-8s  %7s  %s\n", "LABEL", "DOMAIN", "PID", "PLIST")
-	fmt.Println("  " + strings.Repeat("-", 88))
+func printServices(w io.Writer, inv services.LaunchInventory) {
+	fmt.Fprintln(w, "=== Services ===")
+	fmt.Fprintf(w, "jobs: %d\n", len(inv.Jobs))
+	fmt.Fprintf(w, "  %-48s  %-8s  %7s  %s\n", "LABEL", "DOMAIN", "PID", "PLIST")
+	fmt.Fprintln(w, "  "+strings.Repeat("-", 88))
 	for _, job := range inv.Jobs {
 		pid := "-"
 		if job.PID > 0 {
 			pid = fmt.Sprint(job.PID)
 		}
-		fmt.Printf("  %-48s  %-8s  %7s  %s\n",
+		fmt.Fprintf(w, "  %-48s  %-8s  %7s  %s\n",
 			truncate(job.Label, 48),
 			job.Domain,
 			pid,
