@@ -348,8 +348,12 @@ rows and fields as `spectra process --json` with no flags (RSS descending; an
 empty array if none). The snapshot is cached for 2 seconds. Concurrent callers
 share one collection, and a caller that disconnects does not cancel it for the
 others. `refresh: true` skips the cache but joins a collection already in
-flight. A collection is capped at 15 seconds; on timeout or collector panic the
-waiting callers get an error and nothing is cached. The rows are collected on
+flight. A collection is capped at 15 seconds; on timeout or collector panic
+nothing is cached. A caller waiting on a collection when an earlier snapshot
+exists gets that snapshot with `"stale": true` and `"stale_reason"` (its
+`sampled_at` says how old) instead of an error, and does not wait past 3
+seconds unless it asked for `refresh: true`; only a caller with no earlier
+snapshot gets the error. The rows are collected on
 demand rather than taken from the watch sampler, which keeps only aggregates and
 the top CPU consumers.
 
@@ -401,6 +405,17 @@ stale window, the call returns it at once and starts one background collection
 to replace it. A failed background collection leaves the old value in place
 and the next call retries. A value older than the stale window, the first call
 after the daemon starts, and any `refresh: true` call wait for a collection.
+
+A slow or failed collection does not cost a caller that already has a reading.
+When a call has to wait on a collection and an earlier good value exists, it
+waits at most 3 seconds (not with `refresh: true`), and if the collection
+fails it never errors: either way it gets the earlier value with
+`"stale": true`, `"stale_reason"` and `"sampled_at"` (when that reading was
+taken) added. The collection carries on in the background and refills the
+cache for the next call. Only a call with no earlier reading, such as the
+first after the daemon starts, waits for the collection and can fail. This
+matters under heavy load: the daemon runs at background priority, so a
+collection can take most of its cap exactly when someone opens a monitor.
 
 ### `memory.current`
 

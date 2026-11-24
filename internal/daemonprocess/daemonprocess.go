@@ -34,6 +34,9 @@ const (
 	DefaultTTL = 2 * time.Second
 	// DefaultTimeout bounds one shared collection.
 	DefaultTimeout = 15 * time.Second
+	// DefaultAnswerWithin is how long a call waits on a collection before
+	// answering with the previous snapshot, marked stale, when there is one.
+	DefaultAnswerWithin = 3 * time.Second
 	// DefaultInterval is the process.update cadence.
 	DefaultInterval = 15 * time.Second
 )
@@ -126,6 +129,10 @@ type Snapshot struct {
 	SampledAt time.Time      `json:"sampled_at"`
 	Processes []process.Info `json:"processes"`
 	Warning   string         `json:"warning,omitempty"`
+	// Stale marks an earlier snapshot served because a new collection failed
+	// or was still running after the answer deadline; SampledAt says how old.
+	Stale       bool   `json:"stale,omitempty"`
+	StaleReason string `json:"stale_reason,omitempty"`
 }
 
 // Options configure a Service. Zero values select production defaults.
@@ -138,6 +145,8 @@ type Options struct {
 	TTL      time.Duration
 	Timeout  time.Duration
 	Interval time.Duration
+	// AnswerWithin overrides DefaultAnswerWithin when positive.
+	AnswerWithin time.Duration
 }
 
 type call struct {
@@ -171,6 +180,7 @@ type Service struct {
 	ttl      time.Duration
 	timeout  time.Duration
 	interval time.Duration
+	answer   time.Duration
 
 	mu       sync.Mutex
 	plain    slot
@@ -181,7 +191,7 @@ type Service struct {
 
 func NewService(opts Options) *Service {
 	s := &Service{collect: opts.Collect, classify: opts.Classify, grace: classifyGrace, clock: opts.Clock, ttl: opts.TTL, timeout: opts.Timeout,
-		interval: opts.Interval, subs: map[*subscriber]struct{}{}}
+		interval: opts.Interval, answer: opts.AnswerWithin, subs: map[*subscriber]struct{}{}}
 	if s.collect == nil {
 		s.collect = DefaultCollect(process.CollectOptions{})
 	}
@@ -196,6 +206,9 @@ func NewService(opts Options) *Service {
 	}
 	if s.interval <= 0 {
 		s.interval = DefaultInterval
+	}
+	if s.answer <= 0 {
+		s.answer = DefaultAnswerWithin
 	}
 	return s
 }
@@ -252,10 +265,30 @@ func (s *Service) get(ctx context.Context, refresh, classified bool, from *Snaps
 			go s.run(base, c)
 		}
 	}
+	old, hasOld := sl.cached, sl.valid && from == nil
 	s.mu.Unlock()
+	return s.await(ctx, c, old, hasOld && !refresh, hasOld)
+}
+
+// await waits for c. With an earlier snapshot it answers with that one,
+// marked stale, when c fails or (if early) is still running at the deadline.
+func (s *Service) await(ctx context.Context, c *call, old Snapshot, early, hasOld bool) (Snapshot, error) {
+	var answer <-chan time.Time
+	if early {
+		t := time.NewTimer(s.answer)
+		defer t.Stop()
+		answer = t.C
+	}
 	select {
 	case <-c.done:
+		if c.err != nil && hasOld {
+			old.Stale, old.StaleReason = true, c.err.Error()
+			return old, nil
+		}
 		return c.snap, c.err
+	case <-answer:
+		old.Stale, old.StaleReason = true, fmt.Sprintf("collection still running after %s", s.answer)
+		return old, nil
 	case <-ctx.Done():
 		return Snapshot{}, fmt.Errorf("process list: %w", ctx.Err())
 	}
