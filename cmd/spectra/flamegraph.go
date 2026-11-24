@@ -8,10 +8,8 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"time"
 
-	"github.com/kaeawc/spectra/internal/flamegraph"
-	"github.com/kaeawc/spectra/internal/process"
+	"github.com/kaeawc/spectra/internal/nativeprofile"
 )
 
 // sampleCapturer captures a `sample` report for a pid over a duration.
@@ -26,7 +24,7 @@ type flamegraphDeps struct {
 
 func runFlamegraph(args []string) int {
 	deps := flamegraphDeps{
-		capture:   defaultSampleCapture,
+		capture:   nativeprofile.HostSampleCapture,
 		readFile:  os.ReadFile,
 		writeFile: os.WriteFile,
 	}
@@ -37,27 +35,22 @@ func runFlamegraphWithIO(args []string, stdout, stderr io.Writer, deps flamegrap
 	fs := flag.NewFlagSet("spectra flamegraph", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "Fold an existing sample report file instead of capturing")
-	duration := fs.Int("duration", 2, "Capture duration in seconds")
+	duration := fs.Int("duration", int(nativeprofile.DefaultFlamegraphDuration.Seconds()), "Capture duration in seconds")
 	out := fs.String("out", "", "Write the SVG here (default <pid>.flamegraph.svg)")
 	asJSON := fs.Bool("json", false, "After writing the SVG, print its folded stacks (with frame image details) as JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	var report, title, outPath string
+	opts := nativeprofile.FlamegraphOptions{
+		Input: *input, ReadFile: deps.readFile,
+		DurationSec: *duration, Capture: deps.capture,
+		Out: *out, WriteFile: deps.writeFile,
+	}
 	if *input != "" {
 		if fs.NArg() != 0 {
 			fmt.Fprintln(stderr, "flamegraph: pass either --input or a pid, not both")
 			return 2
-		}
-		data, err := deps.readFile(*input)
-		if err != nil {
-			fmt.Fprintf(stderr, "flamegraph: read %s: %v\n", *input, err)
-			return 1
-		}
-		report, title, outPath = string(data), "flamegraph: "+*input, *out
-		if outPath == "" {
-			outPath = *input + ".flamegraph.svg"
 		}
 	} else {
 		if fs.NArg() != 1 {
@@ -69,57 +62,23 @@ func runFlamegraphWithIO(args []string, stdout, stderr io.Writer, deps flamegrap
 			fmt.Fprintf(stderr, "invalid PID %q\n", fs.Arg(0))
 			return 2
 		}
-		report, err = deps.capture(context.Background(), pid, *duration)
-		if err != nil {
-			fmt.Fprintf(stderr, "flamegraph: capture failed for PID %d: %v\n", pid, err)
-			return 1
-		}
-		title = fmt.Sprintf("flamegraph: pid %d (%ds)", pid, *duration)
-		outPath = *out
-		if outPath == "" {
-			outPath = fmt.Sprintf("%d.flamegraph.svg", pid)
-		}
+		opts.PID = pid
 	}
 
-	folded := flamegraph.Fold(report)
-	if len(folded) == 0 {
-		fmt.Fprintln(stderr, "flamegraph: no stacks found in the sample (was it a Call graph report?)")
-		return 1
-	}
-	svg := flamegraph.RenderSVG(folded, title)
-	if err := deps.writeFile(outPath, []byte(svg), 0o644); err != nil {
-		fmt.Fprintf(stderr, "flamegraph: write %s: %v\n", outPath, err)
+	rep, err := nativeprofile.Flamegraph(context.Background(), opts)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(flamegraphReport{SVG: outPath, StackCount: len(folded), Stacks: folded}); err != nil {
+		if err := enc.Encode(rep); err != nil {
 			fmt.Fprintf(stderr, "flamegraph: encode: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "wrote %s (%d folded stacks)\n", outPath, len(folded))
+	fmt.Fprintf(stdout, "wrote %s (%d folded stacks)\n", rep.SVG, rep.StackCount)
 	return 0
-}
-
-// flamegraphReport is the --json shape: the SVG written and every folded
-// stack behind it.
-type flamegraphReport struct {
-	SVG        string              `json:"svg"`
-	StackCount int                 `json:"stack_count"`
-	Stacks     []flamegraph.Folded `json:"stacks"`
-}
-
-func defaultSampleCapture(ctx context.Context, pid, durationSec int) (string, error) {
-	sampler := process.NewSampler(nil, nil)
-	res, err := sampler.Capture(ctx, process.SampleOptions{
-		PID:      pid,
-		Duration: time.Duration(durationSec) * time.Second,
-	})
-	if err != nil {
-		return "", err
-	}
-	return res.Output, nil
 }

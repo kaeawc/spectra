@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/nativeprofile"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -32,7 +33,7 @@ func TestSampleJSONShape(t *testing.T) {
 		if code := runSampleWithIO([]string{flagName, "--duration", "2", "412"}, &out, &errb, fakeSample(t)); code != 0 {
 			t.Fatalf("%s: code %d stderr %s", flagName, code, errb.String())
 		}
-		var rep sampleReport
+		var rep nativeprofile.SampleReport
 		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 			t.Fatal(err)
 		}
