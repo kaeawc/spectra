@@ -50,11 +50,19 @@ type ReportDeps struct {
 	Devices func() devices.Options
 }
 
+// defaultReportDeps shares one CPU tracker between load and idle, so after
+// the first call in a session they diff against a reading the server already
+// holds instead of sleeping through their window.
 func defaultReportDeps() ReportDeps {
+	tracker := hostload.NewTracker()
 	return ReportDeps{
-		Load:    hostload.DefaultReportDeps,
+		Load: func() hostload.ReportDeps {
+			d := hostload.DefaultReportDeps()
+			d.Baseline = tracker.Baseline
+			return d
+		},
 		Orphans: orphans.DefaultReportDeps,
-		Idle:    idle.DefaultReportDeps,
+		Idle:    func() idle.ReportDeps { return idle.HostReportDeps(tracker.Baseline) },
 		Find:    owner.Finder{}.Find,
 		Under:   owner.Finder{}.Under,
 		Spawns:  spawntrace.DefaultDeps,

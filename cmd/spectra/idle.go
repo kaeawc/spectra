@@ -29,17 +29,18 @@ type idleReport = idle.Report
 func defaultIdleDeps() idleDeps { return idle.DefaultReportDeps() }
 
 type idleFlags struct {
-	asJSON  bool
-	minAge  time.Duration
-	maxCPU  float64
-	window  time.Duration
-	timeout time.Duration
-	pids    string
-	roots   stringList
+	asJSON   bool
+	minAge   time.Duration
+	maxCPU   float64
+	window   time.Duration
+	timeout  time.Duration
+	pids     string
+	roots    stringList
+	noDaemon bool
 }
 
 func runIdle(args []string) int {
-	return runIdleWithIO(args, os.Stdout, os.Stderr, defaultIdleDeps())
+	return runIdleVia(args, os.Stdout, os.Stderr, defaultIdleDeps(), callDaemonReport)
 }
 
 func parseIdleFlags(args []string, stderr io.Writer) (idleFlags, bool) {
@@ -76,6 +77,7 @@ Exit codes:
 	fs.DurationVar(&f.timeout, "timeout", def.Timeout, "Give up (exit 1) after this long")
 	fs.StringVar(&f.pids, "pids", "", "Comma-separated pids to check (with or instead of --root)")
 	fs.Var(&f.roots, "root", "Directory whose processes are checked (repeatable; default: the current directory unless --pids)")
+	fs.BoolVar(&f.noDaemon, "no-daemon", false, "Measure in this process instead of asking the running daemon (also SPECTRA_NO_DAEMON=1)")
 	if err := fs.Parse(args); err != nil {
 		return f, false
 	}
@@ -87,6 +89,12 @@ Exit codes:
 }
 
 func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
+	return runIdleVia(args, stdout, stderr, deps, nil)
+}
+
+// runIdleVia asks the daemon through call first, when non-nil; its CPU
+// tracker answers without sleeping through the window.
+func runIdleVia(args []string, stdout, stderr io.Writer, deps idleDeps, call reportCaller) int {
 	f, ok := parseIdleFlags(args, stderr)
 	if !ok {
 		return idleExitUsage
@@ -96,10 +104,15 @@ func runIdleWithIO(args []string, stdout, stderr io.Writer, deps idleDeps) int {
 		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
 		return idleExitUsage
 	}
-	rep, err := idle.BuildReport(context.Background(), f.options(pids), deps)
-	if err != nil {
-		fmt.Fprintf(stderr, "spectra idle: %v\n", err)
-		return idleExitError
+	if f.noDaemon {
+		call = nil
+	}
+	rep, ok := idleViaDaemon(call, f.options(pids), stderr)
+	if !ok {
+		if rep, err = idle.BuildReport(context.Background(), f.options(pids), deps); err != nil {
+			fmt.Fprintf(stderr, "spectra idle: %v\n", err)
+			return idleExitError
+		}
 	}
 	if f.asJSON {
 		enc := json.NewEncoder(stdout)

@@ -27,6 +27,9 @@ type Host struct {
 	ReadFile func(string) ([]byte, error)
 	Readlink func(string) (string, error)
 	NumCPU   func() int
+	// CgroupPID is whose cgroup Cgroup reads; 0 is this process. The daemon
+	// sets it to its caller, which can sit in a different cgroup.
+	CgroupPID int
 }
 
 func (h Host) os() hostos.Kind { return hostos.Resolve(h.OS) }

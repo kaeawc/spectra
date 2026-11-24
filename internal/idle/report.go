@@ -91,7 +91,11 @@ type ReportDeps struct {
 }
 
 // DefaultReportDeps reads the real host.
-func DefaultReportDeps() ReportDeps {
+func DefaultReportDeps() ReportDeps { return HostReportDeps(nil) }
+
+// HostReportDeps reads the real host, taking the first CPU reading from
+// baseline (a hostload.Tracker's) when it has one old enough.
+func HostReportDeps(baseline func(time.Duration) (hostload.Baseline, bool)) ReportDeps {
 	osk := hostos.Resolve(hostos.Unknown)
 	collect := func(ctx context.Context) []process.Info {
 		return process.CollectAll(ctx, process.CollectOptions{
@@ -99,7 +103,7 @@ func DefaultReportDeps() ReportDeps {
 			DetailCollector: func([]process.Info) map[int]process.Details { return map[int]process.Details{} },
 		})
 	}
-	sampler := HostSampler{OS: osk, Runner: proc.Default, Collect: collect, Now: time.Now, Sleep: hostload.SleepContext}
+	sampler := HostSampler{OS: osk, Runner: proc.Default, Collect: collect, Now: time.Now, Sleep: hostload.SleepContext, Baseline: baseline}
 	finder := owner.Finder{OS: osk}
 	return ReportDeps{
 		Sample:       sampler.Sample,

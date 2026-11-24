@@ -20,6 +20,9 @@ type Sampler struct {
 	Collect func(ctx context.Context) []process.Info
 	Now     func() time.Time
 	Sleep   func(ctx context.Context, d time.Duration)
+	// Baseline, when it has a reading at least the window old, replaces the
+	// first reading and the sleep.
+	Baseline func(window time.Duration) (Baseline, bool)
 }
 
 // CPUBasis says what a process's CPUPct means.
@@ -49,12 +52,21 @@ func (s Sampler) Sample(ctx context.Context, interval time.Duration) ([]process.
 	if s.Host.os() != hostos.Linux {
 		return s.Collect(ctx), 0, BasisRecent
 	}
-	if interval <= 0 || s.Sleep == nil || s.Now == nil {
+	if interval <= 0 || s.Now == nil {
 		return s.Collect(ctx), 0, BasisLifetime
 	}
-	before := s.readTimes(s.Collect(ctx))
-	t0 := s.Now()
-	s.Sleep(ctx, interval)
+	var before map[int]cpuTimes
+	var t0 time.Time
+	if b, ok := s.baseline(interval); ok {
+		before, t0 = b.times, b.At
+	} else {
+		if s.Sleep == nil {
+			return s.Collect(ctx), 0, BasisLifetime
+		}
+		before = s.readTimes(s.Collect(ctx))
+		t0 = s.Now()
+		s.Sleep(ctx, interval)
+	}
 	procs := s.Collect(ctx)
 	after := s.readTimes(procs)
 	window := s.Now().Sub(t0)
@@ -96,16 +108,28 @@ func applyWindow(p *process.Info, before, after map[int]cpuTimes, t0 time.Time, 
 	return true
 }
 
+func (s Sampler) baseline(interval time.Duration) (Baseline, bool) {
+	if s.Baseline == nil {
+		return Baseline{}, false
+	}
+	return s.Baseline(interval)
+}
+
 func (s Sampler) readTimes(procs []process.Info) map[int]cpuTimes {
 	out := make(map[int]cpuTimes, len(procs))
 	for _, p := range procs {
-		data, err := s.Host.readFile("/proc/" + strconv.Itoa(p.PID) + "/stat")
-		if err != nil {
-			continue
-		}
-		if cpu, start, ok := process.ParseLinuxCPUTimes(data); ok {
-			out[p.PID] = cpuTimes{cpu: cpu, start: start}
+		if ct, ok := s.Host.readTimes(p.PID); ok {
+			out[p.PID] = ct
 		}
 	}
 	return out
+}
+
+func (h Host) readTimes(pid int) (cpuTimes, bool) {
+	data, err := h.readFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return cpuTimes{}, false
+	}
+	cpu, start, ok := process.ParseLinuxCPUTimes(data)
+	return cpuTimes{cpu: cpu, start: start}, ok
 }

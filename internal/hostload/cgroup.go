@@ -37,13 +37,17 @@ const cgroupRoot = "/sys/fs/cgroup"
 // v1 reports "no limit" as the largest page-aligned int64, not "max".
 const v1Unlimited = uint64(1) << 62
 
-// Cgroup returns this process's cgroup limits, or nil when the host is not
-// Linux, the cgroup cannot be read, or no limit applies.
+// Cgroup returns the cgroup limits of this process (or of CgroupPID), or nil
+// when the host is not Linux, the cgroup cannot be read, or no limit applies.
 func (h Host) Cgroup() *Cgroup {
 	if h.os() != hostos.Linux {
 		return nil
 	}
-	data, err := h.readFile("/proc/self/cgroup")
+	self := "self"
+	if h.CgroupPID > 0 {
+		self = strconv.Itoa(h.CgroupPID)
+	}
+	data, err := h.readFile("/proc/" + self + "/cgroup")
 	if err != nil {
 		return nil
 	}

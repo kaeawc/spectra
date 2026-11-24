@@ -173,7 +173,7 @@ func runHelp(w *os.File) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  --verbose, --debug   Log enhancement/collection failures to stderr (or set SPECTRA_DEBUG)")
-	fmt.Fprintln(w, "  --no-daemon         Disable daemon enrichment for alerts and whatswrong")
+	fmt.Fprintln(w, "  --no-daemon         Do not use the daemon for alerts, whatswrong, load and idle")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
 	for _, sc := range subcommandList() {

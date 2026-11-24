@@ -26,6 +26,8 @@ type HostSampler struct {
 	Collect  func(ctx context.Context) []process.Info
 	Now      func() time.Time
 	Sleep    func(ctx context.Context, d time.Duration)
+	// Baseline is passed to hostload's Linux sampler.
+	Baseline func(window time.Duration) (hostload.Baseline, bool)
 }
 
 // Sample collects the process table and CPU over window.
@@ -55,7 +57,7 @@ func (h HostSampler) Sample(ctx context.Context, window time.Duration) (Sample, 
 func (h HostSampler) sampleLinux(ctx context.Context, window time.Duration) Sample {
 	ls := hostload.Sampler{
 		Host:    hostload.Host{OS: hostos.Linux, Runner: h.Runner, ReadFile: h.ReadFile},
-		Collect: h.Collect, Now: h.Now, Sleep: h.Sleep,
+		Collect: h.Collect, Now: h.Now, Sleep: h.Sleep, Baseline: h.Baseline,
 	}
 	procs, win, basis := ls.Sample(ctx, window)
 	s := Sample{Procs: procs, Window: win, Basis: string(basis), CPU: map[int]float64{}}

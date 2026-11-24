@@ -41,6 +41,10 @@ never candidates.
 | Linux | two `/proc/<pid>/stat` readings via `spectra load`'s sampler, matched by pid and start time | `window` |
 | macOS | two `ps -axo pid=,time=` readings of cumulative CPU time; a process started inside the window is scored on all of its CPU | `window` |
 
+On Linux, a running daemon (or a long-lived `spectra-mcp`) answers from a CPU
+reading it took at least `--window` ago, so it does not sleep through the
+window; see [`spectra load`](cli.md) for details and `--no-daemon`.
+
 If CPU could not be measured over a window (`cpu_basis` is not `window`),
 the run is an error (exit `1`): a lifetime or decaying average is not
 evidence of idleness now. Working directories are read and matched as in

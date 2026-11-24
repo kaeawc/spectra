@@ -288,6 +288,18 @@ a `cgroup` line in the text output. They are omitted when no limit applies.
 The verdict and the host fields are unchanged; see
 [command schemas](../reference/command-schemas.md#spectraload).
 
+When the per-user daemon is running, `spectra load` and `spectra idle` ask it
+(`load.report` / `idle.report`) instead of measuring in their own process.
+On Linux the daemon keeps a reading of every process's CPU each second while
+these are being asked for (it stops after 10 idle minutes), so a call diffs
+against a reading already at least the window old and returns in tens of
+milliseconds instead of sleeping through `--sample` or `--window`;
+`cpu_window_ms` / `window_ms` give the window actually measured, which can be
+a little longer than asked. The first call after a quiet spell still waits
+the window. `spectra-mcp` keeps the same tracker in-process for its `load`
+and `idle` tools. `--no-daemon` (or `SPECTRA_NO_DAEMON=1`) measures locally;
+a missing or older daemon falls back to local measurement silently.
+
 The `cause` kind is `indexing`, `roots`, `ci-runner`, `other` or `none`.
 `ci-runner` names work from a self-hosted CI runner on the host: a process
 with a GitHub Actions `Runner.Worker` / `Runner.Listener`, `gitlab-runner` or

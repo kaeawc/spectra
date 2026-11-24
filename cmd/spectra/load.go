@@ -24,12 +24,18 @@ func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 func runLoad(args []string) int {
-	return runLoadWithIO(args, os.Stdout, os.Stderr, defaultLoadDeps())
+	return runLoadVia(args, os.Stdout, os.Stderr, defaultLoadDeps(), callDaemonReport)
 }
 
 func defaultLoadDeps() loadDeps { return hostload.DefaultReportDeps() }
 
 func runLoadWithIO(args []string, stdout, stderr io.Writer, deps loadDeps) int {
+	return runLoadVia(args, stdout, stderr, deps, nil)
+}
+
+// runLoadVia asks the daemon through call first, when non-nil; its CPU
+// tracker answers without sleeping through the sample window.
+func runLoadVia(args []string, stdout, stderr io.Writer, deps loadDeps, call reportCaller) int {
 	fs := flag.NewFlagSet("spectra load", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -60,6 +66,7 @@ Exit codes:
 	sample := fs.Duration("sample", def.Sample, "Linux: measure CPU over this window between two /proc readings; 0 uses lifetime averages")
 	backoff := fs.Float64("backoff-free-gb", def.BackoffFreeGB, "Back off when available memory is below this many GiB")
 	bootWindow := fs.Duration("boot-window", def.BootWindow, "Count a simulator or emulator as booted recently when it started within this window")
+	noDaemon := fs.Bool("no-daemon", false, "Measure in this process instead of asking the running daemon (also SPECTRA_NO_DAEMON=1)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -72,10 +79,16 @@ Exit codes:
 		return 2
 	}
 
-	rep, err := hostload.BuildReport(context.Background(), opts, deps)
-	if err != nil {
-		fmt.Fprintf(stderr, "spectra load: %v\n", err)
-		return 1
+	if *noDaemon {
+		call = nil
+	}
+	rep, ok := loadViaDaemon(call, opts, stderr)
+	if !ok {
+		var err error
+		if rep, err = hostload.BuildReport(context.Background(), opts, deps); err != nil {
+			fmt.Fprintf(stderr, "spectra load: %v\n", err)
+			return 1
+		}
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
