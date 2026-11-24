@@ -507,3 +507,23 @@ Implemented:
     The `build-daemon-jdk-mismatch` recommendation compares the daemon's JDK
     with the project's configuration (see the recommendations engine doc):
     medium for an explicit pin, low for a compile-toolchain-only difference.
+19. Frame code sources: `spectra jvm thread-dump --json` adds a top-level
+    `code_sources` object keyed by the binary class name of each frame
+    (`com.example.Outer$Inner` from `at app//com.example.Outer$Inner.run(...)`).
+    A class in a jar maps to `{jar, jar_entry}` (a Spring Boot or WAR class
+    keeps its `BOOT-INF/classes/` or `WEB-INF/classes/` entry name); a class in
+    a directory maps to `{class_dir, class_file}`. Paths are absolute. The
+    class path is read from the JVM's command line (`-cp`/`-classpath`/
+    `--class-path`, `-jar` plus its manifest `Class-Path`, `dir/*` wildcards)
+    through the kernel (`/proc/<pid>/cmdline`, `kern.procargs2`), and relative
+    entries are resolved against its working directory (`/proc/<pid>/cwd`, or
+    one single-pid `lsof` on macOS). The JVM itself is never contacted for
+    this: no extra `jcmd`, no attach, no pause. Lookups read only jar central
+    directories, search the class path in order as the JVM does, and are
+    bounded (4096 classes, 2048 class path entries, jars up to 512 MiB and
+    200,000 entries, 2 s in total); jar indexes are cached by path, size and
+    mtime. A class is left out when it is not found: JDK classes (loaded from
+    the runtime image), lambdas and other hidden classes, classes inside nested
+    jars, classes from custom class loaders, and every class of a JVM whose
+    class path is in an `@argfile` or set by a native launcher. When nothing
+    resolves, `code_sources` is absent and the output is unchanged.
