@@ -328,7 +328,9 @@ func TestMaxRunningBoundsJobs(t *testing.T) {
 
 func TestFinishedJobsExpireAndAreCapped(t *testing.T) {
 	var mu sync.Mutex
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Anchored to the real time: job deadlines are real context deadlines
+	// computed from this clock, so a clock in the past would expire them.
+	now := time.Now().UTC()
 	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
 	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
 	s := NewService(Options{OS: hostos.Darwin, Now: clock, MaxFinished: 2, ResultTTL: time.Minute, SampleCapture: fixedSample})
@@ -339,7 +341,9 @@ func TestFinishedJobsExpireAndAreCapped(t *testing.T) {
 			t.Fatal(err)
 		}
 		ids = append(ids, v.(Job).ID)
-		waitDone(t, s, ids[i])
+		if rec := waitDone(t, s, ids[i]); rec.Status != StatusCompleted {
+			t.Fatalf("job %s = %s (%s), want completed", ids[i], rec.Status, rec.Error)
+		}
 		advance(time.Second)
 	}
 	v, err := s.listRPC(context.Background(), &daemon.Request{})

@@ -203,6 +203,9 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	daemonprocinfo.RegisterMethods(server, daemonprocinfo.NewService(daemonprocinfo.Options{}))
 	profiles := daemonprofile.NewService(daemonprofile.Options{})
 	defer profiles.Close(5 * time.Second)
+	// Jobs outlive their client connections, so cancel them as soon as
+	// shutdown starts rather than after the connections drain.
+	server.OnShutdown(profiles.Cancel)
 	daemonprofile.RegisterMethods(server, profiles)
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	watchDone := make(chan struct{})

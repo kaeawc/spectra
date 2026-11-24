@@ -14,10 +14,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kaeawc/spectra/internal/daemon"
@@ -52,6 +54,8 @@ const (
 	DefaultMaxFinished    = 16
 	DefaultResultTTL      = 10 * time.Minute
 	DefaultMaxResultBytes = 8 << 20
+	DefaultMaxInputBytes  = 64 << 20
+	DefaultSweepInterval  = 30 * time.Second
 	// DefaultSlack is added to a capture's duration for its job deadline,
 	// covering tool start-up and symbolication.
 	DefaultSlack = 30 * time.Second
@@ -72,15 +76,19 @@ type Options struct {
 	FlamegraphCapture func(ctx context.Context, pid, durationSec int) (string, error)
 	// SpindumpRun runs spindump for KindSpindump.
 	SpindumpRun nativeprofile.Runner
-	ReadFile    func(string) ([]byte, error)
-	WriteFile   func(string, []byte, os.FileMode) error
+	// ReadInput reads an input report, failing once it passes limit bytes;
+	// the default is ReadInputFile.
+	ReadInput func(path string, limit int64) ([]byte, error)
 	// OS selects the platform the captures are gated on; the zero value is
 	// the host.
 	OS  hostos.Kind
 	Now func() time.Time
 
 	MaxRunning, MaxFinished, MaxResultBytes int
-	ResultTTL, Slack, PollInterval          time.Duration
+	// MaxInputBytes caps an input report.
+	MaxInputBytes int64
+	// SweepInterval is how often expired results are released.
+	ResultTTL, Slack, PollInterval, SweepInterval time.Duration
 }
 
 // Service runs and tracks the jobs.
@@ -107,11 +115,11 @@ func NewService(opts Options) *Service {
 	if opts.SpindumpRun == nil {
 		opts.SpindumpRun = nativeprofile.HostRunner
 	}
-	if opts.ReadFile == nil {
-		opts.ReadFile = os.ReadFile
+	if opts.ReadInput == nil {
+		opts.ReadInput = ReadInputFile
 	}
-	if opts.WriteFile == nil {
-		opts.WriteFile = os.WriteFile
+	if opts.MaxInputBytes <= 0 {
+		opts.MaxInputBytes = DefaultMaxInputBytes
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -132,8 +140,30 @@ func NewService(opts Options) *Service {
 	defDur(&opts.ResultTTL, DefaultResultTTL)
 	defDur(&opts.Slack, DefaultSlack)
 	defDur(&opts.PollInterval, DefaultPollInterval)
+	defDur(&opts.SweepInterval, DefaultSweepInterval)
 	base, stop := context.WithCancel(context.Background())
-	return &Service{opts: opts, base: base, stop: stop, jobs: map[string]*job{}}
+	s := &Service{opts: opts, base: base, stop: stop, jobs: map[string]*job{}}
+	s.wg.Add(1)
+	go s.sweep()
+	return s
+}
+
+// sweep releases expired results for the service's lifetime, so a result
+// nobody asks for again does not outlive its TTL in memory.
+func (s *Service) sweep() {
+	defer s.wg.Done()
+	t := time.NewTicker(s.opts.SweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.base.Done():
+			return
+		case <-t.C:
+			s.mu.Lock()
+			s.prune()
+			s.mu.Unlock()
+		}
+	}
 }
 
 // RegisterMethods registers every method on server.
@@ -145,12 +175,19 @@ func RegisterMethods(server *daemon.Server, svc *Service) {
 	server.Register(MethodList, svc.listRPC)
 }
 
-// Close cancels every job and waits up to wait for their captures to end.
-func (s *Service) Close(wait time.Duration) {
+// Cancel refuses new jobs and cancels every running one, without waiting.
+// The daemon calls it as soon as shutdown starts.
+func (s *Service) Cancel() {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
 	s.stop()
+}
+
+// Close cancels every job and waits up to wait for their captures (and the
+// expiry sweep) to end.
+func (s *Service) Close(wait time.Duration) {
+	s.Cancel()
 	done := make(chan struct{})
 	go func() { s.wg.Wait(); close(done) }()
 	select {
@@ -211,6 +248,9 @@ type job struct {
 	rec    Job
 	cancel context.CancelFunc
 	result json.RawMessage
+	// published is set, under mu, once a flamegraph's SVG is in place at
+	// out; from then on the job can no longer be cancelled or time out.
+	published bool
 }
 
 func (s *Service) startRPC(ctx context.Context, req *daemon.Request) (any, error) {
@@ -228,8 +268,8 @@ func (s *Service) startRPC(ctx context.Context, req *daemon.Request) (any, error
 	return s.start(p, duration, run)
 }
 
-// runFunc builds a job's result.
-type runFunc func(ctx context.Context) (any, error)
+// runFunc builds job j's result.
+type runFunc func(ctx context.Context, j *job) (any, error)
 
 // plan validates p, gates it on macOS, and returns the work and its capture
 // duration.
@@ -279,7 +319,7 @@ func (s *Service) planSample(p StartParams) (runFunc, time.Duration, error) {
 		interval = nativeprofile.DefaultSampleIntervalMS
 	}
 	opts := process.SampleOptions{PID: p.PID, Duration: d, IntervalMS: interval}
-	return func(ctx context.Context) (any, error) {
+	return func(ctx context.Context, _ *job) (any, error) {
 		_, rep, err := nativeprofile.Sample(ctx, s.opts.SampleCapture, opts)
 		return rep, err
 	}, d, nil
@@ -293,8 +333,8 @@ func (s *Service) planSpindump(p StartParams) (runFunc, time.Duration, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	opts := nativeprofile.SpindumpOptions{Input: p.Input, ReadFile: s.opts.ReadFile, PID: p.PID, DurationSec: int(d / time.Second), Run: s.opts.SpindumpRun}
-	return func(ctx context.Context) (any, error) {
+	opts := nativeprofile.SpindumpOptions{Input: p.Input, ReadFile: s.readInput, PID: p.PID, DurationSec: int(d / time.Second), Run: s.opts.SpindumpRun}
+	return func(ctx context.Context, _ *job) (any, error) {
 		_, rep, err := nativeprofile.Spindump(ctx, opts)
 		return rep, err
 	}, d, nil
@@ -314,14 +354,77 @@ func (s *Service) planFlamegraph(p StartParams) (runFunc, time.Duration, error) 
 	if err != nil {
 		return nil, 0, err
 	}
-	opts := nativeprofile.FlamegraphOptions{
-		Input: p.Input, ReadFile: s.opts.ReadFile,
-		PID: p.PID, DurationSec: int(d / time.Second), Capture: s.opts.FlamegraphCapture,
-		Out: p.Out, WriteFile: s.opts.WriteFile,
-	}
-	return func(ctx context.Context) (any, error) {
-		return nativeprofile.Flamegraph(ctx, opts)
+	return func(ctx context.Context, j *job) (any, error) {
+		return nativeprofile.Flamegraph(ctx, nativeprofile.FlamegraphOptions{
+			Input: p.Input, ReadFile: s.readInput,
+			PID: p.PID, DurationSec: int(d / time.Second), Capture: s.opts.FlamegraphCapture,
+			Out: p.Out,
+			WriteFile: func(path string, data []byte, perm os.FileMode) error {
+				return s.publish(ctx, j, path, data, perm)
+			},
+		})
 	}, d, nil
+}
+
+// publish stages the SVG next to path and renames it into place only while
+// j is still working and inside its deadline, deciding under mu so a
+// concurrent profile.cancel either prevents the write or is refused. A
+// write that loses leaves path untouched.
+func (s *Service) publish(ctx context.Context, j *job, path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	staged := tmp.Name()
+	defer func() { _ = os.Remove(staged) }() // a no-op once renamed
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if err := errors.Join(werr, cerr, os.Chmod(staged, perm)); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if j.rec.Status != StatusWorking {
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(staged, path); err != nil {
+		return err
+	}
+	j.published = true
+	return nil
+}
+
+func (s *Service) readInput(path string) ([]byte, error) {
+	return s.opts.ReadInput(path, s.opts.MaxInputBytes)
+}
+
+// ReadInputFile reads the regular file at path, failing once it passes limit
+// bytes. It opens non-blocking and checks the opened file, so a FIFO or
+// device swapped in after validation fails instead of blocking the job.
+func ReadInputFile(path string, limit int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- the caller's own report path
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s is over the %d-byte input limit", path, limit)
+	}
+	return data, nil
 }
 
 // captureOrInput validates a pid capture or an input report, returning the
@@ -341,19 +444,25 @@ func (s *Service) captureOrInput(p StartParams, def time.Duration) (time.Duratio
 	case !filepath.IsAbs(p.Input):
 		return 0, daemon.InvalidParams("input %q must be absolute", p.Input)
 	}
+	// A missing file fails the job with the CLI's read error; anything that
+	// is there but not a regular file (a FIFO could block the read) is
+	// refused before a job starts.
+	if fi, err := os.Stat(p.Input); err == nil && !fi.Mode().IsRegular() {
+		return 0, daemon.InvalidParams("input %q is not a regular file", p.Input)
+	}
 	return 0, nil
 }
 
-// duration is ms as whole seconds within MaxDuration, or def when zero.
+// duration is ms as whole seconds within MaxDuration, or def when zero. ms
+// is checked before it is converted, so a huge value cannot wrap.
 func duration(ms int64, def time.Duration) (time.Duration, error) {
 	if ms == 0 {
 		return def, nil
 	}
-	d := time.Duration(ms) * time.Millisecond
-	if ms < 0 || d > MaxDuration || d%time.Second != 0 {
+	if ms < 1000 || ms > MaxDuration.Milliseconds() || ms%1000 != 0 {
 		return 0, daemon.InvalidParams("duration_ms must be whole seconds between 1000 and %d", MaxDuration.Milliseconds())
 	}
-	return d, nil
+	return time.Duration(ms) * time.Millisecond, nil
 }
 
 func (s *Service) start(p StartParams, capture time.Duration, run runFunc) (Job, error) {
@@ -399,7 +508,7 @@ func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runF
 				err = fmt.Errorf("profile %s: panicked: %v", j.rec.Kind, r)
 			}
 		}()
-		v, err = run(ctx)
+		v, err = run(ctx, j)
 	}()
 	var raw json.RawMessage
 	if err == nil {
@@ -408,32 +517,35 @@ func (s *Service) run(ctx context.Context, j *job, limit time.Duration, run runF
 	if err == nil && len(raw) > s.opts.MaxResultBytes {
 		err = fmt.Errorf("profile %s: result is %d bytes, over the %d-byte limit", j.rec.Kind, len(raw), s.opts.MaxResultBytes)
 	}
-	if ctxErr := ctx.Err(); errors.Is(ctxErr, context.DeadlineExceeded) {
-		err = fmt.Errorf("profile %s: timed out after %s: %w", j.rec.Kind, limit, ctxErr)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.active--
 	if j.rec.Status != StatusWorking {
 		return // cancelled meanwhile
 	}
-	switch {
-	case ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded):
-		s.finish(j, StatusCancelled, "")
+	status, msg := StatusCompleted, ""
+	// ctx is read once, under mu: a deadline that passed while this worker
+	// waited for the lock is still a timeout. A published SVG is final.
+	switch ctxErr := ctx.Err(); {
+	case !j.published && errors.Is(ctxErr, context.DeadlineExceeded):
+		status, msg = StatusFailed, fmt.Sprintf("profile %s: timed out after %s: %v", j.rec.Kind, limit, ctxErr)
+	case !j.published && ctxErr != nil:
+		status = StatusCancelled
 	case err != nil:
-		s.finish(j, StatusFailed, err.Error())
+		status, msg = StatusFailed, err.Error()
 	default:
 		j.result = raw
-		s.finish(j, StatusCompleted, "")
 	}
+	s.finish(j, status, msg)
 }
 
-// finish marks j done; the caller holds mu.
+// finish marks j done and enforces MaxFinished; the caller holds mu.
 func (s *Service) finish(j *job, status, msg string) {
 	now := s.opts.Now().UTC()
 	exp := now.Add(s.opts.ResultTTL)
 	j.rec.Status, j.rec.Error, j.rec.UpdatedAt, j.rec.ExpiresAt = status, msg, now, &exp
 	j.rec.ResultAvailable = status == StatusCompleted
+	s.prune()
 }
 
 // prune drops expired finished jobs and, past MaxFinished, the oldest
@@ -513,7 +625,9 @@ func (s *Service) cancelRPC(_ context.Context, req *daemon.Request) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	if j.rec.Status == StatusWorking {
+	// Once the SVG is published the job is about to complete; reporting it
+	// cancelled would misdescribe the file now at out.
+	if j.rec.Status == StatusWorking && !j.published {
 		j.cancel()
 		s.finish(j, StatusCancelled, "")
 	}
@@ -587,7 +701,7 @@ func decodeParams(req *daemon.Request, dst any) error {
 		return nil
 	}
 	if err := json.Unmarshal(req.Params, dst); err != nil {
-		return daemon.InvalidParams("invalid params: %v", err)
+		return daemon.InvalidParams("invalid params: %w", err)
 	}
 	return nil
 }
