@@ -468,8 +468,9 @@ Durations are milliseconds and roots must be absolute (the daemon's working
 directory is not the caller's).
 
 - `load.report` params: `top`, `roots`, `max_load_per_cpu`, `min_free_gb`,
-  `backoff_free_gb`, `sample_ms`, `boot_window_ms`, as the CLI flags. Capped
-  at 30 seconds.
+  `backoff_free_gb`, `sample_ms`, `boot_window_ms`, as the CLI flags, and
+  optional `caller_pid`, whose cgroup the `cgroup` block describes (the CLI
+  sends its own; the daemon's cgroup can differ). Capped at 30 seconds.
 - `idle.report` params: `roots` and/or `pids` (one is required), `min_age_ms`,
   `max_cpu`, `window_ms`, `timeout_ms` (at most 5 minutes; the call's cap) and
   `exclude_pid`: the caller, whose ancestors and descendants are left out as a

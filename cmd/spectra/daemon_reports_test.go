@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,9 @@ func TestRunLoadAnswersFromDaemon(t *testing.T) {
 	p := d.params.(daemonhost.LoadParams)
 	if d.method != daemonhost.MethodLoad || len(p.Roots) != 1 || !filepath.IsAbs(p.Roots[0]) || !strings.HasSuffix(p.Roots[0], "rel/wt") {
 		t.Fatalf("sent %s %+v, want load.report with an absolute root", d.method, p)
+	}
+	if p.CallerPID != os.Getpid() {
+		t.Fatalf("caller_pid = %d, want this process", p.CallerPID)
 	}
 	if p.SampleMS != 500 || d.timeout <= 500*time.Millisecond {
 		t.Fatalf("sample_ms=%d timeout=%v", p.SampleMS, d.timeout)

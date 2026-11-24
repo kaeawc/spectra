@@ -65,7 +65,9 @@ func loadViaDaemon(call reportCaller, opts hostload.ReportOptions, stderr io.Wri
 	}
 	opts.Roots = roots
 	var rep hostload.Report
-	ok, err := call(context.Background(), daemonhost.MethodLoad, daemonhost.LoadParamsFrom(opts), &rep, opts.Sample+15*time.Second)
+	params := daemonhost.LoadParamsFrom(opts)
+	params.CallerPID = os.Getpid()
+	ok, err := call(context.Background(), daemonhost.MethodLoad, params, &rep, opts.Sample+15*time.Second)
 	if err != nil {
 		fmt.Fprintf(stderr, "spectra load: daemon: %v; measuring locally\n", err)
 	}

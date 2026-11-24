@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -168,5 +169,30 @@ func TestLoadReportUsesTrackerFromNewReports(t *testing.T) {
 	r := NewReports()
 	if r.Load().Baseline == nil {
 		t.Fatal("load deps carry no tracker baseline")
+	}
+}
+
+func TestLoadReportReadsCallerCgroup(t *testing.T) {
+	var w time.Duration
+	var pid int
+	r := fakeReports(&w, &pid)
+	base := r.Load
+	var read []string
+	r.Load = func() hostload.ReportDeps {
+		d := base()
+		rf := d.Host.ReadFile
+		d.Host.ReadFile = func(p string) ([]byte, error) {
+			read = append(read, p)
+			return rf(p)
+		}
+		return d
+	}
+	p := LoadParamsFrom(hostload.ReportOptions{Top: 5, MaxLoadPerCPU: 1.5, MinFreeGB: 8, BackoffFreeGB: 4, BootWindow: time.Minute})
+	p.CallerPID = 4242
+	if _, err := callReport(t, r.rpcLoad, p); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(read, "/proc/4242/cgroup") || slices.Contains(read, "/proc/self/cgroup") {
+		t.Fatalf("read %v, want the caller's cgroup", read)
 	}
 }

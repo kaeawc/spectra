@@ -32,6 +32,8 @@ type LoadParams struct {
 	BackoffFreeGB float64  `json:"backoff_free_gb"`
 	SampleMS      int64    `json:"sample_ms"`
 	BootWindowMS  int64    `json:"boot_window_ms"`
+	// CallerPID, when set, is whose cgroup the report describes.
+	CallerPID int `json:"caller_pid,omitempty"`
 }
 
 // LoadParamsFrom encodes opts for the wire.
@@ -116,9 +118,13 @@ func (r *Reports) rpcLoad(ctx context.Context, req *daemon.Request) (any, error)
 	if err := absolute(opts.Roots); err != nil {
 		return nil, err
 	}
+	deps := r.Load()
+	if p.CallerPID > 0 {
+		deps.Host.CgroupPID = p.CallerPID
+	}
 	ctx, cancel := callContext(ctx, req, loadReportTimeout)
 	defer cancel()
-	return hostload.BuildReport(ctx, opts, r.Load())
+	return hostload.BuildReport(ctx, opts, deps)
 }
 
 func (r *Reports) rpcIdle(ctx context.Context, req *daemon.Request) (any, error) {
