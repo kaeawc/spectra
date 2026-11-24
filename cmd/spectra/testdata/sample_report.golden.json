@@ -1,0 +1,60 @@
+{
+  "pid": 412,
+  "process": "Finder",
+  "taken_at": "2023-11-14T22:13:20Z",
+  "duration_ms": 1000,
+  "interval_ms": 10,
+  "total_samples": 130,
+  "stack_count": 4,
+  "stacks": [
+    {
+      "frames": [
+        "Thread_1",
+        "start",
+        "main",
+        "mach_msg2_trap"
+      ],
+      "count": 70,
+      "percent": 53.85
+    },
+    {
+      "frames": [
+        "Thread_2",
+        "__workq_kernreturn"
+      ],
+      "count": 30,
+      "percent": 23.08
+    },
+    {
+      "frames": [
+        "Thread_1",
+        "start",
+        "main",
+        "CFRunLoopRun"
+      ],
+      "count": 20,
+      "percent": 15.38
+    },
+    {
+      "frames": [
+        "Thread_1",
+        "start",
+        "main"
+      ],
+      "count": 10,
+      "percent": 7.69
+    }
+  ],
+  "main_thread": {
+    "found": true,
+    "verdict": "lock-blocked",
+    "reason": "main thread is parked in mach_msg outside the run loop (mach_msg2_trap) — likely a synchronous IPC/wait",
+    "leaf": "mach_msg2_trap",
+    "top_frames": [
+      "Thread_1",
+      "start",
+      "main",
+      "mach_msg2_trap"
+    ]
+  }
+}

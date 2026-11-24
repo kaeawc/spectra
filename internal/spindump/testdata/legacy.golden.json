@@ -1,0 +1,41 @@
+{
+  "duration": "2.01s",
+  "processes": [
+    {
+      "name": "Foo",
+      "pid": 4012,
+      "heaviest": [
+        {
+          "symbol": "main",
+          "samples": 201
+        },
+        {
+          "symbol": "start",
+          "samples": 201
+        },
+        {
+          "symbol": "-[Renderer draw:]",
+          "samples": 150
+        },
+        {
+          "symbol": "CGContextFillRects",
+          "samples": 150
+        },
+        {
+          "symbol": "-[Renderer idle]",
+          "samples": 51
+        }
+      ]
+    },
+    {
+      "name": "bar",
+      "pid": 55,
+      "heaviest": [
+        {
+          "symbol": "poll",
+          "samples": 40
+        }
+      ]
+    }
+  ]
+}

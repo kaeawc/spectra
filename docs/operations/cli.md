@@ -499,6 +499,9 @@ inspected on Linux reports `missing` for app binaries.
 `spectra sample [--duration <s>] [--interval <ms>] [--no-cache] [--json] <pid>`
 (macOS) prints the raw `sample(1)` report. With `--json` it emits `pid`,
 `process`, `taken_at`, `duration_ms`, `interval_ms`, `total_samples`,
-`stack_count`, `stacks` (top 50 self-time stacks) and `main_thread`. Capture
+`stack_count`, `stacks` (top 50 self-time stacks, each with `frame_details`
+mapping frames to `image_path`, `image_uuid`, `image_offset` and `arch` when
+the report's Binary Images section covers them; see
+[Frame identity](../inspection/process-profiling.md#frame-identity)) and `main_thread`. Capture
 failures exit 1 and usage errors (bad flag, missing or non-numeric pid) exit 2,
 both with a message on stderr and no stdout.

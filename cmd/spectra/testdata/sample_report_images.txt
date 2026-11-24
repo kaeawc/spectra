@@ -1,0 +1,40 @@
+Analysis of sampling Finder (pid 412) every 10 milliseconds
+Process:         Finder [412]
+Path:            /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+Load Address:    0x100a4c000
+Identifier:      com.apple.finder
+Version:         14.0 (1500)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  launchd [1]
+
+Date/Time:       2026-11-20 10:15:02.118 -0800
+Launch Time:     2026-11-20 09:02:44.901 -0800
+OS Version:      macOS 15.1 (24B83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         88.4M
+Physical footprint (peak):  91.0M
+----
+
+Call graph:
+    100 Thread_8812   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 100 start  (in dyld) + 6076  [0x18a3d1b98]
+    +   100 main  (in Finder) + 120  [0x100a50078]
+    +     70 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x18a6e4c34]
+    +     20 ???  (in <unknown binary>)  [0x2c0001234]
+    30 Thread_8813
+      30 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x18a6e6a28]
+
+Total number in stack (recursive counted multiple, when >=5):
+        100       start  (in dyld) + 6076  [0x18a3d1b98]
+
+Sort by top of stack, same collapsed (when >= 5):
+        mach_msg2_trap  (in libsystem_kernel.dylib)        70
+        __workq_kernreturn  (in libsystem_kernel.dylib)        30
+
+Binary Images:
+       0x100a4c000 -        0x100d0bfff  com.apple.finder (14.0 - 1500) <8A2D1D4C-5E6F-3A2B-9C0D-1E2F3A4B5C6D> /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+       0x18a3cb000 -        0x18a45afff  dyld (1231.3) <B1C2D3E4-F5A6-3B7C-8D9E-0F1A2B3C4D5E> /usr/lib/dyld
+       0x18a6e2000 -        0x18a71cfff  libsystem_kernel.dylib (11215.41.3) <C2D3E4F5-A6B7-3C8D-9E0F-1A2B3C4D5E6F> /usr/lib/system/libsystem_kernel.dylib

@@ -59,6 +59,42 @@ verdict). The raw text report is still stored in the sample blob cache unless
 `--no-cache` is set; only the temporary capture file is removed. Failures exit
 non-zero with the error on stderr and nothing on stdout.
 
+### Frame identity
+
+`sample` and `spindump` reports end with a `Binary Images:` section listing
+each loaded binary's address range, UUID and path, and every call-tree frame
+carries its address (`[0x18a6e4c34]`). Spectra maps each frame address to the
+image containing it, so a disassembler can open the right binary at the right
+offset without searching by symbol name:
+
+- `spectra sample --json`: each stack in `stacks` gains `frame_details`, one
+  object per entry in `frames`, in the same order.
+- `spectra flamegraph --json`: after writing the SVG, prints `svg` (the path
+  written), `stack_count` and `stacks`, every folded stack as `{frames,
+  count, frame_details}`. The SVG itself is unchanged.
+- `spectra spindump --json`: each `heaviest` frame gains the fields inline,
+  next to `symbol` and `samples`. A symbol seen at several addresses uses the
+  address of its heaviest line.
+
+| Field | Meaning |
+|---|---|
+| `image` | Base name of the image path (what frames print as `(in AppKit)`). |
+| `image_path`, `image_uuid` | Path and UUID from the Binary Images entry. |
+| `arch` | Process architecture from `Code Type:` (sample) or `Architecture:` (spindump), normalized to `arm64`, `arm64e`, `x86_64`. |
+| `image_base` | Load address of the image, hex string. |
+| `image_offset` | `address - image_base`, hex string. |
+| `address` | The frame's address, hex string. |
+
+The names match `frame_details` in `spectra crash inspect --json`. Fields are
+omitted when unknown: a frame whose address falls outside every listed image
+(JIT code, a thread header line) has an empty `{}` entry in `frame_details`
+and no extra fields in spindump. When no frame in a stack resolves, or the
+report has no Binary Images section, `frame_details` is absent and the
+output is byte-for-byte what it was before these fields existed. The
+`image_uuid` is the UUID at capture time; compare it with the binary on disk
+before trusting a disassembly, because the binary may have been updated
+since.
+
 Use samples when:
 
 - CPU is high now and you need hot call paths.
