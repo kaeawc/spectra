@@ -19,6 +19,7 @@ import (
 	"github.com/kaeawc/spectra/internal/gclog"
 	"github.com/kaeawc/spectra/internal/heap"
 	"github.com/kaeawc/spectra/internal/jvm"
+	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
 
@@ -171,7 +172,8 @@ func runJVMThreadDump(args []string) int {
 		if *asJSON {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			_ = enc.Encode(threadDumpReport{Summary: sum, Dump: dump})
+			_ = enc.Encode(threadDumpReport{Summary: sum, Dump: dump,
+				CodeSources: defaultCodeSourceDeps().codeSources(context.Background(), pid, dump)})
 			return 0
 		}
 		printThreadSummary(os.Stdout, pid, sum, dump.Deadlocks)
@@ -186,6 +188,43 @@ func runJVMThreadDump(args []string) int {
 type threadDumpReport struct {
 	Summary jvm.ThreadSummary    `json:"summary"`
 	Dump    jvm.ParsedThreadDump `json:"dump"`
+	// CodeSources maps a frame's class name to its jar or class file, for
+	// the classes that could be found cheaply.
+	CodeSources map[string]jvm.CodeSource `json:"code_sources,omitempty"`
+}
+
+// codeSourceDeps reads the JVM's launch class path from its argv and cwd
+// (kernel reads; the JVM is not contacted) and resolves frame classes.
+type codeSourceDeps struct {
+	argv     func(pid int) ([]string, error)
+	cwd      func(ctx context.Context, pid int) (string, error)
+	resolver *jvm.CodeSourceResolver
+}
+
+func defaultCodeSourceDeps() codeSourceDeps {
+	return codeSourceDeps{
+		argv:     process.Argv,
+		cwd:      process.CwdReader{}.Cwd,
+		resolver: jvm.NewCodeSourceResolver(),
+	}
+}
+
+func (d codeSourceDeps) codeSources(ctx context.Context, pid int, dump jvm.ParsedThreadDump) map[string]jvm.CodeSource {
+	argv, err := d.argv(pid)
+	if err != nil || len(argv) == 0 {
+		return nil
+	}
+	cp := jvm.ParseLaunchArgs(argv)
+	if cp.Unknown {
+		return nil
+	}
+	var cwd string
+	if cp.NeedsCwd() {
+		if cwd, err = d.cwd(ctx, pid); err != nil {
+			cwd = ""
+		}
+	}
+	return d.resolver.CodeSourcesForDump(ctx, dump, cp, cwd)
 }
 
 func printThreadSummary(w io.Writer, pid int, sum jvm.ThreadSummary, deadlocks []jvm.DeadlockCycle) {

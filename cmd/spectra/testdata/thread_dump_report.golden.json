@@ -1,0 +1,84 @@
+{
+  "summary": {
+    "total": 2,
+    "daemon": 2,
+    "virtual": 0,
+    "by_state": {
+      "BLOCKED": 2
+    },
+    "by_category": {
+      "monitor": 2
+    },
+    "by_top_frame": {
+      "com.example.A.run(A.java:10)": 1,
+      "com.example.B.run(B.java:20)": 1
+    },
+    "monitor_locks": {
+      "\u003c0x0000000700000001\u003e": 1,
+      "\u003c0x0000000700000002\u003e": 1
+    },
+    "deadlocks": 1
+  },
+  "dump": {
+    "runtime": "jvm",
+    "captured_at": "1970-01-01T00:00:00Z",
+    "threads": [
+      {
+        "name": "worker-1",
+        "runtime_id": "12",
+        "native_id": "0xa",
+        "daemon": true,
+        "state": "BLOCKED",
+        "category": "monitor",
+        "detail": "on object monitor",
+        "lock": "\u003c0x0000000700000001\u003e",
+        "top_frame": "com.example.A.run(A.java:10)",
+        "stack": [
+          "at com.example.A.run(A.java:10)"
+        ],
+        "raw_header": "\"worker-1\" #12 daemon prio=5 os_prio=0 tid=0x1 nid=0xa waiting for monitor entry [0x1]",
+        "raw_block": "\"worker-1\" #12 daemon prio=5 os_prio=0 tid=0x1 nid=0xa waiting for monitor entry [0x1]\n   java.lang.Thread.State: BLOCKED (on object monitor)\n\tat com.example.A.run(A.java:10)\n\t- waiting to lock \u003c0x0000000700000001\u003e (a java.lang.Object)"
+      },
+      {
+        "name": "worker-2",
+        "runtime_id": "13",
+        "native_id": "0xb",
+        "daemon": true,
+        "state": "BLOCKED",
+        "category": "monitor",
+        "detail": "on object monitor",
+        "lock": "\u003c0x0000000700000002\u003e",
+        "top_frame": "com.example.B.run(B.java:20)",
+        "stack": [
+          "at com.example.B.run(B.java:20)"
+        ],
+        "raw_header": "\"worker-2\" #13 daemon prio=5 os_prio=0 tid=0x2 nid=0xb waiting for monitor entry [0x2]",
+        "raw_block": "\"worker-2\" #13 daemon prio=5 os_prio=0 tid=0x2 nid=0xb waiting for monitor entry [0x2]\n   java.lang.Thread.State: BLOCKED (on object monitor)\n\tat com.example.B.run(B.java:20)\n\t- waiting to lock \u003c0x0000000700000002\u003e (a java.lang.Object)"
+      }
+    ],
+    "deadlocks": [
+      {
+        "threads": [
+          "worker-1",
+          "worker-2"
+        ],
+        "locks": [
+          "\u003c0x0000000700000001\u003e (a java.lang.Object)",
+          "\u003c0x0000000700000002\u003e (a java.lang.Object)"
+        ],
+        "waits": [
+          {
+            "thread": "worker-1",
+            "lock": "\u003c0x0000000700000001\u003e (a java.lang.Object)",
+            "held_by": "worker-2"
+          },
+          {
+            "thread": "worker-2",
+            "lock": "\u003c0x0000000700000002\u003e (a java.lang.Object)",
+            "held_by": "worker-1"
+          }
+        ]
+      }
+    ]
+  }
+}
