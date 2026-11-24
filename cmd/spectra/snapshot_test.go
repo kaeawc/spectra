@@ -13,6 +13,7 @@ import (
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
+	"github.com/kaeawc/spectra/internal/snapshotquery"
 	"github.com/kaeawc/spectra/internal/store"
 )
 
@@ -33,7 +34,7 @@ func tempDB(t *testing.T) *store.DB {
 
 func TestResolveSnapshotNotFoundReturnsError(t *testing.T) {
 	db := tempDB(t)
-	_, err := resolveSnapshot(context.Background(), db, "nonexistent-id")
+	_, err := snapshotquery.Resolve(context.Background(), db, "nonexistent-id", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent snapshot ID, got nil")
 	}
@@ -45,7 +46,7 @@ func TestResolveSnapshotLoadsLocalSnapshot(t *testing.T) {
 	snap := testSnapshot("snap-local", snapshot.KindLive, time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
 	saveTestSnapshot(t, db, snap, "")
 
-	got, err := resolveSnapshot(ctx, db, "snap-local")
+	got, err := snapshotquery.Resolve(ctx, db, "snap-local", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestResolveBaselineSnapshotByNameAndLatest(t *testing.T) {
 	saveTestSnapshot(t, db, newer, "release")
 	saveTestSnapshot(t, db, live, "")
 
-	got, err := resolveBaselineSnapshot(ctx, db, "pre-incident")
+	got, err := snapshotquery.ResolveBaseline(ctx, db, "pre-incident")
 	if err != nil {
 		t.Fatalf("resolve by name: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestResolveBaselineSnapshotByNameAndLatest(t *testing.T) {
 		t.Fatalf("resolve by name ID = %q, want %q", got.ID, old.ID)
 	}
 
-	got, err = resolveBaselineSnapshot(ctx, db, "")
+	got, err = snapshotquery.ResolveBaseline(ctx, db, "")
 	if err != nil {
 		t.Fatalf("resolve latest: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestResolveBaselineSnapshotRejectsLiveID(t *testing.T) {
 	live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC))
 	saveTestSnapshot(t, db, live, "")
 
-	if _, err := resolveBaselineSnapshot(ctx, db, live.ID); err == nil {
+	if _, err := snapshotquery.ResolveBaseline(ctx, db, live.ID); err == nil {
 		t.Fatal("expected live snapshot ID to be rejected as a baseline")
 	}
 }
@@ -182,7 +183,7 @@ func TestResolveBaselineSnapshotWithFakeRegistry(t *testing.T) {
 	reg.putSnapshot(old, "pre-incident")
 	reg.putSnapshot(newer, "release")
 
-	got, err := resolveBaselineSnapshot(ctx, reg, "release")
+	got, err := snapshotquery.ResolveBaseline(ctx, reg, "release")
 	if err != nil {
 		t.Fatalf("resolve by fake registry: %v", err)
 	}
@@ -201,22 +202,19 @@ func TestResolveSinceDiffOperandsUsesNewestSnapshotOlderThanCutoff(t *testing.T)
 	reg.putSnapshot(newer, "")
 	reg.putSnapshot(tooNew, "")
 
-	oldCollect := collectLiveSnapshot
-	t.Cleanup(func() { collectLiveSnapshot = oldCollect })
-	collectLiveSnapshot = func(context.Context) *snapshot.Snapshot {
-		live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 13, 0, 0, 0, time.UTC))
-		return &live
-	}
-
-	base, live, err := resolveSinceDiffOperands(ctx, reg, 24*time.Hour, time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC))
+	live := testSnapshot("snap-live", snapshot.KindLive, time.Date(2026, 5, 3, 13, 0, 0, 0, time.UTC))
+	res, err := snapshotquery.Diff(ctx, reg, snapshotquery.DiffOptions{Since: 24 * time.Hour}, snapshotquery.DiffDeps{
+		Live: func(context.Context) *snapshot.Snapshot { return &live },
+		Now:  func() time.Time { return time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC) },
+	})
 	if err != nil {
-		t.Fatalf("resolveSinceDiffOperands: %v", err)
+		t.Fatalf("Diff since: %v", err)
 	}
-	if base.ID != "snap-newer" {
-		t.Fatalf("base ID = %q, want snap-newer", base.ID)
+	if res.AID != "snap-newer" {
+		t.Fatalf("base ID = %q, want snap-newer", res.AID)
 	}
-	if live.ID != "snap-live" {
-		t.Fatalf("live ID = %q, want snap-live", live.ID)
+	if res.BID != "snap-live" {
+		t.Fatalf("live ID = %q, want snap-live", res.BID)
 	}
 }
 
@@ -224,7 +222,9 @@ func TestResolveSinceDiffOperandsNoOldEnoughSnapshot(t *testing.T) {
 	reg := newFakeSnapshotRegistry()
 	reg.putSnapshot(testSnapshot("snap-new", snapshot.KindLive, time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)), "")
 
-	_, _, err := resolveSinceDiffOperands(context.Background(), reg, 24*time.Hour, time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC))
+	_, err := snapshotquery.Diff(context.Background(), reg, snapshotquery.DiffOptions{Since: 24 * time.Hour}, snapshotquery.DiffDeps{
+		Now: func() time.Time { return time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC) },
+	})
 	if !errors.Is(err, store.ErrNotFound) && err == nil {
 		t.Fatal("expected no old-enough snapshot error")
 	}
