@@ -52,6 +52,38 @@ func TestDevicesJSON(t *testing.T) {
 	}
 }
 
+func TestDevicesAVDAndAllSimulatorsFlag(t *testing.T) {
+	r := proc.NewFake().OnExact("/usr/bin/adb", []string{"devices", "-l"}, proc.Response{Result: proc.Result{
+		Stdout: []byte("List of devices attached\nemulator-5554 device product:sdk model:Pixel_7 device:emu transport_id:1\n"),
+	}})
+	procs := []process.Info{
+		{PID: 5, PPID: 1, Command: "adb", FullCommandLine: "adb -L tcp:5037 fork-server server"},
+		{PID: 6, PPID: 1, Command: "qemu-system-x86_64", FullCommandLine: "qemu-system-x86_64 -avd Pixel_7_API_34 -port 5554"},
+	}
+	var out, errBuf bytes.Buffer
+	if code := runDevicesWithIO([]string{"--json", "--all-simulators"}, &out, &errBuf, fakeDeviceHost(r, procs)); code != 0 {
+		t.Fatalf("exit %d: %s", code, errBuf.String())
+	}
+	var rep struct {
+		Schema  struct{ Name string }
+		Android struct{ Devices []struct{ AVD string } }
+		IOS     struct {
+			All []any `json:"all"`
+		} `json:"ios_simulators"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("not JSON: %q", out.String())
+	}
+	if rep.Schema.Name != "spectra.devices" || len(rep.Android.Devices) != 1 || rep.Android.Devices[0].AVD != "Pixel_7_API_34" || rep.IOS.All == nil {
+		t.Errorf("report = %s", out.String())
+	}
+
+	out.Reset()
+	if code := runDevicesWithIO(nil, &out, &errBuf, fakeDeviceHost(r, procs)); code != 0 || !strings.Contains(out.String(), "avd:Pixel_7_API_34") {
+		t.Errorf("exit %d, text lacks the AVD:\n%s", code, out.String())
+	}
+}
+
 func TestDevicesTextWithoutServer(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	if code := runDevicesWithIO(nil, &out, &errBuf, fakeDeviceHost(proc.NewFake(), nil)); code != 0 {

@@ -19,9 +19,13 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	protocol "github.com/kaeawc/spectra-protocol/protocol/v1"
+
+	"github.com/kaeawc/spectra/internal/capabilities"
 	"github.com/kaeawc/spectra/internal/hostload"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/proc"
@@ -29,6 +33,10 @@ import (
 )
 
 const commandTimeout = 10 * time.Second
+
+// avdQueryTimeout bounds each `adb emu avd name` fallback: the console of a
+// hung emulator would otherwise hold up the whole report.
+const avdQueryTimeout = 2 * time.Second
 
 // Probe statuses.
 const (
@@ -41,11 +49,12 @@ const (
 
 // Report is the `spectra devices --json` result (schema spectra.devices).
 type Report struct {
-	OS            string           `json:"os"`
-	Android       AndroidReport    `json:"android"`
-	IOSSimulators SimulatorReport  `json:"ios_simulators"`
-	Processes     hostload.Devices `json:"processes"`
-	Limitations   []string         `json:"limitations"`
+	Schema        protocol.SchemaRef `json:"schema"`
+	OS            string             `json:"os"`
+	Android       AndroidReport      `json:"android"`
+	IOSSimulators SimulatorReport    `json:"ios_simulators"`
+	Processes     hostload.Devices   `json:"processes"`
+	Limitations   []string           `json:"limitations"`
 }
 
 // AndroidReport is what adb sees.
@@ -69,6 +78,8 @@ type AndroidDevice struct {
 	Product     string `json:"product,omitempty"`
 	Device      string `json:"device,omitempty"`
 	TransportID string `json:"transport_id,omitempty"`
+	// AVD is the emulator's AVD name, when known.
+	AVD string `json:"avd,omitempty"`
 }
 
 // SimulatorReport is what `xcrun simctl` sees.
@@ -76,9 +87,12 @@ type SimulatorReport struct {
 	Status  string      `json:"status"`
 	Message string      `json:"message,omitempty"`
 	Booted  []Simulator `json:"booted"`
+	// All is every simulator in any state, present only when asked for
+	// (Options.AllSimulators).
+	All []Simulator `json:"all,omitzero"`
 }
 
-// Simulator is one booted iOS/tvOS/watchOS/visionOS simulator.
+// Simulator is one iOS/tvOS/watchOS/visionOS simulator.
 type Simulator struct {
 	UDID    string `json:"udid"`
 	Name    string `json:"name"`
@@ -101,6 +115,8 @@ type Options struct {
 	// StartADB asks adb even when no adb server is running, which starts
 	// one that keeps running after Spectra exits.
 	StartADB bool
+	// AllSimulators also lists simulators that are not booted.
+	AllSimulators bool
 }
 
 func (o Options) withDefaults() Options {
@@ -142,7 +158,9 @@ func Collect(ctx context.Context, opts Options) Report {
 	for i, p := range procs {
 		pids[i] = p.PID
 	}
+	version, _ := capabilities.ResultSchemaVersion(capabilities.SchemaDevices)
 	r := Report{
+		Schema:        protocol.SchemaRef{Name: capabilities.SchemaDevices, Version: version},
 		OS:            o.OS.String(),
 		Android:       collectAndroid(ctx, o, procs),
 		IOSSimulators: collectSimulators(ctx, o),
@@ -182,7 +200,102 @@ func collectAndroid(ctx context.Context, o Options, procs []process.Info) Androi
 	}
 	r.Status = StatusOK
 	r.Devices = ParseADBDevices(string(res.Stdout))
+	resolveAVDs(ctx, o, adb, r.Devices, procs)
 	return r
+}
+
+// resolveAVDs names each emulator's AVD from the emulator process whose
+// console port matches the serial, asking the emulator console through adb
+// only for serials no process explains.
+func resolveAVDs(ctx context.Context, o Options, adb string, devs []AndroidDevice, procs []process.Info) {
+	byPort := EmulatorAVDsByPort(procs)
+	for i := range devs {
+		port, ok := EmulatorConsolePort(devs[i].Serial)
+		if !ok {
+			continue
+		}
+		if avd := byPort[port]; avd != "" {
+			devs[i].AVD = avd
+			continue
+		}
+		devs[i].AVD = queryAVDName(ctx, o, adb, devs[i].Serial)
+	}
+}
+
+// EmulatorConsolePort returns the console port of an emulator-<port> serial.
+func EmulatorConsolePort(serial string) (int, bool) {
+	rest, ok := strings.CutPrefix(serial, "emulator-")
+	if !ok {
+		return 0, false
+	}
+	port, err := strconv.Atoi(rest)
+	return port, err == nil && port > 0
+}
+
+// EmulatorAVDsByPort maps console ports to AVD names from emulator command
+// lines that carry both: "-port N" / "-port=N" or "-ports N,M" (console
+// first), and "-avd NAME" / "@NAME".
+func EmulatorAVDsByPort(procs []process.Info) map[int]string {
+	out := map[int]string{}
+	for _, p := range procs {
+		avd := hostload.AVDName(p.FullCommandLine)
+		if avd == "" {
+			continue
+		}
+		if port, ok := consolePortArg(p.FullCommandLine); ok {
+			out[port] = avd
+		}
+	}
+	return out
+}
+
+func consolePortArg(cmdline string) (int, bool) {
+	f := strings.Fields(cmdline)
+	for i, tok := range f {
+		var v string
+		switch {
+		case (tok == "-port" || tok == "-ports") && i+1 < len(f):
+			v = f[i+1]
+		case strings.HasPrefix(tok, "-port="):
+			v = strings.TrimPrefix(tok, "-port=")
+		case strings.HasPrefix(tok, "-ports="):
+			v = strings.TrimPrefix(tok, "-ports=")
+		default:
+			continue
+		}
+		v, _, _ = strings.Cut(v, ",")
+		if port, err := strconv.Atoi(v); err == nil && port > 0 {
+			return port, true
+		}
+	}
+	return 0, false
+}
+
+func queryAVDName(ctx context.Context, o Options, adb, serial string) string {
+	ctx, cancel := context.WithTimeout(ctx, avdQueryTimeout)
+	defer cancel()
+	res, err := o.Runner.Run(ctx, proc.Cmd{Name: adb, Args: []string{"-s", serial, "emu", "avd", "name"}})
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	return ParseEmuAVDName(string(res.Stdout))
+}
+
+// ParseEmuAVDName parses `adb emu avd name`: the name, then the console's
+// "OK" line. A "KO" reply, an error, or an empty answer yields "".
+func ParseEmuAVDName(out string) string {
+	for line := range strings.Lines(out) {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+			continue
+		case line == "OK", strings.HasPrefix(line, "KO"), strings.HasPrefix(line, "error"):
+			return ""
+		default:
+			return line
+		}
+	}
+	return ""
 }
 
 func findADB(o Options) string {
@@ -253,6 +366,9 @@ func ParseADBDevices(out string) []AndroidDevice {
 
 func collectSimulators(ctx context.Context, o Options) SimulatorReport {
 	r := SimulatorReport{Booted: []Simulator{}}
+	if o.AllSimulators {
+		r.All = []Simulator{}
+	}
 	if o.OS != hostos.Darwin {
 		r.Status = StatusUnsupported
 		r.Message = hostos.Unsupported("iOS simulators (xcrun simctl)").Error()
@@ -266,26 +382,54 @@ func collectSimulators(ctx context.Context, o Options) SimulatorReport {
 	}
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	res, err := o.Runner.Run(ctx, proc.Cmd{Name: xcrun, Args: []string{"simctl", "list", "devices", "booted", "--json"}})
+	args := []string{"simctl", "list", "devices", "booted", "--json"}
+	if o.AllSimulators {
+		args = []string{"simctl", "list", "devices", "--json"}
+	}
+	res, err := o.Runner.Run(ctx, proc.Cmd{Name: xcrun, Args: args})
 	if err == nil && res.ExitCode != 0 {
 		err = fmt.Errorf("exit %d: %s", res.ExitCode, strings.TrimSpace(string(res.Stderr)))
 	}
+	var all []Simulator
 	if err == nil {
-		r.Booted, err = ParseSimctlBooted(res.Stdout)
+		all, err = ParseSimctl(res.Stdout)
 	}
 	if err != nil {
 		// simctl fails without a full Xcode (only the command line tools).
 		r.Status = StatusError
-		r.Message = "xcrun simctl list devices booted: " + err.Error()
-		r.Booted = []Simulator{}
+		r.Message = "xcrun " + strings.Join(args[:len(args)-1], " ") + ": " + err.Error()
 		return r
 	}
 	r.Status = StatusOK
+	r.Booted = bootedOnly(all)
+	if o.AllSimulators {
+		r.All = all
+	}
 	return r
 }
 
 // ParseSimctlBooted parses `xcrun simctl list devices booted --json`.
 func ParseSimctlBooted(data []byte) ([]Simulator, error) {
+	all, err := ParseSimctl(data)
+	if err != nil {
+		return nil, err
+	}
+	return bootedOnly(all), nil
+}
+
+func bootedOnly(sims []Simulator) []Simulator {
+	out := []Simulator{}
+	for _, s := range sims {
+		if s.State == "Booted" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ParseSimctl parses `xcrun simctl list devices [booted] --json` into every
+// simulator listed, in any state, sorted by UDID.
+func ParseSimctl(data []byte) ([]Simulator, error) {
 	var doc struct {
 		Devices map[string][]struct {
 			UDID  string `json:"udid"`
@@ -299,9 +443,6 @@ func ParseSimctlBooted(data []byte) ([]Simulator, error) {
 	sims := []Simulator{}
 	for runtime, list := range doc.Devices {
 		for _, d := range list {
-			if d.State != "Booted" {
-				continue
-			}
 			sims = append(sims, Simulator{UDID: d.UDID, Name: d.Name, Runtime: runtimeName(runtime), State: d.State})
 		}
 	}

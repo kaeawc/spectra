@@ -120,10 +120,11 @@ func reportToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "devices",
-			Description: "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, and which worktree started them?\"",
+			Description: "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), each emulator's AVD name (android.devices[].avd), booted iOS simulators (macOS; every simulator in any state under ios_simulators.all with all_simulators), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, which AVD is emulator-5554, and which worktree started them?\"",
 			InputSchema: objectSchema(map[string]interface{}{
-				"roots":     arrayStringProp("Absolute directories (worktree roots) to attribute emulator and simulator processes to."),
-				"start_adb": boolProp("Ask adb even when no adb server runs. This starts an adb server that keeps running."),
+				"roots":          arrayStringProp("Absolute directories (worktree roots) to attribute emulator and simulator processes to."),
+				"start_adb":      boolProp("Ask adb even when no adb server runs. This starts an adb server that keeps running."),
+				"all_simulators": boolProp("Also list iOS simulators that are not booted (ios_simulators.all). macOS only."),
 			}, nil),
 		},
 		{
@@ -444,8 +445,9 @@ func idleOptions(roots []string, pids []int, minAge, window string, maxCPU *floa
 
 func (s *Server) toolDevices(ctx context.Context, raw json.RawMessage) ToolResult {
 	var p struct {
-		Roots    []string `json:"roots"`
-		StartADB bool     `json:"start_adb"`
+		Roots         []string `json:"roots"`
+		StartADB      bool     `json:"start_adb"`
+		AllSimulators bool     `json:"all_simulators"`
 	}
 	if err := decodeArgs(raw, &p); err != nil {
 		return toolError(err.Error())
@@ -455,6 +457,7 @@ func (s *Server) toolDevices(ctx context.Context, raw json.RawMessage) ToolResul
 	}
 	opts := s.collect.Reports.Devices()
 	opts.StartADB = p.StartADB
+	opts.AllSimulators = p.AllSimulators
 	opts.Roots = hostload.ResolveRoots(p.Roots, filepath.Abs, filepath.EvalSymlinks)
 	ctx, cancel := context.WithTimeout(ctx, devicesToolTimeout)
 	defer cancel()
