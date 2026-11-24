@@ -33,48 +33,65 @@ BASE="file://$WORK/releases"
 
 setup() { sh "$HERE/hive-setup.sh" --base-url "$BASE" "$@" 2>&1; }
 
-# check <name> <command...>
-check() {
-  local name="$1"
-  shift
-  if "$@"; then
-    echo "PASS: $name"
+# report <name> <status>
+report() {
+  if [ "$2" -eq 0 ]; then
+    echo "PASS: $1"
   else
-    echo "FAIL: $name"
+    echo "FAIL: $1"
     echo "$out"
     fail=1
   fi
 }
 
-# shellcheck disable=SC2317 # these run through check "$@"
-{
-  version_is() { [ "$("$SPECTRA_HOME/bin/spectra" version)" = "$1" ]; }
-  daemon_starts() { [ "$(wc -l < "$DAEMON_LOG" | tr -d ' ')" -eq "$1" ]; }
-  output_has() { grep -qF "$1" <<<"$out"; }
+# check <name> <command...>
+check() {
+  local name="$1" rc=0
+  shift
+  "$@" || rc=$?
+  report "$name" "$rc"
+}
+
+version_is() {
+  local rc=0
+  [ "$("$SPECTRA_HOME/bin/spectra" version)" = "$2" ] || rc=1
+  report "$1" "$rc"
+}
+
+daemon_starts() {
+  local rc=0
+  [ "$(wc -l < "$DAEMON_LOG" | tr -d ' ')" -eq "$2" ] || rc=1
+  report "$1" "$rc"
+}
+
+output_has() {
+  local rc=0
+  grep -qF "$2" <<<"$out" || rc=1
+  report "$1" "$rc"
 }
 
 make_release v9.0.0
 make_release v9.0.1
 
 out="$(setup --version v9.0.0)"
-check "fresh install" version_is v9.0.0
+version_is "fresh install" v9.0.0
 check "installs spectra-mcp" test -x "$SPECTRA_HOME/bin/spectra-mcp"
 check "starts the daemon" grep -qx "daemon start" "$DAEMON_LOG"
-check "prints the MCP command" output_has "MCP server command: $SPECTRA_HOME/bin/spectra-mcp"
+output_has "prints the MCP command" "MCP server command: $SPECTRA_HOME/bin/spectra-mcp"
 
 rm -rf "$WORK/releases/v9.0.0"
 out="$(setup --version v9.0.0)"
-check "same version skips the download" output_has "already installed"
-check "restarts the daemon on rerun" daemon_starts 2
+output_has "same version skips the download" "already installed"
+daemon_starts "restarts the daemon on rerun" 2
 
 out="$(setup --version v9.0.1 --no-daemon)"
-check "upgrades to a new version" version_is v9.0.1
-check "--no-daemon skips the daemon" daemon_starts 2
+version_is "upgrades to a new version" v9.0.1
+daemon_starts "--no-daemon skips the daemon" 2
 
 if out="$(setup --version v9.9.9 --no-daemon)"; then
   echo "FAIL: missing release should fail"; echo "$out"; fail=1
 else
-  check "missing release fails and keeps the install" version_is v9.0.1
+  version_is "missing release fails and keeps the install" v9.0.1
 fi
 
 # Piped into sh, the script must not run an install.sh from the current dir.
