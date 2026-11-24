@@ -73,7 +73,7 @@ var commandEntries = []entry{
 	{name: "lineage", schema: SchemaLineage, argv: []string{"lineage", "--json", "<pid>"}},
 	{name: "spawns", schema: SchemaSpawns, argv: []string{"spawns", "--json", "[--interval <duration>]", "[--duration <duration>]", "[--pid <pid>]"}},
 	{name: "idle", schema: SchemaIdle, argv: []string{"idle", "--json", "[--root <dir>]...", "[--pids <pid,...>]", "[--min-age <duration>]", "[--max-cpu <pct>]", "[--window <duration>]", "[--timeout <duration>]"}},
-	{name: "devices", schema: SchemaDevices, argv: []string{"devices", "--json", "[--root <dir>]...", "[--start-adb]"}},
+	{name: "devices", schema: SchemaDevices, argv: []string{"devices", "--json", "[--root <dir>]...", "[--start-adb]", "[--all-simulators]"}},
 	{name: "startup", schema: SchemaStartup, darwinOnly: true, argv: []string{"startup", "list", "--json", "[--scope user|system|all]", "[--include-apple]"}},
 	{name: "startup.disable", schema: SchemaStartupChange, darwinOnly: true, argv: []string{"startup", "disable", "<label>", "--json", "[--scope user]"}},
 	{name: "startup.enable", schema: SchemaStartupChange, darwinOnly: true, argv: []string{"startup", "enable", "<label>", "--json", "[--scope user]"}},

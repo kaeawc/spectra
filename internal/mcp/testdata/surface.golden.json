@@ -257,9 +257,13 @@
       }
     },
     {
-      "description": "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, and which worktree started them?\"",
+      "description": "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), each emulator's AVD name (android.devices[].avd), booted iOS simulators (macOS; every simulator in any state under ios_simulators.all with all_simulators), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, which AVD is emulator-5554, and which worktree started them?\"",
       "inputSchema": {
         "properties": {
+          "all_simulators": {
+            "description": "Also list iOS simulators that are not booted (ios_simulators.all). macOS only.",
+            "type": "boolean"
+          },
           "roots": {
             "description": "Absolute directories (worktree roots) to attribute emulator and simulator processes to.",
             "items": {
@@ -288,6 +292,9 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "avd": {
+                      "type": "string"
+                    },
                     "device": {
                       "type": "string"
                     },
@@ -342,6 +349,36 @@
           "ios_simulators": {
             "additionalProperties": false,
             "properties": {
+              "all": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "runtime": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "udid": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "udid",
+                    "name",
+                    "runtime",
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
               "booted": {
                 "items": {
                   "additionalProperties": false,
@@ -513,9 +550,26 @@
               "list"
             ],
             "type": "object"
+          },
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "version"
+            ],
+            "type": "object"
           }
         },
         "required": [
+          "schema",
           "os",
           "android",
           "ios_simulators",

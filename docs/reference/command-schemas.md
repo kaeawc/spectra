@@ -410,17 +410,25 @@ summary: type string
 ## spectra.devices
 
 `spectra devices --json` emits one object listing the mobile devices work on
-this host may be using, from three sources, each with its own `status` (`ok`,
-`not_found`, `server_not_running`, `unsupported` or `error`) and `message`:
+this host may be using. It starts with `schema` (`{"name":
+"spectra.devices", "version": 1}`), then three sources, each with its own
+`status` (`ok`, `not_found`, `server_not_running`, `unsupported` or `error`)
+and `message`:
 
 - `android`: `adb devices -l` (USB, emulators, and devices reached through
   `adb connect`, marked `remote`). adb is asked only when an adb server is
   already running, or `ADB_SERVER_SOCKET`/`ANDROID_ADB_SERVER_ADDRESS` points
   at one, or `--start-adb` is given; otherwise the status is
   `server_not_running`, because asking would start a server that keeps
-  running after Spectra exits.
+  running after Spectra exits. Each `emulator-<port>` entry carries `avd`,
+  its AVD name: from the emulator process whose command line names both the
+  AVD (`-avd NAME` or `@NAME`) and that console port (`-port <port>` or
+  `-ports <port>,<adb port>`), else from `adb -s <serial> emu avd name`
+  (2 s timeout). `avd` is omitted when neither answers.
 - `ios_simulators`: booted simulators from `xcrun simctl` (macOS;
-  `unsupported` elsewhere).
+  `unsupported` elsewhere). With `--all-simulators` (MCP `all_simulators`),
+  `all` also lists every simulator in any state (`Booted`, `Shutdown`, ...);
+  without it, `all` is absent. Off macOS, `all` is `[]`.
 - `processes`: emulator and simulator processes on this host, the same block
   as `spectra.load`'s `devices`, attributed to each `--root`.
 
@@ -432,6 +440,7 @@ android object
 android.adb string
 android.devices array
 android.devices[] object
+android.devices[].avd string
 android.devices[].device string
 android.devices[].emulator bool
 android.devices[].model string
@@ -443,6 +452,12 @@ android.devices[].transport_id string
 android.message string
 android.status string
 ios_simulators object
+ios_simulators.all array
+ios_simulators.all[] object
+ios_simulators.all[].name string
+ios_simulators.all[].runtime string
+ios_simulators.all[].state string
+ios_simulators.all[].udid string
 ios_simulators.booted array
 ios_simulators.booted[] object
 ios_simulators.booted[].name string
@@ -479,6 +494,9 @@ processes.list[].rss_kib number
 processes.list[].started_at string
 processes.list[].udid string
 processes.simulators number
+schema object
+schema.name string
+schema.version number
 ```
 
 ## spectra.idle

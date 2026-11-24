@@ -2,8 +2,10 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,6 +176,109 @@ func TestCollectSimulatorsOnDarwin(t *testing.T) {
 	rep = Collect(context.Background(), h.options(hostos.Darwin, r))
 	if rep.IOSSimulators.Status != StatusError || rep.IOSSimulators.Booted == nil {
 		t.Errorf("simctl failure = %+v", rep.IOSSimulators)
+	}
+}
+
+const twoEmulators = "List of devices attached\nemulator-5554 device transport_id:1\nemulator-5556 device transport_id:2\nR58M12345 device transport_id:3\n"
+
+func TestCollectAndroidAVDFromEmulatorPort(t *testing.T) {
+	r := proc.NewFake().OnExact("/usr/bin/adb", []string{"devices", "-l"}, proc.Response{Result: proc.Result{Stdout: []byte(twoEmulators)}})
+	h := fakeHost{paths: map[string]string{"adb": "/usr/bin/adb"}, procs: []process.Info{
+		adbServer,
+		{PID: 20, PPID: 1, Command: "qemu-system-x86_64", FullCommandLine: "/sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64 -avd Pixel_7_API_34 -port 5554 -no-window"},
+		{PID: 21, PPID: 1, Command: "qemu-system-aarch64", FullCommandLine: "qemu-system-aarch64 @Tablet -ports=5556,5557"},
+	}}
+	rep := Collect(context.Background(), h.options(hostos.Linux, r))
+	got := map[string]string{}
+	for _, d := range rep.Android.Devices {
+		got[d.Serial] = d.AVD
+	}
+	want := map[string]string{"emulator-5554": "Pixel_7_API_34", "emulator-5556": "Tablet", "R58M12345": ""}
+	for serial, avd := range want {
+		if got[serial] != avd {
+			t.Errorf("%s avd = %q, want %q", serial, got[serial], avd)
+		}
+	}
+	if n := r.CallCount(); n != 1 {
+		t.Errorf("ran %d commands, want only adb devices -l: %+v", n, r.Calls())
+	}
+}
+
+func TestCollectAndroidAVDFallsBackToEmuConsole(t *testing.T) {
+	r := proc.NewFake().
+		OnExact("/usr/bin/adb", []string{"devices", "-l"}, proc.Response{Result: proc.Result{Stdout: []byte(twoEmulators)}}).
+		OnExact("/usr/bin/adb", []string{"-s", "emulator-5554", "emu", "avd", "name"}, proc.Response{Result: proc.Result{Stdout: []byte("Pixel_7\r\nOK\r\n")}}).
+		OnExact("/usr/bin/adb", []string{"-s", "emulator-5556", "emu", "avd", "name"}, proc.Response{Result: proc.Result{ExitCode: 1, Stderr: []byte("error: device offline")}})
+	h := fakeHost{paths: map[string]string{"adb": "/usr/bin/adb"}, procs: []process.Info{
+		adbServer,
+		// Names an AVD but on another port: must not be attributed to 5554.
+		{PID: 20, PPID: 1, Command: "qemu-system-x86_64", FullCommandLine: "qemu-system-x86_64 -avd Other -port 5560"},
+	}}
+	rep := Collect(context.Background(), h.options(hostos.Linux, r))
+	if d := rep.Android.Devices; len(d) != 3 || d[0].AVD != "Pixel_7" || d[1].AVD != "" || d[2].AVD != "" {
+		t.Errorf("devices = %+v", d)
+	}
+}
+
+func TestParseEmuAVDName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Pixel_7\r\nOK\r\n":             "Pixel_7",
+		"\nPixel 7 Pro\nOK\n":           "Pixel 7 Pro",
+		"OK\r\n":                        "",
+		"KO: unknown command\r\n":       "",
+		"error: no emulator detected\n": "",
+		"":                              "",
+	} {
+		if got := ParseEmuAVDName(in); got != want {
+			t.Errorf("ParseEmuAVDName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestEmulatorConsolePort(t *testing.T) {
+	for serial, want := range map[string]int{"emulator-5554": 5554, "emulator-x": 0, "192.168.1.2:5555": 0, "emulator-": 0} {
+		got, ok := EmulatorConsolePort(serial)
+		if got != want || ok != (want != 0) {
+			t.Errorf("EmulatorConsolePort(%q) = %d, %v", serial, got, ok)
+		}
+	}
+}
+
+func TestCollectAllSimulatorsOnDarwin(t *testing.T) {
+	r := proc.NewFake().OnExact("/usr/bin/xcrun", []string{"simctl", "list", "devices", "--json"}, proc.Response{Result: proc.Result{Stdout: []byte(simctlFixture)}})
+	h := fakeHost{paths: map[string]string{"xcrun": "/usr/bin/xcrun"}}
+	o := h.options(hostos.Darwin, r)
+	o.AllSimulators = true
+	s := Collect(context.Background(), o).IOSSimulators
+	if s.Status != StatusOK || len(s.Booted) != 2 || len(s.All) != 3 {
+		t.Fatalf("simulators = %+v", s)
+	}
+	if s.All[2] != (Simulator{UDID: "B9", Name: "iPhone SE", Runtime: "iOS 17.2", State: "Shutdown"}) {
+		t.Errorf("shut-down simulator = %+v", s.All[2])
+	}
+}
+
+func TestSimulatorsAllKeyOnlyWhenAsked(t *testing.T) {
+	for _, all := range []bool{false, true} {
+		o := fakeHost{}.options(hostos.Linux, proc.NewFake())
+		o.AllSimulators = all
+		data, err := json.Marshal(Collect(context.Background(), o).IOSSimulators)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has := strings.Contains(string(data), `"all":[]`); has != all {
+			t.Errorf("all_simulators=%v: %s", all, data)
+		}
+	}
+}
+
+func TestReportSchemaHeader(t *testing.T) {
+	data, err := json.Marshal(Collect(context.Background(), fakeHost{}.options(hostos.Linux, proc.NewFake())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), `{"schema":{"name":"spectra.devices","version":1},`) {
+		t.Errorf("report does not start with the schema header: %s", data)
 	}
 }
 

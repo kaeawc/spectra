@@ -396,4 +396,11 @@ func TestDevicesTool(t *testing.T) {
 	if res := s.toolDevices(context.Background(), json.RawMessage(`{"roots":["rel"]}`)); !res.IsError {
 		t.Error("relative root accepted")
 	}
+	if rep.Schema.Name != "spectra.devices" || rep.Schema.Version != 1 || rep.IOSSimulators.All != nil {
+		t.Errorf("schema = %+v, all = %v", rep.Schema, rep.IOSSimulators.All)
+	}
+	res = s.toolDevices(context.Background(), json.RawMessage(`{"all_simulators":true}`))
+	if !strings.Contains(res.Content[0].Text, `"all": []`) {
+		t.Errorf("all_simulators did not ask for every simulator: %s", res.Content[0].Text)
+	}
 }
