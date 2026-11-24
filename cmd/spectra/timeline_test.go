@@ -25,7 +25,9 @@ func fakeTimelineProcs() []process.Info {
 	}
 }
 
-func procSource() timeline.Source { return processStartSource{procs: fakeTimelineProcs} }
+func procSource() timeline.Source {
+	return timeline.ProcessStartSource{Procs: func(context.Context) []process.Info { return fakeTimelineProcs() }}
+}
 
 func TestTimelineSourcesPerOS(t *testing.T) {
 	names := func(srcs []timeline.Source) []string {
@@ -84,7 +86,7 @@ func TestRunTimelineArgValidation(t *testing.T) {
 
 func TestLogSourceMapsEntries(t *testing.T) {
 	var gotStart time.Time
-	src := logSource{run: func(_ context.Context, q logquery.Query) (logquery.Result, error) {
+	src := timeline.LogSource{Run: func(_ context.Context, q logquery.Query) (logquery.Result, error) {
 		gotStart = q.Start
 		if q.MinLevel != "error" {
 			t.Errorf("expected MinLevel=error, got %q", q.MinLevel)
@@ -95,7 +97,7 @@ func TestLogSourceMapsEntries(t *testing.T) {
 		}}, nil
 	}}
 	since := fixedNow().Add(-time.Hour)
-	evs, err := src.Events(since)
+	evs, err := src.Events(context.Background(), since)
 	if err != nil {
 		t.Fatalf("Events: %v", err)
 	}
@@ -111,13 +113,13 @@ func TestLogSourceMapsEntries(t *testing.T) {
 }
 
 func TestInstallSourceFiltersAndMaps(t *testing.T) {
-	src := installSource{fetch: func(context.Context) ([]updates.InstallEntry, error) {
+	src := timeline.InstallSource{Fetch: func(context.Context) ([]updates.InstallEntry, error) {
 		return []updates.InstallEntry{
 			{Name: "Xcode", Version: "16.2", InstallDate: fixedNow()},
 			{Name: "OldApp", Version: "1.0", InstallDate: fixedNow().Add(-48 * time.Hour)},
 		}, nil
 	}}
-	evs, err := src.Events(fixedNow().Add(-time.Hour))
+	evs, err := src.Events(context.Background(), fixedNow().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("Events: %v", err)
 	}
@@ -127,12 +129,12 @@ func TestInstallSourceFiltersAndMaps(t *testing.T) {
 }
 
 func TestRunTimelineMergesAllSources(t *testing.T) {
-	logs := logSource{run: func(context.Context, logquery.Query) (logquery.Result, error) {
+	logs := timeline.LogSource{Run: func(context.Context, logquery.Query) (logquery.Result, error) {
 		return logquery.Result{Entries: []logquery.LogEntry{
 			{Timestamp: time.Date(2026, 1, 1, 11, 45, 0, 0, time.UTC), Process: "kernel", EventMessage: "oops", MessageType: "Error"},
 		}}, nil
 	}}
-	installs := installSource{fetch: func(context.Context) ([]updates.InstallEntry, error) {
+	installs := timeline.InstallSource{Fetch: func(context.Context) ([]updates.InstallEntry, error) {
 		return []updates.InstallEntry{{Name: "App", InstallDate: time.Date(2026, 1, 1, 11, 50, 0, 0, time.UTC)}}, nil
 	}}
 	var out, errBuf bytes.Buffer
@@ -153,7 +155,7 @@ func TestRunTimelineMergesAllSources(t *testing.T) {
 }
 
 func TestRunTimelineBestEffortOnSourceError(t *testing.T) {
-	failing := logSource{run: func(context.Context, logquery.Query) (logquery.Result, error) {
+	failing := timeline.LogSource{Run: func(context.Context, logquery.Query) (logquery.Result, error) {
 		return logquery.Result{}, errors.New("log unavailable")
 	}}
 	var out, errBuf bytes.Buffer

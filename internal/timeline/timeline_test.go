@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -60,14 +61,14 @@ type fakeSource struct {
 	err  error
 }
 
-func (f fakeSource) Name() string                      { return f.name }
-func (f fakeSource) Events(time.Time) ([]Event, error) { return f.evs, f.err }
+func (f fakeSource) Name() string                                       { return f.name }
+func (f fakeSource) Events(context.Context, time.Time) ([]Event, error) { return f.evs, f.err }
 
 func TestCollectBestEffort(t *testing.T) {
 	since := at("2026-01-01T00:00:00Z")
 	good := fakeSource{name: "good", evs: []Event{{Time: at("2026-01-01T10:00:00Z"), Source: "good", Summary: "ok"}}}
 	bad := fakeSource{name: "bad", err: errors.New("boom")}
-	tl, errs := Collect(since, good, bad)
+	tl, errs := Collect(context.Background(), since, good, bad)
 	if len(tl.Events) != 1 || tl.Events[0].Summary != "ok" {
 		t.Errorf("a failing source must not drop the others: %+v", tl.Events)
 	}
@@ -82,7 +83,7 @@ func TestCollectAppliesWindow(t *testing.T) {
 		{Time: at("2026-01-01T09:00:00Z"), Summary: "old"},
 		{Time: at("2026-01-01T11:00:00Z"), Summary: "new"},
 	}}
-	tl, _ := Collect(since, src)
+	tl, _ := Collect(context.Background(), since, src)
 	if len(tl.Events) != 1 || tl.Events[0].Summary != "new" {
 		t.Errorf("Collect should drop pre-window events: %+v", tl.Events)
 	}

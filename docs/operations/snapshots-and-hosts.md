@@ -71,6 +71,8 @@ collisions when multiple snapshots are taken in the same second.
 
 Use `spectra snapshot list` to find IDs and
 `spectra snapshot show <id>` to inspect one stored snapshot.
+`spectra snapshot list --json` prints `[]` when nothing is stored (or nothing
+matches `--kind`), with the hint on stderr.
 
 ## Live snapshots
 

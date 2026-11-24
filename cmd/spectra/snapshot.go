@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kaeawc/spectra/internal/diff"
 	"github.com/kaeawc/spectra/internal/memstate"
 	"github.com/kaeawc/spectra/internal/snapshot"
+	"github.com/kaeawc/spectra/internal/snapshotquery"
 	"github.com/kaeawc/spectra/internal/store"
 	"github.com/kaeawc/spectra/internal/toolchain"
 )
@@ -168,65 +170,81 @@ func saveSnapshotToRegistry(ctx context.Context, db snapshotRegistry, snap snaps
 	return nil
 }
 
+// snapshotReadDeps open the snapshot store and capture live snapshots for
+// the read-only snapshot commands; tests substitute them.
+type snapshotReadDeps struct {
+	open func() (snapshotquery.Reader, func(), error)
+	live func(context.Context) *snapshot.Snapshot
+	now  func() time.Time
+}
+
+func defaultSnapshotReadDeps() snapshotReadDeps {
+	return snapshotReadDeps{
+		open: func() (snapshotquery.Reader, func(), error) {
+			dbPath, err := store.DefaultPath()
+			if err != nil {
+				return nil, nil, err
+			}
+			db, err := store.Open(dbPath)
+			if err != nil {
+				return nil, nil, err
+			}
+			return db, func() { db.Close() }, nil
+		},
+		live: func(ctx context.Context) *snapshot.Snapshot { return collectLiveSnapshot(ctx) },
+		now:  time.Now,
+	}
+}
+
 // runSnapshotList prints stored snapshots in a summary table.
 func runSnapshotList(args []string) int {
+	return runSnapshotListWithIO(args, os.Stdout, os.Stderr, defaultSnapshotReadDeps())
+}
+
+func runSnapshotListWithIO(args []string, stdout, stderr io.Writer, deps snapshotReadDeps) int {
 	fs := flag.NewFlagSet("spectra snapshot list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	kindFilter := fs.String("kind", "", "Filter by kind: live or baseline")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	dbPath, err := store.DefaultPath()
+	db, closeDB, err := deps.open()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	db, err := store.Open(dbPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer db.Close()
+	defer closeDB()
 
-	rows, err := db.ListSnapshots(context.Background(), "")
+	rows, err := snapshotquery.List(context.Background(), db, *kindFilter)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return 1
-	}
-
-	// Apply kind filter client-side (avoids schema change to ListSnapshots sig).
-	if *kindFilter != "" {
-		filtered := rows[:0]
-		for _, r := range rows {
-			if r.Kind == *kindFilter {
-				filtered = append(filtered, r)
-			}
-		}
-		rows = filtered
 	}
 
 	if len(rows) == 0 {
-		fmt.Fprintln(os.Stderr, "no snapshots stored — run `spectra snapshot` first")
-		return 0
+		fmt.Fprintln(stderr, "no snapshots stored — run `spectra snapshot` first")
+		if !*asJSON {
+			return 0
+		}
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(rows)
 		return 0
 	}
 
-	fmt.Printf("%-32s  %-8s  %-8s  %-20s  %-20s  %s\n", "ID", "KIND", "TAG", "TAKEN AT", "NAME", "APPS")
-	fmt.Println(strings.Repeat("-", 100))
+	fmt.Fprintf(stdout, "%-32s  %-8s  %-8s  %-20s  %-20s  %s\n", "ID", "KIND", "TAG", "TAKEN AT", "NAME", "APPS")
+	fmt.Fprintln(stdout, strings.Repeat("-", 100))
 	for _, r := range rows {
 		tag := r.Tag
 		if tag == "" {
 			tag = "-"
 		}
-		fmt.Printf("%-32s  %-8s  %-8s  %-20s  %-20s  %d\n",
+		fmt.Fprintf(stdout, "%-32s  %-8s  %-8s  %-20s  %-20s  %d\n",
 			r.ID, r.Kind,
 			tag,
 			r.TakenAt.Format("2006-01-02 15:04:05Z"),
@@ -494,61 +512,46 @@ func sortStrings(s []string) {
 // It also supports `diff baseline [name|id] [live|id]`, where the baseline
 // reference is optional and resolves to the newest baseline when omitted.
 func runSnapshotDiff(args []string) int {
+	return runSnapshotDiffWithIO(args, os.Stdout, os.Stderr, defaultSnapshotReadDeps())
+}
+
+func runSnapshotDiffWithIO(args []string, stdout, stderr io.Writer, deps snapshotReadDeps) int {
 	fs := flag.NewFlagSet("spectra snapshot diff", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	since := fs.Duration("since", 0, "Diff the most recent stored snapshot older than this duration against live")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *since < 0 {
-		fmt.Fprintln(os.Stderr, "spectra snapshot diff: --since must be positive")
+		fmt.Fprintln(stderr, "spectra snapshot diff: --since must be positive")
 		return 2
 	}
-	if *since > 0 {
-		if fs.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "spectra snapshot diff: --since cannot be combined with explicit snapshot IDs")
-			return 2
+	opts, err := snapshotquery.DiffOptionsFromArgs(fs.Args(), *since)
+	if err != nil {
+		if *since > 0 {
+			fmt.Fprintln(stderr, "spectra snapshot diff: --since cannot be combined with explicit snapshot IDs")
+		} else {
+			printDiffUsage(stderr)
 		}
-	} else {
-		if fs.NArg() < 1 || fs.NArg() > 3 {
-			printDiffUsage()
-			return 2
-		}
-		if fs.Arg(0) != "baseline" && fs.NArg() != 2 {
-			printDiffUsage()
-			return 2
-		}
+		return 2
 	}
 
-	dbPath, err := store.DefaultPath()
+	db, closeDB, err := deps.open()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	db, err := store.Open(dbPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer db.Close()
+	defer closeDB()
 
-	ctx := context.Background()
-	var snapA, snapB *snapshot.Snapshot
-	if *since > 0 {
-		snapA, snapB, err = resolveSinceDiffOperands(ctx, db, *since, time.Now())
-	} else {
-		snapA, snapB, err = resolveDiffOperands(ctx, db, fs.Args())
-	}
+	result, err := snapshotquery.Diff(context.Background(), db, opts, snapshotquery.DiffDeps{Live: deps.live, Now: deps.now})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-
-	result := diff.Compare(*snapA, *snapB)
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(result)
 		return 0
@@ -558,10 +561,10 @@ func runSnapshotDiff(args []string) int {
 	return 0
 }
 
-func printDiffUsage() {
-	fmt.Fprintln(os.Stderr, "usage: spectra snapshot diff <id-a> <id-b|live>")
-	fmt.Fprintln(os.Stderr, "   or: spectra snapshot diff --since <duration>")
-	fmt.Fprintln(os.Stderr, "   or: spectra diff baseline [name|id] [live|id]")
+func printDiffUsage(w io.Writer) {
+	fmt.Fprintln(w, "usage: spectra snapshot diff <id-a> <id-b|live>")
+	fmt.Fprintln(w, "   or: spectra snapshot diff --since <duration>")
+	fmt.Fprintln(w, "   or: spectra diff baseline [name|id] [live|id]")
 }
 
 var collectLiveSnapshot = func(ctx context.Context) *snapshot.Snapshot {
@@ -574,144 +577,7 @@ type snapshotRegistry interface {
 	SaveSnapshotProcesses(context.Context, string, []store.ProcessSnapshotRow) error
 	SaveLoginItems(context.Context, string, []store.LoginItemRow) error
 	SaveGrantedPerms(context.Context, string, []store.GrantedPermRow) error
-	ListSnapshots(context.Context, string) ([]store.SnapshotRow, error)
-	GetSnapshot(context.Context, string) (store.SnapshotRow, error)
-	GetSnapshotJSON(context.Context, string) ([]byte, error)
-	MostRecentSnapshotOlderThan(context.Context, time.Time) (*snapshot.Snapshot, error)
-	GetSnapshotApps(context.Context, string) ([]store.AppRow, error)
-	DeleteSnapshot(context.Context, string) error
 	PruneSnapshots(context.Context, int) (int64, error)
-}
-
-func resolveDiffOperands(ctx context.Context, db snapshotRegistry, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
-	if len(args) > 0 && args[0] == "baseline" {
-		return resolveBaselineDiffOperands(ctx, db, args[1:])
-	}
-	if len(args) != 2 {
-		printDiffUsage()
-		return nil, nil, fmt.Errorf("invalid diff operands")
-	}
-	idA, idB := args[0], args[1]
-	snapA, err := resolveSnapshot(ctx, db, idA)
-	if err != nil {
-		return nil, nil, fmt.Errorf("snapshot %q: %w", idA, err)
-	}
-	snapB, err := resolveSnapshot(ctx, db, idB)
-	if err != nil {
-		return nil, nil, fmt.Errorf("snapshot %q: %w", idB, err)
-	}
-	return snapA, snapB, nil
-}
-
-func resolveSinceDiffOperands(ctx context.Context, db snapshotRegistry, since time.Duration, now time.Time) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
-	if since <= 0 {
-		return nil, nil, fmt.Errorf("--since must be positive")
-	}
-	cutoff := now.UTC().Add(-since)
-	base, err := db.MostRecentSnapshotOlderThan(ctx, cutoff)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, fmt.Errorf("no stored snapshot older than %s exists; run `spectra snapshot create`", since)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	live := collectLiveSnapshot(ctx)
-	return base, live, nil
-}
-
-func resolveBaselineDiffOperands(ctx context.Context, db snapshotRegistry, args []string) (*snapshot.Snapshot, *snapshot.Snapshot, error) {
-	ref := ""
-	other := "live"
-	switch len(args) {
-	case 0:
-	case 1:
-		ref = args[0]
-	case 2:
-		ref = args[0]
-		other = args[1]
-	default:
-		printDiffUsage()
-		return nil, nil, fmt.Errorf("invalid baseline diff operands")
-	}
-
-	snapA, err := resolveBaselineSnapshot(ctx, db, ref)
-	if err != nil {
-		return nil, nil, fmt.Errorf("baseline %q: %w", baselineDisplayName(ref), err)
-	}
-	snapB, err := resolveSnapshot(ctx, db, other)
-	if err != nil {
-		return nil, nil, fmt.Errorf("snapshot %q: %w", other, err)
-	}
-	return snapA, snapB, nil
-}
-
-// resolveSnapshot loads a snapshot from the DB by ID, or captures a fresh
-// live snapshot when id is the sentinel "live".
-func resolveSnapshot(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
-	if id == "live" {
-		return collectLiveSnapshot(ctx), nil
-	}
-	return loadSnapshotFromDB(ctx, db, id)
-}
-
-func resolveBaselineSnapshot(ctx context.Context, db snapshotRegistry, ref string) (*snapshot.Snapshot, error) {
-	if ref != "" {
-		row, err := db.GetSnapshot(ctx, ref)
-		if err == nil {
-			if row.Kind != string(snapshot.KindBaseline) {
-				return nil, fmt.Errorf("snapshot is %q, not baseline", row.Kind)
-			}
-			return loadSnapshotFromDB(ctx, db, row.ID)
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
-	}
-
-	rows, err := db.ListSnapshots(ctx, "")
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		if row.Kind != string(snapshot.KindBaseline) {
-			continue
-		}
-		if ref == "" || row.Name == ref {
-			return loadSnapshotFromDB(ctx, db, row.ID)
-		}
-	}
-	if ref == "" {
-		return nil, fmt.Errorf("no baselines stored")
-	}
-	return nil, fmt.Errorf("not found")
-}
-
-func baselineDisplayName(ref string) string {
-	if ref == "" {
-		return "latest"
-	}
-	return ref
-}
-
-// loadSnapshotFromDB retrieves the full snapshot JSON blob for id and unmarshals
-// it into a snapshot.Snapshot. Returns an error if the snapshot is not found or
-// was saved without a JSON blob (pre-v0.8 rows).
-func loadSnapshotFromDB(ctx context.Context, db snapshotRegistry, id string) (*snapshot.Snapshot, error) {
-	raw, err := db.GetSnapshotJSON(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("not found")
-	}
-	if err != nil {
-		return nil, err
-	}
-	if raw == nil {
-		return nil, fmt.Errorf("snapshot exists but has no JSON blob (was it taken before this version?)")
-	}
-	var s snapshot.Snapshot
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-	return &s, nil
 }
 
 // runSnapshotPrune deletes live snapshots beyond the retention limit.

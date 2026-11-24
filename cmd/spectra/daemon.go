@@ -20,6 +20,7 @@ import (
 	"github.com/kaeawc/spectra/internal/daemon"
 	"github.com/kaeawc/spectra/internal/daemonclient"
 	"github.com/kaeawc/spectra/internal/daemonhost"
+	"github.com/kaeawc/spectra/internal/daemoninventory"
 	"github.com/kaeawc/spectra/internal/daemonjvm"
 	"github.com/kaeawc/spectra/internal/daemonprocess"
 	"github.com/kaeawc/spectra/internal/detect"
@@ -192,6 +193,7 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	daemonprocess.RegisterMethods(server, daemonprocess.NewService(daemonprocess.Options{Interval: *watchInterval}))
 	daemonhost.RegisterMethods(server, daemonhost.NewService(daemonhost.Options{Whatswrong: daemonhost.DefaultWhatswrong(watch)}))
 	daemonhost.RegisterReports(server, daemonhost.NewReports())
+	daemoninventory.RegisterMethods(server, daemoninventory.NewService(daemoninventory.Options{Snapshots: db, Live: daemoninventory.DefaultLive(version), Logger: log}))
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	go func() {

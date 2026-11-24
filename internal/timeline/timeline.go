@@ -4,6 +4,7 @@
 package timeline
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -32,8 +33,9 @@ type Event struct {
 type Source interface {
 	// Name identifies the source (e.g. "process", "log").
 	Name() string
-	// Events returns this source's events no earlier than since.
-	Events(since time.Time) ([]Event, error)
+	// Events returns this source's events no earlier than since. It should
+	// stop its children when ctx ends.
+	Events(ctx context.Context, since time.Time) ([]Event, error)
 }
 
 // Timeline is a chronologically ordered set of events.
@@ -66,11 +68,15 @@ func (t Timeline) Since(cutoff time.Time) Timeline {
 // Collect gathers events from all sources within the window [since, ∞), merges
 // them, and returns the timeline plus any per-source errors (collection is best
 // effort: one failing source does not drop the others).
-func Collect(since time.Time, sources ...Source) (Timeline, []error) {
+func Collect(ctx context.Context, since time.Time, sources ...Source) (Timeline, []error) {
 	var groups [][]Event
 	var errs []error
 	for _, s := range sources {
-		evs, err := s.Events(since)
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s.Name(), err))
+			continue
+		}
+		evs, err := s.Events(ctx, since)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", s.Name(), err))
 			continue
