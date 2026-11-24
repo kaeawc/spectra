@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kaeawc/spectra/internal/proc"
 )
 
 // Request describes what to symbolicate.
@@ -26,8 +28,17 @@ type Request struct {
 	FullPath bool
 }
 
+// Feature names atos symbolication in unsupported-platform errors.
+const Feature = "atos symbolication"
+
 // Runner executes a command and returns its combined stdout.
 type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+// HostRunner runs atos on the host. A non-zero exit is an error carrying
+// atos's stderr, and the child is killed when ctx ends.
+func HostRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return proc.Output(ctx, proc.Default, name, args...)
+}
 
 // Frame is one resolved (or unresolved) address.
 type Frame struct {
@@ -62,7 +73,7 @@ func Symbolicate(ctx context.Context, req Request, runner Runner) (Result, error
 	if req.LoadAddress == "" {
 		return Result{}, fmt.Errorf("symbolicate: a load address is required")
 	}
-	if !isHexAddress(req.LoadAddress) {
+	if !IsHexAddress(req.LoadAddress) {
 		return Result{}, fmt.Errorf("symbolicate: invalid load address %q (want a hex value like 0x10a400000)", req.LoadAddress)
 	}
 	if len(req.Addresses) == 0 {
@@ -135,9 +146,9 @@ func atosLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// isHexAddress reports whether s is a hexadecimal address, with an optional
-// 0x prefix.
-func isHexAddress(s string) bool {
+// IsHexAddress reports whether s is a hexadecimal address, with an optional
+// 0x prefix (surrounding space is ignored).
+func IsHexAddress(s string) bool {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "0x")
 	s = strings.TrimPrefix(s, "0X")

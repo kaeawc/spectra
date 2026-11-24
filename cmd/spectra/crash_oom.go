@@ -1,70 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
-	"sort"
-	"time"
 
-	"github.com/kaeawc/spectra/internal/crashreport"
+	"github.com/kaeawc/spectra/internal/crashquery"
 )
-
-// jetsamBugTypes are numeric .ips bug_type codes that mark a jetsam /
-// low-memory kill. Kept small and conservative.
-var jetsamBugTypes = map[string]bool{"298": true}
-
-type oomKill struct {
-	Time     string `json:"time"`
-	Process  string `json:"process"`
-	Reason   string `json:"reason"`
-	Limit    string `json:"limit,omitempty"`
-	Observed string `json:"observed,omitempty"`
-	File     string `json:"file"`
-	at       time.Time
-}
-
-// classifyMemoryKill reports whether a report is a memory/OOM termination and,
-// if so, the attributed kill. The reliable path is EXC_RESOURCE(MEMORY), which
-// the crash decoder already resolves; jetsam bug_types are a best-effort path.
-func classifyMemoryKill(r *crashreport.Report) (oomKill, bool) {
-	if r.Resource != nil && r.Resource.Flavor == "MEMORY" {
-		return oomKill{
-			Process:  r.Process,
-			Reason:   r.Resource.Explanation,
-			Limit:    r.Resource.Limit,
-			Observed: r.Resource.Observed,
-		}, true
-	}
-	if jetsamBugTypes[r.BugType] {
-		return oomKill{Process: r.Process, Reason: "jetsam / low-memory kill"}, true
-	}
-	return oomKill{}, false
-}
-
-func collectMemoryKills(swept []sweptReport) []oomKill {
-	var out []oomKill
-	for _, s := range swept {
-		kill, ok := classifyMemoryKill(s.Report)
-		if !ok {
-			continue
-		}
-		kill.Time = s.Report.Time
-		kill.File = s.File
-		if t, err := time.Parse(ipsTimeLayout, s.Report.Time); err == nil {
-			kill.at = t
-		}
-		out = append(out, kill)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].at.After(out[j].at) })
-	return out
-}
 
 func runCrashOOM(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("crash oom", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "output JSON")
-	limit := fs.Int("limit", 25, "maximum kills to show")
+	limit := fs.Int("limit", crashquery.DefaultLimit, "maximum kills to show")
 	dir := fs.String("dir", defaultDiagnosticReportsDir(), "DiagnosticReports directory")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: spectra crash oom [--json] [--limit N] [--dir <path>]")
@@ -80,28 +29,23 @@ func runCrashOOM(args []string, stdout, stderr io.Writer) int {
 	if !requireCrashDir("crash oom", *dir, stderr) {
 		return 1
 	}
-	return runCrashOOMWithDeps(*asJSON, *limit, stdout, stderr, defaultCrashListDeps(*dir))
+	return runCrashOOMWithDeps(*asJSON, *limit, stdout, stderr, crashquery.DirSource(*dir))
 }
 
-func runCrashOOMWithDeps(asJSON bool, limit int, stdout, stderr io.Writer, deps crashListDeps) int {
-	files, err := deps.list()
+func runCrashOOMWithDeps(asJSON bool, limit int, stdout, stderr io.Writer, src crashquery.Source) int {
+	res, err := crashquery.OOM(context.Background(), src, limit)
 	if err != nil {
-		fmt.Fprintf(stderr, "list reports: %v\n", err)
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	swept, _ := sweepCrashReports(files, deps.read)
-	kills := collectMemoryKills(swept)
-	if limit > 0 && len(kills) > limit {
-		kills = kills[:limit]
-	}
 	if asJSON {
-		return encodeJSON(stdout, stderr, kills)
+		return encodeJSON(stdout, stderr, res.Kills)
 	}
-	renderOOM(stdout, kills, len(swept))
+	renderOOM(stdout, res.Kills, res.Total)
 	return 0
 }
 
-func renderOOM(w io.Writer, kills []oomKill, totalReports int) {
+func renderOOM(w io.Writer, kills []crashquery.OOMKill, totalReports int) {
 	if len(kills) == 0 {
 		fmt.Fprintf(w, "No memory/OOM kills among %d report(s).\n", totalReports)
 		return
@@ -109,8 +53,8 @@ func renderOOM(w io.Writer, kills []oomKill, totalReports int) {
 	fmt.Fprintf(w, "Memory / OOM kills (%d of %d report(s)):\n", len(kills), totalReports)
 	for _, k := range kills {
 		when := k.Time
-		if !k.at.IsZero() {
-			when = k.at.Format("2006-01-02 15:04")
+		if !k.At.IsZero() {
+			when = k.At.Format("2006-01-02 15:04")
 		}
 		fmt.Fprintf(w, "  %-16s  %-24s %s%s\n", when, truncate(k.Process, 24), k.Reason, oomLimitNote(k))
 		if k.File != "" {
@@ -119,7 +63,7 @@ func renderOOM(w io.Writer, kills []oomKill, totalReports int) {
 	}
 }
 
-func oomLimitNote(k oomKill) string {
+func oomLimitNote(k crashquery.OOMKill) string {
 	if k.Limit == "" && k.Observed == "" {
 		return ""
 	}
