@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kaeawc/spectra/internal/crashquery"
 	"github.com/kaeawc/spectra/internal/crashreport"
 	"github.com/kaeawc/spectra/internal/process"
 	"github.com/kaeawc/spectra/internal/snapshot"
@@ -90,7 +91,7 @@ func runCrashStateWithDeps(path, host string, window time.Duration, asJSON bool,
 		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
 		return 1
 	}
-	crashAt, err := time.Parse(ipsTimeLayout, report.Time)
+	crashAt, err := time.Parse(crashquery.IPSTimeLayout, report.Time)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s has no parseable timestamp (%q)\n", path, report.Time)
 		return 1

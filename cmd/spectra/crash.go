@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/crashquery"
 	"github.com/kaeawc/spectra/internal/crashready"
 	"github.com/kaeawc/spectra/internal/crashreport"
 	"github.com/kaeawc/spectra/internal/detect"
@@ -145,22 +145,22 @@ func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(stri
 		fs.Usage()
 		return 2
 	}
+	if *asJSON {
+		report, err := crashquery.Inspect(context.Background(), fs.Arg(0), crashquery.InspectOptions{
+			Read: readFile, Open: openBinary, SourceLines: *sourceLines, Source: srcOpts,
+		})
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return encodeJSON(stdout, stderr, report)
+	}
 	report, code := loadCrashReport(fs.Arg(0), readFile, stderr)
 	if code != 0 {
 		return code
 	}
 	if *sourceLines {
 		report.ResolveSourceLines(context.Background(), srcOpts)
-	}
-	if *asJSON {
-		report.CheckImagesOnDisk(openBinary)
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
 	}
 	if u := report.SourceLinesUnsupported; u != nil {
 		fmt.Fprintf(stderr, "spectra crash inspect: --source-lines skipped: %s\n", u.Message)
@@ -172,18 +172,9 @@ func runCrashInspect(args []string, stdout, stderr io.Writer, readFile func(stri
 // loadCrashReport reads and parses one .ips report, mapping failures to a
 // process exit code (0 on success). readFile is injected for testability.
 func loadCrashReport(path string, readFile func(string) ([]byte, error), stderr io.Writer) (*crashreport.Report, int) {
-	data, err := readFile(path)
+	report, err := crashquery.Load(path, readFile)
 	if err != nil {
-		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
-		return nil, 1
-	}
-	report, err := crashreport.Parse(data)
-	if err != nil {
-		if errors.Is(err, crashreport.ErrLegacyFormat) {
-			fmt.Fprintf(stderr, "%s is a legacy plain-text crash report; spectra decodes modern .ips JSON reports.\n", path)
-			return nil, 1
-		}
-		fmt.Fprintf(stderr, "parse %s: %v\n", path, err)
+		fmt.Fprintln(stderr, err)
 		return nil, 1
 	}
 	return report, 0
