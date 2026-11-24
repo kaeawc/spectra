@@ -3,6 +3,7 @@ package detect
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,6 +142,26 @@ func TestTCCMemoReadsEachVersionOnce(t *testing.T) {
 	}
 	if _, err := memo.grants(db, read); err != nil || n.Load() != 4 {
 		t.Fatalf("unchanged: reads = %d, want 4", n.Load())
+	}
+}
+
+func TestTCCMemoWALStatErrorIsNotAbsentWAL(t *testing.T) {
+	files := &memoFiles{infos: map[string]memoFileInfo{}}
+	const db = "/db"
+	files.set(db, 1, 1, 1, 1)
+	walErr := errors.New("permission denied")
+	memo := newTCCMemo(func(p string) (fs.FileInfo, error) {
+		if p == db+"-wal" {
+			return nil, walErr
+		}
+		return files.stat(p)
+	})
+	var n atomic.Int32
+	read := countingRead(&n, hexRow("com.a", "kTCCServiceCamera"), nil)
+	for i := 1; i <= 2; i++ {
+		if _, err := memo.grants(db, read); err != nil || int(n.Load()) != i {
+			t.Fatalf("lookup %d: reads = %d, err %v; want %d (uncached)", i, n.Load(), err, i)
+		}
 	}
 }
 

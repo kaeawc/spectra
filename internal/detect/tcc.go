@@ -87,7 +87,10 @@ func (c *tccMemo) grants(db string, read func(string) ([]byte, error)) (tccGrant
 	if err != nil {
 		return direct()
 	}
-	walv, _ := c.fileVersion(db + "-wal")
+	walv, err := c.fileVersion(db + "-wal")
+	if err != nil && !os.IsNotExist(err) {
+		return direct()
+	}
 	v := tccVersion{db: dbv, wal: walv}
 	c.mu.Lock()
 	if f, ok := c.m[db]; ok && f.version == v {
