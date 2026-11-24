@@ -492,3 +492,59 @@ directory is not the caller's).
   local run leaves out its own.
 
 Both stop when the client disconnects. Invalid params return `-32602`.
+
+## Inventory methods
+
+Four methods serve the toolchain inventory, the incident timeline, and the
+stored-snapshot reads, so clients skip spawning `spectra toolchain|timeline|snapshot
+list|snapshot diff --json`. Each returns exactly the JSON the matching CLI
+command prints with `--json` for the same flags, because the CLI and the daemon
+build it with the same function. Nothing is cached: every call collects
+anew. Each call has its own server-side cap; when it passes, or the client's
+connection closes, the call's context is cancelled, its child processes are
+killed, and the call fails (`<method>: timed out after <cap>` or
+`<method>: context canceled`) instead of returning partial data. Parameters
+are an object (absent or `null` means all defaults); durations are
+milliseconds. Bad parameters are an invalid-params error (-32602). On Linux
+each method returns what the CLI returns there.
+
+### `toolchain.current`
+
+Takes no parameters and returns the `spectra toolchain --json` object (JDKs,
+Node, Python, Go, Ruby, Rust, build tools, JVM managers, Homebrew, and `env`).
+Capped at 60 seconds. Fields the CLI derives from its environment (`env`,
+`active` runtimes, `JAVA_HOME` matches, `PATH` lookups) come from the daemon's
+environment as of daemon start, not the caller's shell, so they can differ
+from the CLI run in a shell with a different `PATH` or `JAVA_HOME`.
+
+### `timeline.report`
+
+Takes optional `since_ms` (positive; default 3600000, the CLI's `--since 1h`)
+and returns the `spectra timeline --since <d> --json` object
+(`{"events": [...]}`). On macOS the sources are process starts, unified-log
+errors, and install history; on Linux, process starts only, as with the CLI.
+A source that fails is left out, as in the CLI; the CLI prints the error on
+stderr and the daemon writes it to its log. Capped at 2 minutes.
+
+### `snapshot.list`
+
+Takes optional `kind` (`live` or `baseline`) and returns the
+`spectra snapshot list --json` array of stored snapshot rows, newest first, or
+`[]` when none match. It reads the daemon's database, which is the CLI's
+unless `SPECTRA_WATCH_DB` relocates it. Capped at 10 seconds.
+
+### `snapshot.diff`
+
+Returns the `spectra snapshot diff --json` result for one of three operand
+forms:
+
+- `{"a": "<id>", "b": "<id>|live"}`: `spectra snapshot diff <a> <b>`.
+- `{"baseline": true, "a": "<name|id>", "b": "<id>|live"}`: `spectra diff
+  baseline [a] [b]`; `a` defaults to the newest baseline and `b` to `live`.
+- `{"since_ms": N}`: `spectra snapshot diff --since <d>`, the newest stored
+  snapshot older than the window against a live one.
+
+`live` captures a fresh snapshot (apps included, as in the CLI), so such a
+call can take a while on macOS; the cap is 3 minutes. Any other combination
+is an invalid-params error. A missing snapshot fails with the CLI's message,
+for example `snapshot "x": not found`.

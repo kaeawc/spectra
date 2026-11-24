@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,23 +22,29 @@ func runToolchain(args []string) int {
 		}
 	}
 
+	return runToolchainWithIO(args, os.Stdout, os.Stderr, toolchain.CollectOptions{})
+}
+
+// runToolchainWithIO prints the inventory toolchain.Collect builds from
+// opts; the daemon's toolchain.current returns the same value.
+func runToolchainWithIO(args []string, stdout, stderr io.Writer, opts toolchain.CollectOptions) int {
 	fs := flag.NewFlagSet("spectra toolchain", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	tc := toolchain.Collect(context.Background(), toolchain.CollectOptions{})
+	tc := toolchain.Collect(context.Background(), opts)
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(tc)
 		return 0
 	}
 
-	printToolchains(tc)
+	printToolchains(stdout, tc)
 	return 0
 }
 
@@ -124,41 +131,41 @@ func runToolchainJDKs(args []string) int {
 	return 0
 }
 
-func printToolchains(tc toolchain.Toolchains) {
-	fmt.Println("=== Toolchain inventory ===")
+func printToolchains(w io.Writer, tc toolchain.Toolchains) {
+	fmt.Fprintln(w, "=== Toolchain inventory ===")
 
 	if len(tc.JDKs) > 0 {
-		fmt.Printf("\nJDKs (%d):\n", len(tc.JDKs))
+		fmt.Fprintf(w, "\nJDKs (%d):\n", len(tc.JDKs))
 		for _, j := range tc.JDKs {
 			active := ""
 			if j.IsActiveJavaHome {
 				active = " (JAVA_HOME)"
 			}
-			fmt.Printf("  JDK %-4d  %-16s  %-8s  %s%s\n",
+			fmt.Fprintf(w, "  JDK %-4d  %-16s  %-8s  %s%s\n",
 				j.VersionMajor, truncate(j.ReleaseString, 16), j.Source, j.Path, active)
 		}
 	}
 
-	printRuntimes("Node", tc.Node)
-	printRuntimes("Python", tc.Python)
-	printRuntimes("Go", tc.Go)
-	printRuntimes("Ruby", tc.Ruby)
+	printRuntimes(w, "Node", tc.Node)
+	printRuntimes(w, "Python", tc.Python)
+	printRuntimes(w, "Go", tc.Go)
+	printRuntimes(w, "Ruby", tc.Ruby)
 
 	if len(tc.Rust) > 0 {
-		fmt.Printf("\nRust (%d toolchains):\n", len(tc.Rust))
+		fmt.Fprintf(w, "\nRust (%d toolchains):\n", len(tc.Rust))
 		for _, r := range tc.Rust {
 			def := ""
 			if r.Default {
 				def = " (default)"
 			}
-			fmt.Printf("  %-30s  %s%s\n", r.Toolchain, r.Channel, def)
+			fmt.Fprintf(w, "  %-30s  %s%s\n", r.Toolchain, r.Channel, def)
 		}
 	}
 
 	if len(tc.BuildTools) > 0 {
-		fmt.Printf("\nBuild tools (%d):\n", len(tc.BuildTools))
+		fmt.Fprintf(w, "\nBuild tools (%d):\n", len(tc.BuildTools))
 		for _, bt := range tc.BuildTools {
-			fmt.Printf("  %-8s  %-12s  %s%s\n", bt.Name, bt.Version, bt.Source, buildToolDetails(bt))
+			fmt.Fprintf(w, "  %-8s  %-12s  %s%s\n", bt.Name, bt.Version, bt.Source, buildToolDetails(bt))
 		}
 	}
 
@@ -167,21 +174,21 @@ func printToolchains(tc toolchain.Toolchains) {
 		if tc.ActiveJVMManager != "" {
 			active = fmt.Sprintf(" (active: %s)", tc.ActiveJVMManager)
 		}
-		fmt.Printf("\nJVM managers: %s%s\n", strings.Join(tc.JVMManagers, ", "), active)
+		fmt.Fprintf(w, "\nJVM managers: %s%s\n", strings.Join(tc.JVMManagers, ", "), active)
 	}
 
 	b := tc.Brew
-	fmt.Printf("\nHomebrew: %d formulae, %d casks, %d taps\n",
+	fmt.Fprintf(w, "\nHomebrew: %d formulae, %d casks, %d taps\n",
 		len(b.Formulae), len(b.Casks), len(b.Taps))
 
 	if tc.Env.JavaHome != "" {
-		fmt.Printf("\nJAVA_HOME: %s\n", tc.Env.JavaHome)
+		fmt.Fprintf(w, "\nJAVA_HOME: %s\n", tc.Env.JavaHome)
 	}
 	if tc.Env.GoRoot != "" {
-		fmt.Printf("GOROOT:    %s\n", tc.Env.GoRoot)
+		fmt.Fprintf(w, "GOROOT:    %s\n", tc.Env.GoRoot)
 	}
 	if tc.Env.GoPath != "" {
-		fmt.Printf("GOPATH:    %s\n", tc.Env.GoPath)
+		fmt.Fprintf(w, "GOPATH:    %s\n", tc.Env.GoPath)
 	}
 }
 
@@ -199,16 +206,16 @@ func buildToolDetails(bt toolchain.BuildTool) string {
 	return "  " + strings.Join(details, "  ")
 }
 
-func printRuntimes(name string, runtimes []toolchain.RuntimeInstall) {
+func printRuntimes(w io.Writer, name string, runtimes []toolchain.RuntimeInstall) {
 	if len(runtimes) == 0 {
 		return
 	}
-	fmt.Printf("\n%s (%d):\n", name, len(runtimes))
+	fmt.Fprintf(w, "\n%s (%d):\n", name, len(runtimes))
 	for _, r := range runtimes {
 		active := ""
 		if r.Active {
 			active = " (active)"
 		}
-		fmt.Printf("  %-12s  %-8s  %s%s\n", r.Version, r.Source, r.Path, active)
+		fmt.Fprintf(w, "  %-12s  %-8s  %s%s\n", r.Version, r.Source, r.Path, active)
 	}
 }
