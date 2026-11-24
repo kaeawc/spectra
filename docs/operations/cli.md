@@ -461,7 +461,7 @@ Remote project.
 
 ## spectra crash inspect
 
-`spectra crash inspect [--json] [--all] <report.ips>` decodes a macOS `.ips`
+`spectra crash inspect [--json] [--all] [--source-lines] <report.ips>` decodes a macOS `.ips`
 crash report on any host. With `--json`, each thread keeps `frames`, one
 string per frame (``Image`symbol + 12`` or `Image + 0x1a2b`), and adds
 `frame_details`, one object per frame in the same order:
@@ -493,6 +493,44 @@ for a universal binary, the slice matching `arch`) with the report's UUID:
 `image_on_disk` is absent when the report has no path or UUID for the image,
 or the file cannot be read as a Mach-O. A report copied from another Mac and
 inspected on Linux reports `missing` for app binaries.
+
+### Source lines
+
+`--source-lines` (off by default) resolves frames to source locations with
+`atos`. It adds these fields to every `frame_details` entry:
+
+| Field | Meaning |
+|---|---|
+| `file` | Absolute path of the source file. Present only when a file exists at that path now; a path from another machine or a deleted file is left out. |
+| `line`, `column` | Line and column from the debug info. `column` is omitted when the debug info has none. They can be present without `file`. |
+| `resolved_by` | Where the debug info came from: `binary`, `dsym`, or `none` when the frame has no line. |
+
+For each image Spectra looks for debug info whose `LC_UUID` matches the
+report, in this order, and stops at the first match:
+
+1. The binary at `image_path`, if it has a `__DWARF` segment or a debug map
+   pointing at object files (a local debug build).
+2. A `.dSYM` beside it: `<binary>.dSYM`, or `<bundle>.dSYM` next to each
+   enclosing `.app`, `.framework`, `.appex`, `.bundle` or `.xpc`.
+3. `mdfind "com_apple_xcode_dsym_uuids == <UUID>"` (Spotlight).
+4. `.dSYM` bundles named after the image under
+   `~/Library/Developer/Xcode/Archives/*/*/dSYMs/` and
+   `~/Library/Developer/Xcode/DerivedData/*/Build/Products/*/`, newest first,
+   reading at most 256 directories.
+
+Spectra then runs one `atos -o <binary-or-dSYM> -l <base> -arch <arch>
+-fullPath <addr>...` per image with all of that image's addresses. Each
+`atos` and `mdfind` call has a 10-second deadline; a call that times out or
+fails leaves its frames at `resolved_by: "none"`. A repeated (UUID, offset)
+pair is resolved once. Shared-cache images and images under `/System/` or
+`/usr/lib/` are skipped. In text output, resolved frames end with
+`at <file>:<line>[:<column>]`.
+
+Off macOS, `--source-lines` does not fail the command: every frame gets
+`resolved_by: "none"` and the report gains `source_lines_unsupported`, an
+object shaped like the
+[unsupported-platform report](../reference/command-schemas.md#unsupported-on-this-os)
+(`error`, `feature`, `os`, `message`). Text output prints the note on stderr.
 
 ## spectra sample
 

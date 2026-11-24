@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/threadinspect"
 )
 
@@ -42,6 +43,9 @@ type Report struct {
 	FaultingThread  int           `json:"faulting_thread"`
 	Threads         []Thread      `json:"threads"`
 	Images          []Image       `json:"images,omitempty"`
+
+	// SourceLinesUnsupported is set by ResolveSourceLines off macOS.
+	SourceLinesUnsupported *hostos.UnsupportedReport `json:"source_lines_unsupported,omitempty"`
 }
 
 // Image is one binary from the report's usedImages list. Base is a hex
@@ -71,6 +75,12 @@ type FrameDetail struct {
 	Address      string `json:"address,omitempty"`
 	Symbol       string `json:"symbol,omitempty"`
 	SymbolOffset *int64 `json:"symbol_offset,omitempty"`
+
+	// Set only by ResolveSourceLines.
+	File       string `json:"file,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Column     int    `json:"column,omitempty"`
+	ResolvedBy string `json:"resolved_by,omitempty"`
 }
 
 // ResourceKill describes an EXC_RESOURCE / watchdog-class termination: the OS
