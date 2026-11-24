@@ -793,10 +793,14 @@ Parameters (durations are milliseconds, a whole number of seconds up to
   existing sample report to fold, plus `out` (required), where the SVG is
   written as the caller's user. The result is the
   `spectra flamegraph --json` object (`svg`, `stack_count`, `stacks`). The
-  SVG at `out` is the only file a profiling job writes. It is staged next to
-  `out` and renamed into place only if the job is still running: a job
-  reported `cancelled` never leaves an SVG at `out`, and once the SVG is in
-  place `profile.cancel` no longer cancels the job, which then completes.
+  SVG at `out` is the only file a profiling job publishes (live captures use
+  a temporary `sample` report file, removed after use). The SVG is staged
+  in a private (0600) `.spectra-svg-*` file next to `out` and moved into
+  place only after the result has been encoded within its cap, and only if
+  the job is still running. So a failed or `cancelled` job never touches
+  `out`, and once the job has claimed publication `profile.cancel` no longer
+  cancels it. A replaced `out` keeps its mode; a new one is created 0644
+  less the daemon's umask, as the CLI creates it.
 
 The three are macOS-only, as are the CLI commands. Off macOS `profile.start`
 fails at once (-32603) without starting a job, and the error's `data` is the
@@ -813,5 +817,7 @@ object `spectra <kind> --json` prints there, for example on Linux:
 }
 ```
 
-Bad parameters are an invalid-params error (-32602), including an `input`
-that exists but is not a regular file. An `input` over 64 MiB fails the job.
+Bad parameters are an invalid-params error (-32602). `profile.start` does
+not touch the `input` file itself, so a hung mount cannot stall it: an
+`input` that is missing, is not a regular file (a FIFO or device fails at
+once instead of blocking), or is over 64 MiB fails the job.
