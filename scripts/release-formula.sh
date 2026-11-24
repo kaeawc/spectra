@@ -49,8 +49,18 @@ darwin_amd64="$(checksum_for darwin amd64)"
 linux_arm64="$(checksum_for linux arm64)"
 linux_amd64="$(checksum_for linux amd64)"
 
+# A plain vX.Y.Z needs no version line (Homebrew scans it from the URLs and
+# brew audit --strict calls it redundant); a prerelease keeps one.
+if [[ "$TAG" == *-* ]]; then
+    version_expr="s/@VERSION@/${TAG#v}/g"
+else
+    version_expr='/^[[:space:]]*version "@VERSION@"$/d'
+fi
+
+# The first expression drops the template's header comment.
 rendered="$(sed \
-    -e "s/@VERSION@/${TAG#v}/g" \
+    -e '/^class /,$!d' \
+    -e "$version_expr" \
     -e "s/@TAG@/${TAG}/g" \
     -e "s/@SHA256_DARWIN_ARM64@/${darwin_arm64}/g" \
     -e "s/@SHA256_DARWIN_AMD64@/${darwin_amd64}/g" \

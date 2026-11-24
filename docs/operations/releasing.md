@@ -83,8 +83,12 @@ key id.
 `packaging/homebrew/spectra.rb` is a template for a binary formula that
 installs the release archives. `scripts/release-formula.sh <tag> dist out.rb`
 fills in the tag and the per-platform SHA-256 values from `checksums.txt` and
-fails if any is missing. The workflow attaches the result to the release;
-copying it into `kaeawc/homebrew-tap` is a manual maintainer step.
+fails if any is missing. It drops the template's header comment and, for a
+plain `vX.Y.Z` tag, the explicit `version` line (a prerelease tag keeps it,
+since Homebrew cannot scan one from the URL), so the result passes `brew
+audit --strict` and can be copied into the tap verbatim.
+The workflow attaches it to the release; copying it into
+`kaeawc/homebrew-tap` is a manual maintainer step.
 
 ## Version strings
 

@@ -37,6 +37,32 @@ sign_binary() {
     codesign --force --timestamp --options runtime --sign "$SPECTRA_SIGN_IDENTITY" "$path"
 }
 
+# render_formula_for <tag> renders the formula from synthetic checksums.
+render_formula_for() {
+    local tag="$1" dir goos arch
+    dir="$(mktemp -d)"
+    for goos in darwin linux; do
+        for arch in amd64 arm64; do
+            printf '%064d  spectra_%s_%s_%s.tar.gz\n' 0 "$tag" "$goos" "$arch" >> "$dir/checksums.txt"
+        done
+    done
+    bash scripts/release-formula.sh "$tag" "$dir"
+    rm -rf "$dir"
+}
+
+# formula_is_tap_ready requires output that can be copied into the tap
+# verbatim: no template header, no `version` line for `brew audit --strict`
+# to reject on a plain tag, and an explicit version on a prerelease tag,
+# which Homebrew cannot scan from the URL.
+formula_is_tap_ready() {
+    local out pre
+    out="$(render_formula_for v0.0.0)" || return 1
+    pre="$(render_formula_for v0.0.0-rc.1)" || return 1
+    [[ "$(head -n 1 <<<"$out")" == "class Spectra < Formula" ]] &&
+        ! grep -Eq '^[[:space:]]*version[[:space:]]' <<<"$out" &&
+        grep -Fqx '  version "0.0.0-rc.1"' <<<"$pre"
+}
+
 notarize_archive() {
     local archive="$1"
     local submit_args=(notarytool submit "$archive" --wait)
@@ -111,6 +137,7 @@ check "dist script exists" test -x scripts/dist.sh
 check "notarize script exists" test -x scripts/notarize-archives.sh
 check "Homebrew formula template exists" test -f packaging/homebrew/spectra.rb
 check "formula render script exists" test -x scripts/release-formula.sh
+check "rendered formula is tap-ready" formula_is_tap_ready
 check "install script exists" test -x scripts/install.sh
 
 echo ""
