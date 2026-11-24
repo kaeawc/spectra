@@ -25,6 +25,7 @@ import (
 	"github.com/kaeawc/spectra/internal/daemonjvm"
 	"github.com/kaeawc/spectra/internal/daemonprocess"
 	"github.com/kaeawc/spectra/internal/daemonprocinfo"
+	"github.com/kaeawc/spectra/internal/daemonprofile"
 	"github.com/kaeawc/spectra/internal/detect"
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/hostwatch"
@@ -200,6 +201,12 @@ func daemonRun(args []string, paths daemon.Paths, stderr io.Writer) error {
 	daemonhost.RegisterReports(server, daemonhost.NewReports())
 	daemoninventory.RegisterMethods(server, daemoninventory.NewService(daemoninventory.Options{Snapshots: db, Live: daemoninventory.DefaultLive(version), Logger: log}))
 	daemonprocinfo.RegisterMethods(server, daemonprocinfo.NewService(daemonprocinfo.Options{}))
+	profiles := daemonprofile.NewService(daemonprofile.Options{})
+	defer profiles.Close(5 * time.Second)
+	// Jobs outlive their client connections, so cancel them as soon as
+	// shutdown starts rather than after the connections drain.
+	server.OnShutdown(profiles.Cancel)
+	daemonprofile.RegisterMethods(server, profiles)
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	go func() {

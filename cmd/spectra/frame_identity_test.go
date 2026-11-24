@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kaeawc/spectra/internal/binaryimages"
+	"github.com/kaeawc/spectra/internal/nativeprofile"
 	"github.com/kaeawc/spectra/internal/process"
 )
 
@@ -46,11 +47,11 @@ func TestSampleJSONFrameDetails(t *testing.T) {
 	if code := runSampleWithIO([]string{"--json", "412"}, &out, &errb, sampleDepsFrom(t, "testdata/sample_report_images.txt")); code != 0 {
 		t.Fatalf("code %d stderr %s", code, errb.String())
 	}
-	var rep sampleReport
+	var rep nativeprofile.SampleReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatal(err)
 	}
-	byLeaf := map[string]sampleStack{}
+	byLeaf := map[string]nativeprofile.SampleStack{}
 	for _, s := range rep.Stacks {
 		byLeaf[s.Frames[len(s.Frames)-1]] = s
 	}
@@ -98,7 +99,7 @@ func TestFlamegraphJSONCarriesFrameDetails(t *testing.T) {
 	if !strings.HasPrefix(written["/g.svg"], "<svg") {
 		t.Fatalf("svg not written")
 	}
-	var rep flamegraphReport
+	var rep nativeprofile.FlamegraphReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("decode: %v\n%s", err, out.String())
 	}

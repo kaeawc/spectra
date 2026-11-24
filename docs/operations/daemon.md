@@ -627,8 +627,8 @@ as visible, or as hidden, as they are to the CLI run without `sudo`.
 
 `services.list` and `logs.query` are macOS-only, as are the CLI commands. Off
 macOS they fail (-32603) with the CLI's message, and the error's `data` is the
-object `spectra services|logs --json` prints there:
-`{"command", "error": "unsupported_platform", "feature", "os", "message", "hint"}`.
+object `spectra services|logs --json` prints there, with `command`, `error`
+(`"unsupported_platform"`), `feature`, `os`, `message` and `hint` fields.
 
 ### `lineage.report`
 
@@ -705,9 +705,9 @@ Without `dir` they read the caller's `~/Library/Logs/DiagnosticReports` on
 macOS (the daemon runs as the caller's user). Off macOS there is no default
 directory, as with the CLI: the call fails (-32603) with
 `macOS DiagnosticReports: ... (linux); pass dir with an absolute directory of
-.ips reports`, and the error's `data` is the unsupported object
-`{"command", "error": "unsupported_platform", "feature", "os", "message",
-"hint"}`. With `dir` they work on Linux too.
+.ips reports`, and the error's `data` is the unsupported object, with
+`command`, `error` (`"unsupported_platform"`), `feature`, `os`, `message`
+and `hint` fields. With `dir` they work on Linux too.
 
 ### `crash.inspect`
 
@@ -731,3 +731,93 @@ Takes `binary` (required, an absolute Mach-O or `.dSYM` path, the CLI's `-o`),
 `atos`), so no parameter can reach `atos` as a flag. Capped at 1 minute.
 macOS-only, as is the CLI: off macOS it fails (-32603) with the CLI's message,
 and the error's `data` is the object `spectra symbolicate --json` prints there.
+
+## Profiling jobs
+
+`spectra sample`, `spindump` and `flamegraph` capture for seconds, so the
+daemon runs them as background jobs instead of holding a call open: start a
+job, poll it, then read the result. The result is exactly the JSON the
+matching CLI command prints with `--json` for the same flags, because the CLI
+and the daemon build it with the same function. Polling (rather than progress
+notifications on one long call) lets a client reconnect or poll from another
+connection, and keeps every call short.
+
+- `profile.start` takes `kind` (`sample`, `spindump` or `flamegraph`) and
+  that kind's parameters, checks them, and returns the job record at once.
+- `profile.status` `{id}` returns the record: `id`, `kind`, `pid` or `input`,
+  `status` (`working`, `completed`, `failed`, `cancelled`), `error` (a failed
+  job's error, the text the CLI prints on stderr), `created_at`,
+  `updated_at`, `deadline_at`, `expires_at` (once finished),
+  `poll_interval_ms` (a suggested poll interval, 1000) and
+  `result_available`.
+- `profile.result` `{id}` returns a completed job's result. For a job that is
+  still working, failed, or was cancelled, it fails (-32603) with the job's
+  error (or `still working` / `was cancelled`), and the error's `data` is the
+  job record.
+- `profile.cancel` `{id}` cancels a working job: its capture's child process
+  (`sample`, `spindump`) is killed and the job ends `cancelled`. On a finished
+  job it does nothing. It returns the record.
+- `profile.list` returns `{"jobs": [...]}`, every job still held, newest
+  first.
+
+Jobs are bounded:
+
+- At most 2 captures run at once. `profile.start` beyond that fails until one
+  ends (a cancelled capture holds its slot until its child process has
+  exited). There is no queue.
+- Each job has a deadline of its capture duration plus 30 seconds. A job
+  that passes it fails with `profile <kind>: timed out after <limit>`.
+- A finished job, with its result, is kept for 10 minutes, and only the 16
+  most recently finished are kept (the cap applies as each job finishes, and
+  expired results are released every 30 seconds even if nobody asks). After
+  that, its `id` is an invalid-params error (-32602), as is an `id` the
+  daemon never issued. A result over 8 MiB fails the job.
+- Jobs are not tied to the connection that started them. Any client of the
+  daemon (the daemon only accepts its own user) can poll or cancel by `id`.
+  Stopping the daemon cancels every job as soon as shutdown starts.
+
+Parameters (durations are milliseconds, a whole number of seconds up to
+60000, as the CLI's `--duration`; paths must be absolute):
+
+- `sample`: `pid` (required), `duration_ms` (default 1000), `interval_ms`
+  (default 10, at most 1000). The result is the `spectra sample --json`
+  object. The daemon does not cache the raw report or record an artifact
+  (the CLI's default without `--no-cache` does both).
+- `spindump`: `pid` with `duration_ms` (default 2000), or `input`, an
+  existing spindump report to parse. The result is the
+  `spectra spindump --json` object. The daemon runs as the caller's user,
+  without `sudo`: a live capture needs root, so for most daemons it fails
+  with the CLI's `spindump requires root` error and only `input` succeeds.
+  `--out` is not served.
+- `flamegraph`: `pid` with `duration_ms` (default 2000), or `input`, an
+  existing sample report to fold, plus `out` (required), where the SVG is
+  written as the caller's user. The result is the
+  `spectra flamegraph --json` object (`svg`, `stack_count`, `stacks`). The
+  SVG at `out` is the only file a profiling job publishes (live captures use
+  a temporary `sample` report file, removed after use). The SVG is staged
+  in a private (0600) `.spectra-svg-*` file next to `out` and moved into
+  place only after the result has been encoded within its cap, and only if
+  the job is still running. So a failed or `cancelled` job never touches
+  `out`, and once the job has claimed publication `profile.cancel` no longer
+  cancels it. A replaced `out` keeps its mode; a new one is created 0644
+  less the daemon's umask, as the CLI creates it.
+
+The three are macOS-only, as are the CLI commands. Off macOS `profile.start`
+fails at once (-32603) without starting a job, and the error's `data` is the
+object `spectra <kind> --json` prints there, for example on Linux:
+
+```json
+{
+  "command": "sample",
+  "error": "unsupported_platform",
+  "feature": "process sampling (sample(1))",
+  "os": "linux",
+  "message": "process sampling (sample(1)): unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}
+```
+
+Bad parameters are an invalid-params error (-32602). `profile.start` does
+not touch the `input` file itself, so a hung mount cannot stall it: an
+`input` that is missing, is not a regular file (a FIFO or device fails at
+once instead of blocking), or is over 64 MiB fails the job.

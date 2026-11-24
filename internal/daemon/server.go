@@ -42,6 +42,7 @@ type Server struct {
 	conns        map[net.Conn]struct{}
 	connWG       sync.WaitGroup
 	handlerWG    sync.WaitGroup
+	onShutdown   []func()
 }
 
 func New(opts Options) *Server {
@@ -71,6 +72,25 @@ func (s *Server) Register(method string, h Handler) {
 		panic("daemon: duplicate method: " + method)
 	}
 	s.handlers[method] = h
+}
+
+// OnShutdown registers f to run once shutdown starts (on ctx end,
+// daemon.shutdown, idle timeout, or a lost socket), before the server waits
+// for connections and handlers to drain. Work that outlives connections,
+// such as background jobs, uses it to stop promptly.
+func (s *Server) OnShutdown(f func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onShutdown = append(s.onShutdown, f)
+}
+
+func (s *Server) runShutdownHooks() {
+	s.mu.RLock()
+	hooks := append([]func(){}, s.onShutdown...)
+	s.mu.RUnlock()
+	for _, f := range hooks {
+		f()
+	}
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -153,6 +173,7 @@ loop:
 	}
 	_ = ln.Close()
 	cancel()
+	s.runShutdownHooks()
 	<-acceptDone
 	s.closeConnections()
 	done := make(chan struct{})
@@ -379,7 +400,15 @@ func (s *Server) sendError(c net.Conn, mu *sync.Mutex, id json.RawMessage, err e
 	var data any
 	var de DataError
 	if errors.As(err, &de) {
-		data = de.ErrorData()
+		// Detail that cannot be encoded would make the whole response
+		// unwritable; the code and message still go out without it.
+		// The validated encoding is sent as is, so a MarshalJSON that would
+		// fail on a second call cannot break the response.
+		if detail := de.ErrorData(); detail != nil {
+			if b, merr := json.Marshal(detail); merr == nil {
+				data = json.RawMessage(b)
+			}
+		}
 	}
 	jsonrpc.SendResponse(c, mu, id, nil, &jsonrpc.Error{Code: code, Message: err.Error(), Data: data})
 }

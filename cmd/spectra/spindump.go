@@ -7,21 +7,20 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
-	"strings"
 
+	"github.com/kaeawc/spectra/internal/nativeprofile"
 	"github.com/kaeawc/spectra/internal/spindump"
 )
 
 // Absolute paths to the macOS utilities, so PATH cannot substitute them.
 const (
-	spindumpBin = "/usr/sbin/spindump"
-	sudoBin     = "/usr/bin/sudo"
+	spindumpBin = nativeprofile.SpindumpBin
+	sudoBin     = nativeprofile.SudoBin
 )
 
 // spindumpRunner runs a command and returns its combined output.
-type spindumpRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+type spindumpRunner = nativeprofile.Runner
 
 // spindumpDeps injects command execution and filesystem access so the command
 // is testable without a real capture or real files.
@@ -33,7 +32,7 @@ type spindumpDeps struct {
 
 func runSpindump(args []string) int {
 	deps := spindumpDeps{
-		run:       defaultSpindumpRunner,
+		run:       nativeprofile.HostRunner,
 		readFile:  os.ReadFile,
 		writeFile: os.WriteFile,
 	}
@@ -44,7 +43,7 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDep
 	fs := flag.NewFlagSet("spectra spindump", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "Parse an existing spindump report file instead of capturing")
-	duration := fs.Int("duration", 2, "Capture duration in seconds")
+	duration := fs.Int("duration", int(nativeprofile.DefaultSpindumpDuration.Seconds()), "Capture duration in seconds")
 	sudo := fs.Bool("sudo", false, "Prepend sudo (spindump requires root to sample a live process)")
 	out := fs.String("out", "", "Also write the raw report to this file")
 	asJSON := fs.Bool("json", false, "Emit JSON instead of a human summary")
@@ -52,7 +51,7 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDep
 		return 2
 	}
 
-	var report string
+	opts := nativeprofile.SpindumpOptions{Input: *input, ReadFile: deps.readFile, DurationSec: *duration, Sudo: *sudo, Run: deps.run}
 	if *input != "" {
 		if fs.NArg() != 0 {
 			fmt.Fprintln(stderr, "spindump: pass either --input or a pid, not both")
@@ -62,12 +61,6 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDep
 			fmt.Fprintln(stderr, "spindump: --out has no effect with --input (the report already exists)")
 			return 2
 		}
-		data, err := deps.readFile(*input)
-		if err != nil {
-			fmt.Fprintf(stderr, "spindump: read %s: %v\n", *input, err)
-			return 1
-		}
-		report = string(data)
 	} else {
 		if fs.NArg() != 1 {
 			fmt.Fprintln(stderr, "usage: spectra spindump [--duration <s>] [--sudo] [--out <file>] <pid>   (or --input <file>)")
@@ -78,20 +71,20 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDep
 			fmt.Fprintf(stderr, "invalid PID %q\n", fs.Arg(0))
 			return 2
 		}
-		report, err = captureSpindump(deps.run, pid, *duration, *sudo)
-		if err != nil {
-			fmt.Fprintf(stderr, "%v\n", err)
-			return 1
-		}
-		if *out != "" {
-			if err := deps.writeFile(*out, []byte(report), 0o600); err != nil {
-				fmt.Fprintf(stderr, "spindump: write %s: %v\n", *out, err)
-				return 1
-			}
-		}
+		opts.PID = pid
 	}
 
-	parsed := spindump.Parse(report)
+	raw, parsed, err := nativeprofile.Spindump(context.Background(), opts)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *out != "" {
+		if err := deps.writeFile(*out, []byte(raw), 0o600); err != nil {
+			fmt.Fprintf(stderr, "spindump: write %s: %v\n", *out, err)
+			return 1
+		}
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -100,26 +93,6 @@ func runSpindumpWithIO(args []string, stdout, stderr io.Writer, deps spindumpDep
 	}
 	printSpindump(stdout, parsed)
 	return 0
-}
-
-func captureSpindump(runner spindumpRunner, pid, duration int, sudo bool) (string, error) {
-	name := spindumpBin
-	args := []string{strconv.Itoa(pid), strconv.Itoa(duration), "-stdout"}
-	if sudo {
-		args = append([]string{name}, args...)
-		name = sudoBin
-	}
-	out, err := runner(context.Background(), name, args...)
-	if err != nil {
-		if strings.Contains(string(out), "must be run as root") || strings.Contains(err.Error(), "must be run as root") {
-			return "", fmt.Errorf("spindump requires root — re-run with --sudo (or as root)")
-		}
-		return "", fmt.Errorf("spindump capture failed: %w", err)
-	}
-	if strings.Contains(string(out), "must be run as root") {
-		return "", fmt.Errorf("spindump requires root — re-run with --sudo (or as root)")
-	}
-	return string(out), nil
 }
 
 func printSpindump(w io.Writer, r spindump.Report) {
@@ -137,8 +110,4 @@ func printSpindump(w io.Writer, r spindump.Report) {
 			fmt.Fprintf(w, "    %6d  %s\n", f.Samples, truncate(f.Symbol, 72))
 		}
 	}
-}
-
-func defaultSpindumpRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }

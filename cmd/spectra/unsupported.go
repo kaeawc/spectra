@@ -8,6 +8,7 @@ import (
 
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
+	"github.com/kaeawc/spectra/internal/nativeprofile"
 	"github.com/kaeawc/spectra/internal/services"
 	"github.com/kaeawc/spectra/internal/symbolicate"
 )
@@ -18,7 +19,7 @@ type darwinOnly struct {
 	hint    string
 }
 
-const linuxStuckProcessHint = "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+const linuxStuckProcessHint = nativeprofile.OffDarwinHint
 
 // darwinOnlyCommands are answered off macOS with one uniform unsupported
 // result instead of each command failing its own way (often by trying to
@@ -33,10 +34,10 @@ var darwinOnlyCommands = map[string]darwinOnly{
 	"updates":        {"macOS install history", ""},
 	"uninstall":      {"app uninstall", ""},
 	"schedule":       {"launchd snapshot scheduling", "run `spectra snapshot` from cron or a systemd timer instead"},
-	"sample":         {"process sampling (sample(1))", linuxStuckProcessHint},
-	"flamegraph":     {"native flamegraphs (sample(1))", linuxStuckProcessHint},
+	"sample":         {nativeprofile.SampleFeature, linuxStuckProcessHint},
+	"flamegraph":     {nativeprofile.FlamegraphFeature, linuxStuckProcessHint},
 	"hang":           {"main-thread hang classification (sample(1))", linuxStuckProcessHint},
-	"spindump":       {"spindump stack reports", linuxStuckProcessHint},
+	"spindump":       {nativeprofile.SpindumpFeature, linuxStuckProcessHint},
 	"vmmap":          {"vmmap memory composition", "on Linux, read /proc/<pid>/smaps_rollup; `spectra procdiag <pid>` covers cgroup memory limits"},
 	"vmregions":      {"vmmap region composition", "on Linux, read /proc/<pid>/smaps"},
 	"lsmp":           {"Mach port tables", ""},
