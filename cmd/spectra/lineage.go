@@ -35,7 +35,7 @@ func runLineageWithIO(args []string, stdout, stderr io.Writer, collector process
 		fmt.Fprintf(stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
-	res, err := lineage.Build(collector.Collect(context.Background(), process.CollectOptions{}), pid)
+	res, err := lineage.Collect(context.Background(), collector, process.CollectOptions{}, pid)
 	if err != nil {
 		fmt.Fprintf(stderr, "lineage: %v\n", err)
 		return 1

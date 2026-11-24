@@ -376,7 +376,12 @@ func (s *Server) sendError(c net.Conn, mu *sync.Mutex, id json.RawMessage, err e
 	if errors.As(err, &invalid) {
 		code = CodeInvalidParams
 	}
-	jsonrpc.SendResponse(c, mu, id, nil, &jsonrpc.Error{Code: code, Message: err.Error()})
+	var data any
+	var de DataError
+	if errors.As(err, &de) {
+		data = de.ErrorData()
+	}
+	jsonrpc.SendResponse(c, mu, id, nil, &jsonrpc.Error{Code: code, Message: err.Error(), Data: data})
 }
 
 func (s *Server) status() StatusResult {

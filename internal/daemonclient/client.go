@@ -18,6 +18,8 @@ import (
 type RPCError struct {
 	Code    int
 	Message string
+	// Data is the error's optional structured detail.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 func (e *RPCError) Error() string { return fmt.Sprintf("daemon RPC %d: %s", e.Code, e.Message) }

@@ -29,7 +29,10 @@ type Finder struct {
 	// process (default os.Getpid). Both are seams for Under.
 	UID     func() int
 	SelfPID func() int
-	Now     func() time.Time
+	// ExcludePID is another process Under leaves out with its children,
+	// such as the client a daemon answers for; zero excludes nobody.
+	ExcludePID int
+	Now        func() time.Time
 	// Procs lists running processes; default is process.CollectAll.
 	Procs func(ctx context.Context) []process.Info
 }

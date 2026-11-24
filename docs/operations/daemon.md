@@ -548,3 +548,72 @@ forms:
 call can take a while on macOS; the cap is 3 minutes. Any other combination
 is an invalid-params error. A missing snapshot fails with the CLI's message,
 for example `snapshot "x": not found`.
+
+## Process and service methods
+
+Four methods serve process lineage, owner lookups, launchd services and
+unified-log queries, so clients skip spawning `spectra lineage|owner|services|logs
+--json`. Each returns exactly the JSON the matching CLI command prints with
+`--json` for the same flags, because the CLI and the daemon build it with the
+same function. Nothing is cached: every call collects anew. Each call has its
+own server-side cap; when it passes, or the client's connection closes, the
+call's context is cancelled, its child processes (`ps`, `lsof`, `launchctl`,
+`log show`) are killed, and the call fails (`<method>: timed out after <cap>`
+or `<method>: context canceled`) instead of returning partial data. Parameters
+are an object; durations are milliseconds; paths must be absolute, because the
+daemon's working directory is not the caller's. Bad parameters are an
+invalid-params error (-32602). An error the CLI prints on stderr comes back as
+the error message, with the same text.
+
+The daemon runs as the caller's user, so processes owned by other users are
+as visible, or as hidden, as they are to the CLI run without `sudo`.
+
+`services.list` and `logs.query` are macOS-only, as are the CLI commands. Off
+macOS they fail (-32603) with the CLI's message, and the error's `data` is the
+object `spectra services|logs --json` prints there:
+`{"command", "error": "unsupported_platform", "feature", "os", "message", "hint"}`.
+
+### `lineage.report`
+
+Takes `pid` (required, positive) and returns the `spectra lineage --json <pid>`
+object: the ancestor chain, the descendant tree with subtree RSS and CPU
+totals, and flags. A pid that is not running fails with
+`lineage: pid N: no such process`, as in the CLI. Capped at 30 seconds.
+
+### `owner.report`
+
+Answers `spectra owner --json <target>` or `spectra owner --under --json
+<dir>...`:
+
+- `target`: `:8080`, `tcp:8080`, `udp:53`, an absolute path, or a pid. Returns
+  the owner object (`target`, `holders`, `incomplete`, `hint`).
+- `under: true` with `dirs` (absolute directories): returns the `--under`
+  object, the processes whose working directory is one of `dirs` or below it.
+  The daemon and its own children are left out. Pass the caller's pid in
+  `exclude_pid` to leave the caller and its children out too, as the CLI
+  leaves out itself.
+- `timeout_ms` caps the lookup (default 30000, the CLI's `--timeout`; at most
+  300000).
+
+As with the CLI, no holder is an empty `holders` array, not an error. The CLI's
+exit codes 3 and 4 have no RPC equivalent: read `holders` and `incomplete`.
+
+### `services.list`
+
+Takes optional `domain` (`system`, the default, `user` or `all`), `label`
+(substring, case-insensitive), `running` and `on_demand` (bools), and returns
+the `spectra services --json` object (`jobs`, `collected_at`). `launchctl list`
+runs in the daemon's launchd session. For a LaunchAgent or a daemon started
+from a login shell, that is the same user session the CLI sees. Capped at
+30 seconds.
+
+### `logs.query`
+
+Takes optional `process`, `subsystem`, `level` (`Default`, `Info`, `Error`,
+`Fault`), `last_ms` (default 3600000), `grep` (a regular expression matched
+against each message and format string), `top` (maximum rows, default 5000)
+and `allow_long_window` (bool), and returns the `spectra logs --json` object
+(`entries`, `truncated`, `clock`, `query_duration`). A window over 24 hours
+without `allow_long_window`, or a `grep` that does not compile, is an
+invalid-params error with the CLI's message. Raw `--predicate` queries and
+`--stream` are not served. Capped at 2 minutes.

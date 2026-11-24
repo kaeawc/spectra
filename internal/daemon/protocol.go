@@ -35,6 +35,13 @@ func InvalidParams(format string, args ...any) error {
 	return invalidParamsError{fmt.Errorf(format, args...)}
 }
 
+// DataError is a handler error whose JSON-RPC error response also carries
+// ErrorData as `data`, for example a structured unsupported-platform report.
+type DataError interface {
+	error
+	ErrorData() any
+}
+
 type StatusResult struct {
 	Protocol      string    `json:"protocol"`
 	Version       string    `json:"version"`

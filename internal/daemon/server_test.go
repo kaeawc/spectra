@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -50,6 +51,9 @@ func TestServerProtocolLifecycle(t *testing.T) {
 	s := New(Options{Paths: p, Version: "v1", SocketCheckInterval: 20 * time.Millisecond})
 	s.Register("test.invalid", func(context.Context, *Request) (any, error) { return nil, InvalidParams("bad value") })
 	s.Register("test.panic", func(context.Context, *Request) (any, error) { panic("test panic") })
+	s.Register("test.data", func(context.Context, *Request) (any, error) {
+		return nil, fmt.Errorf("wrapped: %w", testDataError{})
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -106,6 +110,10 @@ func TestServerProtocolLifecycle(t *testing.T) {
 		if e.Code != tc.code {
 			t.Fatalf("%s: code %d", tc.payload, e.Code)
 		}
+	}
+	dataResp := request(`{"jsonrpc":"2.0","id":6,"method":"test.data"}`)
+	if got := string(dataResp["error"]); got != `{"code":-32603,"message":"wrapped: unsupported here","data":{"error":"unsupported_platform"}}` {
+		t.Fatalf("data error = %s", got)
 	}
 	_ = request(`{"jsonrpc":"2.0","id":5,"method":"daemon.status"}`)
 	_ = request(`{"jsonrpc":"2.0","id":6,"method":"daemon.shutdown"}`)
@@ -249,3 +257,8 @@ func TestProbeHeldLockWithoutPID(t *testing.T) {
 		t.Fatalf("Probe = %v, %d, %v", running, pid, err)
 	}
 }
+
+type testDataError struct{}
+
+func (testDataError) Error() string  { return "unsupported here" }
+func (testDataError) ErrorData() any { return map[string]string{"error": "unsupported_platform"} }

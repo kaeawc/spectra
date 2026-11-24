@@ -139,3 +139,21 @@ func ReportUnsupported(err error, also ...error) (UnsupportedReport, bool) {
 	}
 	return r, true
 }
+
+// CommandReport is what `spectra <cmd> --json` prints for a command with no
+// implementation on this OS; the daemon sends the same object as the error
+// data of the matching method.
+type CommandReport struct {
+	Command string `json:"command"`
+	UnsupportedReport
+}
+
+// ReportCommandUnsupported is ReportUnsupported for command cmd with hint.
+func ReportCommandUnsupported(cmd string, err error, hint string) (CommandReport, bool) {
+	r, ok := ReportUnsupported(err)
+	if !ok {
+		return CommandReport{}, false
+	}
+	r.Hint = hint
+	return CommandReport{Command: cmd, UnsupportedReport: r}, true
+}

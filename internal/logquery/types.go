@@ -10,9 +10,15 @@ import (
 
 // checkOS reports an unsupported error when q targets a host without the
 // macOS unified log.
+// Feature and OffDarwinHint describe unified log queries off macOS.
+const (
+	Feature       = "unified log queries"
+	OffDarwinHint = "on Linux, use journalctl"
+)
+
 func checkOS(q Query) error {
 	if hostos.Resolve(q.OS) != hostos.Darwin {
-		return hostos.Unsupported("unified log queries")
+		return hostos.Unsupported(Feature)
 	}
 	return nil
 }
@@ -38,6 +44,8 @@ type Query struct {
 	AllowLongWindow      bool
 	AllowUnsafePredicate bool
 	Runner               Runner
+	// Now times the query for QueryDuration; nil uses time.Now.
+	Now func() time.Time
 }
 
 type Runner interface {
