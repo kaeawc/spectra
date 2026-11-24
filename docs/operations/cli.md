@@ -280,6 +280,14 @@ reports a decaying recent average; `cpu_window_ms` is `0`) or `lifetime`
 `0`). A process that started during the window is scored on its CPU over the
 window. The text output has a `cpu` line saying which basis applied.
 
+Inside a container, CI runner or agent VM with cgroup limits, Linux also
+reports the process's cgroup slice: a `cgroup` object (CPU quota, memory
+limit, used and available memory, PSI) and `effective_cpus` /
+`effective_available_bytes`, the smaller of the host and cgroup figures, plus
+a `cgroup` line in the text output. They are omitted when no limit applies.
+The verdict and the host fields are unchanged; see
+[command schemas](../reference/command-schemas.md#spectraload).
+
 The `cause` kind is `indexing`, `roots`, `ci-runner`, `other` or `none`.
 `ci-runner` names work from a self-hosted CI runner on the host: a process
 with a GitHub Actions `Runner.Worker` / `Runner.Listener`, `gitlab-runner` or

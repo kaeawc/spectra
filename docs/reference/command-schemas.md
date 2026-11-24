@@ -58,6 +58,22 @@ memory could not be read. `cpu_basis` is `window`, `recent` or `lifetime`;
 `cpu_window_ms` is positive only for `window`. `spotlight` (macOS) reports
 Spotlight indexing state per `--root`.
 
+On Linux, when the process's cgroup (v2, or v1 `cpu`/`memory` controllers)
+has a CPU quota or memory limit, `cgroup` reports it: `version`, `path`,
+`cpu_quota_cpus` (quota / period of the tightest `cpu.max` on the cgroup or
+an ancestor; absent when `max`), `memory_limit_bytes` (tightest
+`memory.max` or `memory.high` on the cgroup or an ancestor; absent when
+unlimited), `memory_used_bytes` (usage where that limit is set, minus
+inactive page cache), `memory_available_bytes` (limit minus used), and
+`cpu_pressure` / `memory_pressure` (the cgroup's PSI `some avg10`
+percentage, v2 only). `effective_cpus` is the smaller of `cpus` and
+`cpu_quota_cpus`; `effective_available_bytes` is the smaller of host and
+cgroup available memory. All of these are omitted when no limit applies or
+off Linux. `verdict`, `cpus` and `available_gb` keep their host-wide
+meaning; callers that want admission against the cgroup slice compare
+against the `effective_*` fields themselves. v1 reads only the process's own
+cgroup, not its ancestors.
+
 <!-- fields: spectra.load v1 -->
 ```text
 available_gb number
@@ -70,6 +86,15 @@ cause.repo string
 cause.root string
 cause.runner string
 cause.worktree string
+cgroup object
+cgroup.cpu_pressure number
+cgroup.cpu_quota_cpus number
+cgroup.memory_available_bytes number
+cgroup.memory_limit_bytes number
+cgroup.memory_pressure number
+cgroup.memory_used_bytes number
+cgroup.path string
+cgroup.version number
 cpu_basis string
 cpu_window_ms number
 cpus number
@@ -104,6 +129,8 @@ dirs[].cpu_pct number
 dirs[].dir string
 dirs[].procs number
 dirs[].rss_kib number
+effective_available_bytes number
+effective_cpus number
 elapsed_ms number
 exit_code number
 families array

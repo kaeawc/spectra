@@ -54,17 +54,17 @@ func TestReadPSIUnavailable(t *testing.T) {
 }
 
 func TestReadPSIOldCPUHasNoFull(t *testing.T) {
-	r, err := parseResource([]byte("some avg10=1.00 avg60=2.00 avg300=3.00 total=7\n"))
+	r, err := ParseResource([]byte("some avg10=1.00 avg60=2.00 avg300=3.00 total=7\n"))
 	if err != nil || r.Full != nil || r.Some.Avg300 != 3 {
 		t.Fatalf("r=%+v err=%v", r, err)
 	}
 }
 
 func TestParseResourceRejectsGarbage(t *testing.T) {
-	if _, err := parseResource([]byte("some avg10=abc\n")); err == nil {
+	if _, err := ParseResource([]byte("some avg10=abc\n")); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := parseResource([]byte("")); err == nil {
+	if _, err := ParseResource([]byte("")); err == nil {
 		t.Fatal("expected error for empty")
 	}
 }
@@ -81,7 +81,7 @@ func TestV2Path(t *testing.T) {
 		"deleted": {"0::/gone (deleted)\n", "/gone", true},
 	}
 	for name, c := range cases {
-		got, ok := v2Path([]byte(c.in))
+		got, ok := V2Path([]byte(c.in))
 		if got != c.want || ok != c.ok {
 			t.Errorf("%s: got %q,%v want %q,%v", name, got, ok, c.want, c.ok)
 		}

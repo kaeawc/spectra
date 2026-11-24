@@ -64,7 +64,7 @@ func ReadPSI(procRoot string) (PSI, error) {
 			}
 			return PSI{}, fmt.Errorf("psi %s: %w", e.name, err)
 		}
-		r, err := parseResource(data)
+		r, err := ParseResource(data)
 		if err != nil {
 			return PSI{}, fmt.Errorf("psi %s: %w", e.name, err)
 		}
@@ -73,7 +73,8 @@ func ReadPSI(procRoot string) (PSI, error) {
 	return p, nil
 }
 
-func parseResource(data []byte) (Resource, error) {
+// ParseResource parses one PSI file (host or cgroup) such as cpu.pressure.
+func ParseResource(data []byte) (Resource, error) {
 	var r Resource
 	seen := false
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -195,15 +196,15 @@ func ReadCgroup(procRoot, cgroupRoot string, pid int) (Cgroup, error) {
 	if err != nil {
 		return Cgroup{}, fmt.Errorf("read cgroup of pid %d: %w", pid, err)
 	}
-	p, ok := v2Path(data)
+	p, ok := V2Path(data)
 	if !ok {
 		return Cgroup{}, fmt.Errorf("pid %d has no cgroup v2 path: %w", pid, ErrUnavailable)
 	}
 	return ReadCgroupPath(cgroupRoot, p)
 }
 
-// v2Path returns the path from the unified-hierarchy "0::<path>" line.
-func v2Path(data []byte) (string, bool) {
+// V2Path returns the path from the unified-hierarchy "0::<path>" line.
+func V2Path(data []byte) (string, bool) {
 	for _, line := range strings.Split(string(data), "\n") {
 		if p, ok := strings.CutPrefix(line, "0::"); ok {
 			// The kernel appends " (deleted)" for a removed cgroup.
@@ -351,7 +352,7 @@ func readPressureFile(file string) *Resource {
 	if err != nil {
 		return nil
 	}
-	r, err := parseResource(data)
+	r, err := ParseResource(data)
 	if err != nil {
 		return nil
 	}

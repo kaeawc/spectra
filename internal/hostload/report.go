@@ -41,6 +41,11 @@ type Report struct {
 	CPUBasis    string          `json:"cpu_basis"`     // window, recent or lifetime
 	ElapsedMS   int64           `json:"elapsed_ms"`
 	ProcessCnt  int             `json:"process_count"`
+	// Cgroup, EffectiveCPUs and EffectiveAvailBytes appear only on Linux when
+	// a cgroup limit applies; the verdict still uses the host-wide figures.
+	Cgroup              *Cgroup  `json:"cgroup,omitempty"`
+	EffectiveCPUs       *float64 `json:"effective_cpus,omitempty"`
+	EffectiveAvailBytes *uint64  `json:"effective_available_bytes,omitempty"`
 }
 
 // ReportOptions are the load check's inputs (the CLI's flags).
@@ -223,6 +228,8 @@ func BuildReport(ctx context.Context, opts ReportOptions, deps ReportDeps) (Repo
 		ElapsedMS: deps.Now().Sub(start).Milliseconds(), ProcessCnt: len(procs),
 	}
 	rep.Spotlight = rootSpotlight(ctx, deps, an.Cause, rootList)
+	rep.Cgroup = deps.Host.Cgroup()
+	rep.EffectiveCPUs, rep.EffectiveAvailBytes = effectiveSlice(rep.Cgroup, reading)
 	if reading.MemKnown {
 		gb := float64(reading.AvailBytes) / (1 << 30)
 		rep.AvailGB = &gb

@@ -98,6 +98,7 @@ func writeLoadText(w io.Writer, r loadReport) {
 	} else {
 		fmt.Fprintf(w, "memory   unknown  min %.1f, backoff %.1f\n", r.MinFreeGB, r.BackoffGB)
 	}
+	writeCgroup(w, r)
 	switch hostload.CPUBasis(r.CPUBasis) {
 	case hostload.BasisWindow:
 		fmt.Fprintf(w, "cpu      measured over a %d ms window\n", r.CPUWindowMS)
@@ -125,6 +126,35 @@ func writeLoadText(w io.Writer, r loadReport) {
 	writeSpotlight(w, r.Spotlight)
 	fmt.Fprintf(w, "elapsed  %d ms\n", r.ElapsedMS)
 }
+
+func writeCgroup(w io.Writer, r loadReport) {
+	cg := r.Cgroup
+	if cg == nil {
+		return
+	}
+	line := fmt.Sprintf("cgroup   v%d %s", cg.Version, cg.Path)
+	if cg.CPUQuotaCPUs != nil {
+		line += fmt.Sprintf("  cpu quota %.2f", *cg.CPUQuotaCPUs)
+	}
+	if cg.MemoryLimitBytes != nil {
+		line += fmt.Sprintf("  memory limit %.1f GiB", gib(*cg.MemoryLimitBytes))
+		if cg.MemoryAvailableBytes != nil {
+			line += fmt.Sprintf(" (%.1f available)", gib(*cg.MemoryAvailableBytes))
+		}
+	}
+	if r.EffectiveCPUs != nil {
+		line += fmt.Sprintf("  effective %.2f CPUs", *r.EffectiveCPUs)
+	}
+	if r.EffectiveAvailBytes != nil {
+		line += fmt.Sprintf("  effective %.1f GiB available", gib(*r.EffectiveAvailBytes))
+	}
+	if cg.CPUPressure != nil && cg.MemoryPressure != nil {
+		line += fmt.Sprintf("  psi cpu %.2f%% memory %.2f%%", *cg.CPUPressure, *cg.MemoryPressure)
+	}
+	fmt.Fprintln(w, line)
+}
+
+func gib(b uint64) float64 { return float64(b) / (1 << 30) }
 
 func writeDevices(w io.Writer, d hostload.Devices) {
 	fmt.Fprintf(w, "devices  %d booted (%d simulators, %d emulators), %d in the last %s\n",
