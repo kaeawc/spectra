@@ -126,34 +126,51 @@ func jvmOptions(ctx context.Context) jvm.CollectOptions {
 	return jvm.CollectOptions{JDKs: toolchain.CollectJDKs(ctx, toolchain.CollectOptions{})}
 }
 
+// jvmReadEnv carries the injectable seams for the per-pid jvm reads the
+// daemon also serves: output streams, the JDK tool runner (nil means
+// jvm.DefaultRunner), and the clock stamped on captures.
+type jvmReadEnv struct {
+	stdout, stderr io.Writer
+	run            jvm.CmdRunner
+	now            func() time.Time
+}
+
+func defaultJVMReadEnv() jvmReadEnv {
+	return jvmReadEnv{stdout: os.Stdout, stderr: os.Stderr, now: time.Now}
+}
+
 func runJVMThreadDump(args []string) int {
+	return runJVMThreadDumpWith(args, defaultJVMReadEnv())
+}
+
+func runJVMThreadDumpWith(args []string, env jvmReadEnv) int {
 	fs := flag.NewFlagSet("spectra jvm thread-dump", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(env.stderr)
 	asJSON := fs.Bool("json", false, "Emit the parsed dump and triage summary as JSON")
 	summary := fs.Bool("summary", false, "Print a triage summary (states, categories, deadlocks) instead of the raw dump")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm thread-dump [--json] [--summary] <pid>")
+		fmt.Fprintln(env.stderr, "usage: spectra jvm thread-dump [--json] [--summary] <pid>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		fmt.Fprintf(env.stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
 
-	data, err := jvm.ThreadDump(pid, nil)
+	data, err := jvm.CaptureThreadDump(pid, env.run)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "thread-dump failed for PID %d: %v\n", pid, err)
+		fmt.Fprintln(env.stderr, err)
 		return 1
 	}
 
-	key := cache.Key([]byte(fmt.Sprintf("threads:%d:%d", pid, time.Now().UnixNano())))
+	key := cache.Key([]byte(fmt.Sprintf("threads:%d:%d", pid, env.now().UnixNano())))
 	if cacheStores != nil && cacheStores.Threads != nil {
 		if putErr := cacheStores.Threads.Put(key, data); putErr == nil {
-			fmt.Fprintf(os.Stderr, "cached as threads/%x\n", key[:4])
+			fmt.Fprintf(env.stderr, "cached as threads/%x\n", key[:4])
 		}
 	}
 	recordArtifactCLI(artifact.Record{
@@ -167,30 +184,28 @@ func runJVMThreadDump(args []string) int {
 	})
 
 	if *asJSON || *summary {
-		dump := jvm.ParseThreadDump(string(data), time.Now())
-		sum := jvm.SummarizeThreads(dump)
+		report := jvm.NewThreadDumpReport(data, env.now())
 		if *asJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(threadDumpReport{Summary: sum, Dump: dump,
-				CodeSources: defaultCodeSourceDeps().codeSources(context.Background(), pid, dump)})
-			return 0
+			report.CodeSources = defaultCodeSourceDeps().codeSources(context.Background(), pid, report.Dump)
+			return writeIndentedJSON(env.stdout, report)
 		}
-		printThreadSummary(os.Stdout, pid, sum, dump.Deadlocks)
+		printThreadSummary(env.stdout, pid, report.Summary, report.Dump.Deadlocks)
 		return 0
 	}
 
-	os.Stdout.Write(data)
+	_, _ = env.stdout.Write(data)
 	return 0
 }
 
 // threadDumpReport is the JSON shape emitted by `spectra jvm thread-dump --json`.
-type threadDumpReport struct {
-	Summary jvm.ThreadSummary    `json:"summary"`
-	Dump    jvm.ParsedThreadDump `json:"dump"`
-	// CodeSources maps a frame's class name to its jar or class file, for
-	// the classes that could be found cheaply.
-	CodeSources map[string]jvm.CodeSource `json:"code_sources,omitempty"`
+type threadDumpReport = jvm.ThreadDumpReport
+
+// writeIndentedJSON writes v the way every `spectra jvm ... --json` does.
+func writeIndentedJSON(w io.Writer, v any) int {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+	return 0
 }
 
 // codeSourceDeps reads the JVM's launch class path from its argv and cwd
@@ -269,53 +284,48 @@ func runJVMHeapHistogram(args []string) int {
 	if len(args) > 0 && args[0] == "compare" {
 		return runJVMHeapHistogramCompare(args[1:])
 	}
+	return runJVMHeapHistogramWith(args, defaultJVMReadEnv())
+}
 
+func runJVMHeapHistogramWith(args []string, env jvmReadEnv) int {
 	fs := flag.NewFlagSet("spectra jvm heap-histogram", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(env.stderr)
 	asJSON := fs.Bool("json", false, "Emit the parsed histogram and ranked suspects as JSON")
 	suspects := fs.Int("suspects", 0, "Print the top-N largest classes (leak suspects); 0 disables")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm heap-histogram [--json] [--suspects N] <pid>")
-		fmt.Fprintln(os.Stderr, "       spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>")
+		fmt.Fprintln(env.stderr, "usage: spectra jvm heap-histogram [--json] [--suspects N] <pid>")
+		fmt.Fprintln(env.stderr, "       spectra jvm heap-histogram compare [--json] [--suspects N] <before-file> <after-file>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		fmt.Fprintf(env.stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
 
 	if *asJSON || *suspects > 0 {
-		hist, err := jvm.HeapHistogramSnapshot(pid, nil)
+		report, err := jvm.ReadHeapHistogram(pid, *suspects, env.run)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "heap-histogram failed for PID %d: %v\n", pid, err)
+			fmt.Fprintln(env.stderr, err)
 			return 1
 		}
-		limit := *suspects
-		if limit <= 0 {
-			limit = 20
-		}
-		ranked := heap.RankHistogramSuspects(hist, limit)
 		if *asJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(heapHistogramReport{Histogram: hist, Suspects: ranked})
-			return 0
+			return writeIndentedJSON(env.stdout, report)
 		}
-		printHeapSuspects(os.Stdout, pid, ranked, hist.Total)
+		printHeapSuspects(env.stdout, pid, report.Suspects, report.Histogram.Total)
 		return 0
 	}
 
-	data, err := jvm.HeapHistogram(pid, nil)
+	data, err := jvm.HeapHistogram(pid, env.run)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "heap-histogram failed for PID %d: %v\n", pid, err)
+		fmt.Fprintf(env.stderr, "heap-histogram failed for PID %d: %v\n", pid, err)
 		return 1
 	}
 
-	os.Stdout.Write(data)
+	_, _ = env.stdout.Write(data)
 	return 0
 }
 
@@ -526,11 +536,9 @@ func readHistogramFile(path string) (heap.Histogram, error) {
 	return heap.ParseHistogram(string(head[:n]) + string(rest))
 }
 
-// heapHistogramReport is the JSON shape emitted by `heap-histogram --json`.
-type heapHistogramReport struct {
-	Histogram heap.Histogram `json:"histogram"`
-	Suspects  []heap.Suspect `json:"suspects,omitempty"`
-}
+// heapHistogramReport is the JSON shape emitted by `heap-histogram --json`
+// and `heap-hprof --json`.
+type heapHistogramReport = jvm.HeapHistogramReport
 
 // heapCompareReport is the JSON shape emitted by `heap-histogram compare --json`.
 type heapCompareReport struct {
@@ -614,42 +622,44 @@ func runJVMHeapDump(args []string) int {
 }
 
 func runJVMGCStats(args []string) int {
+	return runJVMGCStatsWith(args, defaultJVMReadEnv())
+}
+
+func runJVMGCStatsWith(args []string, env jvmReadEnv) int {
 	fs := flag.NewFlagSet("spectra jvm gc-stats", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(env.stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm gc-stats [--json] <pid>")
+		fmt.Fprintln(env.stderr, "usage: spectra jvm gc-stats [--json] <pid>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		fmt.Fprintf(env.stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
 
-	stats, err := jvm.CollectGCStats(pid, nil)
+	stats, err := jvm.ReadGCStats(pid, env.run)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gc-stats failed for PID %d: %v\n", pid, err)
+		fmt.Fprintln(env.stderr, err)
 		return 1
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(stats)
-		return 0
+		return writeIndentedJSON(env.stdout, stats)
 	}
 
-	fmt.Printf("GC stats for PID %d\n", pid)
-	fmt.Printf("  Young GC:  %d events, %.3fs total\n", stats.YGC, stats.YGCT)
-	fmt.Printf("  Full GC:   %d events, %.3fs total\n", stats.FGC, stats.FGCT)
-	fmt.Printf("  Total GC:  %.3fs\n", stats.GCT)
-	fmt.Printf("  Eden:      %.0f KiB used / %.0f KiB capacity\n", stats.EU, stats.EC)
-	fmt.Printf("  Old:       %.0f KiB used / %.0f KiB capacity\n", stats.OU, stats.OC)
-	fmt.Printf("  Metaspace: %.0f KiB used / %.0f KiB capacity\n", stats.MU, stats.MC)
+	w := env.stdout
+	fmt.Fprintf(w, "GC stats for PID %d\n", pid)
+	fmt.Fprintf(w, "  Young GC:  %d events, %.3fs total\n", stats.YGC, stats.YGCT)
+	fmt.Fprintf(w, "  Full GC:   %d events, %.3fs total\n", stats.FGC, stats.FGCT)
+	fmt.Fprintf(w, "  Total GC:  %.3fs\n", stats.GCT)
+	fmt.Fprintf(w, "  Eden:      %.0f KiB used / %.0f KiB capacity\n", stats.EU, stats.EC)
+	fmt.Fprintf(w, "  Old:       %.0f KiB used / %.0f KiB capacity\n", stats.OU, stats.OC)
+	fmt.Fprintf(w, "  Metaspace: %.0f KiB used / %.0f KiB capacity\n", stats.MU, stats.MC)
 	return 0
 }
 
@@ -658,27 +668,29 @@ func runJVMGCStats(args []string) int {
 var collectVMMemory = jvm.CollectVMMemoryDiagnostics
 
 func runJVMVMMemory(args []string) int {
+	return runJVMVMMemoryWith(args, defaultJVMReadEnv())
+}
+
+func runJVMVMMemoryWith(args []string, env jvmReadEnv) int {
 	fs := flag.NewFlagSet("spectra jvm vm-memory", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(env.stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm vm-memory [--json] <pid>")
+		fmt.Fprintln(env.stderr, "usage: spectra jvm vm-memory [--json] <pid>")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		fmt.Fprintf(env.stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
 
-	diagnostics := collectVMMemory(pid, nil)
+	diagnostics := collectVMMemory(pid, env.run)
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(diagnostics)
+		writeIndentedJSON(env.stdout, diagnostics)
 	} else {
 		fmt.Printf("VM memory diagnostics for PID %d\n", pid)
 		printDiagnosticSection("Heap", diagnostics.HeapInfo)
@@ -691,7 +703,7 @@ func runJVMVMMemory(args []string) int {
 	// Individual sections fail routinely (NMT off, CodeHeap_Analytics absent
 	// on older JDKs); only a total failure means the JVM was never reached.
 	if diagnostics.AllFailed() {
-		fmt.Fprintf(os.Stderr, "jvm vm-memory: no diagnostics collected for PID %d\n", pid)
+		fmt.Fprintf(env.stderr, "jvm vm-memory: no diagnostics collected for PID %d\n", pid)
 		return 1
 	}
 	return 0
@@ -995,8 +1007,12 @@ func runJVMFlamegraph(args []string) int {
 }
 
 func runJVMExplain(args []string) int {
+	return runJVMExplainWith(args, defaultJVMReadEnv())
+}
+
+func runJVMExplainWith(args []string, env jvmReadEnv) int {
 	fs := flag.NewFlagSet("spectra jvm explain", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(env.stderr)
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	samples := fs.Int("samples", 1, "Number of jstat samples for trend analysis")
 	interval := fs.Duration("interval", 1*time.Second, "Interval between trend samples")
@@ -1005,32 +1021,30 @@ func runJVMExplain(args []string) int {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: spectra jvm explain [--json] [--samples 1] [--interval 1s] [--soft-refs=true] <pid>")
+		fmt.Fprintln(env.stderr, "usage: spectra jvm explain [--json] [--samples 1] [--interval 1s] [--soft-refs=true] <pid>")
 		return 2
 	}
 	if *samples <= 0 {
-		fmt.Fprintln(os.Stderr, "--samples must be greater than zero")
+		fmt.Fprintln(env.stderr, "--samples must be greater than zero")
 		return 2
 	}
 	pid, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid PID %q\n", fs.Arg(0))
+		fmt.Fprintf(env.stderr, "invalid PID %q\n", fs.Arg(0))
 		return 2
 	}
-	explanation, err := jvm.CollectExplanation(context.Background(), pid, jvm.ExplainOptions{
-		Samples:  *samples,
-		Interval: *interval,
-		SoftRefs: *softRefs,
+	explanation, err := jvm.ReadExplanation(context.Background(), pid, jvm.ExplainOptions{
+		CmdRunner: env.run,
+		Samples:   *samples,
+		Interval:  *interval,
+		SoftRefs:  *softRefs,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "explain failed for PID %d: %v\n", pid, err)
+		fmt.Fprintln(env.stderr, err)
 		return 1
 	}
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(explanation)
-		return 0
+		return writeIndentedJSON(env.stdout, explanation)
 	}
 	printJVMExplanation(*explanation)
 	return 0

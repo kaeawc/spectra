@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -78,56 +77,52 @@ func nmtPID(fs *flag.FlagSet, env nmtEnv) (int, bool) {
 	return pid, true
 }
 
-// captureNMT parses args for a single-PID subcommand and runs jcmd.
-func captureNMT(name, mode string, args []string, env nmtEnv) (string, bool, int, int) {
+// nmtTarget parses args for a single-PID subcommand.
+func nmtTarget(name string, args []string, env nmtEnv) (pid int, asJSON bool, top, code int) {
 	fs, asJSON, top, ok := parseNMTArgs(name, args, 1, env)
 	if !ok {
-		return "", false, 0, 2
+		return 0, false, 0, 2
 	}
-	pid, ok := nmtPID(fs, env)
+	pid, ok = nmtPID(fs, env)
 	if !ok {
-		return "", false, 0, 2
+		return 0, false, 0, 2
 	}
-	out, err := jvm.NativeMemory(pid, mode, env.run)
-	if err != nil {
-		fmt.Fprintf(env.stderr, "nmt %s failed for PID %d: %v\n", mode, pid, err)
-		return "", false, 0, 1
-	}
-	return string(out), asJSON, top, 0
+	return pid, asJSON, top, 0
 }
 
-func nmtDisabled(env nmtEnv) int {
-	fmt.Fprintln(env.stderr, "native memory tracking is not enabled; restart the JVM with -XX:NativeMemoryTracking=summary (or =detail for call sites)")
+// nmtFailed prints err and returns the failure exit code.
+func nmtFailed(env nmtEnv, err error) int {
+	fmt.Fprintln(env.stderr, err)
 	return 1
 }
 
 func runNMTSummary(args []string, env nmtEnv) int {
-	out, asJSON, top, code := captureNMT("summary", "summary", args, env)
+	pid, asJSON, top, code := nmtTarget("summary", args, env)
 	if code != 0 {
 		return code
 	}
-	b := jvm.ParseNMTSummary(out)
-	if !b.Enabled {
-		return nmtDisabled(env)
+	b, err := jvm.ReadNMTSummary(pid, env.run)
+	if err != nil {
+		return nmtFailed(env, err)
 	}
 	if asJSON {
-		return writeNMTJSON(env.stdout, b)
+		return writeIndentedJSON(env.stdout, b)
 	}
 	printNMTSummary(env.stdout, b, top)
 	return 0
 }
 
 func runNMTDetail(args []string, env nmtEnv) int {
-	out, asJSON, top, code := captureNMT("detail", "detail", args, env)
+	pid, asJSON, top, code := nmtTarget("detail", args, env)
 	if code != 0 {
 		return code
 	}
-	d := jvm.ParseNMTDetail(out)
-	if !d.Summary.Enabled {
-		return nmtDisabled(env)
+	d, err := jvm.ReadNMTDetail(pid, env.run)
+	if err != nil {
+		return nmtFailed(env, err)
 	}
 	if asJSON {
-		return writeNMTJSON(env.stdout, d)
+		return writeIndentedJSON(env.stdout, d)
 	}
 	printNMTSummary(env.stdout, d.Summary, top)
 	printNMTSites(env.stdout, d.Sites, top)
@@ -135,29 +130,33 @@ func runNMTDetail(args []string, env nmtEnv) int {
 }
 
 func runNMTBaseline(args []string, env nmtEnv) int {
-	out, _, _, code := captureNMT("baseline", "baseline", args, env)
+	pid, _, _, code := nmtTarget("baseline", args, env)
 	if code != 0 {
 		return code
 	}
-	if strings.Contains(strings.ToLower(out), "not enabled") {
-		return nmtDisabled(env)
+	out, err := jvm.NativeMemory(pid, "baseline", env.run)
+	if err != nil {
+		fmt.Fprintf(env.stderr, "nmt baseline failed for PID %d: %v\n", pid, err)
+		return 1
+	}
+	if strings.Contains(strings.ToLower(string(out)), "not enabled") {
+		return nmtFailed(env, jvm.ErrNMTDisabledHint)
 	}
 	fmt.Fprintln(env.stdout, "NMT baseline recorded; run `spectra jvm nmt diff <pid>` later to see growth.")
 	return 0
 }
 
 func runNMTLiveDiff(args []string, env nmtEnv) int {
-	out, asJSON, top, code := captureNMT("diff", "summary.diff", args, env)
+	pid, asJSON, top, code := nmtTarget("diff", args, env)
 	if code != 0 {
 		return code
 	}
-	d, err := jvm.ParseNMTSummaryDiff(out)
+	d, err := jvm.ReadNMTDiff(pid, env.run)
 	if err != nil {
-		fmt.Fprintf(env.stderr, "nmt diff: %v (run `spectra jvm nmt baseline <pid>` first)\n", err)
-		return 1
+		return nmtFailed(env, err)
 	}
 	if asJSON {
-		return writeNMTJSON(env.stdout, d)
+		return writeIndentedJSON(env.stdout, d)
 	}
 	printNMTDiff(env.stdout, d, top)
 	return 0
@@ -194,7 +193,7 @@ func runNMTCompare(args []string, env nmtEnv) int {
 		report.Sites = jvm.DiffNMTCallSites(details[0].Sites, details[1].Sites)
 	}
 	if asJSON {
-		return writeNMTJSON(env.stdout, report)
+		return writeIndentedJSON(env.stdout, report)
 	}
 	printNMTDiff(env.stdout, report.Summary, top)
 	printNMTSiteDeltas(env.stdout, report.Sites, top)
@@ -220,13 +219,6 @@ func checkNMTCaptureTotals(text string) error {
 		return errors.New("no `Total: reserved=..., committed=...` line found; save a complete `VM.native_memory summary` or `detail` capture")
 	}
 	return nil
-}
-
-func writeNMTJSON(w io.Writer, v any) int {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
-	return 0
 }
 
 func printNMTSummary(w io.Writer, b jvm.NMTBreakdown, top int) {

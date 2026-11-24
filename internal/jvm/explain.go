@@ -95,7 +95,7 @@ func CollectExplanation(ctx context.Context, pid int, opts ExplainOptions) (*Exp
 		explainSoftRefs(e, pid, run)
 	}
 	if opts.Samples > 1 {
-		trend := collectTrend(pid, opts.Samples, opts.Interval, run)
+		trend := collectTrend(ctx, pid, opts.Samples, opts.Interval, run)
 		e.Trend = trend
 		explainTrend(e, trend)
 	} else {
@@ -298,7 +298,9 @@ func explainSoftRefs(e *Explanation, pid int, run CmdRunner) {
 	})
 }
 
-func collectTrend(pid, samples int, interval time.Duration, run CmdRunner) *ResourceTrend {
+// collectTrend stops sampling early when ctx ends, so a cancelled caller
+// does not keep sleeping between samples.
+func collectTrend(ctx context.Context, pid, samples int, interval time.Duration, run CmdRunner) *ResourceTrend {
 	if samples < 2 {
 		return nil
 	}
@@ -306,7 +308,7 @@ func collectTrend(pid, samples int, interval time.Duration, run CmdRunner) *Reso
 		interval = time.Second
 	}
 	var first, last *GCStats
-	for i := 0; i < samples; i++ {
+	for i := 0; i < samples && ctx.Err() == nil; i++ {
 		gc, err := CollectGCStats(pid, run)
 		if err == nil {
 			if first == nil {
@@ -315,7 +317,12 @@ func collectTrend(pid, samples int, interval time.Duration, run CmdRunner) *Reso
 			last = gc
 		}
 		if i != samples-1 {
-			time.Sleep(interval)
+			t := time.NewTimer(interval)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
+			}
 		}
 	}
 	if first == nil || last == nil {
