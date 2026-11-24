@@ -8,14 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/kaeawc/spectra/internal/symbolicate"
 )
 
 func runSymbolicate(args []string) int {
-	return runSymbolicateWithIO(args, os.Stdin, os.Stdout, os.Stderr, defaultSymbolicateRunner)
+	return runSymbolicateWithIO(args, os.Stdin, os.Stdout, os.Stderr, symbolicate.HostRunner)
 }
 
 func runSymbolicateWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer, runner symbolicate.Runner) int {
@@ -94,8 +93,4 @@ func readAddresses(r io.Reader) []string {
 		}
 	}
 	return addrs
-}
-
-func defaultSymbolicateRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
 }

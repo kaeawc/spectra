@@ -9,6 +9,7 @@ import (
 	"github.com/kaeawc/spectra/internal/hostos"
 	"github.com/kaeawc/spectra/internal/logquery"
 	"github.com/kaeawc/spectra/internal/services"
+	"github.com/kaeawc/spectra/internal/symbolicate"
 )
 
 // darwinOnly describes a subcommand with no implementation off macOS.
@@ -41,7 +42,7 @@ var darwinOnlyCommands = map[string]darwinOnly{
 	"lsmp":           {"Mach port tables", ""},
 	"whois":          {"XPC/Mach service attribution", ""},
 	"malloc-history": {"malloc stack logging", ""},
-	"symbolicate":    {"atos symbolication", ""},
+	"symbolicate":    {symbolicate.Feature, ""},
 }
 
 // gateDarwinOnly answers a macOS-only subcommand off macOS. ok is false
