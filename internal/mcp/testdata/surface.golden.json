@@ -34,43 +34,11 @@
       },
       "name": "alerts",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Local blob cache. Ops: stats, clear. Ask: \"How big is the cache?\"",
+      "description": "Local blob cache: stats or clear. Ask: \"How big is the cache?\"",
       "inputSchema": {
         "properties": {
           "kind": {
@@ -90,38 +58,6 @@
       },
       "name": "cache",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -145,43 +81,11 @@
       },
       "name": "core",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ops: discover, overview, schema, relations, stats, sample. Ask: \"What database does this app use?\" \"Show its schema.\"",
+      "description": "Read-only database inspection (postgres, mysql, sqlite, mongodb, redis). Ask: \"What database does this app use?\" \"Show its schema.\"",
       "inputSchema": {
         "properties": {
           "confirm_sensitive": {
@@ -221,58 +125,26 @@
       },
       "name": "db",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), each emulator's AVD name (android.devices[].avd), booted iOS simulators (macOS; every simulator in any state under ios_simulators.all with all_simulators), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, which AVD is emulator-5554, and which worktree started them?\"",
+      "description": "Mobile devices in use: Android devices and emulators adb reaches (USB, emulator, adb connect) with each emulator's avd, booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. Ask: \"Which emulators are booted, and which worktree started them?\"",
       "inputSchema": {
         "properties": {
           "all_simulators": {
-            "description": "Also list iOS simulators that are not booted (ios_simulators.all). macOS only.",
+            "description": "Also list simulators that are not booted (ios_simulators.all). macOS only.",
             "type": "boolean"
           },
           "roots": {
-            "description": "Absolute directories (worktree roots) to attribute emulator and simulator processes to.",
+            "description": "Absolute worktree roots to attribute emulator and simulator processes to.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "start_adb": {
-            "description": "Ask adb even when no adb server runs. This starts an adb server that keeps running.",
+            "description": "Ask adb even if no adb server runs (default: only if one does). Starts a server that keeps running.",
             "type": "boolean"
           }
         },
@@ -283,49 +155,12 @@
         "additionalProperties": false,
         "properties": {
           "android": {
-            "additionalProperties": false,
             "properties": {
               "adb": {
                 "type": "string"
               },
               "devices": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "avd": {
-                      "type": "string"
-                    },
-                    "device": {
-                      "type": "string"
-                    },
-                    "emulator": {
-                      "type": "boolean"
-                    },
-                    "model": {
-                      "type": "string"
-                    },
-                    "product": {
-                      "type": "string"
-                    },
-                    "remote": {
-                      "type": "boolean"
-                    },
-                    "serial": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "type": "string"
-                    },
-                    "transport_id": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "serial",
-                    "state",
-                    "emulator",
-                    "remote"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -340,38 +175,12 @@
                 "type": "string"
               }
             },
-            "required": [
-              "status",
-              "devices"
-            ],
             "type": "object"
           },
           "ios_simulators": {
-            "additionalProperties": false,
             "properties": {
               "all": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "runtime": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "type": "string"
-                    },
-                    "udid": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "udid",
-                    "name",
-                    "runtime",
-                    "state"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -381,27 +190,6 @@
               },
               "booted": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "runtime": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "type": "string"
-                    },
-                    "udid": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "udid",
-                    "name",
-                    "runtime",
-                    "state"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -416,10 +204,6 @@
                 "type": "string"
               }
             },
-            "required": [
-              "status",
-              "booted"
-            ],
             "type": "object"
           },
           "limitations": {
@@ -435,7 +219,6 @@
             "type": "string"
           },
           "processes": {
-            "additionalProperties": false,
             "properties": {
               "boot_window_seconds": {
                 "type": "integer"
@@ -448,23 +231,6 @@
               },
               "by_root": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "booted": {
-                      "type": "integer"
-                    },
-                    "booted_recently": {
-                      "type": "integer"
-                    },
-                    "root": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "root",
-                    "booted",
-                    "booted_recently"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -477,58 +243,6 @@
               },
               "list": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "age_seconds": {
-                      "type": "integer"
-                    },
-                    "avd": {
-                      "type": "string"
-                    },
-                    "booted_recently": {
-                      "type": "boolean"
-                    },
-                    "cpu_pct": {
-                      "type": "number"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "type": "string"
-                    },
-                    "members": {
-                      "type": "integer"
-                    },
-                    "pid": {
-                      "type": "integer"
-                    },
-                    "root": {
-                      "type": "string"
-                    },
-                    "rss_kib": {
-                      "type": "integer"
-                    },
-                    "started_at": {
-                      "type": [
-                        "null",
-                        "string"
-                      ]
-                    },
-                    "udid": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "pid",
-                    "members",
-                    "cpu_pct",
-                    "rss_kib",
-                    "age_seconds",
-                    "booted_recently"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -540,19 +254,9 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "simulators",
-              "emulators",
-              "booted",
-              "booted_recently",
-              "boot_window_seconds",
-              "by_root",
-              "list"
-            ],
             "type": "object"
           },
           "schema": {
-            "additionalProperties": false,
             "properties": {
               "name": {
                 "type": "string"
@@ -561,10 +265,6 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "name",
-              "version"
-            ],
             "type": "object"
           }
         },
@@ -611,38 +311,6 @@
       },
       "name": "diagnose",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -659,47 +327,15 @@
       },
       "name": "host_health",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Long-idle holders: processes under roots (or named by pids) alive longer than min_age whose tree used under max_cpu percent of one CPU over a window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
+      "description": "Long-idle holders: processes under roots or in pids, older than min_age, whose tree stayed under max_cpu over the window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
       "inputSchema": {
         "properties": {
           "max_cpu": {
-            "description": "Idle means process plus descendants used under this percent of one CPU (default 1).",
+            "description": "Idle threshold: tree CPU under this percent of one CPU (default 1).",
             "type": "number"
           },
           "min_age": {
@@ -765,161 +401,12 @@
             ]
           },
           "result": {
-            "additionalProperties": false,
             "properties": {
               "checked": {
                 "type": "integer"
               },
               "holders": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "age_seconds": {
-                      "type": "integer"
-                    },
-                    "chain": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "command": {
-                            "type": "string"
-                          },
-                          "pid": {
-                            "type": "integer"
-                          }
-                        },
-                        "required": [
-                          "pid",
-                          "command"
-                        ],
-                        "type": "object"
-                      },
-                      "type": [
-                        "null",
-                        "array"
-                      ]
-                    },
-                    "command": {
-                      "type": "string"
-                    },
-                    "command_line": {
-                      "type": "string"
-                    },
-                    "cpu_pct": {
-                      "type": "number"
-                    },
-                    "cwd": {
-                      "type": "string"
-                    },
-                    "descendants": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "command": {
-                            "type": "string"
-                          },
-                          "cpu_pct": {
-                            "type": "number"
-                          },
-                          "pid": {
-                            "type": "integer"
-                          },
-                          "ppid": {
-                            "type": "integer"
-                          },
-                          "started": {
-                            "type": "string"
-                          },
-                          "wait": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "lock_files": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": [
-                                  "null",
-                                  "array"
-                                ]
-                              },
-                              "wchan": {
-                                "type": "string"
-                              }
-                            },
-                            "type": [
-                              "null",
-                              "object"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "pid",
-                          "ppid",
-                          "command",
-                          "cpu_pct"
-                        ],
-                        "type": "object"
-                      },
-                      "type": [
-                        "null",
-                        "array"
-                      ]
-                    },
-                    "descendants_total": {
-                      "type": "integer"
-                    },
-                    "matched": {
-                      "type": "string"
-                    },
-                    "pid": {
-                      "type": "integer"
-                    },
-                    "ppid": {
-                      "type": "integer"
-                    },
-                    "started": {
-                      "type": "string"
-                    },
-                    "tree_cpu_pct": {
-                      "type": "number"
-                    },
-                    "user": {
-                      "type": "string"
-                    },
-                    "wait": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "lock_files": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": [
-                            "null",
-                            "array"
-                          ]
-                        },
-                        "wchan": {
-                          "type": "string"
-                        }
-                      },
-                      "type": [
-                        "null",
-                        "object"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "pid",
-                    "ppid",
-                    "command",
-                    "matched",
-                    "started",
-                    "age_seconds",
-                    "cpu_pct",
-                    "tree_cpu_pct",
-                    "descendants",
-                    "descendants_total"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -949,14 +436,6 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "holders",
-              "checked",
-              "skipped_young",
-              "skipped_busy",
-              "skipped_unmeasured",
-              "nested"
-            ],
             "type": "object"
           },
           "roots": {
@@ -988,7 +467,7 @@
       "inputSchema": {
         "properties": {
           "assess_gatekeeper": {
-            "description": "Run the real spctl Gatekeeper assessment (slow, 15s cap per app). Default infers it from the signature.",
+            "description": "Run spctl's Gatekeeper assessment (slow, 15s cap per app) instead of inferring it from the signature.",
             "type": "boolean"
           },
           "deep": {
@@ -1019,43 +498,11 @@
       },
       "name": "inspect_app",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Persisted findings. Ops: check, list, acknowledge, dismiss, record_fix, fix_history. Ask: \"What issues are open?\"",
+      "description": "Persisted findings and fix history. Ask: \"What issues are open?\"",
       "inputSchema": {
         "properties": {
           "applied_by": {
@@ -1111,43 +558,11 @@
       },
       "name": "issues",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Cancel a working job: it becomes cancelled at once and its tool is stopped.",
+      "description": "Cancel a working job: it becomes cancelled at once, its tool is stopped, and its record is returned.",
       "inputSchema": {
         "properties": {
           "job_id": {
@@ -1162,83 +577,6 @@
       },
       "name": "job_cancel",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "createdAt": {
-            "type": "string"
-          },
-          "expiresAt": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "jobId": {
-            "type": "string"
-          },
-          "lastUpdatedAt": {
-            "type": "string"
-          },
-          "operation": {
-            "type": "string"
-          },
-          "pollInterval": {
-            "type": "integer"
-          },
-          "progress": {
-            "additionalProperties": false,
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "progress": {
-                "type": "number"
-              },
-              "total": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "progress"
-            ],
-            "type": [
-              "null",
-              "object"
-            ]
-          },
-          "resultAvailable": {
-            "type": "boolean"
-          },
-          "status": {
-            "enum": [
-              "working",
-              "input_required",
-              "completed",
-              "failed",
-              "cancelled"
-            ],
-            "type": "string"
-          },
-          "statusMessage": {
-            "type": "string"
-          },
-          "tool": {
-            "type": "string"
-          },
-          "ttl": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "jobId",
-          "tool",
-          "status",
-          "createdAt",
-          "lastUpdatedAt",
-          "ttl",
-          "pollInterval",
-          "resultAvailable"
-        ],
         "type": "object"
       }
     },
@@ -1254,7 +592,6 @@
         "properties": {
           "jobs": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "createdAt": {
                   "type": "string"
@@ -1278,21 +615,6 @@
                   "type": "integer"
                 },
                 "progress": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "progress": {
-                      "type": "number"
-                    },
-                    "total": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "progress"
-                  ],
                   "type": [
                     "null",
                     "object"
@@ -1321,16 +643,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "jobId",
-                "tool",
-                "status",
-                "createdAt",
-                "lastUpdatedAt",
-                "ttl",
-                "pollInterval",
-                "resultAvailable"
-              ],
               "type": "object"
             },
             "type": [
@@ -1346,7 +658,7 @@
       }
     },
     {
-      "description": "The wrapped tool's result (its text, resource links and structuredContent, exactly as a direct call returns them) once the job is completed or failed. Errors while the job is working.",
+      "description": "The wrapped tool's result, exactly as a direct call returns it, once the job is completed or failed. Errors while working.",
       "inputSchema": {
         "properties": {
           "job_id": {
@@ -1365,7 +677,7 @@
       }
     },
     {
-      "description": "Run a slow tool in the background and return its job record at once. tool is one of diagnose, idle, jvm, load, orphans, process, snapshot, spawns, triage (process only for operation=sample, jvm only for flamegraph, snapshot only for create or baseline); arguments are that tool's arguments, checked now. Poll job_status (status working, then completed, failed or cancelled) and fetch the tool's own result with job_result. Ask: \"Trace spawns for 30s without blocking.\"",
+      "description": "Run a slow tool in the background and return its job record (as job_status) at once. process only for operation=sample, jvm only for flamegraph, snapshot only for create or baseline; arguments are checked now. Poll job_status until completed, failed or cancelled, then fetch the result with job_result. Ask: \"Trace spawns for 30s without blocking.\"",
       "inputSchema": {
         "properties": {
           "arguments": {
@@ -1395,88 +707,11 @@
       },
       "name": "job_start",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "createdAt": {
-            "type": "string"
-          },
-          "expiresAt": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "jobId": {
-            "type": "string"
-          },
-          "lastUpdatedAt": {
-            "type": "string"
-          },
-          "operation": {
-            "type": "string"
-          },
-          "pollInterval": {
-            "type": "integer"
-          },
-          "progress": {
-            "additionalProperties": false,
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "progress": {
-                "type": "number"
-              },
-              "total": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "progress"
-            ],
-            "type": [
-              "null",
-              "object"
-            ]
-          },
-          "resultAvailable": {
-            "type": "boolean"
-          },
-          "status": {
-            "enum": [
-              "working",
-              "input_required",
-              "completed",
-              "failed",
-              "cancelled"
-            ],
-            "type": "string"
-          },
-          "statusMessage": {
-            "type": "string"
-          },
-          "tool": {
-            "type": "string"
-          },
-          "ttl": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "jobId",
-          "tool",
-          "status",
-          "createdAt",
-          "lastUpdatedAt",
-          "ttl",
-          "pollInterval",
-          "resultAvailable"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "A job's record: status (working, input_required, completed, failed, cancelled), statusMessage, the latest progress the tool reported, createdAt, lastUpdatedAt, ttl and pollInterval (ms).",
+      "description": "A job's record, with the latest progress its tool reported; ttl and pollInterval are in ms.",
       "inputSchema": {
         "properties": {
           "job_id": {
@@ -1515,7 +750,6 @@
             "type": "integer"
           },
           "progress": {
-            "additionalProperties": false,
             "properties": {
               "message": {
                 "type": "string"
@@ -1527,9 +761,6 @@
                 "type": "number"
               }
             },
-            "required": [
-              "progress"
-            ],
             "type": [
               "null",
               "object"
@@ -1572,7 +803,7 @@
       }
     },
     {
-      "description": "JVM debug. Ops: list, inspect, explain, thread_dump, gc_stats, vm_memory, heap_histogram, heap_dump, heap_leak_suspects (analyze the .hprof at dest: retained-size leak suspects, accumulation points, paths to GC roots; needs confirm_sensitive), flamegraph, attach. Ops that require the spectra agent (auto-attached by default): mbeans, mbean_read (needs mbean_name+attribute), mbean_invoke (needs mbean_name+mbean_operation), probe. Pass auto_attach=false to opt out. Ask: \"Why is PID 123 using heap?\"",
+      "description": "JVM debug. heap_leak_suspects analyzes the .hprof at dest (leak suspects by retained size, accumulation points, GC-root paths; needs confirm_sensitive). mbeans, mbean_read, mbean_invoke and probe need the spectra agent, auto-attached unless auto_attach=false. Ask: \"Why is PID 123 using heap?\"",
       "inputSchema": {
         "properties": {
           "agent": {
@@ -1584,7 +815,7 @@
             "type": "string"
           },
           "auto_attach": {
-            "description": "Auto-attach spectra agent when an agent-only op needs it (default true). Set false to opt out.",
+            "description": "Auto-attach the spectra agent for agent-only ops (default true).",
             "type": "boolean"
           },
           "confirm_sensitive": {
@@ -1657,38 +888,6 @@
       },
       "name": "jvm",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -1697,7 +896,7 @@
       "inputSchema": {
         "properties": {
           "pid": {
-            "description": "Process ID (required).",
+            "description": "Process ID.",
             "type": "integer"
           }
         },
@@ -1712,7 +911,7 @@
       }
     },
     {
-      "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. On Linux under a cgroup CPU or memory limit, also cgroup (quota, limit, used/available, PSI) and effective_cpus / effective_available_bytes (min of host and cgroup); the verdict still uses host-wide figures. Ask: \"Should I start another lane?\"",
+      "description": "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`; verdict is admit, hold or backoff. On Linux under a cgroup limit it adds cgroup and effective_cpus / effective_available_bytes. Ask: \"Should I start another lane?\"",
       "inputSchema": {
         "properties": {
           "backoff_free_gb": {
@@ -1755,7 +954,6 @@
             "type": "number"
           },
           "cause": {
-            "additionalProperties": false,
             "properties": {
               "cpu_pct": {
                 "type": "number"
@@ -1779,15 +977,9 @@
                 "type": "string"
               }
             },
-            "required": [
-              "kind",
-              "detail",
-              "cpu_pct"
-            ],
             "type": "object"
           },
           "cgroup": {
-            "additionalProperties": false,
             "properties": {
               "cpu_pressure": {
                 "type": [
@@ -1835,10 +1027,6 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "version",
-              "path"
-            ],
             "type": [
               "null",
               "object"
@@ -1854,7 +1042,6 @@
             "type": "integer"
           },
           "devices": {
-            "additionalProperties": false,
             "properties": {
               "boot_window_seconds": {
                 "type": "integer"
@@ -1867,23 +1054,6 @@
               },
               "by_root": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "booted": {
-                      "type": "integer"
-                    },
-                    "booted_recently": {
-                      "type": "integer"
-                    },
-                    "root": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "root",
-                    "booted",
-                    "booted_recently"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -1896,58 +1066,6 @@
               },
               "list": {
                 "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "age_seconds": {
-                      "type": "integer"
-                    },
-                    "avd": {
-                      "type": "string"
-                    },
-                    "booted_recently": {
-                      "type": "boolean"
-                    },
-                    "cpu_pct": {
-                      "type": "number"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "type": "string"
-                    },
-                    "members": {
-                      "type": "integer"
-                    },
-                    "pid": {
-                      "type": "integer"
-                    },
-                    "root": {
-                      "type": "string"
-                    },
-                    "rss_kib": {
-                      "type": "integer"
-                    },
-                    "started_at": {
-                      "type": [
-                        "null",
-                        "string"
-                      ]
-                    },
-                    "udid": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "id",
-                    "pid",
-                    "members",
-                    "cpu_pct",
-                    "rss_kib",
-                    "age_seconds",
-                    "booted_recently"
-                  ],
                   "type": "object"
                 },
                 "type": [
@@ -1959,20 +1077,10 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "simulators",
-              "emulators",
-              "booted",
-              "booted_recently",
-              "boot_window_seconds",
-              "by_root",
-              "list"
-            ],
             "type": "object"
           },
           "dirs": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "cpu_pct": {
                   "type": "number"
@@ -1987,12 +1095,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "dir",
-                "procs",
-                "cpu_pct",
-                "rss_kib"
-              ],
               "type": "object"
             },
             "type": [
@@ -2021,7 +1123,6 @@
           },
           "families": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "cpu_pct": {
                   "type": "number"
@@ -2039,13 +1140,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "name",
-                "kind",
-                "members",
-                "cpu_pct",
-                "rss_kib"
-              ],
               "type": "object"
             },
             "type": [
@@ -2079,7 +1173,6 @@
           },
           "spotlight": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "excluded": {
                   "type": [
@@ -2106,24 +1199,6 @@
                   "type": "string"
                 },
                 "size": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "files": {
-                      "type": "integer"
-                    },
-                    "partial": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "files",
-                    "bytes",
-                    "partial"
-                  ],
                   "type": [
                     "null",
                     "object"
@@ -2136,47 +1211,6 @@
                   "type": "string"
                 },
                 "volume": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "mount_point": {
-                      "type": "string"
-                    },
-                    "progress": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "percent": {
-                          "type": "number"
-                        },
-                        "phase": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "phase"
-                      ],
-                      "type": [
-                        "null",
-                        "object"
-                      ]
-                    },
-                    "status": {
-                      "type": [
-                        "null",
-                        "boolean",
-                        "number",
-                        "string",
-                        "array",
-                        "object"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "mount_point",
-                    "status"
-                  ],
                   "type": [
                     "null",
                     "object"
@@ -2186,10 +1220,6 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "root",
-                "excluded"
-              ],
               "type": "object"
             },
             "type": [
@@ -2199,7 +1229,6 @@
           },
           "top_cpu": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "command": {
                   "type": "string"
@@ -2220,13 +1249,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "pid",
-                "command",
-                "cpu_pct",
-                "rss_kib",
-                "dir"
-              ],
               "type": "object"
             },
             "type": [
@@ -2236,7 +1258,6 @@
           },
           "top_rss": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "command": {
                   "type": "string"
@@ -2257,13 +1278,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "pid",
-                "command",
-                "cpu_pct",
-                "rss_kib",
-                "dir"
-              ],
               "type": "object"
             },
             "type": [
@@ -2272,7 +1286,6 @@
             ]
           },
           "unknown": {
-            "additionalProperties": false,
             "properties": {
               "cpu_pct": {
                 "type": "number"
@@ -2287,12 +1300,6 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "dir",
-              "procs",
-              "cpu_pct",
-              "rss_kib"
-            ],
             "type": "object"
           },
           "verdict": {
@@ -2365,38 +1372,6 @@
       },
       "name": "logs",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -2408,43 +1383,11 @@
       },
       "name": "memory",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Locally stored process metrics and app churn. Ops: process, churn. Ask: \"How has PID 123's memory trended?\"",
+      "description": "Locally stored process metrics and app churn. Ask: \"How has PID 123's memory trended?\"",
       "inputSchema": {
         "properties": {
           "app_path": {
@@ -2472,43 +1415,11 @@
       },
       "name": "metrics",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Network state and sockets. Ops: state, connections, by_app, diagnose. Ask: \"What is this app connected to?\"",
+      "description": "Network state and sockets. Ask: \"What is this app connected to?\"",
       "inputSchema": {
         "properties": {
           "bundles": {
@@ -2552,43 +1463,11 @@
       },
       "name": "network",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`: groups (candidates plus daemon_by_design processes), totals, limitations. Ask: \"What did finished lanes leave running?\"",
+      "description": "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`; groups also hold daemon_by_design processes. Ask: \"What did finished lanes leave running?\"",
       "inputSchema": {
         "properties": {
           "min_age": {
@@ -2600,7 +1479,7 @@
             "type": "boolean"
           },
           "roots": {
-            "description": "Absolute directories holding worktrees (required).",
+            "description": "Absolute directories holding worktrees.",
             "items": {
               "type": "string"
             },
@@ -2621,231 +1500,9 @@
           },
           "groups": {
             "items": {
-              "additionalProperties": false,
               "properties": {
                 "processes": {
                   "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "age_seconds": {
-                        "type": "integer"
-                      },
-                      "command": {
-                        "type": "string"
-                      },
-                      "command_line": {
-                        "type": "string"
-                      },
-                      "cpu_pct": {
-                        "type": "number"
-                      },
-                      "cwd": {
-                        "type": "string"
-                      },
-                      "cwd_missing": {
-                        "type": "boolean"
-                      },
-                      "cwd_unreadable": {
-                        "type": "boolean"
-                      },
-                      "daemon_by_design": {
-                        "type": "boolean"
-                      },
-                      "descendants": {
-                        "type": "integer"
-                      },
-                      "origin": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "agent": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "alive": {
-                                "type": "boolean"
-                              },
-                              "command": {
-                                "type": "string"
-                              },
-                              "command_line": {
-                                "type": "string"
-                              },
-                              "cwd": {
-                                "type": "string"
-                              },
-                              "depth": {
-                                "type": "integer"
-                              },
-                              "exited_at": {
-                                "type": [
-                                  "null",
-                                  "string"
-                                ]
-                              },
-                              "pid": {
-                                "type": "integer"
-                              },
-                              "role": {
-                                "type": "string"
-                              },
-                              "start_time": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "pid",
-                              "command",
-                              "alive",
-                              "depth"
-                            ],
-                            "type": [
-                              "null",
-                              "object"
-                            ]
-                          },
-                          "first_seen": {
-                            "type": [
-                              "null",
-                              "string"
-                            ]
-                          },
-                          "known": {
-                            "type": "boolean"
-                          },
-                          "parent": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "alive": {
-                                "type": "boolean"
-                              },
-                              "command": {
-                                "type": "string"
-                              },
-                              "command_line": {
-                                "type": "string"
-                              },
-                              "cwd": {
-                                "type": "string"
-                              },
-                              "depth": {
-                                "type": "integer"
-                              },
-                              "exited_at": {
-                                "type": [
-                                  "null",
-                                  "string"
-                                ]
-                              },
-                              "pid": {
-                                "type": "integer"
-                              },
-                              "role": {
-                                "type": "string"
-                              },
-                              "start_time": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "pid",
-                              "command",
-                              "alive",
-                              "depth"
-                            ],
-                            "type": [
-                              "null",
-                              "object"
-                            ]
-                          },
-                          "reason": {
-                            "type": "string"
-                          },
-                          "recording_since": {
-                            "type": [
-                              "null",
-                              "string"
-                            ]
-                          },
-                          "session": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "alive": {
-                                "type": "boolean"
-                              },
-                              "command": {
-                                "type": "string"
-                              },
-                              "command_line": {
-                                "type": "string"
-                              },
-                              "cwd": {
-                                "type": "string"
-                              },
-                              "depth": {
-                                "type": "integer"
-                              },
-                              "exited_at": {
-                                "type": [
-                                  "null",
-                                  "string"
-                                ]
-                              },
-                              "pid": {
-                                "type": "integer"
-                              },
-                              "role": {
-                                "type": "string"
-                              },
-                              "start_time": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "pid",
-                              "command",
-                              "alive",
-                              "depth"
-                            ],
-                            "type": [
-                              "null",
-                              "object"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "known"
-                        ],
-                        "type": [
-                          "null",
-                          "object"
-                        ]
-                      },
-                      "pid": {
-                        "type": "integer"
-                      },
-                      "rss_kib": {
-                        "type": "integer"
-                      },
-                      "subtree_rss_kib": {
-                        "type": "integer"
-                      },
-                      "user": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "pid",
-                      "age_seconds",
-                      "rss_kib",
-                      "cpu_pct",
-                      "cwd",
-                      "cwd_missing",
-                      "cwd_unreadable",
-                      "command",
-                      "command_line",
-                      "descendants",
-                      "subtree_rss_kib",
-                      "daemon_by_design"
-                    ],
                     "type": "object"
                   },
                   "type": [
@@ -2866,13 +1523,6 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "root",
-                "worktree",
-                "worktree_removed",
-                "processes",
-                "rss_kib"
-              ],
               "type": "object"
             },
             "type": [
@@ -2917,15 +1567,15 @@
       }
     },
     {
-      "description": "Who has this? Pass target (:PORT, tcp:PORT, udp:PORT, an absolute path, or a pid) for `spectra owner --json`, or under (absolute directories) for `spectra owner --under --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
+      "description": "Who has this port, path or pid (target), or what runs under these directories (under)? Same JSON as `spectra owner [--under] --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
       "inputSchema": {
         "properties": {
           "target": {
-            "description": "Port, absolute path, or pid. Exactly one of target or under.",
+            "description": ":PORT, tcp:PORT, udp:PORT, an absolute path, or a pid. Exactly one of target or under.",
             "type": "string"
           },
           "under": {
-            "description": "Absolute directories: list processes whose cwd is inside them.",
+            "description": "Absolute directories: list processes whose cwd is inside.",
             "items": {
               "type": "string"
             },
@@ -2940,7 +1590,7 @@
       }
     },
     {
-      "description": "Built-in diagnostic playbooks and command plans. Ops: list, get. Ask: \"How do I triage an fseventsd leak?\"",
+      "description": "Built-in diagnostic playbooks and command plans. Ask: \"How do I triage an fseventsd leak?\"",
       "inputSchema": {
         "properties": {
           "id": {
@@ -2960,43 +1610,11 @@
       },
       "name": "playbook",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Battery, thermal, and energy impact. Ops: state, impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
+      "description": "Battery, thermal, and energy impact. Ask: \"Is the machine throttling?\" \"What is draining the battery?\"",
       "inputSchema": {
         "properties": {
           "duration_seconds": {
@@ -3027,43 +1645,11 @@
       },
       "name": "power",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Live processes. Ops: list, tree, history, by_app (macOS), sample (macOS). Ask: \"What is using memory?\" \"Sample PID 123.\"",
+      "description": "Live processes; by_app and sample are macOS only. Ask: \"What is using memory?\" \"Sample PID 123.\"",
       "inputSchema": {
         "properties": {
           "bundles": {
@@ -3120,38 +1706,6 @@
       },
       "name": "process",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -3163,43 +1717,11 @@
       },
       "name": "services",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Capture or compare host state. Ops: create, list, get, diff, baseline. Ask: \"What changed since baseline?\"",
+      "description": "Capture, list or diff host state snapshots and baselines. Ask: \"What changed since baseline?\"",
       "inputSchema": {
         "properties": {
           "id": {
@@ -3261,43 +1783,11 @@
       },
       "name": "snapshot",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Bounded live trace of process starts and exits by polling (blocks for the duration, at most 30s). Returns {events: [...], summary: {...}}: events are the objects `spectra spawns --json` streams one per line, summary is its final line. Ask: \"What keeps spawning under PID 123?\"",
+      "description": "Bounded live trace of process starts and exits by polling; blocks for the duration (at most 30s). events are the lines `spectra spawns --json` streams, summary its final line. Ask: \"What keeps spawning under PID 123?\"",
       "inputSchema": {
         "properties": {
           "duration_seconds": {
@@ -3385,43 +1875,11 @@
       },
       "name": "storage",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Kernel resource limits and saturation. Ops: limits, top. Ask: \"Are we running out of file descriptors or PTYs?\"",
+      "description": "Kernel resource limits and saturation; top lists the holders. Ask: \"Are we running out of file descriptors or PTYs?\"",
       "inputSchema": {
         "properties": {
           "limit": {
@@ -3441,38 +1899,6 @@
       },
       "name": "system",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -3484,43 +1910,11 @@
       },
       "name": "timemachine",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "Dev tools and drift. Ops: scan, jdk, runtimes, build_tools, brew, drift. Ask: \"Which JDKs are installed?\"",
+      "description": "Dev tools (JDKs, runtimes, build tools, brew) and drift. Ask: \"Which JDKs are installed?\"",
       "inputSchema": {
         "properties": {
           "include_raw": {
@@ -3544,38 +1938,6 @@
       },
       "name": "toolchain",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
@@ -3620,43 +1982,11 @@
       },
       "name": "triage",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     },
     {
-      "description": "macOS only. macOS install/update log. Ops: history, log. Ask: \"When was the last OS update?\"",
+      "description": "macOS only. Install/update history and install.log. Ask: \"When was the last OS update?\"",
       "inputSchema": {
         "properties": {
           "grep": {
@@ -3684,38 +2014,6 @@
       },
       "name": "updates",
       "outputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "next_actions": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "raw": true,
-          "summary": {
-            "type": "string"
-          },
-          "timestamp": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "summary",
-          "timestamp"
-        ],
         "type": "object"
       }
     }

@@ -166,6 +166,31 @@ func TestSurfaceMatchesGolden(t *testing.T) {
 	}
 }
 
+// toolsListBudget caps the encoded tools/list result. Clients that load every
+// tool up front pay for each byte on every session, so growth should be a
+// deliberate choice: raise the budget in the same change, with the reason.
+const toolsListBudget = 30_400
+
+func TestToolsListStaysWithinBudget(t *testing.T) {
+	tools, err := startSession(t, "2025-11-25").ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > toolsListBudget {
+		sizes := make([]string, 0, len(tools.Tools))
+		for _, tool := range tools.Tools {
+			b, _ := json.Marshal(tool)
+			sizes = append(sizes, fmt.Sprintf("%s=%d", tool.Name, len(b)))
+		}
+		t.Fatalf("tools/list is %d bytes, budget %d: %s", len(data), toolsListBudget, strings.Join(sizes, " "))
+	}
+	t.Logf("tools/list: %d bytes (budget %d)", len(data), toolsListBudget)
+}
+
 func TestToolAnnotationsMarkReadOnlyTools(t *testing.T) {
 	tools, err := startSession(t, "2025-11-25").ListTools(context.Background(), nil)
 	if err != nil {

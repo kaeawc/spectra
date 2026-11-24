@@ -95,7 +95,7 @@ func reportToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{
 			Name:        "load",
-			Description: "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`: verdict (admit/hold/backoff), reason, cause, top_cpu/top_rss tables, families, per-root dirs, devices. On Linux under a cgroup CPU or memory limit, also cgroup (quota, limit, used/available, PSI) and effective_cpus / effective_available_bytes (min of host and cgroup); the verdict still uses host-wide figures. Ask: \"Should I start another lane?\"",
+			Description: "Can this machine take another job, and if not, who is using it? Same JSON as `spectra load --json`; verdict is admit, hold or backoff. On Linux under a cgroup limit it adds cgroup and effective_cpus / effective_available_bytes. Ask: \"Should I start another lane?\"",
 			InputSchema: objectSchema(map[string]interface{}{
 				"roots":            arrayStringProp("Absolute directories holding worktrees; cause is \"roots\" when load leads there."),
 				"max_load_per_cpu": numberProp("Hold when 1-minute load is at or above this times the CPU count (default 1.5)."),
@@ -106,9 +106,9 @@ func reportToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "orphans",
-			Description: "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`: groups (candidates plus daemon_by_design processes), totals, limitations. Ask: \"What did finished lanes leave running?\"",
+			Description: "Leftover processes from worktrees and finished jobs: parent is pid 1 and cwd is under a root. Evidence only, never kills. Same JSON as `spectra orphans --json`; groups also hold daemon_by_design processes. Ask: \"What did finished lanes leave running?\"",
 			InputSchema: objectSchema(map[string]interface{}{
-				"roots":     arrayStringProp("Absolute directories holding worktrees (required)."),
+				"roots":     arrayStringProp("Absolute directories holding worktrees."),
 				"min_age":   stringProp("Ignore processes younger than this Go duration (default \"1m\")."),
 				"no_daemon": boolProp("Do not ask the running daemon for recorded spawn origins."),
 			}, []string{"roots"}),
@@ -116,28 +116,28 @@ func reportToolDefinitions() []ToolDefinition {
 		{
 			Name:        "lineage",
 			Description: "Ancestors and descendant tree of one pid, with subtree RSS and CPU. Same JSON as `spectra lineage --json`. Ask: \"What started PID 123 and what is under it?\"",
-			InputSchema: objectSchema(map[string]interface{}{"pid": integerProp("Process ID (required).")}, []string{"pid"}),
+			InputSchema: objectSchema(map[string]interface{}{"pid": integerProp("Process ID.")}, []string{"pid"}),
 		},
 		{
 			Name:        "devices",
-			Description: "Mobile devices work here may be using: Android devices and emulators adb reaches (USB, emulator, or remote via adb connect), each emulator's AVD name (android.devices[].avd), booted iOS simulators (macOS; every simulator in any state under ios_simulators.all with all_simulators), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. adb is only asked when an adb server already runs, unless start_adb. Ask: \"Which emulators are booted, which AVD is emulator-5554, and which worktree started them?\"",
+			Description: "Mobile devices in use: Android devices and emulators adb reaches (USB, emulator, adb connect) with each emulator's avd, booted iOS simulators (macOS), and emulator/simulator processes attributed to roots. Same JSON as `spectra devices --json`. Ask: \"Which emulators are booted, and which worktree started them?\"",
 			InputSchema: objectSchema(map[string]interface{}{
-				"roots":          arrayStringProp("Absolute directories (worktree roots) to attribute emulator and simulator processes to."),
-				"start_adb":      boolProp("Ask adb even when no adb server runs. This starts an adb server that keeps running."),
-				"all_simulators": boolProp("Also list iOS simulators that are not booted (ios_simulators.all). macOS only."),
+				"roots":          arrayStringProp("Absolute worktree roots to attribute emulator and simulator processes to."),
+				"start_adb":      boolProp("Ask adb even if no adb server runs (default: only if one does). Starts a server that keeps running."),
+				"all_simulators": boolProp("Also list simulators that are not booted (ios_simulators.all). macOS only."),
 			}, nil),
 		},
 		{
 			Name:        "owner",
-			Description: "Who has this? Pass target (:PORT, tcp:PORT, udp:PORT, an absolute path, or a pid) for `spectra owner --json`, or under (absolute directories) for `spectra owner --under --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
+			Description: "Who has this port, path or pid (target), or what runs under these directories (under)? Same JSON as `spectra owner [--under] --json`. Ask: \"Who is listening on 8080?\" \"Is anything still running in this worktree?\"",
 			InputSchema: objectSchema(map[string]interface{}{
-				"target": stringProp("Port, absolute path, or pid. Exactly one of target or under."),
-				"under":  arrayStringProp("Absolute directories: list processes whose cwd is inside them."),
+				"target": stringProp(":PORT, tcp:PORT, udp:PORT, an absolute path, or a pid. Exactly one of target or under."),
+				"under":  arrayStringProp("Absolute directories: list processes whose cwd is inside."),
 			}, nil),
 		},
 		{
 			Name:        "spawns",
-			Description: fmt.Sprintf("Bounded live trace of process starts and exits by polling (blocks for the duration, at most %ds). Returns {events: [...], summary: {...}}: events are the objects `spectra spawns --json` streams one per line, summary is its final line. Ask: \"What keeps spawning under PID 123?\"", spawnsMaxSeconds),
+			Description: fmt.Sprintf("Bounded live trace of process starts and exits by polling; blocks for the duration (at most %ds). events are the lines `spectra spawns --json` streams, summary its final line. Ask: \"What keeps spawning under PID 123?\"", spawnsMaxSeconds),
 			InputSchema: objectSchema(map[string]interface{}{
 				"pid":              integerProp("Only trace this process and its descendants (0 or omitted: all)."),
 				"duration_seconds": integerProp(fmt.Sprintf("How long to trace (1..%d, default %d).", spawnsMaxSeconds, defaultSpawnsSeconds)),
@@ -146,12 +146,12 @@ func reportToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "idle",
-			Description: "Long-idle holders: processes under roots (or named by pids) alive longer than min_age whose tree used under max_cpu percent of one CPU over a window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
+			Description: "Long-idle holders: processes under roots or in pids, older than min_age, whose tree stayed under max_cpu over the window. Evidence only, never signals. Same JSON as `spectra idle --json`. Ask: \"Which lane processes are stuck doing nothing?\"",
 			InputSchema: objectSchema(map[string]interface{}{
 				"roots":   arrayStringProp("Absolute directories whose processes are checked."),
 				"pids":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "integer"}, "description": "PIDs to check (with or instead of roots; one of them is required)."},
 				"min_age": stringProp("Only processes alive at least this Go duration (default \"10m\")."),
-				"max_cpu": numberProp("Idle means process plus descendants used under this percent of one CPU (default 1)."),
+				"max_cpu": numberProp("Idle threshold: tree CPU under this percent of one CPU (default 1)."),
 				"window":  stringProp(fmt.Sprintf("CPU sample Go duration (100ms..%s, default \"5s\"); the call blocks this long.", idleMaxWindow)),
 			}, nil),
 		},

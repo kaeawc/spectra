@@ -64,25 +64,26 @@ func jobToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{
 			Name: "job_start",
-			Description: "Run a slow tool in the background and return its job record at once. tool is one of " + strings.Join(jobToolNames(), ", ") +
-				" (process only for operation=sample, jvm only for flamegraph, snapshot only for create or baseline); arguments are that tool's arguments, checked now. " +
-				"Poll job_status (status working, then completed, failed or cancelled) and fetch the tool's own result with job_result. Ask: \"Trace spawns for 30s without blocking.\"",
+			Description: "Run a slow tool in the background and return its job record (as job_status) at once. process only for operation=sample, jvm only for flamegraph, snapshot only for create or baseline; arguments are checked now. " +
+				"Poll job_status until completed, failed or cancelled, then fetch the result with job_result. Ask: \"Trace spawns for 30s without blocking.\"",
 			InputSchema: objectSchema(map[string]interface{}{
 				"tool":      enumProp(jobToolNames(), "spawns"),
 				"arguments": map[string]interface{}{"type": "object", "description": "The wrapped tool's arguments, as for a direct call."},
 			}, []string{"tool"}),
 		},
-		{Name: "job_status", Description: "A job's record: status (working, input_required, completed, failed, cancelled), statusMessage, the latest progress the tool reported, createdAt, lastUpdatedAt, ttl and pollInterval (ms).", InputSchema: idSchema},
-		{Name: "job_result", Description: "The wrapped tool's result (its text, resource links and structuredContent, exactly as a direct call returns them) once the job is completed or failed. Errors while the job is working.", InputSchema: idSchema},
-		{Name: "job_cancel", Description: "Cancel a working job: it becomes cancelled at once and its tool is stopped.", InputSchema: idSchema},
+		{Name: "job_status", Description: "A job's record, with the latest progress its tool reported; ttl and pollInterval are in ms.", InputSchema: idSchema},
+		{Name: "job_result", Description: "The wrapped tool's result, exactly as a direct call returns it, once the job is completed or failed. Errors while working.", InputSchema: idSchema},
+		{Name: "job_cancel", Description: "Cancel a working job: it becomes cancelled at once, its tool is stopped, and its record is returned.", InputSchema: idSchema},
 		{Name: "job_list", Description: "This session's jobs, oldest first, including finished ones until they expire.", InputSchema: objectSchema(map[string]interface{}{}, nil)},
 	}
 }
 
+// jobOutputSchema spells out the job record once, on job_status; job_start
+// and job_cancel return the same record and say so in their descriptions.
 func jobOutputSchema(name string) *jsonschema.Schema {
 	switch name {
-	case "job_result":
-		return permissiveObjectSchema()
+	case "job_status":
+		return jobRecordSchema()
 	case "job_list":
 		s := schemaForType(reflect.TypeFor[jobList]())
 		if items := s.Properties["jobs"]; items != nil && items.Items != nil {
@@ -90,10 +91,14 @@ func jobOutputSchema(name string) *jsonschema.Schema {
 		}
 		return s
 	default:
-		s := schemaForType(reflect.TypeFor[jobRecord]())
-		constrainJobStatus(s)
-		return s
+		return permissiveObjectSchema()
 	}
+}
+
+func jobRecordSchema() *jsonschema.Schema {
+	s := schemaForType(reflect.TypeFor[jobRecord]())
+	constrainJobStatus(s)
+	return s
 }
 
 func constrainJobStatus(s *jsonschema.Schema) {
