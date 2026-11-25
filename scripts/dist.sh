@@ -22,7 +22,9 @@ Usage: VERSION=vX.Y.Z $0
 Environment:
   VERSION       Release version. Defaults to git describe.
   DIST_DIR      Output directory. Defaults to ./dist.
-  CODESIGN_ID   Optional Developer ID Application identity (darwin only).
+  CODESIGN_ID   Optional Developer ID Application identity in a local
+                keychain (darwin only). The release workflow signs in its
+                codesign job instead (scripts/sign-darwin-archives.sh).
 EOF
 }
 
@@ -81,6 +83,8 @@ build_one() {
 
     if [[ "$goos" == "darwin" && -n "${CODESIGN_ID:-}" ]]; then
         codesign --force --timestamp --options runtime --sign "$CODESIGN_ID" \
+            "$stage/bin/spectra" "$stage/bin/spectra-mcp" "$stage/bin/spectra-helper"
+        bash "$ROOT/scripts/verify-darwin-signature.sh" \
             "$stage/bin/spectra" "$stage/bin/spectra-mcp" "$stage/bin/spectra-helper"
     fi
 
