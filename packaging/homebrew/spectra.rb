@@ -3,8 +3,9 @@
 # The release workflow renders this file with scripts/release-formula.sh,
 # replacing the at-sign placeholders with the tag and the SHA-256 of each
 # release archive from checksums.txt, and attaches the result to the GitHub
-# release as spectra.rb. Copying it into the tap is a manual maintainer step
-# (see packaging/release/README.md); this template is not installable as is.
+# release as spectra.rb; for stable tags the homebrew-tap job then pushes it to
+# Formula/spectra.rb in kaeawc/homebrew-tap (see packaging/release/README.md).
+# This template is not installable as is.
 # Rendering drops this header so the asset can be copied verbatim. The
 # `version` line survives only for prerelease tags: Homebrew scans a plain
 # vX.Y.Z from the URLs (and `brew audit --strict` rejects an explicit one as
