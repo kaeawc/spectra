@@ -90,6 +90,8 @@ The helper's RPC surface is intentionally narrow. It listens on
 | `helper.launchd.system.prepare(label, action)` | Verify a third-party system launch daemon and return the plan and a single-use token; admins only |
 | `helper.launchd.system.disable(token)` | `launchctl disable`, then `bootout` when loaded, for the prepared daemon |
 | `helper.launchd.system.enable(token)` | `launchctl enable`, then `bootstrap` when not loaded, for the prepared daemon |
+| `helper.process.root.prepare(pid, start_time)` | **Proposed, not implemented** (step 2): verify a root-owned process of a verified third-party bundle and return a single-use token; admins only |
+| `helper.process.root.terminate(token)` | **Proposed, not implemented** (step 2): send SIGTERM once to the prepared process and report whether it exited |
 
 `helper.fs_usage.start` requires a numeric PID and an allowlisted mode
 (`filesys`, `pathname`, `exec`, `diskio`, or `network`). It defaults to
@@ -131,8 +133,8 @@ Notably absent:
   changes system configuration is added only after its own design,
   threat-model update, security review and owner approval (issue #600).
   Each step is **one reviewed method family**: a reviewed pair of
-  compensating operations on one kind of target, which ships as a single
-  step:
+  compensating operations on one kind of target, or one one-way operation
+  with no undo, which ships as a single step:
     - *Step 1, implemented:*
       [helper launchd mutation](helper-launchd-mutation.md). The family is
       disable/enable of a system launch daemon:
@@ -153,6 +155,20 @@ Notably absent:
       managed daemons it can detect, and it always refuses labels and team
       ids in a root-owned denylist
       (`/Library/Application Support/Spectra/helper-denylist.plist`).
+    - *Step 2, proposed (awaiting owner go-ahead, no code):*
+      [helper root process terminate](helper-process-terminate.md).
+      `helper.process.root.prepare` and `.terminate` send SIGTERM, once,
+      to one running root-owned process whose executable belongs to a
+      verified third-party app in `/Applications`. This is a one-way
+      operation: a signal cannot be undone, so the step has no
+      compensating pair. The request carries only a pid and the observed
+      start time. The helper checks identity from the kernel, validates
+      the running code with `codesign --verify +<pid>`, compares the
+      kernel's running CDHash (`csops`) with the file's, and binds both
+      into the token. It refuses the main processes of launchd jobs (step
+      1's `disable` covers those) and children of denylisted jobs. It
+      reuses step 1's admin gate, token mechanism in a separate store,
+      mutation mutex and denylist. No SIGKILL.
 
 ## Wire protocol
 
