@@ -182,8 +182,14 @@ Every numbered check runs in `prepare` and again, from scratch, in
    - **Kernel CDHash:** the running image's code directory hash and status
      come straight from the kernel with `csops(pid, CS_OPS_CDHASH)` and
      `csops(pid, CS_OPS_STATUS)`. The status must have `CS_VALID` set and
-     `CS_PLATFORM_BINARY` clear. The CDHash must equal the on-disk
-     executable's `CDHash` (`codesign -dv --verbose=4 <path>`).
+     `CS_PLATFORM_BINARY` clear. The CDHash must equal the `CDHash` of one
+     of the on-disk executable's architecture slices
+     (`codesign -dv --verbose=4 --all-architectures <path>`). Each slice of
+     a universal binary has its own CDHash, and a process under Rosetta
+     runs the `x86_64` slice. Plain `-dv` shows only the native slice, so it
+     would refuse an unchanged translated process (review CR-1). The
+     matched slice's architecture is bound into the token, and the result
+     reports it.
      `codesign -dv +<pid>` is **not** used for this. Display mode on a pid
      resolves the process to its executable path and may report the
      *file's* signature. After an update replaced the file, that would
@@ -210,8 +216,9 @@ Every numbered check runs in `prepare` and again, from scratch, in
    - its team id is in `TeamIDs`;
    - an id matches a `Labels` entry (case-folded, exact, or by
      trailing-`*` prefix). The ids checked are the outermost and innermost
-     bundle ids, the running code's signing identifier, and the label of
-     the **ancestor launchd job** (check 8).
+     bundle ids, the running code's signing identifier, the label of the
+     **ancestor launchd job**, and the labels of the bundle's **sibling
+     jobs** (both from check 8).
 
    The ancestor job is what protects a worker that a denylisted daemon
    spawned. A worker's signing identifier is often a bare file name such as
@@ -240,6 +247,17 @@ Every numbered check runs in `prepare` and again, from scratch, in
      reaches pid 1 without a job, there is no ancestor job, as for a
      process reparented to launchd. If any step cannot be read, or the
      chain exceeds 64 steps, the result is `ancestry_unknown` (fail closed).
+   - **Bundle siblings.** The ppid chain does not survive reparenting. If a
+     denylisted job starts a worker and then exits, the worker's parent
+     becomes launchd and no ancestor label is found (review CR-2). The
+     helper therefore also reads every candidate plist in
+     `/Library/LaunchDaemons` and `/Library/LaunchAgents`, with step 1's
+     file rules. It takes each job whose `Program` (or first
+     `ProgramArguments` element) lies inside the process's outermost
+     bundle, and feeds each such job's label to check 7, whether or not the
+     job is loaded. Attribution by bundle does not depend on process
+     ancestry. A plist that cannot be read refuses `ancestry_unknown`, as in
+     step 1's unreadable rule.
    - If the `services` block cannot be found or parsed, the result is
      `launchd_unknown`. `launchctl print` output is not a stable API, so the
      implementation PR pins it with fixtures for each supported macOS
@@ -257,14 +275,22 @@ Every numbered check runs in `prepare` and again, from scratch, in
 
 Only after checks 0 to 9 pass does the helper:
 
-1. register a kqueue `EVFILT_PROC` / `NOTE_EXIT` filter on the pid. That
-   attaches to the process itself, not to the number;
+1. register a kqueue `EVFILT_PROC` filter on the pid for `NOTE_EXIT` and
+   `NOTE_EXEC`. The filter attaches to the process itself, not to the
+   number. This happens before checks 4 to 9 run in `terminate`, so an
+   `execve` during the checks is seen too;
 2. re-read identity (check 2) one last time;
-3. poll that kqueue with a zero timeout. If the process has exited since
-   step 1, the result is `gone`;
+3. poll that kqueue with a zero timeout:
+   - if the process has exited, the result is `gone`;
+   - if it has called `execve` since step 1, the result is
+     `target_changed`. `execve` keeps the pid, the start time and usually
+     the uids, so only the kqueue sees it (review CR-3);
 4. call `kill(pid, SIGTERM)` directly, as a syscall (`syscall.Kill`). It
    never runs `/bin/kill`, a shell, or `kill` from `PATH`;
-5. release the mutation mutex, then wait on the same kqueue for up to
+5. poll the kqueue once more. If a `NOTE_EXEC` arrived, the signal may have
+   reached an image the checks never saw. The result and the audit line
+   report `outcome: exec_race`, so the race is recorded, not hidden;
+6. release the mutation mutex, then wait on the same kqueue for up to
    `wait_seconds` (10) for `NOTE_EXIT`, and write the audit line.
 
 The helper sends exactly one signal. It never repeats the signal, never
@@ -294,9 +320,11 @@ in its own store, so a launchd token is never valid here:
   refuses `target_changed`, or `gone` when the process has exited. The
   helper never signals a process the user did not confirm.
 
-Remaining race: between the zero-timeout kqueue poll and `kill(2)`, the
-verified process could exit, and the kernel could give its pid to a new
-process. The window is two adjacent system calls. XNU hands out pids from
+Remaining races: between the zero-timeout kqueue poll and `kill(2)`,
+the verified process could call `execve`, or it could exit and the kernel
+could give its pid to a new process. An `execve` there is detected after
+the fact and reported as `exec_race` (step 5). It cannot be prevented
+without an audit-token signal. A reused pid is not detected. The window is two adjacent system calls. XNU hands out pids from
 an increasing counter. It wraps after `PID_MAX` and skips pids still in
 use. After a wrap, reuse needs only the counter to reach this pid again,
 not a full cycle, and any local user can force a wrap with a burst of
@@ -305,8 +333,11 @@ review SR-5).
 
 The public API has no handle for signalling one specific process. The
 implementation PR should evaluate `proc_signal_with_audittoken` (libproc
-SPI). It signals a process named by audit token, which carries a
-per-process version and fails on a reused pid, so it would close the race.
+SPI). It signals a process named by audit token. The token carries a
+per-process version (`p_idversion`), which XNU is believed to bump on
+`execve` as well as on fork; the implementation PR must confirm this. The
+signal would then fail on a reused pid *and* on an exec'd image, closing
+both races.
 Adopting it needs the owner's agreement, because it is private
 ([open question 7](#open-questions-for-the-owner)).
 
@@ -401,6 +432,7 @@ method is a separate PR ([open question 4](#open-questions-for-the-owner)).
 | Rate limited, or another mutation in flight | JSON-RPC `-32001` | "try again in N minutes"; exit 1 |
 | `kill(2)` fails (`ESRCH` just after the last check) | `outcome: error` | "the process exited before the signal"; exit 1 |
 | Signal delivered, process still running after 10 s | `outcome: still_running` | "still running; it may be handling SIGTERM"; exit 1 |
+| The process called `execve` around the signal | `outcome: exec_race` | "the process started other code as the signal was sent; it may have reached that code"; exit 1 |
 
 ## Testing (for the implementation PR)
 
@@ -415,6 +447,12 @@ method is a separate PR ([open question 4](#open-questions-for-the-owner)).
   - A zombie process.
   - A running CDHash that differs from the file's, and a failing `csops`.
   - A child of a denylisted job, refused by the ancestor job's label.
+  - An orphaned root worker whose denylisted parent job exited, with only
+    `Labels` populated and `TeamIDs` empty. Both methods refuse it through
+    the bundle-sibling rule.
+  - An `execve` between checks and `kill(2)` (refused `target_changed`),
+    and just after `kill(2)` (reported `exec_race`), driven by the fake
+    kqueue.
   - An unreadable link in the ppid chain.
   - A `not_admin` caller, with no process-info, `csops` or runner calls.
   - Token reuse, expiry, wrong uid and eviction.
@@ -433,6 +471,9 @@ method is a separate PR ([open question 4](#open-questions-for-the-owner)).
     SIGKILL.
   - The fixture binary is replaced on disk, by atomic rename, while it
     runs, and the result is `code_mismatch`.
+  - A universal fixture run under Rosetta (`arch -x86_64`; the Cirrus
+    `-base` image installs Rosetta) is accepted, and its `x86_64` slice is
+    bound.
   - Refusals: the fixture's daemon as a loaded launchd job
     (`launchd_job`); an Apple process (`apple_signed` or `system_path`);
     the caller's own process (`not_root`); a replayed token.
@@ -476,6 +517,15 @@ No high-severity finding. Every finding changed this page.
 | SR-7 | low | The shared mutex was held through slow `codesign` runs and the 10 s wait. A busy `-32001` burns the token. The rate-limit sharing was unstated. | The mutex is released after `kill(2)`. The burned token is documented. The `terminate` counter is separate from step 1's (at most 20 mutations per 10 minutes). |
 | SR-8 | low | Edge cases: path casing on case-insensitive APFS, hard links, interpreters and injected libraries, and the instability of `launchctl print`. | Prefixes match case-sensitively and fail closed. Interpreters are refused through the path rule. Loaded code is stated as host-only verification. An unparseable `services` block refuses `launchd_unknown`, with output pinned by fixtures. A hard-linked name cannot cross vendors, because the executable's team must equal the bundle's. |
 | SR-9 | info | Doc errors: the example start time did not match, `start_time` types were inconsistent, the token-store wording conflicted, pid 1 was described as both refused and malformed, the relaunch rationale was too broad, and the allowlist was implicit. | All fixed. The allowlist is stated under [allowlisted targets](#allowlisted-targets). |
+
+A second review pass, CodeRabbit on #742, raised three more findings, also
+folded in:
+
+| ID | Severity | Finding | Resolution |
+|---|---|---|---|
+| CR-1 | minor | Under Rosetta the running CDHash is the `x86_64` slice's, but `codesign -dv` shows the native slice's. An unchanged translated process would be refused. | Compare against every slice (`--all-architectures`), and bind and report the matched architecture. A Rosetta VM fixture is added. |
+| CR-2 | major | The ancestor walk does not survive reparenting: a worker of an exited denylisted job has no ancestor label. | Add the bundle-sibling rule: the labels of all jobs whose program lies in the same bundle are denylist-checked, loaded or not. A test is added. |
+| CR-3 | minor | `execve` keeps the pid and start time, so the signal could reach an image the checks never saw. | A `NOTE_EXEC` kqueue filter is registered before the checks. An exec before `kill(2)` refuses `target_changed`, and one right after is reported `exec_race`. The window between the last poll and `kill(2)` is stated, and closing it is part of open question 7. |
 
 The reviewer also checked these and found them sound:
 
