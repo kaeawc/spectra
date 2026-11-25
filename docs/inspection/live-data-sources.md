@@ -225,6 +225,9 @@ dominated by `ps` parsing. Acceptable.
 
 ## See also
 
+- [../research/process-data-push.md](../research/process-data-push.md) —
+  measured collection cost and the push/event APIs (kqueue, Endpoint
+  Security, notify, FSEvents) that could replace polling
 - [../design/system-inventory.md](../design/system-inventory.md) —
   what these sources roll up into
 - [../design/privileged-helper.md](../design/privileged-helper.md) —
