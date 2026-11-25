@@ -56,6 +56,8 @@ out, and deletes the VM.
                              "-base" image, not "-vanilla".
   --results DIR              where results go
                              (default: helper-vm-results/<UTC timestamp>)
+  --boot-timeout SECONDS     how long to wait for the guest agent
+                             (default: $BOOT_TIMEOUT)
   --keep-vm                  stop but do not delete the VM (debugging only;
                              the certificate stays inside it)
   --dry-run                  print the steps and commands; change nothing
@@ -87,12 +89,17 @@ parse_args() {
       --image=*) IMAGE="${1#*=}"; shift ;;
       --results) [ $# -ge 2 ] || usage_error "--results needs a directory"; RESULTS="$2"; shift 2 ;;
       --results=*) RESULTS="${1#*=}"; shift ;;
+      --boot-timeout) [ $# -ge 2 ] || usage_error "--boot-timeout needs seconds"; BOOT_TIMEOUT="$2"; shift 2 ;;
+      --boot-timeout=*) BOOT_TIMEOUT="${1#*=}"; shift ;;
       --keep-vm) KEEP_VM=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) usage_error "unknown argument: $1" ;;
     esac
   done
+  case "$BOOT_TIMEOUT" in
+    '' | *[!0-9]*) usage_error "--boot-timeout must be a whole number of seconds" ;;
+  esac
   if [ -z "$P12" ]; then
     [ "$DRY_RUN" = 1 ] || usage_error "--p12 is required"
     P12="<path to the .p12>"
@@ -216,15 +223,33 @@ boot_vm() {
   fi
 
   step "Wait for the Tart guest agent (up to ${BOOT_TIMEOUT}s)"
-  showline "until tart exec $VM /usr/bin/true; do sleep 5; done"
+  showline "until tart exec $VM /usr/bin/true; do sleep 5; done   # each probe bounded"
   [ "$DRY_RUN" = 1 ] && return
-  local waited=0
-  until tart exec "$VM" /usr/bin/true >/dev/null 2>&1; do
+  local deadline=$((SECONDS + BOOT_TIMEOUT))
+  until probe_agent "$deadline"; do
     kill -0 "$RUN_PID" 2>/dev/null || die "tart run exited; see $RESULTS/tart-run.log"
-    [ "$waited" -lt "$BOOT_TIMEOUT" ] || die "the guest agent did not answer within ${BOOT_TIMEOUT}s"
+    [ "$SECONDS" -lt "$deadline" ] || die "the guest agent did not answer within ${BOOT_TIMEOUT}s"
     sleep 5
-    waited=$((waited + 5))
   done
+}
+
+# probe_agent <deadline>: one tart exec probe, killed if it runs past 30s or
+# past the boot deadline (SECONDS), since a stalled probe must not outlive
+# the timeout. macOS has no timeout(1).
+probe_agent() {
+  local limit=$((SECONDS + 30)) pid
+  [ "$limit" -le "$1" ] || limit="$1"
+  tart exec "$VM" /usr/bin/true >/dev/null 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$limit" ]; then
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 1
+    fi
+    sleep 1
+  done
+  wait "$pid"
 }
 
 copy_in() {

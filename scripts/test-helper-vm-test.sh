@@ -37,6 +37,7 @@ case "$cmd" in
     [ "$1" = --help ] && exit 0
     if [ "$1" = -i ]; then shift; cat >>"$STDIN_LOG"; fi
     shift
+    [ "$*" = /usr/bin/true ] && [ -n "${FAKE_AGENT_HANG:-}" ] && exec sleep 600
     case "$*" in
       *"guest.sh import-cert") exit "${FAKE_IMPORT_RC:-0}" ;;
       *"guest.sh run-tests") cat "$FAKE_RESULTS/test.log"; exit "${FAKE_SUITE_RC:-0}" ;;
@@ -172,6 +173,16 @@ check "a failed step exits non-zero" failed
 check "a failed step still deletes the VM" deleted
 check "a failed step does not run the suite" not_in_file "$C/tart.log" "guest.sh run-tests"
 check "no secret after a failed step" no_secret
+
+start=$SECONDS
+run_case agent-hangs FAKE_AGENT_HANG=1 -- "${ITEM[@]}" --boot-timeout 3
+elapsed=$((SECONDS - start))
+check "a stalled guest agent probe fails the boot wait" exited 1
+check "says the agent did not answer" in_file "$C/out" "did not answer within 3s"
+check "the boot deadline bounds a stalled probe" test "$elapsed" -lt 20
+check "deletes the VM after a boot timeout" deleted
+run_case bad-boot-timeout -- "${ITEM[@]}" --boot-timeout soon
+check "a non-numeric --boot-timeout is a usage error" exited 2
 
 run_case keep-vm -- "${ITEM[@]}" --keep-vm
 check "--keep-vm exits 0" exited 0

@@ -58,7 +58,9 @@ cached image in seconds.
    image is `ghcr.io/cirruslabs/macos-tahoe-base:latest`; `--image` picks
    another.
 4. Boots the clone headless (`tart run --no-graphics`).
-5. Waits (up to 10 minutes) until `tart exec` answers.
+5. Waits until `tart exec` answers. The default limit is 10 minutes
+   (`--boot-timeout`). It is an absolute deadline, and each probe is killed
+   after 30 s, so a stalled probe cannot outlast it.
 6. Copies the suite, the fixture binary and `scripts/helper-vm/guest.sh` into
    `/private/var/tmp/spectra-vm` (mode `0700`) in the guest.
 7. Streams the `.p12` into the guest on stdin.
