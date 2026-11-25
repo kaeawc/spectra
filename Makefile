@@ -1,5 +1,5 @@
 .PHONY: build build-mcp mcp-smoke build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
-	release-check validate-workflows test-hive-setup \
+	release-check validate-workflows test-hive-setup test-helper-vm-script \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -83,6 +83,11 @@ validate-workflows:
 
 test-hive-setup:
 	bash scripts/test-hive-setup.sh
+
+# Shimmed test of scripts/helper-vm-test.sh; the VM run itself is manual
+# (docs/design/helper-vm-test.md).
+test-helper-vm-script:
+	bash scripts/test-helper-vm-test.sh
 
 # --- Documentation -----------------------------------------------------------
 
