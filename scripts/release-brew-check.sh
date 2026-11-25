@@ -40,6 +40,10 @@ tap_dir="$(brew --repository "$TAP")"
 if [[ ! -d "$tap_dir/Formula" ]]; then
     brew tap-new --no-git "$TAP" >/dev/null
 fi
+# Newer Homebrew refuses to load formulae from taps nobody trusted.
+if brew help trust >/dev/null 2>&1; then
+    brew trust "$TAP"
+fi
 cp "$FORMULA" "$tap_dir/Formula/spectra.rb"
 
 brew style "$TAP/spectra"
