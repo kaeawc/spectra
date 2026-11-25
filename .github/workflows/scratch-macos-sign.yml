@@ -75,7 +75,7 @@ jobs:
           bin="$tmp/spectra_${VERSION}_darwin_arm64/bin"
           codesign -dv --verbose=4 "$bin/spectra-helper"
           "$bin/spectra" version; "$bin/spectra-mcp" --version; "$bin/spectra-helper" --version
-          "$bin/spectra" system | head -20
+          "$bin/spectra" system limits | head -20
           "$bin/spectra" process | head -10
           go version -m "$bin/spectra" | grep CGO_ENABLED
       - name: install-helper --require-signed check logic (same codesign calls)
