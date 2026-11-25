@@ -73,6 +73,12 @@ jobs:
           mkdir -p formula
           bash scripts/release-formula.sh "$VERSION" dist formula/spectra.rb
           ruby -c formula/spectra.rb
+      # The archives are not published yet, so install and test wait for the
+      # homebrew-verify job; a dispatch dry run still audits the formula.
+      - name: Audit Homebrew formula (offline)
+        run: bash scripts/release-brew-check.sh --offline formula/spectra.rb
+      - name: Test the tap publish script
+        run: bash scripts/test-release-tap.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-unsigned
@@ -144,3 +150,43 @@ jobs:
             args+=(--prerelease)
           fi
           gh release create "${args[@]}"
+
+  # Installs and tests the formula against the archives just published, on the
+  # same checks the tap's own CI runs after a push, so a broken formula never
+  # reaches the tap. Prereleases stay out of the tap.
+  homebrew-verify:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    needs: publish
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: homebrew-formula
+          path: formula
+      - name: Audit, install and test the published formula
+        run: bash scripts/release-brew-check.sh formula/spectra.rb
+
+  homebrew-tap:
+    # The tap deploy key exists only in the "release" environment. This job
+    # runs after the GitHub release is published, so a missing or revoked key
+    # fails here without holding back the release itself.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    needs: homebrew-verify
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: homebrew-formula
+          path: formula
+      - name: Push the formula to kaeawc/homebrew-tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/release-tap.sh "$TAG" formula/spectra.rb

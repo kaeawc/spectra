@@ -49,8 +49,13 @@ Published release assets are the four platform archives
 `spectra-release.json.sig`, and the rendered Homebrew formula `spectra.rb`.
 The formula is kept outside the signed manifest, which covers the archives.
 
-The per-release checklist, including the manual Homebrew tap update, is in
-`packaging/release/README.md`.
+For stable tags, the `homebrew-verify` job then installs and tests the
+rendered formula against the published archives, and the `homebrew-tap` job
+pushes it to `kaeawc/homebrew-tap` with a write deploy key stored as the
+`release` environment secret `HOMEBREW_TAP_DEPLOY_KEY`. Prerelease tags are
+never pushed to the tap.
+
+The per-release checklist is in `packaging/release/README.md`.
 
 ## Verifying a release
 
@@ -87,8 +92,13 @@ fails if any is missing. It drops the template's header comment and, for a
 plain `vX.Y.Z` tag, the explicit `version` line (a prerelease tag keeps it,
 since Homebrew cannot scan one from the URL), so the result passes `brew
 audit --strict` and can be copied into the tap verbatim.
-The workflow attaches it to the release; copying it into
-`kaeawc/homebrew-tap` is a manual maintainer step.
+The workflow attaches it to the release, and for stable tags
+`scripts/release-tap.sh` commits it to `Formula/spectra.rb` in
+`kaeawc/homebrew-tap`. The script skips prereleases, never replaces a newer
+formula with an older one, and does nothing when the tap is already current.
+`scripts/release-brew-check.sh` runs the tap CI's checks (`brew style`,
+`brew audit --strict`, and with the archives published `--online`,
+`brew install` and `brew test`) before the push.
 
 ## Version strings
 

@@ -77,6 +77,7 @@ release-check:
 
 validate-workflows:
 	bash scripts/test-validate-workflows.sh
+	bash scripts/test-release-tap.sh
 	bash scripts/validate-workflows.sh
 
 test-hive-setup:
