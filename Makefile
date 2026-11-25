@@ -1,5 +1,5 @@
 .PHONY: build build-mcp mcp-smoke build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
-	release-check validate-workflows \
+	release-check validate-workflows test-hive-setup \
 	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -78,6 +78,9 @@ release-check:
 validate-workflows:
 	bash scripts/test-validate-workflows.sh
 	bash scripts/validate-workflows.sh
+
+test-hive-setup:
+	bash scripts/test-hive-setup.sh
 
 # --- Documentation -----------------------------------------------------------
 

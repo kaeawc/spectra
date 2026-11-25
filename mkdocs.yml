@@ -122,6 +122,7 @@ nav:
       - Idle holders: operations/idle-holders.md
       - Background service: operations/daemon.md
       - MCP tools: operations/mcp.md
+      - Hive VMs: operations/hive.md
       - Remote separation: operations/remote.md
       - Snapshots and hosts: operations/snapshots-and-hosts.md
       - Caching: operations/caching.md
