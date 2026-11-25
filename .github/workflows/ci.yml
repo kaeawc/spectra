@@ -465,6 +465,8 @@ jobs:
         run: ./scripts/test-validate-workflows.sh
       - name: Test the Hive setup script
         run: ./scripts/test-hive-setup.sh
+      - name: Test the helper VM script
+        run: ./scripts/test-helper-vm-test.sh
       - name: Validate workflows + shell scripts
         run: ./scripts/validate-workflows.sh
 
