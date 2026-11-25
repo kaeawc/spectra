@@ -79,10 +79,10 @@ while read -r line; do
 done <<'EOF'
 process
 process --deep
-system limits
+system limits @0,1
 memory
 power
-thermal
+thermal @0,3,4
 network
 storage
 toolchain
