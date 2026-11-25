@@ -49,7 +49,6 @@ jobs:
       - name: Build archives
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          CODESIGN_ID: ${{ secrets.CODESIGN_ID }}
         run: VERSION="$VERSION" bash scripts/dist.sh
       - name: Check stamped version
         env:
@@ -64,7 +63,8 @@ jobs:
             exit 1
           fi
       # The formula lives outside dist/ so the signed manifest covers exactly
-      # the archives; publish attaches it as a separate release asset.
+      # the archives. Tag pushes re-render it in the codesign job, after the
+      # darwin archives change; publish attaches that one as a release asset.
       - name: Render Homebrew formula
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -77,11 +77,149 @@ jobs:
       # homebrew-verify job; a dispatch dry run still audits the formula.
       - name: Audit Homebrew formula (offline)
         run: bash scripts/release-brew-check.sh --offline formula/spectra.rb
-      - name: Test the tap publish script
-        run: bash scripts/test-release-tap.sh
+      - name: Test the tap publish and macOS signing scripts
+        run: |
+          bash scripts/test-release-tap.sh
+          bash scripts/test-release-macos-sign.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-unsigned
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-formula-unsigned
+          path: formula/spectra.rb
+          if-no-files-found: error
+
+  codesign:
+    # Developer ID signing and notarization of the darwin binaries. The .p12
+    # and the App Store Connect API key exist only in the "release"
+    # environment, so this tag-only job, not the build job, handles them.
+    # Without any of those secrets it passes the archives through with only
+    # the Go linker's ad-hoc signature, unless the SPECTRA_REQUIRE_MACOS_SIGNING
+    # variable is "true".
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: macos-latest
+    environment: release
+    timeout-minutes: 75
+    outputs:
+      signed: ${{ steps.config.outputs.signed }}
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-unsigned
+          path: dist
+      - name: Check signing secrets
+        id: config
+        env:
+          HAS_P12: ${{ secrets.MACOS_SIGNING_P12_BASE64 != '' }}
+          HAS_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD != '' }}
+          HAS_API_KEY: ${{ secrets.APPSTORE_CONNECT_API_KEY_P8 != '' }}
+          HAS_API_KEY_ID: ${{ secrets.APPSTORE_CONNECT_API_KEY_ID != '' }}
+          REQUIRE_SIGNING: ${{ vars.SPECTRA_REQUIRE_MACOS_SIGNING }}
+        run: |
+          set -euo pipefail
+          present=0
+          missing=""
+          for pair in "MACOS_SIGNING_P12_BASE64=$HAS_P12" \
+            "MACOS_SIGNING_P12_PASSWORD=$HAS_P12_PASSWORD" \
+            "APPSTORE_CONNECT_API_KEY_P8=$HAS_API_KEY" \
+            "APPSTORE_CONNECT_API_KEY_ID=$HAS_API_KEY_ID"; do
+            if [[ "${pair#*=}" == "true" ]]; then
+              present=$((present + 1))
+            else
+              missing="$missing ${pair%%=*}"
+            fi
+          done
+          if [[ "$present" -eq 0 && "$REQUIRE_SIGNING" != "true" ]]; then
+            echo "::warning title=Unsigned macOS binaries::No macOS signing secrets in the release environment; the darwin binaries keep only the Go linker's ad-hoc signature. See packaging/release/README.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$missing" ]]; then
+            echo "::error title=macOS signing secrets missing::Missing release environment secrets:$missing. See packaging/release/README.md."
+            exit 1
+          else
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Import the Developer ID identity
+        id: identity
+        if: steps.config.outputs.signed == 'true'
+        env:
+          MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          id="$(bash scripts/import-signing-identity.sh "$RUNNER_TEMP/spectra-signing.keychain-db")"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - name: Sign the darwin binaries
+        if: steps.config.outputs.signed == 'true'
+        env:
+          CODESIGN_ID: ${{ steps.identity.outputs.id }}
+          CODESIGN_KEYCHAIN: ${{ runner.temp }}/spectra-signing.keychain-db
+        run: bash scripts/sign-darwin-archives.sh "$VERSION" dist
+      - name: Notarize the darwin binaries
+        if: steps.config.outputs.signed == 'true'
+        env:
+          APPSTORE_CONNECT_API_KEY_P8: ${{ secrets.APPSTORE_CONNECT_API_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPSTORE_CONNECT_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPSTORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          export NOTARY_KEY_PATH="$RUNNER_TEMP/notary-api-key.p8"
+          (umask 077 && printf '%s\n' "$APPSTORE_CONNECT_API_KEY_P8" > "$NOTARY_KEY_PATH")
+          trap 'rm -f "$NOTARY_KEY_PATH"' EXIT
+          bash scripts/notarize-archives.sh dist/spectra_"$VERSION"_darwin_*.tar.gz
+      # Bare binaries cannot be stapled, so Gatekeeper looks the ticket up
+      # online, and the lookup can lag the notary's verdict. Using spctl on a
+      # bare binary is established practice rather than documented by Apple,
+      # so this only warns; the notary's Accepted status is the gate.
+      - name: Ask Gatekeeper about the notarization
+        if: steps.config.outputs.signed == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          tar -xzf "dist/spectra_${VERSION}_darwin_arm64.tar.gz" -C "$tmp"
+          bin="$tmp/spectra_${VERSION}_darwin_arm64/bin"
+          for attempt in 1 2 3 4 5 6; do
+            if bash scripts/verify-darwin-signature.sh --notarized "$bin/spectra" "$bin/spectra-mcp" "$bin/spectra-helper"; then
+              exit 0
+            fi
+            echo "Gatekeeper has no notarization ticket yet (attempt $attempt); retrying in 20s"
+            sleep 20
+          done
+          echo "::warning title=Gatekeeper check::spctl did not report the darwin binaries as notarized; check them by hand."
+          exit 1
+      - name: Remove the signing keychain
+        if: always() && steps.identity.outcome != 'skipped'
+        run: security delete-keychain "$RUNNER_TEMP/spectra-signing.keychain-db" || true
+      - name: Check the darwin binaries still run
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          tar -xzf "dist/spectra_${VERSION}_darwin_arm64.tar.gz" -C "$tmp"
+          bin="$tmp/spectra_${VERSION}_darwin_arm64/bin"
+          for got in "$("$bin/spectra" version)" "$("$bin/spectra-mcp" --version)" "$("$bin/spectra-helper" --version)"; do
+            if [[ "$got" != *"$VERSION"* ]]; then
+              echo "a darwin binary printed '$got', expected '$VERSION'" >&2
+              exit 1
+            fi
+          done
+      - name: Render Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir -p formula
+          bash scripts/release-formula.sh "$VERSION" dist formula/spectra.rb
+          ruby -c formula/spectra.rb
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-macos
           path: dist/
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -94,7 +232,7 @@ jobs:
     # The signing key exists only in the protected "release" environment, and
     # only tag pushes reach this job; manual dispatches stop at unsigned builds.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: codesign
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -110,7 +248,7 @@ jobs:
           cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: dist-unsigned
+          name: dist-macos
           path: dist
       - name: Create and verify signed release manifest
         env:
@@ -156,7 +294,7 @@ jobs:
   # reaches the tap. Prereleases stay out of the tap.
   homebrew-verify:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
-    needs: publish
+    needs: [codesign, publish]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,6 +305,8 @@ jobs:
           name: homebrew-formula
           path: formula
       - name: Audit, install and test the published formula
+        env:
+          EXPECT_DEVELOPER_ID: ${{ needs.codesign.outputs.signed }}
         run: bash scripts/release-brew-check.sh formula/spectra.rb
 
   homebrew-tap:

@@ -9,6 +9,8 @@ set -euo pipefail
 # Default: brew style, brew audit --strict --online, brew install and brew test
 # against the published release archives. --offline runs only brew style and
 # brew audit --strict, for builds whose archives are not published yet.
+# EXPECT_DEVELOPER_ID=true also verifies the installed binaries' Developer ID
+# signatures.
 
 TAP="spectra-release/check"
 
@@ -56,4 +58,11 @@ fi
 brew audit --strict --online --formula "$TAP/spectra"
 brew install --formula "$TAP/spectra"
 brew test "$TAP/spectra"
+# A signed release must stay Developer ID signed once Homebrew installs it,
+# or `spectra install-helper --require-signed` would refuse the helper.
+if [[ "${EXPECT_DEVELOPER_ID:-}" == "true" ]]; then
+    prefix="$(brew --prefix "$TAP/spectra")"
+    bash "$(dirname "$0")/verify-darwin-signature.sh" \
+        "$prefix/bin/spectra" "$prefix/bin/spectra-mcp" "$prefix/bin/spectra-helper"
+fi
 echo "brew style, audit --strict --online, install and test passed."
