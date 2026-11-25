@@ -7,7 +7,8 @@
     disable|enable --scope system`. The owner's answers (admin gate,
     `enable` bootstrap, no stop-only method, denylist, VM fixture signing)
     are part of the design below. The VM integration test is a manual
-    pre-release step (see [testing](#testing)). Where this page was
+    pre-release step (see [testing](#testing) and
+    [helper VM integration test](helper-vm-test.md)). Where this page was
     ambiguous the implementation chose the more restrictive reading; those
     choices are listed under [implementation notes](#implementation-notes).
 
@@ -565,13 +566,16 @@ Implemented as table and unit tests in `internal/helper/launchd_test.go`
 (fakes in `launchd_fake_test.go`), `cmd/spectra/startup_system_test.go`,
 `internal/helperclient/launchd_test.go` and
 `internal/startup/export_test.go`, including `FuzzLaunchdParams` for the
-request decoder. The VM test below is not automated.
+request decoder. The VM test below is scripted but not run by CI
+(`internal/helper/launchd_vm_test.go`).
 
 - **VM-only integration (manual pre-release step):** build tag `helper_vm`
   plus `SPECTRA_VM_TEST=1`. It runs only inside a disposable macOS VM, never
-  on CI hosts or developer machines. The owner runs it by hand before each
-  release that changes the helper, and the release checklist records the
-  result. It installs the helper and a fixture app with a trivial daemon.
+  on CI hosts or developer machines. The owner runs it before each release
+  that changes the helper, with `scripts/helper-vm-test.sh` in a disposable
+  Tart VM (decided 2026-11-21), and posts the summary on the release's
+  tracking issue. The procedure, the tests and the certificate handling are
+  in [helper VM integration test](helper-vm-test.md). It installs the helper and a fixture app with a trivial daemon.
   It then checks disable, enable, a replayed token, and refusals for a
   `com.apple.*` label, a symlinked plist, a non-root plist and a
   service-management rule. Enable is checked to bootstrap an unloaded
@@ -649,4 +653,5 @@ None remain open. Answered 2026-11-20 and folded into the design above: the `adm
    daemon, and where does that VM test run? A Developer ID test certificate
    that exists only in the disposable test VM. Ad-hoc signing cannot pass
    check 7. The owner runs the test by hand inside that VM before each
-   helper release (see [testing](#testing)).
+   helper release (see [testing](#testing)). The VM is a disposable Tart
+   clone on the owner's Mac (decided 2026-11-21, #650).
