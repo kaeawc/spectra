@@ -104,6 +104,8 @@ nav:
       - JVM: inspection/jvm.md
       - Databases: inspection/databases.md
       - Live data sources: inspection/live-data-sources.md
+  - Research:
+      - Process data push APIs: research/process-data-push.md
   - Playbooks:
       - Overview: playbooks/index.md
       - JVM memory: playbooks/jvm-memory.md
