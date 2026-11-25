@@ -82,6 +82,33 @@ attempts with 5s/15s backoff so a transient module-proxy error does not fail
 a required check. Scan, test, and lint steps are never wrapped, so a real
 failure still fails the job immediately.
 
+### Required checks on main
+
+The `green-main` ruleset blocks a merge to `main` until these checks pass:
+`test`, `JUnit Test Report`, `test-linux`, `linux-distros (ubuntu:24.04)`,
+`linux-distros (debian:12)`, `linux-distros (fedora:41)`,
+`linux-distros (alpine:3.20)`, `linux-systemd`, `complexity`,
+`static-analysis`, `security`, `check-licenses`, `codeql-analysis`,
+`CodeQL`, and `docs`.
+
+GitHub matches a required check by its exact name, and a matrix job's name
+includes its matrix value. Renaming a job or changing a `linux-distros`
+image renames the check, and the old name never reports again, so every PR
+blocks on it. Update the ruleset in the same change:
+
+```bash
+gh api repos/kaeawc/spectra/rulesets            # find the green-main id
+gh api repos/kaeawc/spectra/rulesets/<id> > ruleset.json
+# edit required_status_checks, then PUT back only name/target/enforcement/
+# conditions/rules/bypass_actors:
+gh api --method PUT repos/kaeawc/spectra/rulesets/<id> --input ruleset.json
+```
+
+`ci.yml` has no `paths` filters and no job-level `if:` on required jobs, so
+every PR, including docs-only ones, reports every required check. Keep it
+that way: a filtered or skipped workflow leaves its required checks pending
+forever.
+
 ## Adding a test for a new framework
 
 When you add detection for a new framework, the test pattern:

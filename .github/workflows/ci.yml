@@ -63,6 +63,7 @@ jobs:
   # are macOS-only by design; vet+build still cover them for Linux compilation.
   test-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CGO_ENABLED: '0'
     steps:
@@ -110,8 +111,15 @@ jobs:
   # (CGO off), so they are built once on the host runner and executed inside
   # each distro container with its own real ip/ss/ps/df; no distro needs Go.
   # The script also runs locally against Docker.
+  #
+  # Each matrix entry is a required check on main by its full name, e.g.
+  # `linux-distros (ubuntu:24.04)`: changing an image here renames the check,
+  # so update the green-main ruleset in the same change (see
+  # docs/development/testing.md). The timeout bounds a stalled distro package
+  # mirror (median ~2m; the Ubuntu archive has trickled for ~18m).
   linux-distros:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +146,7 @@ jobs:
   # the helper installer's sudo calls rely on.
   linux-systemd:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CGO_ENABLED: '0'
     steps:
