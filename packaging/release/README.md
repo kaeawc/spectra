@@ -74,11 +74,41 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    fails, naming the missing secret; revoke the deploy key on the tap to cut
    off the workflow.
 
-6. **Optional, macOS signing**: a repository secret `CODESIGN_ID` (a Developer
-   ID Application identity available on the runner) makes `scripts/dist.sh`
-   codesign the darwin binaries. Without it the darwin binaries carry only the
-   Go linker's ad-hoc signature, which is enough for the tarball, the install
-   script and the Homebrew formula.
+6. **macOS signing and notarization**: the `codesign` job signs `spectra`,
+   `spectra-mcp` and `spectra-helper` in both darwin archives with a
+   Developer ID Application identity and the hardened runtime, then submits
+   them to Apple's notary service. Create these `release` environment
+   secrets:
+
+   | Secret | Value |
+   | --- | --- |
+   | `MACOS_SIGNING_P12_BASE64` | `base64 -i DeveloperID.p12` of a .p12 holding exactly one Developer ID Application certificate and its private key |
+   | `MACOS_SIGNING_P12_PASSWORD` | the .p12 export password |
+   | `APPSTORE_CONNECT_API_KEY_P8` | the full text of the App Store Connect API key file `AuthKey_<KEYID>.p8` |
+   | `APPSTORE_CONNECT_API_KEY_ID` | that key's Key ID |
+   | `APPSTORE_CONNECT_API_ISSUER_ID` | the Issuer ID, for a Team key only; leave it unset for an Individual key |
+
+   Export the .p12 from Keychain Access (the "Developer ID Application: …"
+   identity, with its private key). Create the API key in App Store Connect
+   under Users and Access, Integrations; the Developer role is enough for
+   notarization.
+
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set MACOS_SIGNING_P12_BASE64 --env release -R kaeawc/spectra
+   gh secret set MACOS_SIGNING_P12_PASSWORD --env release -R kaeawc/spectra
+   gh secret set APPSTORE_CONNECT_API_KEY_P8 --env release -R kaeawc/spectra < AuthKey_KEYID.p8
+   gh secret set APPSTORE_CONNECT_API_KEY_ID --env release -R kaeawc/spectra
+   gh secret set APPSTORE_CONNECT_API_ISSUER_ID --env release -R kaeawc/spectra
+   gh variable set SPECTRA_REQUIRE_MACOS_SIGNING --body true -R kaeawc/spectra
+   ```
+
+   With none of the secrets set, releases still publish, with a warning, and
+   the darwin binaries carry only the Go linker's ad-hoc signature (enough
+   for the tarball, the install script and the Homebrew formula, but not for
+   `spectra install-helper --require-signed`). A partial set fails the
+   release. Once the secrets exist, set the repository variable
+   `SPECTRA_REQUIRE_MACOS_SIGNING` to `true` so a deleted or renamed secret
+   fails the release instead of silently shipping unsigned binaries.
 
 ## Per-release steps
 
@@ -102,6 +132,14 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
      darwin-arm64, darwin-amd64 (cgo on), linux-amd64 and linux-arm64 (static,
      cgo off), writes `checksums.txt`, checks that `spectra version` prints
      the tag, and renders the Homebrew formula.
+   - `codesign` (macOS, `release` environment): imports the Developer ID
+     identity into a temporary keychain, signs the darwin binaries with the
+     hardened runtime and a secure timestamp, checks each passes what
+     `install-helper --require-signed` checks, notarizes them (one zip
+     submission; the release must come back `Accepted`), asks Gatekeeper
+     for the ticket, repacks the darwin archives, rewrites `checksums.txt`
+     and re-renders the Homebrew formula. Without signing secrets it passes
+     the archives through unchanged.
    - `sign` (`release` environment): writes and verifies
      `spectra-release.json` and `spectra-release.json.sig`, after checking the
      native archive's `capabilities --json` reports the tag.
@@ -110,7 +148,8 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
      `spectra-release.json`, `spectra-release.json.sig` and `spectra.rb`.
    - `homebrew-verify` (macOS, stable tags only): runs `brew style`,
      `brew audit --strict --online`, `brew install` and `brew test` on the
-     rendered formula against the just-published archives.
+     rendered formula against the just-published archives, and for a signed
+     release checks the installed binaries are still Developer ID signed.
    - `homebrew-tap` (`release` environment, stable tags only): commits the
      formula to `Formula/spectra.rb` in `kaeawc/homebrew-tap` as
      `spectra vX.Y.Z` (`scripts/release-tap.sh`). It never downgrades the

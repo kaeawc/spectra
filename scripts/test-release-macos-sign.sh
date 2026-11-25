@@ -7,6 +7,8 @@ set -euo pipefail
 # macOS; no Apple credentials or network. Real signing is exercised only by
 # the release workflow's codesign job.
 
+# Glob and sort order must not depend on the runner's locale.
+export LC_ALL=C
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BASH_BIN="${BASH_BIN:-bash}"
 fail=0

@@ -38,6 +38,22 @@ signing key. A separate `sign` job, which runs only for tag pushes inside the
 tag is pushed. A `workflow_dispatch` run builds
 unsigned archives only and uploads them as a workflow artifact.
 
+For tag pushes, a `codesign` job on macOS, inside the `release` environment,
+Developer ID signs `spectra`, `spectra-mcp` and `spectra-helper` in both
+darwin archives with the hardened runtime and a secure timestamp
+(`scripts/sign-darwin-archives.sh`), and notarizes them with an App Store
+Connect API key (`scripts/notarize-archives.sh`). notarytool accepts only zip,
+dmg and pkg files, so the binaries go up in one zip; Apple records each
+binary's hash, so the tarballs that ship them are covered. Bare binaries
+cannot be stapled, so Gatekeeper checks the ticket online the first time a
+quarantined copy runs. Each signed binary must pass what `spectra
+install-helper --require-signed` checks: a `Developer ID Application`
+authority and strict `codesign --verify`. The job then repacks the darwin
+archives and rewrites `checksums.txt` before the manifest is signed. Without
+the signing secrets it warns and passes the archives through unsigned, unless
+the repository variable `SPECTRA_REQUIRE_MACOS_SIGNING` is `true`; the secrets
+are listed in `packaging/release/README.md`.
+
 The `build` job forces cgo on for both darwin targets (Go otherwise drops
 cgo when cross-compiling darwin/amd64 on the arm64 runner) and builds the
 Linux targets static with cgo off, then fails if any binary was built with the
