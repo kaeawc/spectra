@@ -1,0 +1,109 @@
+# Temporary: exercises the #648 signing scripts end to end on macOS with a
+# throwaway self-signed "Developer ID Application" identity. Never merged.
+name: scratch macos sign
+on:
+  push:
+    branches: [work/scratch-macos-sign]
+permissions:
+  contents: read
+jobs:
+  sign:
+    runs-on: macos-latest
+    env:
+      VERSION: v0.0.0-scratch.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build archives
+        run: VERSION="$VERSION" bash scripts/dist.sh
+      - name: Shim tests on macOS
+        run: bash scripts/test-release-macos-sign.sh
+      - name: Make a throwaway self-signed Developer ID-named identity
+        id: p12
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/selfsigned"; mkdir -p "$d"
+          cat > "$d/ext.cnf" <<'CNF'
+          [req]
+          distinguished_name = dn
+          prompt = no
+          [dn]
+          CN = Developer ID Application: Spectra Scratch (SCRATCH001)
+          OU = SCRATCH001
+          O = Spectra Scratch
+          C = US
+          [ext]
+          basicConstraints = critical,CA:false
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          CNF
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$d/ext.cnf" -extensions ext -keyout "$d/key.pem" -out "$d/cert.pem"
+          pw="scratch-$(openssl rand -hex 8)"
+          openssl pkcs12 -export -legacy -inkey "$d/key.pem" -in "$d/cert.pem" -out "$d/id.p12" -passout "pass:$pw" || \
+            openssl pkcs12 -export -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -inkey "$d/key.pem" -in "$d/cert.pem" -out "$d/id.p12" -passout "pass:$pw"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$d/cert.pem"
+          echo "::add-mask::$pw"
+          echo "pw=$pw" >> "$GITHUB_OUTPUT"
+          base64 -i "$d/id.p12" > "$d/id.p12.b64"
+      - name: Import identity (real security)
+        id: identity
+        env:
+          MACOS_SIGNING_P12_PASSWORD: ${{ steps.p12.outputs.pw }}
+        run: |
+          set -euo pipefail
+          MACOS_SIGNING_P12_BASE64="$(cat "$RUNNER_TEMP/selfsigned/id.p12.b64")" \
+            bash scripts/import-signing-identity.sh "$RUNNER_TEMP/spectra-signing.keychain-db" > "$RUNNER_TEMP/id.txt"
+          cat "$RUNNER_TEMP/id.txt"
+          echo "id=$(cat "$RUNNER_TEMP/id.txt")" >> "$GITHUB_OUTPUT"
+      - name: Sign archives (real codesign)
+        env:
+          CODESIGN_ID: ${{ steps.identity.outputs.id }}
+          CODESIGN_KEYCHAIN: ${{ runner.temp }}/spectra-signing.keychain-db
+        run: bash scripts/sign-darwin-archives.sh "$VERSION" dist
+      - name: Inspect signatures and run hardened binaries
+        run: |
+          set -euo pipefail
+          cat dist/checksums.txt
+          (cd dist && shasum -a 256 -c checksums.txt)
+          tmp="$(mktemp -d)"; tar -xzf "dist/spectra_${VERSION}_darwin_arm64.tar.gz" -C "$tmp"
+          tar -tzf "dist/spectra_${VERSION}_darwin_arm64.tar.gz"
+          bin="$tmp/spectra_${VERSION}_darwin_arm64/bin"
+          codesign -dv --verbose=4 "$bin/spectra-helper"
+          "$bin/spectra" version; "$bin/spectra-mcp" --version; "$bin/spectra-helper" --version
+          "$bin/spectra" system | head -20
+          "$bin/spectra" process | head -10
+          go version -m "$bin/spectra" | grep CGO_ENABLED
+      - name: install-helper --require-signed check logic (same codesign calls)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"; tar -xzf "dist/spectra_${VERSION}_darwin_amd64.tar.gz" -C "$tmp"
+          h="$tmp/spectra_${VERSION}_darwin_amd64/bin/spectra-helper"
+          codesign -dv --verbose=4 "$h" 2>&1 | grep "Authority=Developer ID Application:"
+          codesign --verify --strict --verbose=2 "$h"
+      - name: Notarize with fake notarytool (real ditto + plutil)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fake"
+          cat > "$RUNNER_TEMP/fake/xcrun" <<'SH'
+          #!/bin/bash
+          echo "xcrun $*" >&2
+          if [ "$2" = submit ]; then unzip -l "$3" >&2; echo '{"id":"2efe2717-52ef-43a5-96dc-0797e4ca1041","message":"Processing complete","status":"Accepted"}'; fi
+          SH
+          chmod +x "$RUNNER_TEMP/fake/xcrun"
+          PATH="$RUNNER_TEMP/fake:$PATH" NOTARY_KEY_PATH=/dev/null NOTARY_KEY_ID=FAKE \
+            bash scripts/notarize-archives.sh dist/spectra_"$VERSION"_darwin_*.tar.gz
+      - name: Real notarytool help (flags exist)
+        run: xcrun notarytool submit --help | grep -E -- "--key-id|--issuer|--output-format|--timeout"
+      - name: spctl on a non-notarized binary (expect reject, shows output)
+        run: |
+          tmp="$(mktemp -d)"; tar -xzf "dist/spectra_${VERSION}_darwin_arm64.tar.gz" -C "$tmp"
+          spctl --assess --type install -vv "$tmp/spectra_${VERSION}_darwin_arm64/bin/spectra" || true
+          bash scripts/verify-darwin-signature.sh --notarized "$tmp/spectra_${VERSION}_darwin_arm64/bin/spectra" && exit 1 || echo "rejected as expected"
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/spectra-signing.keychain-db" || true
