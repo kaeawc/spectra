@@ -54,7 +54,27 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    maintainers. A matching tag push signs and publishes a release with no
    further approval, so this ruleset is the gate on who can release.
 
-5. **Optional, macOS signing**: a repository secret `CODESIGN_ID` (a Developer
+5. **Homebrew tap deploy key**: the `homebrew-tap` job pushes each stable
+   release's formula to `kaeawc/homebrew-tap` with an SSH deploy key that can
+   write to that one repository only. Generate it on a trusted machine,
+   outside any repo, with no passphrase:
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C 'spectra release -> homebrew-tap' \
+     -f ~/spectra-tap-deploy-key
+   gh repo deploy-key add ~/spectra-tap-deploy-key.pub -R kaeawc/homebrew-tap \
+     --allow-write --title 'spectra release workflow'
+   gh secret set HOMEBREW_TAP_DEPLOY_KEY --env release \
+     -R kaeawc/spectra < ~/spectra-tap-deploy-key
+   rm ~/spectra-tap-deploy-key ~/spectra-tap-deploy-key.pub
+   ```
+
+   Like the signing key, it must be a `release` environment secret. Without
+   it the GitHub release still publishes and only the `homebrew-tap` job
+   fails, naming the missing secret; revoke the deploy key on the tap to cut
+   off the workflow.
+
+6. **Optional, macOS signing**: a repository secret `CODESIGN_ID` (a Developer
    ID Application identity available on the runner) makes `scripts/dist.sh`
    codesign the darwin binaries. Without it the darwin binaries carry only the
    Go linker's ad-hoc signature, which is enough for the tarball, the install
@@ -88,16 +108,23 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    - `publish`: creates the GitHub release (`--prerelease` for `-` tags) with
      the four `spectra_<tag>_<os>_<arch>.tar.gz` archives, `checksums.txt`,
      `spectra-release.json`, `spectra-release.json.sig` and `spectra.rb`.
+   - `homebrew-verify` (macOS, stable tags only): runs `brew style`,
+     `brew audit --strict --online`, `brew install` and `brew test` on the
+     rendered formula against the just-published archives.
+   - `homebrew-tap` (`release` environment, stable tags only): commits the
+     formula to `Formula/spectra.rb` in `kaeawc/homebrew-tap` as
+     `spectra vX.Y.Z` (`scripts/release-tap.sh`). It never downgrades the
+     tap and is a no-op when the tap is already current. The tap's own
+     `Formula audit` workflow then audits, installs and tests it again.
 
-4. **Update the Homebrew tap (manual)**. The workflow never pushes to
-   `kaeawc/homebrew-tap`; copy the rendered formula by hand:
+4. Check that the tap's `Formula audit` run for the `spectra vX.Y.Z` commit
+   passed. If the `homebrew-tap` job failed after the release was published,
+   fix the cause and re-run that job; to publish by hand instead:
 
    ```bash
    gh release download vX.Y.Z -R kaeawc/spectra -p spectra.rb -D /tmp/spectra-formula
    # in a kaeawc/homebrew-tap checkout:
    cp /tmp/spectra-formula/spectra.rb Formula/spectra.rb
-   brew audit --strict --formula ./Formula/spectra.rb
-   brew install --formula ./Formula/spectra.rb && brew test spectra
    git commit -am "spectra vX.Y.Z" && git push
    ```
 
@@ -109,4 +136,5 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    ```
 
 A `workflow_dispatch` run builds the unsigned archives and the formula only,
-uploads them as workflow artifacts, and never signs or publishes.
+audits the formula offline, uploads them as workflow artifacts, and never
+signs, publishes or touches the tap.
