@@ -1,0 +1,25 @@
+# Temporary: exercises scripts/release-brew-check.sh online mode on macOS
+# against the published v0.1.3 formula. Never merged.
+name: scratch brew check
+on:
+  push:
+    branches: [work/scratch-brew-check]
+permissions:
+  contents: read
+jobs:
+  brew:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch v0.1.3 formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0.1.3 -R kaeawc/spectra -p spectra.rb -D formula
+      - name: Online check
+        run: bash scripts/release-brew-check.sh formula/spectra.rb
+      - name: Offline check is rerunnable in the same tap
+        run: bash scripts/release-brew-check.sh --offline formula/spectra.rb
+      - name: bash version used
+        run: bash --version | head -1; which -a bash
