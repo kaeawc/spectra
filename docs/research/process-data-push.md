@@ -26,7 +26,15 @@ ships in a Spectra build).
   spawn probe returns the same process table in **0.07 ms**, about 250 times
   cheaper. Forking under heavy load at background priority is also what makes
   collection overrun, the problem behind
-  [#708](https://github.com/kaeawc/spectra/issues/708).
+  [#708](https://github.com/kaeawc/spectra/issues/708). On a saturated
+  runner under the background policy, 200 sysctl calls still finished in
+  about 7 s, while `ps` did not finish a single call in 24 minutes.
+- libproc cannot replace `ps` everywhere without root. `proc_pidinfo` and
+  `proc_pid_rusage` return `EPERM` for root and other users' processes, and
+  `ps` can read them only because it runs privileged. The daemon can drop one
+  of its two `ps` calls per tick and keep the sysctl part of every reading
+  independent of `ps`. Other users' RSS and CPU still need one `ps` call or
+  the helper.
 - macOS has **no unprivileged system-wide "process started" push**. The only
   system-wide push is Endpoint Security, which needs root, Full Disk Access
   and (for a native client) an Apple-granted entitlement plus an app-like
@@ -40,8 +48,8 @@ ships in a Spectra build).
   new child. In a test with 200 short-lived children, the fork-triggered
   rescan saw **200 of 200**; 250 ms polling, the `spectra spawns` default,
   saw **1**.
-- Recommended order: drop `ps` from the daemon's per-tick path (small, safe,
-  biggest steady-state win); then an event-driven process table on kqueue with
+- Recommended order: cut the daemon's per-tick `ps` to one call and make the
+  rest of each reading fork-free (small, safe, biggest steady-state win); then an event-driven process table on kqueue with
   a slow reconcile poll; then cheap pushes for thermal, power, crash reports
   and app installs; and only then, with the owner's go-ahead, a helper-backed
   Endpoint Security stream.
@@ -144,11 +152,29 @@ bound: a tool run by absolute path, such as `/bin/launchctl`, is not counted).
 | `kern.proc.all` sysctl (470 procs) | 0.07 ms p50, 0.16 ms p95 | 0.11 ms | pid, ppid, uid, comm, start time |
 | `ps -Ao pid=,ppid=,rss=,%cpu=,comm=` | 19 ms p50, 21 ms p95 | 18 ms (child) | daemon tick, sustained probe |
 | `ps -axwwo ...,lstart=,command=` | 31 ms p50, 48 ms p95 | 25 ms (child) | `spectra process` |
-| `proc_pidinfo(PROC_PIDTASKINFO)` | pending (queued macOS run) | | RSS and CPU time; whether non-root can read other users' pids decides how step 1 handles them |
-| `proc_pid_rusage(RUSAGE_INFO_V4)` | pending (queued macOS run) | | footprint, energy; same visibility question |
+| `proc_pidinfo(PROC_PIDTASKINFO)` | 1.3 µs per pid | | RSS and CPU time; **own pids only** without root: 146 of 147 root pids and all 72 other-user pids fail with `EPERM` |
+| `proc_pid_rusage(RUSAGE_INFO_V4)` | 1.5 µs per pid | | footprint, energy; same visibility as `proc_pidinfo` |
 | kqueue `EVFILT_PROC` registration | 0.5 µs per pid | | NOTE_EXIT, NOTE_FORK, NOTE_EXEC |
 
-`ps` against `kern.proc.all` under CPU load at background priority (`taskpolicy -b`, like the LaunchAgent's `ProcessType Background`) is measured by the same probe (`-cost-only`); that run is still queued, so this note gives no number for it yet.
+`ps` reads RSS and CPU for every user's processes because it runs with
+elevated privilege; an unprivileged daemon cannot get those columns for root
+or other users' processes from libproc. That limits how far `ps` can be
+removed without the helper (see step 1).
+
+Under load at background priority. Ten `yes` busy loops on the 5-CPU
+runner, then the probe at normal priority and under `taskpolicy -b`, the
+background policy that the LaunchAgent's `ProcessType Background` also gets:
+
+| Primitive | Normal priority, loaded | Background policy, loaded |
+|---|---|---|
+| `kern.proc.all` (200 calls) | 0.07 ms p50, 0.22 ms p95 | 0.10 ms p50, 106 ms p95, 30 ms mean; all 200 done in about 7 s |
+| `ps -axwwo ...` (20 calls) | 43 ms p50, 77 ms p95 | **no call finished in 24 minutes** (the job hit its timeout) |
+| `ps -Ao ...` (20 calls) | 29 ms p50, 36 ms p95 | not reached |
+
+This is one run with a synthetic load, but it reproduces #708's failure mode.
+At background priority under saturation, an in-process sysctl slows down but
+completes. Forking a child, which inherits the background policy and has to
+be exec'd, loaded and scheduled, can stall indefinitely.
 
 ### Daemon, idle, default 15 s tick
 
@@ -214,9 +240,9 @@ Observations:
 |---|---|---|
 | `EVFILT_PROC` `NOTE_EXIT\|NOTE_FORK\|NOTE_EXEC` on every pid | 471/471 ok (own 255, root 145, other users 70) | 472/472 ok |
 | `EVFILT_PROC` with `NOTE_EXITSTATUS` | own pids only; root and other users `EACCES` | all but one ok |
-| 200 short-lived `/usr/bin/true` children: fork-triggered `kern.proc.all` rescan | 200/200 seen, 200 fork events, 29 ms of rescans, 43 ms observer CPU | 200/200 |
-| same workload, 250 ms `kern.proc.all` poll | 1/200 seen | 0/200 |
-| `eslogger exec fork exit` | n/a (needs root) | ran on the runner: 317 events and 827 KB of JSON (about 2.6 KB per event) over an 11 s window that included 200 `/usr/bin/true` runs; the per-type breakdown and idle rate are pending |
+| 200 short-lived `/usr/bin/true` children: fork-triggered `kern.proc.all` rescan | 200/200 and 199/200 in two runs; 200 fork events; 29 to 95 ms of rescans; 43 to 128 ms observer CPU | 200/200 |
+| same workload, 250 ms `kern.proc.all` poll | 1/200 and 3/200 | 0/200 |
+| `eslogger exec fork exit` | n/a (needs root) | ran on the runner: 317 events and 827 KB of JSON (about 2.6 KB per event) over an 11 s window that included 200 `/usr/bin/true` runs. The per-type breakdown and idle rate were not measured: the second run timed out on the load step first |
 | `dtrace -n proc:::exec-success` | n/a | works on this runner because SIP is disabled; blocked on a default Mac |
 
 The `NOTE_EXITSTATUS` result matches XNU's `filt_procattach`, which only
@@ -284,7 +310,7 @@ Ranked by benefit against cost and risk. Each step is a separate issue.
 
 | # | Step | Benefit | Cost and risk | Issue |
 |---|---|---|---|---|
-| 1 | Daemon on macOS: build the per-tick process sample and sustained probe from `kern.proc.all` plus libproc instead of `ps` | Removes 2 forks per tick, about half the idle daemon CPU; collection stops depending on fork latency under load (#708) | Small; libproc and sysctl are already used. CPU% must come from CPU-time deltas, as the Linux probe already does | [#745](https://github.com/kaeawc/spectra/issues/745) |
+| 1 | Daemon on macOS: one `ps` per tick shared by the bulk sample and the sustained probe; pid, ppid, comm and start time from `kern.proc.all`; Java argv from `kern.procargs2`; own-uid RSS and CPU from libproc. When `ps` overruns, still publish the sysctl part (counts, own processes) instead of nothing | Halves per-tick forks (about a quarter of idle daemon CPU); under load the daemon answers fresh partial data instead of stale data (#708) | Small; libproc and sysctl are already used. Other users' RSS and CPU still need `ps` without root (libproc gives `EPERM`), or the helper's existing `ps` method when installed | [#745](https://github.com/kaeawc/spectra/issues/745) |
 | 2 | Daemon on Linux: build the same readings from `/proc` instead of `ps`, and read `/proc` files without the Go poller | Removes 2 forks per tick and most idle syscalls | Small | [#746](https://github.com/kaeawc/spectra/issues/746) |
 | 3 | `spectra spawns` and `process.CollectAll` on macOS: use `kern.proc.all` for the pid/ppid/start table instead of `ps` | 250x cheaper per poll, so a tighter interval becomes affordable | Small | [#747](https://github.com/kaeawc/spectra/issues/747) |
 | 4 | Event-driven process table on macOS: seed from `kern.proc.all`, watch every pid with `EVFILT_PROC` (`NOTE_EXIT\|NOTE_FORK\|NOTE_EXEC`), rescan on fork/exec with a rate cap, reconcile with the existing slow poll | Exact exit times; catches short-lived children and parents that polling misses (spawn origins, `orphans`, `spawns`, `spawn.rate`) | Medium; pure Go, unprivileged. Fork storms must be rate-capped, and a kqueue fallback to polling is needed | [#748](https://github.com/kaeawc/spectra/issues/748) |
@@ -341,8 +367,10 @@ Full Disk Access for its agent. These need a stock, SIP-enabled Mac:
   measured.
 - The literal value of `kOSThermalNotificationPressureLevelName` (reported as `com.apple.system.thermalpressurelevel`; the header exports only the symbol), and how its level maps to `pmset -g therm`'s
   speed limit on Apple Silicon and Intel.
-- `ps` against sysctl wall time under the real #708 load (load average in the
-  hundreds on a laptop). The runner's synthetic load is a proxy.
+- `ps` against sysctl under the real #708 load (load average in the hundreds on
+  a laptop). The runner's synthetic load reproduced the stall once; a real Mac
+  should confirm it.
+- `eslogger` event mix and idle event rate (not measured).
 
 ## Sources
 
