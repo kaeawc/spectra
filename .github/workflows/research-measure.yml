@@ -1,0 +1,43 @@
+name: research-measure (temporary)
+
+on:
+  push:
+    branches: ['work/push-data-sources-research']
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Host
+        run: sw_vers; sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; csrutil status || true; ps -A | wc -l
+      - name: Build
+        run: |
+          go build -o spectra ./cmd/spectra/
+          (cd scripts/research/procpush && go build -o ../../../procpush .)
+      - name: Probe (non-root)
+        run: ./procpush
+      - name: Probe (root)
+        run: sudo ./procpush
+      - name: eslogger
+        run: |
+          sudo eslogger exec fork exit >es.jsonl 2>es.err &
+          sleep 3
+          for _ in $(seq 200); do /usr/bin/true; done
+          sleep 7
+          sudo pkill -INT eslogger || true
+          sleep 1
+          echo "eslogger stderr:"; cat es.err
+          echo "events=$(wc -l <es.jsonl) bytes=$(wc -c <es.jsonl)"
+          head -c 600 es.jsonl || true
+      - name: DTrace
+        run: sudo dtrace -n 'proc:::exec-success { @n = count(); }' -c 'sleep 2' 2>&1 | tail -5 || true
+      - name: Collection cost
+        run: bash scripts/research/measure-collection.sh ./spectra 120
