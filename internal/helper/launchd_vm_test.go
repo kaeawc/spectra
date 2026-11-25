@@ -20,6 +20,7 @@ package helper_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -94,10 +95,13 @@ func (w *syncWriter) String() string {
 // private socket, so the installed helper and /var/run are never touched.
 func startHelper(t *testing.T) (*helperclient.Client, *syncWriter) {
 	t.Helper()
+	// Not t.TempDir: Darwin limits a socket path to 104 bytes, which root's
+	// TMPDIR can exceed.
 	dir, err := os.MkdirTemp("/tmp", "spx-vm-")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "helper.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -116,10 +120,7 @@ func startHelper(t *testing.T) (*helperclient.Client, *syncWriter) {
 	d.SetAuditWriter(audit)
 	helper.RegisterAll(d, nil)
 	go func() { _ = d.ServeListener(ln) }()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		_ = os.RemoveAll(dir)
-	})
+	t.Cleanup(func() { _ = ln.Close() })
 	return helperclient.NewWithPath(sock), audit
 }
 
@@ -283,21 +284,30 @@ func checkTarget(t *testing.T, got *helper.LaunchdTarget) {
 }
 
 // checkAudit requires that the token never reaches the log and that the
-// prepare and execute lines pair by token_hash.
+// successful prepare and the disable it authorised carry the same
+// non-empty token_hash.
 func checkAudit(t *testing.T, audit *syncWriter, token string) {
 	t.Helper()
 	log := audit.String()
 	if strings.Contains(log, token) {
 		t.Fatal("the audit log contains a confirmation token")
 	}
-	n := 0
+	hashes := map[string]string{}
 	for _, line := range strings.Split(log, "\n") {
-		if strings.Contains(line, `"label":"`+vmLabel+`"`) && strings.Contains(line, `"token_hash":"`) {
-			n++
+		var rec struct {
+			Event     string `json:"event"`
+			Label     string `json:"label"`
+			TokenHash string `json:"token_hash"`
+			Outcome   string `json:"outcome"`
 		}
+		if json.Unmarshal([]byte(line), &rec) != nil || rec.Label != vmLabel || rec.Outcome != helper.OutcomeOK {
+			continue
+		}
+		hashes[rec.Event] = rec.TokenHash
 	}
-	if n < 2 {
-		t.Fatalf("want a prepare and an execute line with token_hash for %s, got %d:\n%s", vmLabel, n, log)
+	prep, dis := hashes["launchd.system.prepare"], hashes["launchd.system.disable"]
+	if prep == "" || prep != dis {
+		t.Fatalf("prepare token_hash %q and disable token_hash %q must be equal and non-empty:\n%s", prep, dis, log)
 	}
 }
 
@@ -408,21 +418,14 @@ func TestVMRefusesAppleLabel(t *testing.T) {
 func TestVMRefusesSymlinkedPlist(t *testing.T) {
 	requireVM(t)
 	installFixture(t, false)
-	dir, err := os.MkdirTemp("/private/var/tmp", "spx-vm-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(dir, vmSymlinkLabel+".plist")
+	target := filepath.Join(t.TempDir(), vmSymlinkLabel+".plist")
 	writeRootFile(t, target, daemonPlist(vmSymlinkLabel, vmProgram))
 	link := plistFor(vmSymlinkLabel)
 	_ = os.Remove(link)
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = os.Remove(link)
-		_ = os.RemoveAll(dir)
-	})
+	t.Cleanup(func() { _ = os.Remove(link) })
 	c, _ := startHelper(t)
 	res := prepare(t, c, vmSymlinkLabel, "disable")
 	wantRefused(t, res.Refused, helper.ReasonSymlink, res.Reason, res.Message)

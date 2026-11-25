@@ -30,6 +30,7 @@ DRY_RUN=0
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 VM="spectra-helper-vm-$STAMP-$$"
 WORK=""
+PAYLOAD=""
 VM_CREATED=0
 RUN_PID=""
 P12_PW=""
@@ -185,17 +186,20 @@ check_host() {
 
 build_payload() {
   step "Build the helper_vm suite and the fixture daemon for darwin/arm64"
+  # WORK is set only when this run created it, so cleanup never removes
+  # the dry run's display path.
   if [ "$DRY_RUN" = 1 ]; then
-    WORK="/tmp/tmp.XXXXXXXX"
+    PAYLOAD="/tmp/tmp.XXXXXXXX/payload"
   else
     WORK="$(mktemp -d)"
-    mkdir -p "$WORK/payload"
+    PAYLOAD="$WORK/payload"
+    mkdir -p "$PAYLOAD"
   fi
   run env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -c -tags helper_vm \
-    -o "$WORK/payload/helper_vm.test" ./internal/helper
+    -o "$PAYLOAD/helper_vm.test" ./internal/helper
   run env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build \
-    -o "$WORK/payload/vmfixture" ./internal/helper/testdata/vmfixture
-  run cp scripts/helper-vm/guest.sh "$WORK/payload/guest.sh"
+    -o "$PAYLOAD/vmfixture" ./internal/helper/testdata/vmfixture
+  run cp scripts/helper-vm/guest.sh "$PAYLOAD/guest.sh"
 }
 
 boot_vm() {
@@ -226,9 +230,9 @@ boot_vm() {
 copy_in() {
   step "Copy the suite, the fixture and guest.sh into the VM"
   gexec /bin/mkdir -m 0700 -p "$GUEST_DIR"
-  showline "tar -C $WORK/payload -cf - . | tart exec -i $VM /usr/bin/tar -xf - -C $GUEST_DIR"
+  showline "tar -C $PAYLOAD -cf - . | tart exec -i $VM /usr/bin/tar -xf - -C $GUEST_DIR"
   if [ "$DRY_RUN" = 0 ]; then
-    tar -C "$WORK/payload" -cf - . | tart exec -i "$VM" /usr/bin/tar -xf - -C "$GUEST_DIR"
+    tar -C "$PAYLOAD" -cf - . | tart exec -i "$VM" /usr/bin/tar -xf - -C "$GUEST_DIR"
   fi
 
   step "Copy the test certificate into the VM (stdin; never printed)"

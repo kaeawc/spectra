@@ -30,9 +30,9 @@ cmd="$1"; shift
 case "$cmd" in
   --version) echo "2.30.0" ;;
   clone) exit 0 ;;
-  stop) exit 0 ;;
+  stop) [ -s "$RUN_PID_FILE" ] && kill "$(cat "$RUN_PID_FILE")" 2>/dev/null; exit 0 ;;
   delete) echo "deleted $1" >>"$TART_LOG"; exit 0 ;;
-  run) trap 'exit 0' TERM; while :; do sleep 1; done ;;
+  run) echo $$ >"$RUN_PID_FILE"; trap 'exit 0' TERM; while :; do sleep 1; done ;;
   exec)
     [ "$1" = --help ] && exit 0
     if [ "$1" = -i ]; then shift; cat >>"$STDIN_LOG"; fi
@@ -136,7 +136,7 @@ run_case() {
     args+=("$a")
   done
   set +e
-  env PATH="$WORK/shim:$PATH" TART_LOG="$C/tart.log" STDIN_LOG="$C/stdin.log" \
+  env PATH="$WORK/shim:$PATH" TART_LOG="$C/tart.log" STDIN_LOG="$C/stdin.log" RUN_PID_FILE="$C/run.pid" \
     FAKE_RESULTS="$C/results-src" FAKE_PW="$FAKE_PW" ${envs[@]+"${envs[@]}"} \
     "$SH" "$SCRIPT" ${args[@]+"${args[@]}"} </dev/null >"$C/out" 2>&1
   rc=$?
@@ -185,6 +185,10 @@ check "dry run prints the clone" in_file "$C/out" "tart clone"
 check "dry run prints the suite run" in_file "$C/out" "guest.sh run-tests"
 check "dry run prints the delete" in_file "$C/out" "tart delete"
 check "dry run creates no results" absent "$RES"
+mkdir -p /tmp/tmp.XXXXXXXX
+run_case dry-run-keeps-placeholder -- --dry-run
+check "dry run leaves an existing placeholder path alone" test -d /tmp/tmp.XXXXXXXX
+rmdir /tmp/tmp.XXXXXXXX
 
 run_case no-tty -- --p12 "$WORK/cert.p12" --results @RES
 check "no keychain item and no terminal refuses" exited 1
