@@ -18,8 +18,10 @@ only run in a throwaway VM, for two reasons:
   `/Library/LaunchDaemons`, and disables and re-enables a daemon;
 - check 7 of the design requires a verified, non-Apple team id. An ad-hoc
   signature has none, so the fixture must be signed with a real
-  Apple-issued **Developer ID Application** certificate. That certificate
-  should exist only inside the VM.
+  Apple-issued **Developer ID Application** certificate. The signing
+  keychain made from it exists only inside the VM. The owner keeps the
+  protected `.p12`, which holds the certificate and private key, on the
+  host, and deleting the VM removes only the guest copies.
 
 ## The one command
 
@@ -153,8 +155,10 @@ is public: it is in every signature the certificate makes.
   never written to the results. Both scripts run with `set +x`.
 - **In the guest,** the password exists only while `security import` runs,
   as its `-P` argument. That is visible only inside the disposable VM. The
-  key lives in a keychain created for this run, and the `.p12` copy is
-  deleted after import. Deleting the VM at the end removes both.
+  key lives in a keychain created for this run, and the guest's `.p12`
+  copy is deleted after import. Deleting the VM at the end removes the
+  guest keychain. The host `.p12` stays where the owner keeps it; the
+  script never copies it anywhere else on the host.
 - `scripts/test-helper-vm-test.sh` checks these rules on any OS. It
   replaces `tart`, `go`, `security` and `uname` with shims, runs the full
   flow, and asserts that a fake password and a fake `.p12` reach the guest

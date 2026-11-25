@@ -575,15 +575,18 @@ request decoder. The VM test below is scripted but not run by CI
   that changes the helper, with `scripts/helper-vm-test.sh` in a disposable
   Tart VM (decided 2026-11-21), and posts the summary on the release's
   tracking issue. The procedure, the tests and the certificate handling are
-  in [helper VM integration test](helper-vm-test.md). It installs the helper and a fixture app with a trivial daemon.
-  It then checks disable, enable, a replayed token, and refusals for a
+  in [helper VM integration test](helper-vm-test.md). It serves the helper
+  code in-process (a fresh dispatcher on a private socket, not the
+  installed `spectra-helper` service) and installs a fixture app with a
+  trivial daemon. It then checks disable, enable, a replayed token, and refusals for a
   `com.apple.*` label, a symlinked plist, a non-root plist and a
   service-management rule. Enable is checked to bootstrap an unloaded
   fixture daemon. The fixture is signed with a **Developer ID test
-  certificate provisioned only in that VM**. An ad-hoc signature is not
-  enough: check 7 requires a verified non-Apple team id, and an ad-hoc
-  signature has none. The certificate and its key never leave the VM image
-  and are never used to sign anything shipped.
+  certificate** imported, for that run only, into a keychain inside the VM.
+  An ad-hoc signature is not enough: check 7 requires a verified non-Apple
+  team id, and an ad-hoc signature has none. The owner keeps the `.p12` on
+  the host and never uses that certificate to sign anything shipped;
+  deleting the VM removes only the guest copies.
 - **Denylist tests:** label, prefix and team id matches; file absent, wrong
   owner, mode `0664`, symlink and malformed content each refuse (or fall back,
   when absent) with the right reason; no mutation argv recorded.
@@ -651,7 +654,8 @@ None remain open. Answered 2026-11-20 and folded into the design above: the `adm
 
 1. *Resolved as proposed:* which signing identity signs the VM fixture
    daemon, and where does that VM test run? A Developer ID test certificate
-   that exists only in the disposable test VM. Ad-hoc signing cannot pass
+   imported only into the disposable test VM (the owner keeps the `.p12`
+   on the host). Ad-hoc signing cannot pass
    check 7. The owner runs the test by hand inside that VM before each
    helper release (see [testing](#testing)). The VM is a disposable Tart
    clone on the owner's Mac (decided 2026-11-21, #650).
