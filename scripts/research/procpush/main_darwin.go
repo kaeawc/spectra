@@ -176,6 +176,34 @@ func measureForkCapture(n int) {
 		return
 	}
 
+	_, stopPoll := pollChildren(int32(sh), 250*time.Millisecond)
+	_, _ = stdin.Write([]byte("\n"))
+	start := time.Now()
+	c0 := cpu(syscall.RUSAGE_SELF)
+	r := watchForks(kq, int32(sh))
+	elapsed := time.Since(start)
+	selfCPU := cpu(syscall.RUSAGE_SELF) - c0
+	polledCount := stopPoll()
+	_ = cmd.Wait()
+	fmt.Printf("fork capture: children=%d run=%v fork-events=%d rescans=%d rescan-total=%v "+
+		"caught-by-fork-rescan=%d (%.0f%%) caught-by-250ms-poll=%d (%.0f%%) observer-cpu=%v\n",
+		n, elapsed, r.forkEvents, r.rescans, r.rescanTime,
+		len(r.seen), 100*float64(len(r.seen))/float64(n), polledCount, 100*float64(polledCount)/float64(n), selfCPU)
+}
+
+// addChildren records every pid in kern.proc.all whose parent is ppid.
+func addChildren(ppid int32, into map[int32]bool) {
+	rows, _ := unix.SysctlKinfoProcSlice("kern.proc.all")
+	for _, r := range rows {
+		if r.Eproc.Ppid == ppid {
+			into[r.Proc.P_pid] = true
+		}
+	}
+}
+
+// pollChildren polls kern.proc.all for children of ppid at a fixed interval
+// until the returned stop function is called; stop returns how many it saw.
+func pollChildren(ppid int32, every time.Duration) (map[int32]bool, func() int) {
 	var mu sync.Mutex
 	polled := map[int32]bool{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,7 +211,7 @@ func measureForkCapture(n int) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		tick := time.NewTicker(250 * time.Millisecond)
+		tick := time.NewTicker(every)
 		defer tick.Stop()
 		for {
 			select {
@@ -191,62 +219,55 @@ func measureForkCapture(n int) {
 				return
 			case <-tick.C:
 			}
-			rows, _ := unix.SysctlKinfoProcSlice("kern.proc.all")
 			mu.Lock()
-			for _, r := range rows {
-				if r.Eproc.Ppid == int32(sh) {
-					polled[r.Proc.P_pid] = true
-				}
-			}
+			addChildren(ppid, polled)
 			mu.Unlock()
 		}
 	}()
+	return polled, func() int {
+		cancel()
+		wg.Wait()
+		mu.Lock()
+		defer mu.Unlock()
+		return len(polled)
+	}
+}
 
-	_, _ = stdin.Write([]byte("\n"))
-	seen := map[int32]bool{}
-	var forkEvents, rescans int
-	var rescanTime time.Duration
-	start := time.Now()
-	c0 := cpu(syscall.RUSAGE_SELF)
+type forkWatch struct {
+	seen       map[int32]bool
+	forkEvents int
+	rescans    int
+	rescanTime time.Duration
+}
+
+// watchForks waits for EVFILT_PROC events on the registered pid and rescans
+// kern.proc.all for its children on every NOTE_FORK, until NOTE_EXIT.
+func watchForks(kq int, ppid int32) forkWatch {
+	w := forkWatch{seen: map[int32]bool{}}
 	events := make([]unix.Kevent_t, 16)
-	exited := false
-	for !exited {
+	for {
 		k, err := unix.Kevent(kq, nil, events, &unix.Timespec{Sec: 10})
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil || k == 0 {
 			fmt.Println("kevent wait ended:", err)
-			break
+			return w
 		}
+		exited := false
 		for _, e := range events[:k] {
-			if e.Fflags&unix.NOTE_EXIT != 0 {
-				exited = true
-			}
+			exited = exited || e.Fflags&unix.NOTE_EXIT != 0
 			if e.Fflags&unix.NOTE_FORK == 0 {
 				continue
 			}
-			forkEvents++
+			w.forkEvents++
 			t := time.Now()
-			rows, _ := unix.SysctlKinfoProcSlice("kern.proc.all")
-			rescanTime += time.Since(t)
-			rescans++
-			for _, r := range rows {
-				if r.Eproc.Ppid == int32(sh) {
-					seen[r.Proc.P_pid] = true
-				}
-			}
+			addChildren(ppid, w.seen)
+			w.rescanTime += time.Since(t)
+			w.rescans++
+		}
+		if exited {
+			return w
 		}
 	}
-	elapsed := time.Since(start)
-	selfCPU := cpu(syscall.RUSAGE_SELF) - c0
-	cancel()
-	wg.Wait()
-	_ = cmd.Wait()
-	mu.Lock()
-	defer mu.Unlock()
-	fmt.Printf("fork capture: children=%d run=%v fork-events=%d rescans=%d rescan-total=%v "+
-		"caught-by-fork-rescan=%d (%.0f%%) caught-by-250ms-poll=%d (%.0f%%) observer-cpu=%v\n",
-		n, elapsed, forkEvents, rescans, rescanTime,
-		len(seen), 100*float64(len(seen))/float64(n), len(polled), 100*float64(len(polled))/float64(n), selfCPU)
 }

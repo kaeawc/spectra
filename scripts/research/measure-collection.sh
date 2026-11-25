@@ -25,7 +25,9 @@ for d in "${dirs[@]}"; do
 	[ -d "$d" ] || continue
 	for f in "$d"/*; do
 		name=$(basename "$f")
-		[ -x "$f" ] && [ ! -d "$f" ] && [ ! -e "$shims/$name" ] || continue
+		if [ ! -x "$f" ] || [ -d "$f" ] || [ -e "$shims/$name" ]; then
+			continue
+		fi
 		printf '#!/bin/sh\necho %s >>"%s"\nexec "%s" "$@"\n' "$name" "$log" "$f" >"$shims/$name"
 		chmod +x "$shims/$name"
 	done
@@ -48,7 +50,8 @@ measure() {
 	local execs top
 	execs=$(wc -l <"$log" | tr -d ' ')
 	top=$(sort "$log" | uniq -c | sort -rn | head -6 | awk '{printf "%s×%s ", $2, $1}')
-	printf '| `%s` | %s | %s | %s | %s | %s |\n' "$label" "$wall" "$usr" "$sys" "$execs" "$top"
+	local tick='`'
+	printf '| %s | %s | %s | %s | %s | %s |\n' "$tick$label$tick" "$wall" "$usr" "$sys" "$execs" "$top"
 }
 
 echo "| command | wall s | user s | sys s | child execs | exec'd |"
