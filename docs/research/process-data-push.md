@@ -141,7 +141,13 @@ sysctl and libproc calls avoid all of that.
   what the API does, not what a user's Mac allows.
 - **Linux**: Hive VM, Ubuntu 22.04, kernel 6.1, 4 CPUs, about 115 processes.
 
-Times are the median of three runs and include child processes. A command that exits with an error is reported as failed, not timed; `spectra load`'s verdict exit codes 3 (hold) and 4 (back off) count as success. The runs behind these tables measured bare `spectra system`, which only prints usage, so it is left out; the script now measures `spectra system limits`. Those macOS runs did not yet check exit codes, so a row there could time a command that failed. Rerun the script on a Mac to confirm them. Exec counts
+Times are the median of three runs and include child processes. A command that
+exits with an error is reported as failed, not timed; `spectra load`'s verdict
+exit codes 3 (hold) and 4 (back off) count as success. The runs behind these
+tables measured bare `spectra system`, which only prints usage, so it is left
+out; the script now measures `spectra system limits`. Those macOS runs did not
+yet check exit codes, so a row there could time a command that failed. Rerun
+the script on a Mac to confirm them. Exec counts
 come from `strace -f` on Linux (exact) and from PATH shims on macOS (a lower
 bound: a tool run by absolute path, such as `/bin/launchctl`, is not counted).
 
