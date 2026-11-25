@@ -176,36 +176,48 @@ func measureForkCapture(n int) {
 		return
 	}
 
-	_, stopPoll := pollChildren(int32(sh), 250*time.Millisecond)
+	stopPoll := pollChildren(int32(sh), 250*time.Millisecond)
 	_, _ = stdin.Write([]byte("\n"))
 	start := time.Now()
 	c0 := cpu(syscall.RUSAGE_SELF)
 	r := watchForks(kq, int32(sh))
 	elapsed := time.Since(start)
 	selfCPU := cpu(syscall.RUSAGE_SELF) - c0
-	polledCount := stopPoll()
+	polledCount, pollFailed := stopPoll()
 	_ = cmd.Wait()
 	fmt.Printf("fork capture: children=%d run=%v fork-events=%d rescans=%d rescan-total=%v "+
-		"caught-by-fork-rescan=%d (%.0f%%) caught-by-250ms-poll=%d (%.0f%%) observer-cpu=%v\n",
+		"caught-by-fork-rescan=%d (%.0f%%) caught-by-250ms-poll=%d (%.0f%%) failed-scans: rescan=%d poll=%d observer-cpu=%v\n",
 		n, elapsed, r.forkEvents, r.rescans, r.rescanTime,
-		len(r.seen), 100*float64(len(r.seen))/float64(n), polledCount, 100*float64(polledCount)/float64(n), selfCPU)
+		len(r.seen), 100*float64(len(r.seen))/float64(n), polledCount, 100*float64(polledCount)/float64(n),
+		r.failed, pollFailed, selfCPU)
+	if r.failed > 0 || pollFailed > 0 {
+		fmt.Println("fork capture: some scans failed; the caught counts above are lower bounds, not misses")
+	}
 }
 
-// addChildren records every pid in kern.proc.all whose parent is ppid.
-func addChildren(ppid int32, into map[int32]bool) {
-	rows, _ := unix.SysctlKinfoProcSlice("kern.proc.all")
+// addChildren records every pid in kern.proc.all whose parent is ppid. It
+// returns false when the scan itself failed, so a failed scan is reported
+// rather than counted as missed children.
+func addChildren(ppid int32, into map[int32]bool) bool {
+	rows, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	if err != nil {
+		return false
+	}
 	for _, r := range rows {
 		if r.Eproc.Ppid == ppid {
 			into[r.Proc.P_pid] = true
 		}
 	}
+	return true
 }
 
 // pollChildren polls kern.proc.all for children of ppid at a fixed interval
-// until the returned stop function is called; stop returns how many it saw.
-func pollChildren(ppid int32, every time.Duration) (map[int32]bool, func() int) {
+// until the returned stop function is called; stop returns how many it saw
+// and how many scans failed.
+func pollChildren(ppid int32, every time.Duration) func() (int, int) {
 	var mu sync.Mutex
 	polled := map[int32]bool{}
+	failed := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -220,21 +232,24 @@ func pollChildren(ppid int32, every time.Duration) (map[int32]bool, func() int) 
 			case <-tick.C:
 			}
 			mu.Lock()
-			addChildren(ppid, polled)
+			if !addChildren(ppid, polled) {
+				failed++
+			}
 			mu.Unlock()
 		}
 	}()
-	return polled, func() int {
+	return func() (int, int) {
 		cancel()
 		wg.Wait()
 		mu.Lock()
 		defer mu.Unlock()
-		return len(polled)
+		return len(polled), failed
 	}
 }
 
 type forkWatch struct {
 	seen       map[int32]bool
+	failed     int
 	forkEvents int
 	rescans    int
 	rescanTime time.Duration
@@ -262,7 +277,9 @@ func watchForks(kq int, ppid int32) forkWatch {
 			}
 			w.forkEvents++
 			t := time.Now()
-			addChildren(ppid, w.seen)
+			if !addChildren(ppid, w.seen) {
+				w.failed++
+			}
 			w.rescanTime += time.Since(t)
 			w.rescans++
 		}

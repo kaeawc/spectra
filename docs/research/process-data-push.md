@@ -141,7 +141,7 @@ sysctl and libproc calls avoid all of that.
   what the API does, not what a user's Mac allows.
 - **Linux**: Hive VM, Ubuntu 22.04, kernel 6.1, 4 CPUs, about 115 processes.
 
-Times are the median of three runs and include child processes. Exec counts
+Times are the median of three runs and include child processes. A command that exits with an error is reported as failed, not timed; `spectra load`'s verdict exit codes 3 (hold) and 4 (back off) count as success. The runs behind these tables measured bare `spectra system`, which only prints usage, so it is left out; the script now measures `spectra system limits`. Those macOS runs did not yet check exit codes, so a row there could time a command that failed. Rerun the script on a Mac to confirm them. Exec counts
 come from `strace -f` on Linux (exact) and from PATH shims on macOS (a lower
 bound: a tool run by absolute path, such as `/bin/launchctl`, is not counted).
 
@@ -197,7 +197,6 @@ macOS, `SPECTRA_NO_DAEMON=1`:
 |---|---|---|---|---|---|
 | `spectra process` | 0.068 | 0.026 | 0.045 | 2 | `ps` 2 |
 | `spectra process --deep` | 0.200 | 0.103 | 0.095 | 3 | `ps` 2, `lsof` 1 |
-| `spectra system` | 0.010 | 0.005 | 0.004 | 0 | |
 | `spectra memory` | 0.012 | 0.006 | 0.006 | 0 | |
 | `spectra thermal` | 0.025 | 0.011 | 0.012 | 1 | `pmset` 1 |
 | `spectra power` | 1.191 | 0.038 | 0.159 | 4 | `pmset` 3, `top` 1 |
@@ -344,10 +343,14 @@ Not recommended:
   sight. That is the moment `spectra orphans` needs, before reparenting.
 - **Exit event.** Record the exact exit time. Drop the knote, which the kernel
   removes on exit anyway.
-- **Reconcile.** Keep the existing 5 s probe as a reconcile pass. It catches
-  any pid that forked and exited between a fork event and the rescan. It also
-  covers processes forked by unwatched parents, which can't exist after the
-  seed, because every process is someone's child.
+- **Reconcile.** Keep the existing 5 s probe as a reconcile pass for pids
+  that are still alive but were not registered, for example after a failed
+  `kevent` call or a dropped rescan under the rate cap.
+- **Known gap.** `NOTE_FORK` does not carry the child's pid. A child that
+  exits and is reaped before the rescan runs is invisible to both the rescan
+  and the reconcile pass, so the table can only count it as a fork on its
+  parent. Measured, this was 0 or 1 of 200 one-millisecond children. Only an
+  Endpoint Security source (step 7 or 8) closes that gap.
 - **Budget.** At the measured 0.1 ms per rescan, the cap bounds observer CPU
   at about 5 ms per second during a fork storm.
 - **Fallback.** If kqueue registration fails, fall back to polling.

@@ -36,21 +36,30 @@ done
 export SPECTRA_NO_DAEMON=1
 TIMEFORMAT='%R %U %S'
 
+# measure <label> <ok exit codes, comma-separated> <args...>
 measure() {
-	local label=$1
-	shift
-	local times=$work/times
+	local label=$1 ok=$2
+	shift 2
+	local times=$work/times status=0 tick='`'
 	: >"$times"
+	local rc
 	for _ in 1 2 3; do
-		{ time "$bin" "$@" >/dev/null 2>&1; } 2>>"$times" || true
+		rc=0
+		{ time "$bin" "$@" >/dev/null 2>&1; } 2>>"$times" || rc=$?
+		[[ ",$ok," == *",$rc,"* ]] || status=$rc
 	done
-	read -r wall usr sys < <(sort -n "$times" | sed -n 2p)
 	: >"$log"
-	PATH=$shims:$real_path "$bin" "$@" >/dev/null 2>&1 || true
+	rc=0
+	PATH=$shims:$real_path "$bin" "$@" >/dev/null 2>&1 || rc=$?
+	[[ ",$ok," == *",$rc,"* ]] || status=$rc
+	if [ "$status" -ne 0 ]; then
+		printf '| %s | FAILED (exit %s); not a measurement | | | | |\n' "$tick$label$tick" "$status"
+		return
+	fi
+	read -r wall usr sys < <(sort -n "$times" | sed -n 2p)
 	local execs top
 	execs=$(wc -l <"$log" | tr -d ' ')
 	top=$(sort "$log" | uniq -c | sort -rn | head -6 | awk '{printf "%s×%s ", $2, $1}')
-	local tick='`'
 	printf '| %s | %s | %s | %s | %s | %s |\n' "$tick$label$tick" "$wall" "$usr" "$sys" "$execs" "$top"
 }
 
@@ -58,12 +67,19 @@ echo "| command | wall s | user s | sys s | child execs | exec'd |"
 echo "|---|---|---|---|---|---|"
 while read -r line; do
 	[ -n "$line" ] || continue
+	# A line may end in "@codes": exit codes that are verdicts, not failures.
+	ok=0
+	if [[ $line == *@* ]]; then
+		ok=${line##*@}
+		line=${line%@*}
+		line=${line% }
+	fi
 	read -r -a argv <<<"$line"
-	measure "spectra $line" "${argv[@]}"
+	measure "spectra $line" "$ok" "${argv[@]}"
 done <<'EOF'
 process
 process --deep
-system
+system limits
 memory
 power
 thermal
@@ -74,7 +90,7 @@ jvm
 services
 startup
 whatswrong
-load
+load @0,3,4
 snapshot --json
 EOF
 
@@ -88,8 +104,10 @@ mkdir -p "$dh"
 	unset SPECTRA_NO_DAEMON
 	mkdir -p "$XDG_RUNTIME_DIR"
 	{ time PATH=$shims:$real_path "$bin" daemon run --no-notify >"$dh/log" 2>&1; } 2>"$work/daemon.time" &
+	timer=$!
 	sleep "$daemon_secs"
-	pkill -TERM -f "$bin daemon run" || true
+	# Signal only the daemon this script started: the child of the timing subshell.
+	pkill -TERM -P "$timer" || true
 	wait
 )
 read -r wall usr sys <"$work/daemon.time"
