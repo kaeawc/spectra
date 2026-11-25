@@ -7,7 +7,8 @@
     disable|enable --scope system`. The owner's answers (admin gate,
     `enable` bootstrap, no stop-only method, denylist, VM fixture signing)
     are part of the design below. The VM integration test is a manual
-    pre-release step (see [testing](#testing)). Where this page was
+    pre-release step (see [testing](#testing) and
+    [helper VM integration test](helper-vm-test.md)). Where this page was
     ambiguous the implementation chose the more restrictive reading; those
     choices are listed under [implementation notes](#implementation-notes).
 
@@ -565,21 +566,27 @@ Implemented as table and unit tests in `internal/helper/launchd_test.go`
 (fakes in `launchd_fake_test.go`), `cmd/spectra/startup_system_test.go`,
 `internal/helperclient/launchd_test.go` and
 `internal/startup/export_test.go`, including `FuzzLaunchdParams` for the
-request decoder. The VM test below is not automated.
+request decoder. The VM test below is scripted but not run by CI
+(`internal/helper/launchd_vm_test.go`).
 
 - **VM-only integration (manual pre-release step):** build tag `helper_vm`
   plus `SPECTRA_VM_TEST=1`. It runs only inside a disposable macOS VM, never
-  on CI hosts or developer machines. The owner runs it by hand before each
-  release that changes the helper, and the release checklist records the
-  result. It installs the helper and a fixture app with a trivial daemon.
-  It then checks disable, enable, a replayed token, and refusals for a
+  on CI hosts or developer machines. The owner runs it before each release
+  that changes the helper, with `scripts/helper-vm-test.sh` in a disposable
+  Tart VM (decided 2026-11-21), and posts the summary on the release's
+  tracking issue. The procedure, the tests and the certificate handling are
+  in [helper VM integration test](helper-vm-test.md). It serves the helper
+  code in-process (a fresh dispatcher on a private socket, not the
+  installed `spectra-helper` service) and installs a fixture app with a
+  trivial daemon. It then checks disable, enable, a replayed token, and refusals for a
   `com.apple.*` label, a symlinked plist, a non-root plist and a
   service-management rule. Enable is checked to bootstrap an unloaded
   fixture daemon. The fixture is signed with a **Developer ID test
-  certificate provisioned only in that VM**. An ad-hoc signature is not
-  enough: check 7 requires a verified non-Apple team id, and an ad-hoc
-  signature has none. The certificate and its key never leave the VM image
-  and are never used to sign anything shipped.
+  certificate** imported, for that run only, into a keychain inside the VM.
+  An ad-hoc signature is not enough: check 7 requires a verified non-Apple
+  team id, and an ad-hoc signature has none. The owner keeps the `.p12` on
+  the host and never uses that certificate to sign anything shipped;
+  deleting the VM removes only the guest copies.
 - **Denylist tests:** label, prefix and team id matches; file absent, wrong
   owner, mode `0664`, symlink and malformed content each refuse (or fall back,
   when absent) with the right reason; no mutation argv recorded.
@@ -647,6 +654,8 @@ None remain open. Answered 2026-11-20 and folded into the design above: the `adm
 
 1. *Resolved as proposed:* which signing identity signs the VM fixture
    daemon, and where does that VM test run? A Developer ID test certificate
-   that exists only in the disposable test VM. Ad-hoc signing cannot pass
+   imported only into the disposable test VM (the owner keeps the `.p12`
+   on the host). Ad-hoc signing cannot pass
    check 7. The owner runs the test by hand inside that VM before each
-   helper release (see [testing](#testing)).
+   helper release (see [testing](#testing)). The VM is a disposable Tart
+   clone on the owner's Mac (decided 2026-11-21, #650).

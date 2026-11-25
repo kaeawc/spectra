@@ -36,7 +36,10 @@ the daemon stops if its socket is removed or replaced.
 
 Status: implemented (step 1 of issue #600). See
 [helper launchd mutation](helper-launchd-mutation.md). The VM integration
-test is a manual pre-release step.
+test is a manual pre-release step, run in a disposable Tart VM. The
+Developer ID test certificate is imported into a keychain only inside that
+VM, and the owner keeps the `.p12` on the host
+([helper VM integration test](helper-vm-test.md)).
 
 New assets:
 

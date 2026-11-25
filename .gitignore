@@ -12,3 +12,6 @@ site/
 .claude/worktrees
 
 /spectra-mcp
+
+# scripts/helper-vm-test.sh output
+/helper-vm-results/
