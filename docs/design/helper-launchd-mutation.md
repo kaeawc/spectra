@@ -640,8 +640,10 @@ restrictive reading:
   limits stated under [managed daemons](#managed-daemons).
 - Programs outside an `.app` or `/Library/PrivilegedHelperTools`, such as
   Homebrew services under `/usr/local` or `/opt/homebrew`.
-- Signalling processes, batch changes, and any caller besides the local
-  CLI (no MCP, per-user daemon or Remote exposure).
+- Signalling processes (step 2,
+  [proposed separately](helper-process-terminate.md)), batch changes, and
+  any caller besides the local CLI (no MCP, per-user daemon or Remote
+  exposure).
 - Linux: the methods return `hostos.Unsupported` off Darwin; systemd units
   get their own design.
 
