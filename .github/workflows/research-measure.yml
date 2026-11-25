@@ -22,6 +22,8 @@ jobs:
         run: |
           go build -o spectra ./cmd/spectra/
           (cd scripts/research/procpush && go build -o ../../../procpush .)
+      - name: Probe (non-root)
+        run: ./procpush
       - name: Cost under CPU load at background priority
         run: |
           for _ in $(seq 10); do yes >/dev/null & done

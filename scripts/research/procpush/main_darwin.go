@@ -31,6 +31,7 @@ func main() {
 	measureSysctl(200)
 	measurePS(20, "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=")
 	measurePS(20, "-Ao", "pid=,ppid=,rss=,%cpu=,comm=")
+	measurePidinfo()
 	if *costOnly {
 		return
 	}
