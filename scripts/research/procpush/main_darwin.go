@@ -25,11 +25,15 @@ import (
 
 func main() {
 	children := flag.Int("children", 200, "short-lived children the fork workload spawns")
+	costOnly := flag.Bool("cost-only", false, "only compare kern.proc.all with ps (for runs under load)")
 	flag.Parse()
 	fmt.Printf("uid=%d euid=%d\n", os.Getuid(), os.Geteuid())
 	measureSysctl(200)
 	measurePS(20, "-axwwo", "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command=")
 	measurePS(20, "-Ao", "pid=,ppid=,rss=,%cpu=,comm=")
+	if *costOnly {
+		return
+	}
 	measureKqueueAttach()
 	measureForkCapture(*children)
 }
