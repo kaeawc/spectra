@@ -120,6 +120,13 @@ in [docs/operations/releasing.md](../../docs/operations/releasing.md).
    VERSION=vX.Y.Z make dist   # optional dry run of all four archives
    ```
 
+   If this release changes the helper (`cmd/spectra-helper`,
+   `internal/helper`, `internal/helperclient`), the owner runs
+   `scripts/helper-vm-test.sh` on their Mac (see
+   `docs/design/helper-vm-test.md`) and posts its `summary.txt` on the
+   release's tracking issue. Don't ship the helper's mutation methods
+   without a PASS.
+
 2. Tag and push (the ruleset decides who may):
 
    ```bash
