@@ -144,11 +144,11 @@ bound: a tool run by absolute path, such as `/bin/launchctl`, is not counted).
 | `kern.proc.all` sysctl (470 procs) | 0.07 ms p50, 0.16 ms p95 | 0.11 ms | pid, ppid, uid, comm, start time |
 | `ps -Ao pid=,ppid=,rss=,%cpu=,comm=` | 19 ms p50, 21 ms p95 | 18 ms (child) | daemon tick, sustained probe |
 | `ps -axwwo ...,lstart=,command=` | 31 ms p50, 48 ms p95 | 25 ms (child) | `spectra process` |
-| `proc_pidinfo(PROC_PIDTASKINFO)` | PIDINFO_PER_PID | | RSS and CPU time; PIDINFO_VISIBILITY |
-| `proc_pid_rusage(RUSAGE_INFO_V4)` | RUSAGE_PER_PID | | footprint, energy; RUSAGE_VISIBILITY |
+| `proc_pidinfo(PROC_PIDTASKINFO)` | pending (queued macOS run) | | RSS and CPU time; whether non-root can read other users' pids decides how step 1 handles them |
+| `proc_pid_rusage(RUSAGE_INFO_V4)` | pending (queued macOS run) | | footprint, energy; same visibility question |
 | kqueue `EVFILT_PROC` registration | 0.5 µs per pid | | NOTE_EXIT, NOTE_FORK, NOTE_EXEC |
 
-LOAD_RESULTS
+`ps` against `kern.proc.all` under CPU load at background priority (`taskpolicy -b`, like the LaunchAgent's `ProcessType Background`) is measured by the same probe (`-cost-only`); that run is still queued, so this note gives no number for it yet.
 
 ### Daemon, idle, default 15 s tick
 
@@ -216,7 +216,7 @@ Observations:
 | `EVFILT_PROC` with `NOTE_EXITSTATUS` | own pids only; root and other users `EACCES` | all but one ok |
 | 200 short-lived `/usr/bin/true` children: fork-triggered `kern.proc.all` rescan | 200/200 seen, 200 fork events, 29 ms of rescans, 43 ms observer CPU | 200/200 |
 | same workload, 250 ms `kern.proc.all` poll | 1/200 seen | 0/200 |
-| `eslogger exec fork exit` | n/a (needs root) | ESLOGGER_RESULTS |
+| `eslogger exec fork exit` | n/a (needs root) | ran on the runner: 317 events and 827 KB of JSON (about 2.6 KB per event) over an 11 s window that included 200 `/usr/bin/true` runs; the per-type breakdown and idle rate are pending |
 | `dtrace -n proc:::exec-success` | n/a | works on this runner because SIP is disabled; blocked on a default Mac |
 
 The `NOTE_EXITSTATUS` result matches XNU's `filt_procattach`, which only
