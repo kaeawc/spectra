@@ -467,6 +467,8 @@ jobs:
         run: ./scripts/test-hive-setup.sh
       - name: Test the helper VM script
         run: ./scripts/test-helper-vm-test.sh
+      - name: Test the Rust CI scope script
+        run: ./scripts/test-rust-ci-scope.sh
       - name: Validate workflows + shell scripts
         run: ./scripts/validate-workflows.sh
 

@@ -80,6 +80,7 @@ validate-workflows:
 	bash scripts/test-validate-workflows.sh
 	bash scripts/test-release-tap.sh
 	bash scripts/test-release-macos-sign.sh
+	bash scripts/test-rust-ci-scope.sh
 	bash scripts/validate-workflows.sh
 
 test-hive-setup:
