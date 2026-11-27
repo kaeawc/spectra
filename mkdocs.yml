@@ -17,6 +17,8 @@ plugins:
 
 theme:
   name: 'material'
+  logo: 'assets/brand/spectra-icon-small.svg'
+  favicon: 'assets/brand/favicon-32.png'
   palette:
     - media: '(prefers-color-scheme: light)'
       scheme: default
@@ -76,6 +78,7 @@ nav:
       - Helper root process terminate (proposed): design/helper-process-terminate.md
       - Threat model: design/threat-model.md
       - Recommendations engine: design/recommendations-engine.md
+      - Brand: design/brand.md
   - Detection:
       - Overview: detection/overview.md
       - Framework signal table: detection/frameworks.md
