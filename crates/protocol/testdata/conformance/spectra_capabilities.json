@@ -1,0 +1,1065 @@
+[
+  {
+    "name": "core darwin inspect",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true,
+    "operation": "inspect"
+  },
+  {
+    "name": "core darwin snapshot",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true,
+    "operation": "snapshot.create"
+  },
+  {
+    "name": "linux without inspect document",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "linux",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "linux missing inspect incompatible",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "linux",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "operation": "inspect",
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "linux snapshot supported",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "linux",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true,
+    "operation": "snapshot.create"
+  },
+  {
+    "name": "unsupported capabilities version",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 2
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "wrong capabilities schema name",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.other",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "missing Spectra version",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "duplicate inspect interface",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "JSON interface missing schema",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json"
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "text interface declares schema",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "capabilities interface missing",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "inspect schema version mismatch",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 2
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "inspect operation schema mismatch",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 2
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "operation": "inspect",
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "snapshot schema name mismatch",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot.v2",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "snapshot operation schema mismatch",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot.v2",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "operation": "snapshot.create",
+    "error_code": "incompatible_spectra"
+  },
+  {
+    "name": "unknown top-level field",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ],
+      "extra_field": "whatever"
+    },
+    "valid": true
+  },
+  {
+    "name": "health has no CLI interface",
+    "kind": "spectra_capabilities",
+    "input": {
+      "schema": {
+        "name": "spectra.capabilities",
+        "version": 1
+      },
+      "spectra_version": "v0.90.0",
+      "os": "darwin",
+      "arch": "arm64",
+      "interfaces": [
+        {
+          "name": "version",
+          "argv": [
+            "version"
+          ],
+          "output": "text"
+        },
+        {
+          "name": "inspect",
+          "argv": [
+            "--json",
+            "<app_path>..."
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        },
+        {
+          "name": "snapshot",
+          "argv": [
+            "snapshot",
+            "--json",
+            "[--no-apps]"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.snapshot",
+            "version": 1
+          }
+        },
+        {
+          "name": "capabilities",
+          "argv": [
+            "capabilities",
+            "--json"
+          ],
+          "output": "json",
+          "result_schema": {
+            "name": "spectra.capabilities",
+            "version": 1
+          }
+        }
+      ]
+    },
+    "valid": false,
+    "operation": "health",
+    "error_code": "unsupported_operation"
+  }
+]

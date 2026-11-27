@@ -148,6 +148,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "spectra-protocol"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

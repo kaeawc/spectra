@@ -1,0 +1,22 @@
+[package]
+name = "spectra-protocol"
+description = "Spectra's wire contract v1: request/response envelopes, NDJSON framing, capability manifests and the spectra.capabilities document."
+# Tracks the Go module github.com/kaeawc/spectra-protocol, whose contract version this matches.
+version = "0.3.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lib]
+name = "spectra_protocol"
+doctest = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
