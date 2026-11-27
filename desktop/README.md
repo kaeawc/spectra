@@ -1,5 +1,7 @@
 # spectra-desktop
 
+<img src="assets/brand/spectra-icon.svg" alt="Spectra" width="128">
+
 A diagnosis-first desktop app for every process on this machine, built with
 [Rune](https://github.com/anomalyco/rune). It opens on what's wrong, worst first; each finding
 expands into its evidence and a fix. Next to that is a list of everything running, grouped the
@@ -562,6 +564,9 @@ SPECTRA_REMOTE_TARGET=work-mac:7878 cargo test -- --ignored remote_live --nocapt
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs` and `src/sample_jvm.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.
+- `src/mark/`: Spectra's mark, drawn from one description into every icon, favicon, menu bar
+  template and the wordmark in `assets/brand/` (`scripts/brand.sh`); `scripts/desktop-app.sh`
+  bundles the window as `Spectra.app` with the icon. See [docs/brand.md](docs/brand.md).
 
 Rune is pre-release and pinned to a `dev` rev in `Cargo.toml`; the `[patch.crates-io]` revs must
 match it.

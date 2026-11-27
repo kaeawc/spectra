@@ -10,6 +10,10 @@ Notable changes to Spectra Desktop. The format follows
 ### Added
 
 - A menu bar item on macOS: an icon that shows when something needs a look, and a panel with CPU, memory pressure, the worst finding, the busiest processes, disk and thermal state, each opening the window on its page.
+- Spectra's mark: a glass A-prism splitting the bits of "spectra" into a spectrum, drawn from
+  one Rust description into the macOS `.icns`, app icons, favicons, web icons, the menu bar
+  template, Linux icons and the wordmark (`assets/brand/`, [docs/brand.md](docs/brand.md)).
+  `scripts/desktop-app.sh` bundles the window as `Spectra.app` with the icon.
 
 ### Changed
 

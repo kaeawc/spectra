@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+<title>Spectra</title>
+<path d="M15 3L22.862 22L7.138 22ZM5.483 26L24.517 26L27 32L3 32Z" fill="#000000"/>
+<path d="M1 8L12.276 12" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round"/>
+<g id="spectra-tray-rays">
+<path d="M22 10L34 10L34 14L22 14Z" fill="#000000" shape-rendering="crispEdges"/>
+<path d="M24 16L34 16L34 20L24 20Z" fill="#000000" shape-rendering="crispEdges"/>
+<path d="M26 22L34 22L34 26L26 26Z" fill="#000000" shape-rendering="crispEdges"/>
+</g>
+</svg>
