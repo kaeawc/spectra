@@ -2,5 +2,10 @@
 //! calling the clock, the environment, subprocesses or the filesystem directly, so tests can fake
 //! them (AGENTS.md, "Time, randomness, env, subprocess, filesystem").
 
+pub mod clock;
+pub mod env;
+pub mod fs;
+pub mod fsutil;
 pub mod gojson;
 pub mod hostos;
+pub mod proc;
