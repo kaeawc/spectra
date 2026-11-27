@@ -115,4 +115,10 @@ jobs:
           shared-key: package
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo package --workspace --locked
+      # The repo keeps `publish = false` until the owner confirms crate names and the first
+      # version, and cargo won't resolve one unpublishable workspace crate from another. So this
+      # job lifts that guard in its own throwaway checkout only; spectra-contract (test-only,
+      # never published) stays out.
+      - name: Allow packaging in this checkout only
+        run: sed -i 's/^publish = false$/publish = ["crates-io"]/' Cargo.toml
+      - run: cargo package --workspace --locked --allow-dirty --exclude spectra-contract
