@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/brand/spectra-wordmark.svg" alt="Spectra: a glass prism shaped like an A turns binary into hex-labelled colour" width="720"></p>
+
 # Spectra
 
 A local diagnostic tool for macOS that combines deep static inspection of
