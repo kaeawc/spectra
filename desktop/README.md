@@ -6,6 +6,21 @@ expands into its evidence and a fix. Next to that is a list of everything runnin
 way people think of it: an app with all its helpers is one row, twelve `zsh` are one row, and
 each opens onto its processes.
 
+**Install.** Each [release](https://github.com/kaeawc/spectra-desktop/releases) has a macOS
+binary for Apple silicon (`aarch64-apple-darwin`) and Intel (`x86_64-apple-darwin`), with a
+SHA-256 beside each. The binaries are not signed or notarized yet: one downloaded in a browser
+is quarantined, so clear that before running it, or download it with `curl`:
+
+```bash
+tar xzf spectra-desktop-v*-aarch64-apple-darwin.tar.gz
+xattr -d com.apple.quarantine spectra-desktop-v*-aarch64-apple-darwin/spectra-desktop
+```
+
+It isn't on crates.io (Rune comes from git); `cargo install --git
+https://github.com/kaeawc/spectra-desktop --locked` builds it from source. To cut a release,
+`scripts/release.sh 0.1.0` opens the version-bump PR; merging it builds the binaries and
+creates the tag and the release.
+
 It reads two feeds from the [Spectra](https://github.com/kaeawc/spectra) CLI, each on its own
 thread, so nothing needs setting up:
 
