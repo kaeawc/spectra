@@ -7,6 +7,10 @@ Notable changes to Spectra Desktop. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built on a newer Rune (2026-11-27), which brings the macOS menu bar support the app will use next.
+
 ## [0.1.0] - 2026-11-27
 
 ### Added
