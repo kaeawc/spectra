@@ -7,6 +7,7 @@ cognitive-complexity-threshold = 15
 disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "use spectra_base::clock::Clock" },
     { path = "std::time::Instant::now", reason = "use spectra_base::clock::Clock" },
+    { path = "jiff::Timestamp::now", reason = "use spectra_base::clock::Clock" },
     { path = "std::thread::sleep", reason = "use spectra_base::clock::Sleeper" },
     { path = "std::env::var", reason = "use spectra_base::env::Env" },
     { path = "std::env::var_os", reason = "use spectra_base::env::Env" },
