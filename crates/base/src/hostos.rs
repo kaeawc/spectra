@@ -74,6 +74,46 @@ impl fmt::Display for Unsupported {
 
 impl std::error::Error for Unsupported {}
 
+/// The JSON a command prints when it is unsupported on this OS (Go's `hostos.UnsupportedReport`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct UnsupportedReport {
+    /// Always `unsupported_platform`.
+    pub error: &'static str,
+    #[serde(skip_serializing_if = "crate::gojson::is_empty")]
+    pub feature: String,
+    pub os: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "crate::gojson::is_empty")]
+    pub hint: String,
+}
+
+/// [`UnsupportedReport`] with the command name first (Go's `hostos.CommandReport`, which embeds
+/// the report).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct CommandReport {
+    pub command: String,
+    #[serde(flatten)]
+    pub report: UnsupportedReport,
+}
+
+impl Unsupported {
+    /// The report for this error (Go's `ReportUnsupported`).
+    pub fn report(&self) -> UnsupportedReport {
+        UnsupportedReport {
+            error: "unsupported_platform",
+            feature: self.feature.clone(),
+            os: self.os.to_string(),
+            message: self.to_string(),
+            hint: String::new(),
+        }
+    }
+
+    /// The report for `command`, with `hint` (Go's `ReportCommandUnsupported`).
+    pub fn command_report(&self, command: &str, hint: &str) -> CommandReport {
+        CommandReport { command: command.to_string(), report: UnsupportedReport { hint: hint.to_string(), ..self.report() } }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +143,16 @@ mod tests {
         assert_eq!(Kind::Darwin.resolve(), Kind::Darwin);
         assert_eq!(Kind::Unknown.resolve(), Kind::current());
         assert_eq!(Kind::default(), Kind::Unknown);
+    }
+
+    #[test]
+    fn command_report_field_order_matches_go() {
+        let r = Unsupported::new("Time Machine", Kind::Linux).command_report("timemachine", "");
+        let out = crate::gojson::to_vec(&r).expect("json");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            r#"{"command":"timemachine","error":"unsupported_platform","feature":"Time Machine","os":"linux","message":"Time Machine: unsupported on host OS (linux)"}"#
+        );
     }
 
     #[test]
