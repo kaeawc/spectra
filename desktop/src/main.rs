@@ -24,6 +24,7 @@ mod inspect;
 mod jvm_tools;
 mod live;
 mod logs;
+mod menubar;
 mod network;
 mod proc_findings;
 mod procs;
@@ -39,6 +40,7 @@ mod sample_growth;
 mod sample_hosts;
 mod sample_jvm;
 mod sample_logs;
+mod sample_menubar;
 mod sample_network;
 mod sample_startup;
 mod sample_storage;
@@ -224,7 +226,11 @@ fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     if now_status.1 != status.1 && !landed {
         s.refresh_findings();
     }
-    landed || now_status != status
+    let changed = landed || now_status != status;
+    // The menu bar item shows what just landed. Poll runs every frame, so it looks only when
+    // something changed (and once at the start), and sends nothing when its view didn't change.
+    menubar::refresh(s, changed);
+    changed
 }
 
 /// Memory, thermal, load, power, disks and network. The System page shows them all, the Network
@@ -413,11 +419,13 @@ fn main() {
         on_key: Some(ui::on_key),
         ..AppSpec::new("Spectra", (1100.0, 700.0), app::init, ui::view)
     };
-    rune::App::new(spec)
+    let mut app = rune::App::new(spec)
         .chrome(chrome)
         .on_quit(on_quit)
-        .on_visibility(on_visibility)
-        .run();
+        .on_visibility(on_visibility);
+    // macOS: the menu bar item and its panel (`--window menubar` renders the panel headless).
+    menubar::install(&mut app);
+    app.run();
 }
 
 #[cfg(test)]

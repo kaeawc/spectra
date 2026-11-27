@@ -7,6 +7,10 @@ Notable changes to Spectra Desktop. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A menu bar item on macOS: an icon that shows when something needs a look, and a panel with CPU, memory pressure, the worst finding, the busiest processes, disk and thermal state, each opening the window on its page.
+
 ### Changed
 
 - Built on a newer Rune (2026-11-27), which brings the macOS menu bar support the app will use next.

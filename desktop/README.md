@@ -287,6 +287,19 @@ What it shows:
     so with what to check; an agent without `process.list` (or started without `--allow-processes`, which it needs to offer process and JVM lists) says it can't list processes yet; a Mac
     without `spectra-remote` gets a notice saying how to install it. Set `SPECTRA_REMOTE_BIN` if
     `spectra-remote` isn't on `PATH`.
+- **The menu bar** (macOS): an icon, three bars of a chart, that macOS tints for light and dark
+  menu bars; it takes a dot while something needs a look (the same count as the Overview's
+  title). A click opens a small panel under it: how many things to look at, CPU and memory
+  pressure over the last four minutes, the worst finding or "Right now" line, the three busiest
+  processes with their CPU and memory, the fullest disk's free space and the thermal state, and
+  Open Spectra Desktop. Each row opens the window on its page (a process's page, the Machine
+  page, the Overview, or where the finding points). Esc, a click elsewhere or a second click on
+  the icon closes it. A secondary click opens a short menu: Open Spectra Desktop and Quit.
+  - The panel and the icon show what the window already read and start no reading of their own.
+    The window's readings rest while it is hidden or minimized, so the panel then shows the last
+    ones and says how old they are.
+  - Quitting from the menu quits the app as ⌘Q does. Closing the window still quits it; there is
+    no menu-bar-only mode yet.
 - **Compare**, under Storage: what's different from when it was fine. It lists the snapshots and
   baselines Spectra has stored (`spectra snapshot list --json`, read when the page opens, newest
   first), and you pick an earlier one with From, optionally a later one with To (Now by default),
@@ -478,6 +491,9 @@ cargo run -- --list-scenes  # sample, all, apps, group, process, signed, detail,
                             # hosts, hosts-empty, hosts-missing, host, host-group,
                             # host-unsupported, host-unreachable
 cargo run -- --snap out.png --scene tool-sample --size 1100x3000  # tall, to show the tools
+cargo run -- --snap out.png --window menubar --scene menubar-alert  # the menu bar panel
+                            # (--window menubar --list-scenes: menubar, menubar-alert,
+                            # menubar-reading)
 cargo test                                             # unit and headless UI tests
 SPECTRA_BIN=/path/to/spectra cargo test -- --ignored --nocapture  # reads both live feeds, and
                             # runs every tool on a `sleep` the test starts and then stops
@@ -538,6 +554,9 @@ SPECTRA_REMOTE_TARGET=work-mac:7878 cargo test -- --ignored remote_live --nocapt
   `src/sample_hosts.rs`: its sample data, from invented fixtures in `tests/fixtures/remote`.
 - `src/tree.rs`: the Tree view: building the parent/child tree, branch totals, search and
   flattening it into rows; `src/sample_tree.rs`: its sample data.
+- `src/menubar.rs`: the menu bar item: the panel's snapshot of the window's state, when to send
+  it and the icon, where the panel goes under the icon, and the tray and panel wiring (macOS);
+  `src/sample_menubar.rs`: its sample data; `src/ui/menubar.rs`: the panel's view.
 - `src/app.rs`: state and each process's recent history; `src/main.rs`: the polling threads.
 - `src/sample.rs` and `src/sample_jvm.rs`: sample data for the headless scenes and tests.
 - `src/ui/`: the view, one module per page.

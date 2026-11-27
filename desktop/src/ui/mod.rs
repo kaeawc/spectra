@@ -15,6 +15,7 @@ mod home;
 mod hosts;
 mod list;
 mod logs;
+pub mod menubar;
 mod network;
 mod process;
 mod quit;
