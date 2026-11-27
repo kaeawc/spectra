@@ -79,7 +79,11 @@ func CollectWithOptions(opts Options) (MemoryState, error) {
 	if v, err := unix.SysctlUint32("kern.memorystatus_vm_pressure_level"); err == nil {
 		ms.PressureLevel = pressureLevel(uint64(v))
 	}
-	return finish(ms), nil
+	ms = finish(ms)
+	if v, err := unix.SysctlUint32("kern.memorystatus_level"); err == nil {
+		ms = applyMemorystatusLevel(ms, v)
+	}
+	return ms, nil
 }
 
 func readSwapUsage(out *SwapUsage) error {

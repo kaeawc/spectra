@@ -83,3 +83,28 @@ func TestPressureLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyMemorystatusLevel(t *testing.T) {
+	const page = 4096
+	in := `Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                               100.
+Pages speculative:                        21.
+`
+	ms, err := ParseVMStat(strings.NewReader(in), page, 1000*page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ms.FreePagesPercent != 12.1 || ms.PressureFreePercent != ms.FreePagesPercent {
+		t.Fatalf("fallback = pressure %v pages %v, want both 12.1", ms.PressureFreePercent, ms.FreePagesPercent)
+	}
+	got := applyMemorystatusLevel(ms, 87)
+	if got.PressureFreePercent != 87 {
+		t.Errorf("PressureFreePercent = %v, want 87", got.PressureFreePercent)
+	}
+	if got.FreePagesPercent != 12.1 {
+		t.Errorf("FreePagesPercent = %v, want unchanged 12.1", got.FreePagesPercent)
+	}
+	if bad := applyMemorystatusLevel(ms, 255); bad.PressureFreePercent != ms.FreePagesPercent {
+		t.Errorf("out-of-range level changed PressureFreePercent to %v", bad.PressureFreePercent)
+	}
+}

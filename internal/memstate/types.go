@@ -50,11 +50,14 @@ type MemoryState struct {
 	Swap                SwapUsage     `json:"swap"`
 	PressureLevel       PressureLevel `json:"pressure_level"`
 	PressureFreePercent float64       `json:"pressure_free_percent"`
-	Compressions        uint64        `json:"compressions"`
-	Decompressions      uint64        `json:"decompressions"`
-	SwapIns             uint64        `json:"swap_ins"`
-	SwapOuts            uint64        `json:"swap_outs"`
-	CollectedAt         time.Time     `json:"collected_at"`
+	// FreePagesPercent is (Free+Speculative)/Physical on macOS (unset on Linux); it is NOT a
+	// pressure headroom figure, since the kernel keeps few pages literally free.
+	FreePagesPercent float64   `json:"free_pages_percent,omitempty"`
+	Compressions     uint64    `json:"compressions"`
+	Decompressions   uint64    `json:"decompressions"`
+	SwapIns          uint64    `json:"swap_ins"`
+	SwapOuts         uint64    `json:"swap_outs"`
+	CollectedAt      time.Time `json:"collected_at"`
 
 	// Linux only. OS names the backend that filled the sample.
 	// AvailableBytes is MemAvailable: what can be allocated without
@@ -82,7 +85,18 @@ func finish(ms MemoryState) MemoryState {
 	}
 	if ms.PhysicalBytes > 0 {
 		free := ms.Free + ms.Speculative
-		ms.PressureFreePercent = float64(free) / float64(ms.PhysicalBytes) * 100
+		ms.FreePagesPercent = float64(free) / float64(ms.PhysicalBytes) * 100
+		ms.PressureFreePercent = ms.FreePagesPercent
+	}
+	return ms
+}
+
+// applyMemorystatusLevel replaces the page-fraction fallback with the kernel's
+// kern.memorystatus_level, the figure memory_pressure reports as the
+// system-wide free percentage. Values above 100 are ignored.
+func applyMemorystatusLevel(ms MemoryState, level uint32) MemoryState {
+	if level <= 100 {
+		ms.PressureFreePercent = float64(level)
 	}
 	return ms
 }
