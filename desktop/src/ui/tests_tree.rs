@@ -2,6 +2,7 @@
 //! and the arrow keys, Return and a double click, a search, and readings where pids come and go.
 
 use rune::{Env, Key, KeyEvent, Runtime, TextEdit};
+use rune_kit::SortDir;
 
 use crate::app::{App, init};
 use crate::groups::Nav;
@@ -221,6 +222,7 @@ fn open_branches_survive_readings_where_pids_come_and_go() {
     let mut s = init();
     s.show(Nav::All);
     s.set_view(View::Tree);
+    s.sort_by("sub_cpu", SortDir::Descending);
     s.land_procs(Ok(vec![
         under(10, 1, "shell"),
         under(11, 10, "make"),

@@ -158,6 +158,10 @@ pub fn matches_query(p: &Process, q: &str) -> bool {
 pub enum SortKey {
     Cpu,
     Memory,
+    /// The tree's "CPU + children": the caller passes each branch's total.
+    BranchCpu,
+    /// The tree's "Memory + children": the caller passes each branch's total.
+    BranchMemory,
     Name,
 }
 
@@ -182,8 +186,8 @@ impl Sort {
     pub(crate) fn order(self, a: (f64, f64, &str, &str), b: (f64, f64, &str, &str)) -> Ordering {
         let by_name = || caseless(a.2, b.2);
         let by_key = match self.key {
-            SortKey::Cpu => a.0.total_cmp(&b.0),
-            SortKey::Memory => a.1.total_cmp(&b.1),
+            SortKey::Cpu | SortKey::BranchCpu => a.0.total_cmp(&b.0),
+            SortKey::Memory | SortKey::BranchMemory => a.1.total_cmp(&b.1),
             SortKey::Name => by_name(),
         };
         let by_key = if self.descending {

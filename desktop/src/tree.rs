@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::groups::{Row, RowRef, Sort};
+use crate::groups::{Row, RowRef, Sort, SortKey};
 use crate::procs::Process;
 
 /// How the process list is laid out.
@@ -52,8 +52,9 @@ fn starts_branch(pid: u32, ppid: u32) -> bool {
 
 impl Tree {
     /// Builds the tree over `procs` (a pid listed twice counts once). Siblings are ordered by
-    /// `sort` on their branch's totals, so a quiet shell running a busy build sits with the busy
-    /// rows; by name, names decide. A parent loop is cut at its lowest pid, which becomes a root.
+    /// `sort`: CPU and Memory on each process's own figure, BranchCpu and BranchMemory on its
+    /// branch's totals (so a quiet shell running a busy build sits with the busy rows); by
+    /// name, names decide. A parent loop is cut at its lowest pid, which becomes a root.
     pub fn build(procs: &[&Process], sort: Sort) -> Tree {
         let mut index = HashMap::with_capacity(procs.len());
         let mut kept: Vec<&Process> = Vec::with_capacity(procs.len());
@@ -120,11 +121,17 @@ impl Tree {
         let names: Vec<_> = kept.iter().map(|p| p.name()).collect();
         let cmp = |a: &usize, b: &usize| {
             let (x, y) = (&nodes[*a], &nodes[*b]);
-            sort.order(
-                (x.sub_cpu, x.sub_rss_kib, &names[*a], ""),
-                (y.sub_cpu, y.sub_rss_kib, &names[*b], ""),
-            )
-            .then(x.pid.cmp(&y.pid))
+            let branch = matches!(sort.key, SortKey::BranchCpu | SortKey::BranchMemory);
+            let vals = |n: &Node| {
+                if branch {
+                    (n.sub_cpu, n.sub_rss_kib)
+                } else {
+                    (n.cpu, n.rss_kib)
+                }
+            };
+            let (xv, yv) = (vals(x), vals(y));
+            sort.order((xv.0, xv.1, &names[*a], ""), (yv.0, yv.1, &names[*b], ""))
+                .then(x.pid.cmp(&y.pid))
         };
         roots.sort_by(cmp);
         let mut sorted: Vec<Vec<usize>> = nodes.iter().map(|n| n.children.clone()).collect();
@@ -271,7 +278,6 @@ fn break_loops(parent: &mut [Option<usize>], procs: &[&Process]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::groups::SortKey;
     use crate::groups::tests::proc;
 
     fn child(pid: u32, ppid: u32, name: &str, cpu: f64, mb: f64) -> Process {
@@ -373,7 +379,13 @@ mod tests {
     #[test]
     fn closed_nodes_hide_their_branch() {
         let v = sample();
-        let t = Tree::build(&refs(&v), Sort::default());
+        let t = Tree::build(
+            &refs(&v),
+            Sort {
+                key: SortKey::BranchCpu,
+                descending: true,
+            },
+        );
         let none = HashSet::new();
         assert_eq!(
             pids(&t, &t.flatten(&none, None, &none)),
@@ -390,7 +402,13 @@ mod tests {
     #[test]
     fn sort_orders_siblings_by_their_branch() {
         let v = sample();
-        let t = Tree::build(&refs(&v), Sort::default());
+        let t = Tree::build(
+            &refs(&v),
+            Sort {
+                key: SortKey::BranchCpu,
+                descending: true,
+            },
+        );
         let rows = pids(&t, &t.flatten(&all_open(&t), None, &HashSet::new()));
         assert_eq!(
             rows,
@@ -429,12 +447,51 @@ mod tests {
         let t = Tree::build(
             &refs(&v),
             Sort {
-                key: SortKey::Memory,
+                key: SortKey::BranchMemory,
                 descending: false,
             },
         );
         let roots: Vec<u32> = t.roots.iter().map(|&i| t.nodes[i].pid).collect();
         assert_eq!(roots, [1, 200, 100], "smallest branch first");
+    }
+
+    /// A quiet parent (small own figures) over a busy child, beside a lone busier-than-it root.
+    fn parent_over_busy_child() -> Vec<Process> {
+        vec![
+            child(10, 1, "shell", 1.0, 10.0),
+            child(11, 10, "build", 50.0, 500.0),
+            child(20, 1, "lone", 5.0, 100.0),
+        ]
+    }
+
+    fn root_pids(v: &[Process], key: SortKey) -> Vec<u32> {
+        let t = Tree::build(
+            &refs(v),
+            Sort {
+                key,
+                descending: true,
+            },
+        );
+        t.roots.iter().map(|&i| t.nodes[i].pid).collect()
+    }
+
+    #[test]
+    fn memory_sorts_by_a_process_own_figure() {
+        let v = parent_over_busy_child();
+        assert_eq!(root_pids(&v, SortKey::Memory), [20, 10]);
+    }
+
+    #[test]
+    fn branch_memory_sorts_by_the_branch_total() {
+        let v = parent_over_busy_child();
+        assert_eq!(root_pids(&v, SortKey::BranchMemory), [10, 20]);
+    }
+
+    #[test]
+    fn cpu_sorts_by_own_and_branch_cpu_by_the_branch() {
+        let v = parent_over_busy_child();
+        assert_eq!(root_pids(&v, SortKey::Cpu), [20, 10]);
+        assert_eq!(root_pids(&v, SortKey::BranchCpu), [10, 20]);
     }
 
     #[test]

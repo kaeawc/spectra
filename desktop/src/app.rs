@@ -771,6 +771,25 @@ impl App {
     pub fn set_view(&mut self, view: View) {
         if self.view != view {
             self.view = view;
+            // The grouped list has no branch columns: keep the order on the plain ones.
+            if view == View::Grouped {
+                let plain = match self.sort.key {
+                    SortKey::BranchCpu => Some((SortKey::Cpu, "cpu")),
+                    SortKey::BranchMemory => Some((SortKey::Memory, "mem")),
+                    _ => None,
+                };
+                if let Some((key, column)) = plain {
+                    self.sort.key = key;
+                    self.table.set_sort(
+                        column,
+                        if self.sort.descending {
+                            SortDir::Descending
+                        } else {
+                            SortDir::Ascending
+                        },
+                    );
+                }
+            }
             self.table.clear_selection();
             self.rebuild();
         }
@@ -909,6 +928,8 @@ impl App {
     pub fn sort_by(&mut self, column: &str, dir: SortDir) {
         let key = match column {
             "mem" => SortKey::Memory,
+            "sub_cpu" => SortKey::BranchCpu,
+            "sub_mem" => SortKey::BranchMemory,
             "name" => SortKey::Name,
             _ => SortKey::Cpu,
         };
@@ -1901,6 +1922,35 @@ mod tests {
         assert_eq!(s.rows[0].id, "p:2", "a second click flips it");
         s.sort_by("name", SortDir::Ascending);
         assert_eq!(s.rows[0].id, "p:1", "names start A to Z");
+    }
+
+    #[test]
+    fn branch_columns_sort_the_tree_and_grouped_falls_back_to_the_plain_one() {
+        let mut s = init();
+        s.land_procs(Ok(vec![proc(1, "a", 1.0, 5.0), proc(2, "b", 9.0, 1.0)]));
+        s.show(Nav::All);
+        s.set_view(View::Tree);
+        s.sort_by("sub_mem", SortDir::Ascending);
+        assert_eq!(
+            s.sort,
+            Sort {
+                key: SortKey::BranchMemory,
+                descending: true
+            }
+        );
+        s.set_view(View::Grouped);
+        assert_eq!(
+            s.sort,
+            Sort {
+                key: SortKey::Memory,
+                descending: true
+            }
+        );
+        s.set_view(View::Tree);
+        s.sort_by("sub_cpu", SortDir::Ascending);
+        assert_eq!(s.sort.key, SortKey::BranchCpu);
+        s.set_view(View::Grouped);
+        assert_eq!(s.sort.key, SortKey::Cpu);
     }
 
     #[test]

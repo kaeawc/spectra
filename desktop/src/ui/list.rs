@@ -168,7 +168,7 @@ fn name_cell(n: Name, k: &Kit) -> Cell {
 }
 
 /// A tree row: the process, indented under its parent with a triangle when it has children,
-/// and in "With children" what its whole branch uses.
+/// and in "CPU + children" and "Memory + children" what its whole branch uses.
 fn tree_cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
     let Some((r, node)) = s
         .rows
@@ -200,11 +200,9 @@ fn tree_cell(s: &App, i: usize, column: &str, k: &Kit) -> Cell {
         "sign" => Cell::el(sign_badge(p.trust(), k)),
         "cpu" => number(fmt_cpu(p.cpu_pct), k),
         "mem" => number(fmt_mem(p.rss_kib), k),
-        "sub" if node.children.is_empty() => Cell::text("—").muted(),
-        "sub" => number(
-            format!("{} · {}", fmt_cpu(node.sub_cpu), fmt_mem(node.sub_rss_kib)),
-            k,
-        ),
+        "sub_cpu" | "sub_mem" if node.children.is_empty() => Cell::text("—").muted(),
+        "sub_cpu" => number(fmt_cpu(node.sub_cpu), k),
+        "sub_mem" => number(fmt_mem(node.sub_rss_kib), k),
         "threads" => number(fmt_count(p.thread_count), k),
         "pid" => Cell::text(node.pid.to_string()).muted(),
         _ => Cell::text(""),
@@ -332,7 +330,8 @@ fn table(s: &App, k: &Kit) -> El {
                 .column(num("count", "Processes", 90.0))
         }
         View::Tree => t
-            .column(num("sub", "With children", 150.0))
+            .column(num("sub_cpu", "CPU + children", 130.0).sortable())
+            .column(num("sub_mem", "Memory + children", 150.0).sortable())
             .column(num("threads", "Threads", 74.0)),
     };
     t.column(num("pid", "PID", 64.0))

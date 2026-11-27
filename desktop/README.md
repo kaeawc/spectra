@@ -346,8 +346,10 @@ What it shows:
 - **Tree view**: Grouped | Tree over the list switches to who started whom, and the choice stays
   while the app runs. launchd's children (and any process whose parent isn't in the list) are
   the roots, so an app, a terminal or a daemon each heads its own branch; launchd is a row of its
-  own. Each row shows its own CPU and memory, and "With children" what its whole branch uses.
-  Siblings sort by their branch's totals, so a quiet shell running a busy build rises with it.
+  own. Each row shows its own CPU and memory, and "CPU + children" and "Memory + children" what
+  its whole branch uses. CPU and Memory sort by each process's own figure; CPU + children and
+  Memory + children sort siblings by their branch's totals, so a quiet shell running a busy
+  build rises with it.
   Branches open with the triangle or Right, and close with Left (which then steps to the
   parent); what's open stays open from reading to reading while those processes run. A search
   keeps the matches and every process above them, opened down to each match. Return or a double
