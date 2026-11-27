@@ -1,0 +1,40 @@
+name: Rust toolchain
+description: >-
+  Installs rust-toolchain.toml's pinned toolchain (from simee's CI). On macOS runners, where
+  rustup's download costs 8-11 s a job and runners are scarce, it comes from one Actions cache
+  entry instead, saved only by main. Linux jobs keep rustup's ~7 s install: Linux runners are
+  plentiful and the repository cache is shared with the Go CI, so a Linux entry would only evict
+  rust-cache targets.
+runs:
+  using: composite
+  steps:
+    - id: pin
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+        case "$RUNNER_ARCH" in
+          ARM64) host=aarch64-apple-darwin ;;
+          X64) host=x86_64-apple-darwin ;;
+          *)
+            echo "no host triple for macOS $RUNNER_ARCH" >&2
+            exit 1
+            ;;
+        esac
+        {
+          echo "dir=${RUSTUP_HOME:-$HOME/.rustup}/toolchains/$channel-$host"
+          echo "key=rustup-$channel-$host"
+        } >> "$GITHUB_OUTPUT"
+    - id: restore
+      if: runner.os == 'macOS'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.dir }}
+        key: ${{ steps.pin.outputs.key }}-${{ hashFiles('rust-toolchain.toml') }}
+    - shell: bash
+      run: rustup show active-toolchain || rustup toolchain install
+    - if: runner.os == 'macOS' && steps.restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.dir }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}
