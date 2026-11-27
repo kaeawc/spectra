@@ -79,6 +79,7 @@ nav:
       - Threat model: design/threat-model.md
       - Recommendations engine: design/recommendations-engine.md
       - Brand: design/brand.md
+      - Rust port: design/rust-port.md
   - Detection:
       - Overview: detection/overview.md
       - Framework signal table: detection/frameworks.md
