@@ -1,0 +1,7 @@
+{
+  "command": "malloc-history",
+  "error": "unsupported_platform",
+  "feature": "malloc stack logging",
+  "os": "linux",
+  "message": "malloc stack logging: unsupported on host OS (linux)"
+}

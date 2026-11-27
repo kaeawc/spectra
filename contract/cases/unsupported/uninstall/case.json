@@ -1,0 +1,6 @@
+{
+  "command": "uninstall",
+  "feature": "app uninstall",
+  "hint": "",
+  "os": "linux"
+}

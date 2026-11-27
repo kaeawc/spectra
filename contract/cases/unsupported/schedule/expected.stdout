@@ -1,0 +1,8 @@
+{
+  "command": "schedule",
+  "error": "unsupported_platform",
+  "feature": "launchd snapshot scheduling",
+  "os": "linux",
+  "message": "launchd snapshot scheduling: unsupported on host OS (linux)",
+  "hint": "run `spectra snapshot` from cron or a systemd timer instead"
+}

@@ -1,0 +1,8 @@
+{
+  "command": "vmmap",
+  "error": "unsupported_platform",
+  "feature": "vmmap memory composition",
+  "os": "linux",
+  "message": "vmmap memory composition: unsupported on host OS (linux)",
+  "hint": "on Linux, read /proc/<pid>/smaps_rollup; `spectra procdiag <pid>` covers cgroup memory limits"
+}

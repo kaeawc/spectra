@@ -1,0 +1,7 @@
+{
+  "command": "uninstall",
+  "error": "unsupported_platform",
+  "feature": "app uninstall",
+  "os": "linux",
+  "message": "app uninstall: unsupported on host OS (linux)"
+}

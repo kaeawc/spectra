@@ -1,0 +1,7 @@
+{
+  "command": "startup",
+  "error": "unsupported_platform",
+  "feature": "startup items",
+  "os": "linux",
+  "message": "startup items: unsupported on host OS (linux)"
+}

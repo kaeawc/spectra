@@ -1,0 +1,7 @@
+{
+  "command": "updates",
+  "error": "unsupported_platform",
+  "feature": "macOS install history",
+  "os": "linux",
+  "message": "macOS install history: unsupported on host OS (linux)"
+}

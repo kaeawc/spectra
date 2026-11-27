@@ -1,0 +1,6 @@
+{
+  "command": "malloc-history",
+  "feature": "malloc stack logging",
+  "hint": "",
+  "os": "linux"
+}

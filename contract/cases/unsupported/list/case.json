@@ -1,0 +1,6 @@
+{
+  "command": "list",
+  "feature": "app-bundle inspection",
+  "hint": "app inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS",
+  "os": "linux"
+}

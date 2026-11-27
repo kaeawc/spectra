@@ -1,0 +1,6 @@
+{
+  "command": "flamegraph",
+  "feature": "native flamegraphs (sample(1))",
+  "hint": "on Linux, `spectra procdiag \u003cpid\u003e` diagnoses a stuck or slow process from /proc",
+  "os": "linux"
+}

@@ -1,0 +1,8 @@
+{
+  "command": "inspect",
+  "error": "unsupported_platform",
+  "feature": "app-bundle inspection",
+  "os": "linux",
+  "message": "app-bundle inspection: unsupported on host OS (linux)",
+  "hint": "app inspection reads macOS .app bundles, Mach-O binaries, code signatures, and the TCC database; it has no equivalent on this OS"
+}

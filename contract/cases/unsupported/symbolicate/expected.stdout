@@ -1,0 +1,7 @@
+{
+  "command": "symbolicate",
+  "error": "unsupported_platform",
+  "feature": "atos symbolication",
+  "os": "linux",
+  "message": "atos symbolication: unsupported on host OS (linux)"
+}

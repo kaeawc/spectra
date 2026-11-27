@@ -1,0 +1,6 @@
+{
+  "command": "whois",
+  "feature": "XPC/Mach service attribution",
+  "hint": "",
+  "os": "linux"
+}

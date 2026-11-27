@@ -1,0 +1,7 @@
+{
+  "command": "timemachine",
+  "error": "unsupported_platform",
+  "feature": "Time Machine",
+  "os": "linux",
+  "message": "Time Machine: unsupported on host OS (linux)"
+}

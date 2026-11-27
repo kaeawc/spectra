@@ -1,0 +1,6 @@
+{
+  "command": "vmregions",
+  "feature": "vmmap region composition",
+  "hint": "on Linux, read /proc/\u003cpid\u003e/smaps",
+  "os": "linux"
+}

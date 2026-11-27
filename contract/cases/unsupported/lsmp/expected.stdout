@@ -1,0 +1,7 @@
+{
+  "command": "lsmp",
+  "error": "unsupported_platform",
+  "feature": "Mach port tables",
+  "os": "linux",
+  "message": "Mach port tables: unsupported on host OS (linux)"
+}

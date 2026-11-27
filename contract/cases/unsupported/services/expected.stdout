@@ -1,0 +1,8 @@
+{
+  "command": "services",
+  "error": "unsupported_platform",
+  "feature": "launchd services",
+  "os": "linux",
+  "message": "launchd services: unsupported on host OS (linux)",
+  "hint": "on Linux, use systemctl list-units"
+}

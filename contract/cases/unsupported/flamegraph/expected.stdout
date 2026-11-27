@@ -1,0 +1,8 @@
+{
+  "command": "flamegraph",
+  "error": "unsupported_platform",
+  "feature": "native flamegraphs (sample(1))",
+  "os": "linux",
+  "message": "native flamegraphs (sample(1)): unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}

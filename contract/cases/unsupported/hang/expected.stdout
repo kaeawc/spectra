@@ -1,0 +1,8 @@
+{
+  "command": "hang",
+  "error": "unsupported_platform",
+  "feature": "main-thread hang classification (sample(1))",
+  "os": "linux",
+  "message": "main-thread hang classification (sample(1)): unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}
