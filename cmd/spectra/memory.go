@@ -108,6 +108,7 @@ func printMemoryState(s, prev memstate.MemoryState) {
 		"swap=" + memoryBytes(s.Swap.UsedBytes),
 		"pressure=" + string(s.PressureLevel),
 		fmt.Sprintf("free=%.0f%%", s.PressureFreePercent),
+		fmt.Sprintf("pages_free=%.0f%%", s.FreePagesPercent),
 	}
 	if !prev.CollectedAt.IsZero() {
 		elapsed := s.CollectedAt.Sub(prev.CollectedAt).Seconds()
