@@ -97,7 +97,11 @@ rust-check:       ## type-check everything (no codegen, no link): the inner loop
 	cargo check --all-targets
 
 rust-test:        ## nextest when installed, else cargo test
-	@command -v cargo-nextest >/dev/null && cargo nextest run || cargo test
+	@if command -v cargo-nextest >/dev/null; then \
+		cargo nextest run; \
+	else \
+		cargo test; \
+	fi
 
 rust-lint:
 	cargo clippy --all-targets -- -D warnings
