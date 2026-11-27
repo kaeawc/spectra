@@ -1,6 +1,7 @@
 .PHONY: build build-mcp mcp-smoke build-helper build-agent agent build-all dist notarize test vet fmt lint complexity security licenses tidy ci clean all core-boundary \
 	release-check validate-workflows test-hive-setup test-helper-vm-script \
-	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install
+	docs-validate docs-nav docs-lychee docs-build docs-serve docs-install \
+	rust-check rust-test rust-lint rust-fmt rust-deny rust-ci rust-watch rust-tools
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VERSION)
@@ -88,6 +89,34 @@ test-hive-setup:
 # (docs/design/helper-vm-test.md).
 test-helper-vm-script:
 	bash scripts/test-helper-vm-test.sh
+
+# --- Rust port (docs/design/rust-port.md) ----------------------------------
+# Plain cargo underneath; these run beside the Go targets until the cutover wave.
+
+rust-check:       ## type-check everything (no codegen, no link): the inner loop
+	cargo check --all-targets
+
+rust-test:        ## nextest when installed, else cargo test
+	@command -v cargo-nextest >/dev/null && cargo nextest run || cargo test
+
+rust-lint:
+	cargo clippy --all-targets -- -D warnings
+
+rust-fmt:
+	cargo fmt --all
+
+rust-deny:        ## dependency policy: duplicates, banned crates, advisories, licenses
+	cargo deny check
+
+rust-ci: rust-lint rust-deny rust-test ## what the Rust CI workflow runs, locally
+	cargo fmt --all --check
+
+rust-watch:       ## re-check on save; `bacon test`, `bacon clippy` for other jobs
+	bacon
+
+rust-tools:       ## dev tools as prebuilt binaries: nextest, bacon, sccache, cargo-deny
+	@command -v cargo-binstall >/dev/null || curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+	cargo binstall -y cargo-nextest bacon sccache cargo-deny
 
 # --- Documentation -----------------------------------------------------------
 
