@@ -1,0 +1,5 @@
+[toolchain]
+# Matches Rune's pinned toolchain so the desktop workspace and this one share one install.
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

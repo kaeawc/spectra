@@ -1,0 +1,17 @@
+[package]
+name = "kaeawc-spectra-base"
+description = "Spectra's seams: host-OS selection, subprocess, clock, env and filesystem traits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lib]
+name = "spectra_base"
+doctest = false
+
+[lints]
+workspace = true

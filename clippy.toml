@@ -1,0 +1,21 @@
+# Same bar as the Go gate (gocyclo -over 15).
+cognitive-complexity-threshold = 15
+
+# Testability rule (AGENTS.md): time, env, subprocess and filesystem go through the seams in
+# spectra-base (Clock, Env, Runner, Fs). The real implementations live there behind a local
+# `#[allow(clippy::disallowed_methods)]`; everything else takes the trait.
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "use spectra_base::clock::Clock" },
+    { path = "std::time::Instant::now", reason = "use spectra_base::clock::Clock" },
+    { path = "std::thread::sleep", reason = "use spectra_base::clock::Sleeper" },
+    { path = "std::env::var", reason = "use spectra_base::env::Env" },
+    { path = "std::env::var_os", reason = "use spectra_base::env::Env" },
+    { path = "std::env::vars", reason = "use spectra_base::env::Env" },
+    { path = "std::process::Command::new", reason = "use spectra_base::proc::Runner" },
+    { path = "std::fs::read", reason = "use spectra_base::fs::Fs" },
+    { path = "std::fs::read_to_string", reason = "use spectra_base::fs::Fs" },
+    { path = "std::fs::read_dir", reason = "use spectra_base::fs::Fs" },
+    { path = "std::fs::metadata", reason = "use spectra_base::fs::Fs" },
+    { path = "std::fs::symlink_metadata", reason = "use spectra_base::fs::Fs" },
+    { path = "std::fs::write", reason = "use spectra_base::fsutil::write_file_atomic or spectra_base::fs::Fs" },
+]

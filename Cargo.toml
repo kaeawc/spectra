@@ -1,0 +1,75 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# The Rune desktop app (wave 2) is its own workspace: it pulls a ~170 MB git dependency and a GPU
+# stack. Keeping it out means `cargo check`/`test` here never fetch, resolve or feature-unify it.
+exclude = ["desktop"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/kaeawc/spectra"
+homepage = "https://github.com/kaeawc/spectra"
+# Nothing publishes until the owner confirms the crate names and the first version
+# (docs/design/rust-port.md, "crates.io names and first version").
+publish = false
+
+# Every crate inherits deps from here, so each dependency is built with one feature set no matter
+# which `-p` subset you build. Crates refer to each other by their `spectra-*` alias; the package
+# names carry the crates.io prefix, so renaming it touches only this table and the package names.
+[workspace.dependencies]
+spectra-base = { package = "kaeawc-spectra-base", path = "crates/base", version = "0.2.0" }
+
+[workspace.lints.rust]
+# kaeawc-spectra-sys (FFI) is the one crate that opts out of this, with its own [lints] table.
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "warn"
+unwrap_used = "warn"
+await_holding_lock = "deny"
+# Threshold 15 in clippy.toml, matching the Go gocyclo gate.
+cognitive_complexity = "warn"
+# clippy.toml lists the calls that bypass the injected seams (time, env, subprocess, fs).
+disallowed_methods = "deny"
+
+# ---------------------------------------------------------------------------------------------
+# Profiles tuned for the edit → check → test loop (from rust-build).
+# ---------------------------------------------------------------------------------------------
+
+[profile.dev]
+# Line tables keep backtraces useful at a fraction of full debuginfo's codegen + link time.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Dependencies: no debuginfo (built once and cached; smaller objects link faster).
+debug = false
+
+[profile.dev.build-override]
+opt-level = 0
+debug = false
+
+# Fast optimized builds for local perf checks: incremental + parallel codegen.
+[profile.release]
+codegen-units = 16
+incremental = true
+strip = "debuginfo"
+
+# What ships (release archives): slowest to build, smallest and fastest binary.
+[profile.dist]
+inherits = "release"
+codegen-units = 1
+incremental = false
+lto = "thin"
+strip = true
+
+# CI: from-scratch builds never reuse incremental state, so skip writing it and skip debuginfo.
+# `cargo nextest run --cargo-profile ci`.
+[profile.ci]
+inherits = "dev"
+debug = false
+incremental = false
