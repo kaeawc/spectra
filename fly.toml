@@ -1,0 +1,27 @@
+# fly.toml app configuration file generated for spectra-web on 2026-11-27T16:34:45Z
+#
+# See https://docs.fly.io/reference/configuration for information about how to use this file.
+#
+
+app = 'spectra-web'
+primary_region = 'iad'
+
+[build]
+  [build.args]
+    GO_VERSION = '1.26.6'
+
+[env]
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
