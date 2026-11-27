@@ -22,6 +22,11 @@ publish = false
 [workspace.dependencies]
 spectra-base = { package = "kaeawc-spectra-base", path = "crates/base", version = "0.2.0" }
 
+jiff = { version = "1", default-features = false, features = ["std"] }
+ryu = "1"
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
 [workspace.lints.rust]
 # kaeawc-spectra-sys (FFI) is the one crate that opts out of this, with its own [lints] table.
 unsafe_code = "forbid"

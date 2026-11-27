@@ -13,5 +13,14 @@ publish.workspace = true
 name = "spectra_base"
 doctest = false
 
+[dependencies]
+jiff = { workspace = true }
+ryu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+jiff = { workspace = true }
+
 [lints]
 workspace = true
