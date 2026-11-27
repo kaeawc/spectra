@@ -1,0 +1,20 @@
+# `bacon` = continuous `cargo check` on save; press t / c / n to switch jobs.
+default_job = "check"
+
+[jobs.check]
+command = ["cargo", "check", "--all-targets"]
+need_stdout = false
+
+[jobs.clippy]
+command = ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "nextest", "run", "--hide-progress-bar", "--failure-output", "final"]
+need_stdout = true
+analyzer = "nextest"
+
+[keybindings]
+t = "job:test"
+c = "job:clippy"
+n = "job:check"

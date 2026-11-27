@@ -15,3 +15,6 @@ site/
 
 # scripts/helper-vm-test.sh output
 /helper-vm-results/
+
+# Rust (wave 1 of docs/design/rust-port.md)
+/target/

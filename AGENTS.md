@@ -7,8 +7,13 @@ product framing.
 
 ## Working Rules
 
-- Keep code in Go. Standard library first; only add dependencies for clear
-  value. `github.com/kaeawc/spectra-protocol` is an intentionally minimal,
+- Spectra is being ported to Rust ([docs/design/rust-port.md](docs/design/rust-port.md)).
+  Go under `cmd/` and `internal/` stays the shipped build until the cutover
+  wave; fixes land there as before. New Rust code goes in the Cargo workspace
+  under `crates/` and follows the port's rules (byte-identical JSON, injected
+  seams, `unsafe` only in `kaeawc-spectra-sys`). Standard library first in
+  both languages; only add dependencies for clear value.
+  `github.com/kaeawc/spectra-protocol` is an intentionally minimal,
   standard-library-only dependency used for the capabilities contract.
 - Detection logic lives in `internal/detect/`. Per-collector functions are
   short and single-purpose; new sub-detections add their own functions
@@ -46,6 +51,21 @@ After any implementation change, run `go build ./... && go vet ./...`.
 Use focused package tests while iterating: `go test ./internal/detect/ -run TestX -count=1`.
 
 For docs changes: `make docs-validate` (mkdocs nav + lychee link check).
+
+Rust (toolchain pinned in `rust-toolchain.toml`):
+
+```bash
+cargo c          # check --all-targets (the inner loop)
+cargo t          # nextest run; `make rust-test` falls back to cargo test
+cargo lint       # clippy --all-targets -D warnings
+cargo fmt --all
+cargo deny check # one version per crate, no aws-lc/OpenSSL, advisories, licenses
+make rust-ci     # what the Rust CI workflow runs
+```
+
+New Rust dependencies go in root `[workspace.dependencies]` with
+`default-features = false` and only the features used; crates reference them
+with `{ workspace = true }`. Keep `Cargo.lock` committed.
 
 ## Git
 

@@ -1,0 +1,60 @@
+# cargo-deny: dependency policy for the root workspace, enforced in CI (`deny` job).
+# Run locally: `cargo deny check` (install: `make rust-tools`).
+# The desktop workspace (wave 2) is not checked: Rune brings its own large, duplicated GPU tree.
+
+[graph]
+# Feature-gated backends must follow the policy too.
+all-features = true
+# Only platforms Spectra ships for.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+]
+
+[advisories]
+# RustSec advisories (vulnerable, unmaintained, unsound) fail the build; yanked versions too.
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+# The list is the policy for crates to come; an entry no dependency uses yet is fine.
+unused-allowed-license = "allow"
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+exceptions = []
+
+[bans]
+# One version of every crate: a second copy compiles a crate (and usually its subtree) twice.
+# When a bump would duplicate a crate a framework also uses, hold the bump until the framework
+# moves. Add a `skip` only for duplicates we can't control, with a reason.
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+skip = []
+
+# TLS stays on rustls + ring: no aws-lc (CMake + a large C build) and no OpenSSL.
+deny = [
+    { crate = "aws-lc-rs", reason = "TLS uses ring; aws-lc adds a CMake/C build" },
+    { crate = "aws-lc-sys", reason = "TLS uses ring; aws-lc adds a CMake/C build" },
+    { crate = "openssl-sys", reason = "TLS uses rustls + ring" },
+    { crate = "native-tls", reason = "TLS uses rustls + ring" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

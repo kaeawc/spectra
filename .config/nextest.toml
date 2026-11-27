@@ -1,0 +1,13 @@
+[profile.default]
+# Fail fast locally: the first failing test is usually all you need.
+fail-fast = true
+slow-timeout = { period = "10s", terminate-after = 3 }
+
+[profile.ci]
+fail-fast = false
+retries = 1
+failure-output = "immediate-final"
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci.junit]
+path = "junit.xml"

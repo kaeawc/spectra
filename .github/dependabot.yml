@@ -24,3 +24,16 @@ updates:
     groups:
       go-minor-patch:
         update-types: [minor, patch]
+
+  # Rust crates (docs/design/rust-port.md). deny.toml fails a bump that duplicates a crate, so
+  # hold such bumps with an `ignore` here until the framework that shares the crate moves.
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, rust]
+    groups:
+      rust-minor-patch:
+        update-types: [minor, patch]
