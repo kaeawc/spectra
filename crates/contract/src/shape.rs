@@ -12,9 +12,13 @@
 //! one path `p[]`, whose type set is the types seen and whose children are the union of the
 //! elements' keys. Element order and count are ignored, which suits lists whose contents differ
 //! between runs (processes, interfaces). The consequence is that a key present in only some
-//! elements still counts as present, and that an empty array has no element shape: when either
-//! build prints `[]` where the other prints elements, the element paths are reported as
-//! unchecked rather than as differences, since the two builds simply saw different data.
+//! elements still counts as present.
+//!
+//! A path under an array `a[]` is reported as **unchecked** (not a difference) only when one
+//! side has no element paths under `a[]` at all, meaning `a` is an array that is empty in every
+//! instance on that side, while the other side has elements: the two builds simply saw different
+//! data. As soon as both sides have at least one non-empty instance of `a`, the element paths
+//! are compared normally, so an empty instance elsewhere never hides a renamed field.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -34,11 +38,10 @@ fn type_name(v: &Value) -> &'static str {
     }
 }
 
-/// A document's shape: the set of types seen at each path, plus the arrays that were empty.
+/// A document's shape: the set of types seen at each path.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Shape {
     types: BTreeMap<String, BTreeSet<&'static str>>,
-    empty_arrays: BTreeSet<String>,
 }
 
 impl Shape {
@@ -57,9 +60,6 @@ impl Shape {
                 }
             }
             Value::Array(items) => {
-                if items.is_empty() {
-                    self.empty_arrays.insert(path.to_string());
-                }
                 for item in items {
                     self.visit(&format!("{path}[]"), item);
                 }
@@ -103,9 +103,13 @@ fn join(types: &BTreeSet<&'static str>) -> String {
     types.iter().copied().collect::<Vec<_>>().join("|")
 }
 
-/// Whether `path` lies under (or at an element of) an array in `empty`.
-fn under_any(path: &str, empty: &BTreeSet<String>) -> Option<String> {
-    empty.iter().find(|a| path.strip_prefix(a.as_str()).is_some_and(|rest| rest.starts_with("[]"))).cloned()
+/// Whether `path` lies under (or at) an element of an array that `side` has, as an array, but
+/// never with any element: every instance of it there is empty.
+fn under_empty_array(path: &str, side: &Shape) -> bool {
+    path.match_indices("[]").any(|(i, _)| {
+        let array = &path[..i];
+        side.types.get(array).is_some_and(|t| t.contains("array")) && !side.types.contains_key(&format!("{array}[]"))
+    })
 }
 
 /// Compares `go` (the reference) with `rust`.
@@ -115,9 +119,10 @@ pub fn compare(go: &Shape, rust: &Shape) -> Report {
     let paths: BTreeSet<&String> = go.types.keys().chain(rust.types.keys()).collect();
     for path in paths {
         let (g, r) = (go.types.get(path), rust.types.get(path));
-        // One side's empty array hides the other's element shape: not a difference.
-        let hidden = under_any(path, &go.empty_arrays).is_some() || under_any(path, &rust.empty_arrays).is_some();
-        if hidden && (g.is_none() || r.is_none()) {
+        // An array empty in every instance on the side missing this path hides the other side's
+        // element shape: not a difference.
+        let hidden = (g.is_none() && under_empty_array(path, go)) || (r.is_none() && under_empty_array(path, rust));
+        if hidden {
             unchecked.insert(path.clone());
             continue;
         }
@@ -278,6 +283,36 @@ mod tests {
             lines(&diff(r#"{"a":[{"x":1}]}"#, r#"{"a":null}"#)),
             ["~ $.a: go array, rust null", "- $.a[]: only in go (object)", "- $.a[].x: only in go (number)"]
         );
+    }
+
+    #[test]
+    fn mixed_empty_instances_do_not_hide_a_renamed_field() {
+        let go = r#"{"procs":[{"children":[]},{"children":[{"name":1}]}]}"#;
+        let rust = r#"{"procs":[{"children":[]},{"children":[{"nm":1}]}]}"#;
+        let r = diff(go, rust);
+        assert_eq!(lines(&r), ["- $.procs[].children[].name: only in go (number)", "+ $.procs[].children[].nm: only in rust (number)"]);
+        assert!(r.unchecked.is_empty(), "{r:?}");
+    }
+
+    #[test]
+    fn always_empty_on_one_side_is_unchecked() {
+        let go = r#"{"procs":[{"children":[]},{"children":[]}]}"#;
+        let rust = r#"{"procs":[{"children":[{"nm":1}]},{"children":[]}]}"#;
+        for (g, r) in [(go, rust), (rust, go)] {
+            let r = diff(g, r);
+            assert!(r.differences.is_empty(), "{r:?}");
+            assert_eq!(r.unchecked, ["$.procs[].children[]", "$.procs[].children[].nm"]);
+        }
+    }
+
+    #[test]
+    fn both_sides_mixed_with_same_keys_match() {
+        let go = r#"{"procs":[{"children":[]},{"children":[{"name":1}]}]}"#;
+        let rust = r#"{"procs":[{"children":[{"name":"x"}]},{"children":[]}]}"#;
+        let r = diff(go, rust);
+        assert_eq!(lines(&r), ["~ $.procs[].children[].name: go number, rust string"]);
+        let rust = r#"{"procs":[{"children":[{"name":2}]},{"children":[]}]}"#;
+        assert_eq!(diff(go, rust), Report::default());
     }
 
     #[test]
