@@ -1,9 +1,13 @@
+# Its own workspace: the root workspace excludes desktop/, and the app is never published.
+[workspace]
+
 [package]
 name = "spectra-desktop"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Diagnosis-first JVM desktop app for Spectra, built with Rune"
+publish = false
 
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276", features = ["tooling"] }
