@@ -15,9 +15,9 @@ pub const SCHEMA_SNAPSHOT: &str = "spectra.snapshot";
 /// `schema`, `spectra_version` and non-null `data`.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct DiagnosticResult {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub schema: SchemaRef,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub spectra_version: String,
     #[serde(default, deserialize_with = "present_raw")]
     pub data: Option<Box<RawValue>>,
@@ -92,4 +92,24 @@ pub fn decode_health(resp: &Response) -> Result<HealthResult, ProtocolError> {
     let health: HealthResult = serde_json::from_str(raw).map_err(|e| ProtocolError::plain(format!("decode health: {e}")))?;
     health.capabilities.validate().map_err(|e| e.context("health capabilities"))?;
     Ok(health)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inspect(result: &str) -> Result<DiagnosticResult, ProtocolError> {
+        let line = format!(r#"{{"protocol_version":"v1","request_id":"r","result":{result}}}"#);
+        let resp: Response = serde_json::from_str(&line).expect("decode");
+        decode_result(&resp, &Operation::INSPECT)
+    }
+
+    #[test]
+    fn null_spectra_version_is_empty_as_in_go() {
+        let schema = r#""schema":{"name":"spectra.inspect","version":1}"#;
+        assert_eq!(inspect(&format!(r#"{{{schema},"spectra_version":null,"data":{{}}}}"#)).expect("valid").spectra_version, "");
+        assert_eq!(inspect(&format!(r#"{{{schema},"spectra_version":"1.2","data":{{}}}}"#)).expect("valid").spectra_version, "1.2");
+        assert!(inspect(&format!(r#"{{{schema},"spectra_version":null,"data":null}}"#)).is_err());
+        assert!(inspect(&format!(r#"{{{schema},"spectra_version":null}}"#)).is_err());
+    }
 }

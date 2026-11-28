@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::{self, BufRead, Write};
 
 use serde::Serialize;
+use serde_json::ser::Formatter;
 
 use crate::errors::ProtocolError;
 use crate::message::{Request, Response};
@@ -70,11 +71,36 @@ pub fn decode_response(line: &[u8]) -> Result<Response, ProtocolError> {
 }
 
 /// Writes `value` as one line, refusing it when the encoding exceeds `limit`. Uses
-/// `serde_json`'s encoding; Spectra itself encodes with `spectra_base::gojson` and calls
+/// `serde_json`'s encoding, with raw values compacted as Go's `json.Marshal` compacts a
+/// `json.RawMessage`; Spectra itself encodes with `spectra_base::gojson` and calls
 /// [`write_encoded`] so its frames match the Go build's bytes.
 pub fn write_message<W: Write, T: Serialize + ?Sized>(w: &mut W, value: &T, limit: usize) -> Result<(), FramingError> {
-    let encoded = serde_json::to_vec(value).map_err(FramingError::Encode)?;
+    let mut encoded = Vec::with_capacity(128);
+    value.serialize(&mut serde_json::Serializer::with_formatter(&mut encoded, RawCompact)).map_err(FramingError::Encode)?;
     write_encoded(w, &encoded, limit)
+}
+
+/// `serde_json`'s compact layout, except that a raw value loses the whitespace between its
+/// tokens: a `RawValue` keeps its input bytes, and a newline there would split the frame.
+struct RawCompact;
+
+impl Formatter for RawCompact {
+    fn write_raw_fragment<W: ?Sized + Write>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()> {
+        let mut out = Vec::with_capacity(fragment.len());
+        let (mut in_string, mut escaped) = (false, false);
+        for &b in fragment.as_bytes() {
+            if in_string {
+                in_string = escaped || b != b'"';
+                escaped = !escaped && b == b'\\';
+            } else if matches!(b, b' ' | b'\t' | b'\n' | b'\r') {
+                continue;
+            } else {
+                in_string = b == b'"';
+            }
+            out.push(b);
+        }
+        writer.write_all(&out)
+    }
 }
 
 /// Writes already-encoded JSON as one line, refusing it when it exceeds `limit`.
@@ -105,6 +131,17 @@ mod tests {
         let mut r = io::BufReader::new(&b"abcd\nabcde\n"[..]);
         assert_eq!(read_message(&mut r, 4).expect("fits"), Some(b"abcd".to_vec()));
         assert!(matches!(read_message(&mut r, 4), Err(FramingError::TooLarge)));
+    }
+
+    #[test]
+    fn raw_values_are_compacted_into_one_line() {
+        let raw = serde_json::value::RawValue::from_string("{\n \"ok\" : true,\t\"s\": \"a \\\" b\\\\\" \r\n}".into()).expect("raw");
+        let resp = Response { protocol_version: "v1".into(), request_id: "r".into(), result: Some(raw), error: None };
+        let mut out = Vec::new();
+        write_message(&mut out, &resp, 1024).expect("write");
+        assert_eq!(out, b"{\"protocol_version\":\"v1\",\"request_id\":\"r\",\"result\":{\"ok\":true,\"s\":\"a \\\" b\\\\\"}}\n");
+        let line = read_message(&mut io::BufReader::new(&out[..]), 1024).expect("read").expect("line");
+        assert!(decode_response(&line).is_ok());
     }
 
     #[test]
