@@ -1,0 +1,1 @@
+spectra sample: process sampling (sample(1)): unsupported on host OS (linux) (on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc)

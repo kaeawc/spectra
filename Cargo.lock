@@ -78,6 +78,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kaeawc-spectra"
+version = "0.2.0"
+dependencies = [
+ "kaeawc-spectra-base",
+ "lexopt",
+ "serde",
+ "serde_json",
+ "spectra-contract",
+]
+
+[[package]]
 name = "kaeawc-spectra-base"
 version = "0.2.0"
 dependencies = [
@@ -94,6 +105,12 @@ version = "0.2.0"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "lexopt"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803ec87c9cfb29b9d2633f20cba1f488db3fd53f2158b1024cbefb47ba05d413"
 
 [[package]]
 name = "libc"

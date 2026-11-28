@@ -1,0 +1,1 @@
+spectra spindump: spindump stack reports: unsupported on host OS (linux) (on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc)
