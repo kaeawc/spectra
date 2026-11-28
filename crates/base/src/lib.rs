@@ -8,4 +8,7 @@ pub mod fs;
 pub mod fsutil;
 pub mod gojson;
 pub mod hostos;
+pub mod idgen;
+pub mod logger;
+pub mod plist;
 pub mod proc;

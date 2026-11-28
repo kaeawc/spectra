@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AutoBackup</key>
+	<true/>
+	<key>Big</key>
+	<integer>9007199254740993</integer>
+	<key>Destinations</key>
+	<array>
+		<dict>
+			<key>ID</key>
+			<integer>7</integer>
+			<key>Name</key>
+			<string>Backup</string>
+		</dict>
+		<string>not-a-dict</string>
+	</array>
+	<key>LastSuccessfulDate</key>
+	<date>2026-05-28T13:38:24Z</date>
+	<key>Name</key>
+	<string>Spectra Sample ü</string>
+	<key>Negative</key>
+	<integer>-7</integer>
+	<key>Payload</key>
+	<data>
+	AQID
+	</data>
+	<key>PreferencesVersion</key>
+	<integer>5</integer>
+	<key>Ratio</key>
+	<real>1.25</real>
+	<key>RequiresACPower</key>
+	<false/>
+	<key>SkipPaths</key>
+	<array>
+		<string>/tmp/skip</string>
+		<integer>1</integer>
+		<string>/Volumes/Build</string>
+	</array>
+	<key>com</key>
+	<dict>
+		<key>example</key>
+		<dict>
+			<key>nested</key>
+			<string>deep</string>
+		</dict>
+	</dict>
+	<key>com.example.dotted</key>
+	<string>exact</string>
+</dict>
+</plist>

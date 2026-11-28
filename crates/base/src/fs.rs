@@ -15,14 +15,17 @@ pub enum FileType {
     Other,
 }
 
-/// The parts of file metadata collectors use. `modified` is seconds and nanoseconds since the
-/// Unix epoch.
+/// The parts of file metadata collectors use. `modified` and `ctime` are seconds and nanoseconds
+/// since the Unix epoch. `dev`, `ino` and `ctime` feed [`crate::fsutil::identity::identity`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileInfo {
     pub file_type: FileType,
     pub len: u64,
     pub mode: u32,
     pub modified: Option<(i64, u32)>,
+    pub dev: u64,
+    pub ino: u64,
+    pub ctime: Option<(i64, u32)>,
 }
 
 /// One entry of a directory listing.
@@ -100,7 +103,15 @@ fn file_type(t: std::fs::FileType) -> FileType {
 
 fn info(m: &std::fs::Metadata) -> FileInfo {
     use std::os::unix::fs::MetadataExt;
-    FileInfo { file_type: file_type(m.file_type()), len: m.len(), mode: m.mode(), modified: Some((m.mtime(), m.mtime_nsec() as u32)) }
+    FileInfo {
+        file_type: file_type(m.file_type()),
+        len: m.len(),
+        mode: m.mode(),
+        modified: Some((m.mtime(), m.mtime_nsec() as u32)),
+        dev: m.dev(),
+        ino: m.ino(),
+        ctime: Some((m.ctime(), m.ctime_nsec() as u32)),
+    }
 }
 
 /// The real filesystem with absolute paths served from `root`: `/proc/1/stat` reads
