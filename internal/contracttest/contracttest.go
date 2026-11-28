@@ -80,7 +80,7 @@ func (c Case) file(t testing.TB, name string, content []byte) {
 	t.Helper()
 	path := filepath.Join(c.Dir, name)
 	if *Update {
-		if err := os.MkdirAll(c.Dir, 0o755); err != nil {
+		if err := os.MkdirAll(c.Dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		if err := fsutil.WriteFileAtomic(path, content, 0o644); err != nil {
