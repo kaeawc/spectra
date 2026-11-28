@@ -95,7 +95,7 @@ fn setup(s: &mut App, wake: rune::Waker) {
         });
     }
     if let Some(tx) = s.system.tx.take() {
-        system::spawn(tx, wake.clone());
+        system::spawn(s.ctx.clone(), tx, wake.clone());
     }
     s.wake = Some(wake.clone());
     // "Right now" on the Overview looks while the Overview shows.

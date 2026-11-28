@@ -18,7 +18,8 @@
 //! - **Maps.** Go sorts map keys as strings. Use `BTreeMap<String, _>` for every map that reaches
 //!   output; integer keys must be stringified first, because Go sorts `"10"` before `"9"`.
 //! - **Time.** [`GoTime`] writes RFC 3339 with nanoseconds and trailing zeros trimmed, and `Z`
-//!   for a zero offset; [`GoDuration`] writes integer nanoseconds.
+//!   for a zero offset, and reads RFC 3339 back keeping its offset; [`GoDuration`] writes integer
+//!   nanoseconds.
 //! - **Layout.** [`to_vec`] is `json.Marshal`, [`to_vec_indent`] is `json.MarshalIndent(v, "",
 //!   "  ")`, and [`to_writer_encoder`] is `json.NewEncoder(w).Encode(v)` (trailing newline).
 //!
@@ -29,7 +30,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::ser::{CompactFormatter, Formatter, PrettyFormatter};
 
 pub use serde_json::Error;
@@ -401,6 +402,32 @@ impl GoTime {
     pub fn is_zero(&self) -> bool {
         self.instant == GoTime::zero().instant
     }
+
+    /// Go's `Time.UnmarshalJSON` text: RFC 3339, kept in the UTC offset it was written in.
+    pub fn parse_rfc3339(s: &str) -> Result<GoTime, String> {
+        let instant: jiff::Timestamp = s.parse().map_err(|e| format!("parsing time {s:?}: {e}"))?;
+        let offset = rfc3339_offset(s).ok_or_else(|| format!("parsing time {s:?}: no UTC offset"))?;
+        Ok(GoTime { instant, offset })
+    }
+}
+
+/// The trailing `Z` or `±hh:mm` of an RFC 3339 time.
+fn rfc3339_offset(s: &str) -> Option<jiff::tz::Offset> {
+    if s.ends_with(['Z', 'z']) {
+        return Some(jiff::tz::Offset::UTC);
+    }
+    let tail = s.get(s.len().checked_sub(6)?..)?;
+    let sign = match tail.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    if tail.as_bytes().get(3) != Some(&b':') {
+        return None;
+    }
+    let hours: i32 = tail.get(1..3)?.parse().ok()?;
+    let minutes: i32 = tail.get(4..6)?.parse().ok()?;
+    jiff::tz::Offset::from_seconds(sign * (hours * 3600 + minutes * 60)).ok()
 }
 
 impl Default for GoTime {
@@ -437,6 +464,13 @@ impl Serialize for GoTime {
             return Err(serde::ser::Error::custom("Time.MarshalJSON: year outside of range [0,9999]"));
         }
         serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for GoTime {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = std::borrow::Cow::<str>::deserialize(deserializer)?;
+        GoTime::parse_rfc3339(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -509,6 +543,19 @@ mod tests {
     fn go_zero_time() {
         assert_eq!(GoTime::zero().to_string(), "0001-01-01T00:00:00Z");
         assert!(GoTime::default().is_zero());
+    }
+
+    #[test]
+    fn go_time_reads_back_what_it_writes() {
+        let texts =
+            ["0001-01-01T00:00:00Z", "2026-11-21T22:11:01.019903Z", "2026-11-21T17:11:03.937323-05:00", "2026-01-02T03:04:05+05:30"];
+        for text in texts {
+            let t: GoTime = serde_json::from_str(&format!("{text:?}")).expect(text);
+            assert_eq!(t.to_string(), text);
+        }
+        assert!(serde_json::from_str::<GoTime>(r#""0001-01-01T00:00:00Z""#).expect("zero").is_zero());
+        assert!(GoTime::parse_rfc3339("2026-11-21").is_err(), "a date alone has no instant");
+        assert!(serde_json::from_str::<GoTime>("12").is_err());
     }
 
     #[test]

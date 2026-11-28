@@ -9,7 +9,7 @@ mod vmstat;
 use std::fmt;
 use std::io;
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use spectra_base::clock::Clock;
 use spectra_base::fs::Fs;
 use spectra_base::gojson::{self, GoTime};
@@ -43,6 +43,18 @@ impl PressureLevel {
         }
     }
 
+    /// The level [`PressureLevel::as_str`] names. A name this build doesn't know (a newer
+    /// Spectra's) is [`PressureLevel::Unknown`], so one reading's level never fails the sample.
+    pub fn from_name(name: &str) -> PressureLevel {
+        match name {
+            "" => PressureLevel::Unset,
+            "Normal" => PressureLevel::Normal,
+            "Warning" => PressureLevel::Warning,
+            "Critical" => PressureLevel::Critical,
+            _ => PressureLevel::Unknown,
+        }
+    }
+
     /// Go's `pressureLevel`: `kern.memorystatus_vm_pressure_level` as a level.
     pub fn from_raw(raw: u64) -> PressureLevel {
         match raw {
@@ -66,8 +78,16 @@ impl Serialize for PressureLevel {
     }
 }
 
-/// The host swap device state.
+impl<'de> Deserialize<'de> for PressureLevel {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = std::borrow::Cow::<str>::deserialize(deserializer)?;
+        Ok(PressureLevel::from_name(&name))
+    }
+}
+
+/// The host swap device state. A missing field reads as zero, as in [`MemoryState`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SwapUsage {
     pub total_bytes: u64,
     pub used_bytes: u64,
@@ -76,8 +96,10 @@ pub struct SwapUsage {
 }
 
 /// One point-in-time host memory sample (Go's `MemoryState`); field order and `omitempty`
-/// match its JSON.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+/// match its JSON. It reads back from that JSON (the Go daemon's `memory.current` answers in
+/// it), with a missing field left at its zero value, as Go's `json.Unmarshal` leaves it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MemoryState {
     pub physical_bytes: u64,
     pub page_size_bytes: u64,

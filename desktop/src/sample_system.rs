@@ -5,9 +5,10 @@
 use crate::app::App;
 use crate::groups::Nav;
 use crate::sample::sample_scene;
+use spectra_host::memstate::{MemoryState, PressureLevel, SwapUsage};
+
 use crate::system::{
-    Battery, Fail, Load, Memory, Network, Port, Power, Pressure, Reading, Thermal, ThermalState,
-    Volume,
+    Battery, Fail, Load, Network, Port, Power, Reading, Thermal, ThermalState, Volume,
 };
 
 const GB: f64 = 1024.0 * 1024.0 * 1024.0;
@@ -23,50 +24,51 @@ fn wave(i: usize) -> f64 {
     W[i % W.len()]
 }
 
-fn memory(i: usize, pressed: bool) -> Memory {
+/// A figure as the whole number a reading holds (bytes or a count).
+fn whole(n: f64) -> u64 {
+    n as u64
+}
+
+fn memory(i: usize, pressed: bool) -> MemoryState {
     let (pressure, free, swap, compressed) = if pressed {
         let free = (18.0 - i as f64 * 0.3).max(4.0);
         (
-            Pressure::Critical,
+            PressureLevel::Critical,
             free,
             GB + i as f64 * 24.0 * MB,
             5.2 * GB + i as f64 * 40.0 * MB,
         )
     } else {
         (
-            Pressure::Normal,
+            PressureLevel::Normal,
             38.0 + wave(i) * 8.0,
             0.0,
             1.3 * GB + wave(i) * 0.3 * GB,
         )
     };
     let step = if pressed { 9000.0 } else { 600.0 };
-    Memory {
-        physical: 32.0 * GB,
-        wired: 3.4 * GB,
-        free: 1.1 * GB,
-        file_backed: if pressed { 2.1 * GB } else { 9.8 * GB },
-        app: if pressed { 21.5 * GB } else { 14.2 * GB },
-        purgeable: 0.4 * GB,
-        compressed,
-        compressed_from: compressed * 2.4,
-        ratio: 2.4,
-        swap_total: if pressed { 3.0 * GB } else { 0.0 },
-        swap_used: swap,
-        pressure,
-        free_pct: Some(free),
-        compressions: 410_000.0 + (0..i).map(|j| step * (0.5 + wave(j))).sum::<f64>(),
-        decompressions: 200_000.0,
-        swap_ins: if pressed {
-            1200.0 + i as f64 * 140.0
-        } else {
-            0.0
+    MemoryState {
+        physical_bytes: whole(32.0 * GB),
+        wired: whole(3.4 * GB),
+        free: whole(1.1 * GB),
+        file_backed: whole(if pressed { 2.1 * GB } else { 9.8 * GB }),
+        anonymous: whole(if pressed { 21.5 * GB } else { 14.2 * GB }),
+        purgeable: whole(0.4 * GB),
+        compressor_occupied: whole(compressed),
+        compressor_stored: whole(compressed * 2.4),
+        compressor_ratio: 2.4,
+        swap: SwapUsage {
+            total_bytes: whole(if pressed { 3.0 * GB } else { 0.0 }),
+            used_bytes: whole(swap),
+            ..SwapUsage::default()
         },
-        swap_outs: if pressed {
-            3400.0 + i as f64 * 310.0
-        } else {
-            0.0
-        },
+        pressure_level: pressure,
+        pressure_free_percent: free,
+        compressions: whole(410_000.0 + (0..i).map(|j| step * (0.5 + wave(j))).sum::<f64>()),
+        decompressions: 200_000,
+        swap_ins: if pressed { 1200 + i as u64 * 140 } else { 0 },
+        swap_outs: if pressed { 3400 + i as u64 * 310 } else { 0 },
+        ..MemoryState::default()
     }
 }
 

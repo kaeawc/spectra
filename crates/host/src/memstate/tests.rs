@@ -261,6 +261,45 @@ fn json_matches_go_field_order_and_omitempty() {
     );
 }
 
+#[test]
+fn json_reads_back_into_the_sample() {
+    let psi = psi_fixture("2.50", "0.00");
+    let fs = MapFs::new([
+        ("/proc/meminfo", MEMINFO),
+        ("/proc/pressure/cpu", psi.as_str()),
+        ("/proc/pressure/io", psi.as_str()),
+        ("/proc/pressure/memory", psi.as_str()),
+    ]);
+    let clock = FakeClock::new("2026-11-23T10:00:00.5Z".parse().expect("time"));
+    let linux = collect(&linux_opts(&fs, &clock, &FixedMemory::default(), 4096)).expect("collect");
+    let darwin = from_darwin_sample(
+        &DarwinSample {
+            page_size_bytes: 16384,
+            physical_bytes: 1 << 34,
+            pressure_level: Some(2),
+            memorystatus_level: Some(41),
+            ..DarwinSample::default()
+        },
+        GoTime::utc(jiff::Timestamp::UNIX_EPOCH),
+    );
+    for ms in [linux, darwin, MemoryState::default()] {
+        let json = gojson::to_vec(&ms).expect("json");
+        assert_eq!(serde_json::from_slice::<MemoryState>(&json).expect("reads back"), ms);
+    }
+}
+
+#[test]
+fn json_missing_fields_read_as_zero_and_an_unknown_level_as_unknown() {
+    let ms: MemoryState = serde_json::from_str(r#"{"physical_bytes": 1024, "pressure_level": "Elevated", "extra": 1}"#).expect("json");
+    assert_eq!((ms.physical_bytes, ms.pressure_level, ms.swap, ms.psi), (1024, PressureLevel::Unknown, SwapUsage::default(), None));
+    assert_eq!(serde_json::from_str::<MemoryState>("{}").expect("empty"), MemoryState::default());
+    let swap: MemoryState = serde_json::from_str(r#"{"swap": {"used_bytes": 1024}}"#).expect("partial swap");
+    assert_eq!(swap.swap, SwapUsage { used_bytes: 1024, ..SwapUsage::default() });
+    for level in [PressureLevel::Unset, PressureLevel::Unknown, PressureLevel::Normal, PressureLevel::Warning, PressureLevel::Critical] {
+        assert_eq!(PressureLevel::from_name(level.as_str()), level);
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn host_memory_reads_this_mac() {

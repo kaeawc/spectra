@@ -389,6 +389,9 @@ pub struct App {
     pub codeview: crate::codeview::CodeView,
     /// Other Macs through Spectra Remote, for the Hosts page and each host's page.
     pub hosts: crate::remote::Hosts,
+    /// The command layer's seams (this machine's OS, clock, filesystem and memory readings),
+    /// made once and shared with the reading threads that call it in-process.
+    pub ctx: std::sync::Arc<spectra_cli::Ctx>,
 }
 
 pub fn init() -> App {
@@ -476,6 +479,7 @@ pub fn init() -> App {
         crashes: crate::crashes::CrashesPage::new(),
         codeview: crate::codeview::CodeView::new(),
         hosts: crate::remote::Hosts::new(),
+        ctx: std::sync::Arc::new(spectra_cli::Ctx::system(env!("CARGO_PKG_VERSION"))),
     }
 }
 

@@ -20,7 +20,7 @@ use crate::app::App;
 use crate::findings::{Link, Severity};
 use crate::groups::Nav;
 use crate::procs::Process;
-use crate::system::{Pressure, ThermalState};
+use crate::system::{MemoryFigures, Pressure, ThermalState};
 use crate::whatswrong::Action;
 
 /// The panel's window key: `--window menubar` renders it headless.
@@ -197,8 +197,8 @@ pub fn snapshot(s: &App) -> Snapshot {
         Vec::new()
     };
     let mem = sys.memory.last.as_ref().map(|m| Mem {
-        pressure: m.pressure,
-        free_pct: m.free_pct,
+        pressure: m.pressure(),
+        free_pct: m.free_pct(),
     });
     let memory = if mem.as_ref().is_some_and(|m| m.free_pct.is_some()) {
         last(

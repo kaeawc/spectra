@@ -3,7 +3,7 @@
 
 use crate::findings::{Chart, Finding, Link, Severity};
 use crate::procs::fmt_mem;
-use crate::system::{Pressure, System, ThermalState, swap_growth};
+use crate::system::{MemoryFigures, Pressure, System, ThermalState, swap_growth};
 
 /// How full a volume may get before it's worth a look, and before it's urgent, in percent.
 pub use crate::system::VOLUME_WARN;
@@ -39,7 +39,7 @@ fn mib(bytes: f64) -> String {
 pub fn diagnose(s: &System, now: f64) -> Vec<Finding> {
     let mut out = Vec::new();
     if let Some(m) = s.memory.last.as_ref().filter(|_| !s.memory.stale(now)) {
-        let free = m.free_pct.map_or_else(String::new, |p| {
+        let free = m.free_pct().map_or_else(String::new, |p| {
             format!(" {p:.0}% of memory is free for new work.")
         });
         let held = s.held_pressure;
@@ -55,7 +55,7 @@ pub fn diagnose(s: &System, now: f64) -> Vec<Finding> {
                 severity,
                 format!(
                     "Memory pressure is {}",
-                    held.unwrap_or(m.pressure).label().to_lowercase()
+                    held.unwrap_or(m.pressure()).label().to_lowercase()
                 ),
                 format!("The system is compressing and swapping to make room.{free}"),
                 "Quit what you aren't using; Top consumers on the Machine page lists who holds the most.",
@@ -67,7 +67,7 @@ pub fn diagnose(s: &System, now: f64) -> Vec<Finding> {
                 "Memory",
                 Severity::Warning,
                 format!("Swap grew {} in the last minute", mib(grown)),
-                format!("{} of swap is in use and still rising, so memory is short.", mib(m.swap_used)),
+                format!("{} of swap is in use and still rising, so memory is short.", mib(m.swap.used_bytes as f64)),
                 "Find the process that keeps growing (By memory on the Machine page) and restart or quit it.",
             ));
         }
@@ -149,15 +149,24 @@ pub fn diagnose(s: &System, now: f64) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::{Fail, Memory, Reading, SWAP_WINDOW, Thermal, Volume};
+    use crate::system::{Fail, Reading, SWAP_WINDOW, Thermal, Volume};
+    use spectra_host::memstate::{MemoryState, PressureLevel, SwapUsage};
 
-    fn mem(pressure: Pressure, swap_used: f64) -> Memory {
-        Memory {
-            physical: 8e9,
-            pressure,
-            free_pct: Some(12.0),
-            swap_used,
-            ..Memory::default()
+    fn mem(pressure: Pressure, swap_used: f64) -> MemoryState {
+        MemoryState {
+            physical_bytes: 8_000_000_000,
+            pressure_level: match pressure {
+                Pressure::Normal => PressureLevel::Normal,
+                Pressure::Warning => PressureLevel::Warning,
+                Pressure::Critical => PressureLevel::Critical,
+                Pressure::Unknown => PressureLevel::Unknown,
+            },
+            pressure_free_percent: 12.0,
+            swap: SwapUsage {
+                used_bytes: swap_used as u64,
+                ..SwapUsage::default()
+            },
+            ..MemoryState::default()
         }
     }
 

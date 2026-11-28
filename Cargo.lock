@@ -110,6 +110,7 @@ dependencies = [
  "kaeawc-spectra-base",
  "kaeawc-spectra-sys",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

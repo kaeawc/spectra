@@ -15,7 +15,7 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use spectra_base::fs::Fs;
 use spectra_base::gojson;
 
@@ -59,7 +59,8 @@ impl std::error::Error for Error {}
 
 /// One PSI line. Avg values are the percentage of wall time, over the trailing window, in which
 /// tasks were stalled.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Line {
     pub avg10: f64,
     pub avg60: f64,
@@ -69,7 +70,8 @@ pub struct Line {
 
 /// The PSI for one resource. "some" means at least one task was stalled; "full" means every
 /// non-idle task was stalled at once. CPU has no meaningful full line at host level.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Resource {
     pub some: Line,
     #[serde(skip_serializing_if = "gojson::is_empty")]
