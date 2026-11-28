@@ -1,0 +1,20 @@
+Spectra v0.0.0-contract (darwin/arm64)
+Capabilities schema: spectra.capabilities v1
+NAME             OUTPUT  RESULT SCHEMA               ARGV
+version          text    -                           version
+inspect          json    spectra.inspect v1          --json <app_path>...
+snapshot         json    spectra.snapshot v1         snapshot --json [--no-apps]
+load             json    spectra.load v1             load --json [--top <n>] [--root <dir>]... [--max-load-per-cpu <x>] [--min-free-gb <gib>] [--backoff-free-gb <gib>] [--sample <duration>]
+orphans          json    spectra.orphans v1          orphans --json [--root <dir>]... [--min-age <duration>]
+owner            json    spectra.owner v1            owner --json [--timeout <duration>] <target>
+owner.under      json    spectra.owner.under v1      owner --under --json [--timeout <duration>] <dir>...
+lineage          json    spectra.lineage v1          lineage --json <pid>
+spawns           json    spectra.spawns v1           spawns --json [--interval <duration>] [--duration <duration>] [--pid <pid>]
+idle             json    spectra.idle v1             idle --json [--root <dir>]... [--pids <pid,...>] [--min-age <duration>] [--max-cpu <pct>] [--window <duration>] [--timeout <duration>]
+devices          json    spectra.devices v1          devices --json [--root <dir>]... [--start-adb] [--all-simulators]
+startup          json    spectra.startup v1          startup list --json [--scope user|system|all] [--include-apple]
+startup.disable  json    spectra.startup.change v1   startup disable <label> --json [--scope user]
+startup.enable   json    spectra.startup.change v1   startup enable <label> --json [--scope user]
+uninstall.plan   json    spectra.uninstall.plan v1   uninstall plan --json <app_path|bundle_id>
+uninstall.apply  json    spectra.uninstall.apply v1  uninstall apply --plan <plan_file> --json [--dry-run] [--quit] [--include-low-confidence] [--data-only] [--leftovers]
+capabilities     json    spectra.capabilities v1     capabilities --json

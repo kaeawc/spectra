@@ -78,6 +78,32 @@ func TestContractCLICases(t *testing.T) {
 	}
 }
 
+// TestContractCapabilitiesCases records `spectra capabilities` (JSON and text)
+// for each OS with the version and architecture injected: the interface list
+// differs by OS. Replayed by crates/cli/tests/contract.rs.
+func TestContractCapabilitiesCases(t *testing.T) {
+	orig := version
+	version = contractVersion
+	defer func() { version = orig }()
+	for _, goos := range []string{"darwin", "linux"} {
+		for _, asJSON := range []bool{true, false} {
+			args := []string{"capabilities"}
+			name := "text-" + goos
+			if asJSON {
+				args = append(args, "--json")
+				name = "json-" + goos
+			}
+			c := contracttest.New(t, "capabilities", name)
+			c.Input(t, map[string]any{"args": args, "os": goos, "arch": "arm64", "version": contractVersion})
+			var stdout bytes.Buffer
+			if err := writeCapabilities(&stdout, asJSON, goos, "arm64"); err != nil {
+				t.Fatal(err)
+			}
+			c.Expect(t, stdout.Bytes(), 0)
+		}
+	}
+}
+
 // captureStdio runs fn with os.Stdout and os.Stderr redirected to pipes and
 // returns what it wrote to each.
 func captureStdio(t *testing.T, fn func()) (stdout, stderr []byte) {

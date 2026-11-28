@@ -21,6 +21,8 @@ pub const DEV_VERSION: &str = "dev";
 pub struct Ctx {
     /// The OS to behave as; [`Kind::Unknown`] means the host.
     pub os: Kind,
+    /// The architecture to report, as Go's `runtime.GOARCH` names it; empty means the host's.
+    pub arch: String,
     pub env: Arc<dyn Env>,
     pub clock: Arc<dyn Clock>,
     pub sleeper: Arc<dyn Sleeper>,
@@ -42,6 +44,7 @@ impl Ctx {
             logger::new(logger::Config { writer: None, format: Format::Text, level: Some(Level::Debug), clock: Some(Arc::clone(&clock)) });
         Ctx {
             os: Kind::Unknown,
+            arch: String::new(),
             env: Arc::new(SystemEnv),
             clock,
             sleeper: Arc::new(SystemSleeper),
@@ -89,4 +92,21 @@ pub fn unsupported(command: &str, os: Kind) -> Option<spectra_base::hostos::Comm
     let os = os.resolve();
     let d = crate::unsupported::darwin_only(command)?;
     (os != Kind::Darwin).then(|| Unsupported::new(d.feature, os).command_report(command, d.hint))
+}
+
+/// Go's `runtime.GOARCH` for the host (Rust names the same two architectures `aarch64` and
+/// `x86_64`).
+pub fn host_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "amd64",
+        other => other,
+    }
+}
+
+/// What `spectra capabilities` reports: the manifest of the machine-readable interfaces this
+/// build supports on `ctx.os` (Go's `capabilities.Build(version, GOOS, GOARCH)`).
+pub fn capabilities(ctx: &Ctx) -> spectra_protocol::SpectraCapabilities {
+    let arch = if ctx.arch.is_empty() { host_arch() } else { ctx.arch.as_str() };
+    crate::capabilities::build(&ctx.version, ctx.os.resolve(), arch)
 }

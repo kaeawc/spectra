@@ -4,6 +4,7 @@
 //! [`Ctx`].
 
 pub mod api;
+pub mod capabilities;
 pub mod dispatch;
 pub mod flags;
 pub mod help;

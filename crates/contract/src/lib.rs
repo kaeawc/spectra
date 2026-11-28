@@ -12,6 +12,8 @@
 //!
 //! A Rust test runs the port with these seams and calls [`Case::assert_stdout`].
 
+pub mod shape;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

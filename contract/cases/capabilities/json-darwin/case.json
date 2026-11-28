@@ -1,0 +1,9 @@
+{
+  "arch": "arm64",
+  "args": [
+    "capabilities",
+    "--json"
+  ],
+  "os": "darwin",
+  "version": "v0.0.0-contract"
+}

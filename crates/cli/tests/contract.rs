@@ -120,3 +120,50 @@ fn unsupported_text_matches_go_through_dispatch() {
         assert_case(case, code, &out, &err);
     }
 }
+
+#[derive(Deserialize)]
+struct CapabilitiesInput {
+    args: Vec<String>,
+    os: String,
+    arch: String,
+    version: String,
+}
+
+fn kind_of(os: &str) -> Kind {
+    match os {
+        "darwin" => Kind::Darwin,
+        "linux" => Kind::Linux,
+        other => panic!("unknown os {other}"),
+    }
+}
+
+/// `capabilities` and `capabilities --json` on each OS, byte for byte (the interface list
+/// differs by OS). The host running the test does not matter: the OS comes from the `Ctx`.
+#[test]
+fn capabilities_match_go_through_dispatch() {
+    let cases = spectra_contract::cases("capabilities");
+    let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["json-darwin", "json-linux", "text-darwin", "text-linux"]);
+    for case in &cases {
+        let input: CapabilitiesInput = case.input();
+        let ctx = Ctx { arch: input.arch.clone(), ..ctx(case, kind_of(&input.os), &input.version) };
+        let (code, out, err) = run(&ctx, &input.args);
+        assert_case(case, code, &out, &err);
+        assert!(err.is_empty(), "{}: nothing on stderr", case.name);
+    }
+}
+
+/// The protocol crate accepts what the Rust build prints, and the OS-specific interfaces are
+/// where the cases say.
+#[test]
+fn capabilities_json_decodes_with_the_protocol_crate() {
+    for case in spectra_contract::cases("capabilities").iter().filter(|c| c.name.starts_with("json-")) {
+        let input: CapabilitiesInput = case.input();
+        let ctx = Ctx { arch: input.arch.clone(), ..ctx(case, kind_of(&input.os), &input.version) };
+        let (_, out, _) = run(&ctx, &input.args);
+        let m = spectra_protocol::decode_spectra_capabilities(&out).unwrap_or_else(|e| panic!("{}: {e}", case.name));
+        assert_eq!((m.os.as_str(), m.arch.as_str(), m.spectra_version.as_str()), (input.os.as_str(), "arm64", input.version.as_str()));
+        assert_eq!(m.interface("inspect").is_some(), input.os == "darwin", "{}", case.name);
+        assert_eq!(m.interface("startup").is_some(), input.os == "darwin", "{}", case.name);
+    }
+}

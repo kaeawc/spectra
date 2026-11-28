@@ -111,7 +111,7 @@ pub const SUBCOMMANDS: &[Subcommand] = &[
     pending("whatswrong", "Ranked whole-system triage: why is this Mac slow right now?"),
     pending("cache", "Manage the local blob cache (stats, clear)"),
     ported("version", "Print Spectra version and exit", run_version),
-    pending("capabilities", "Describe the machine-readable interfaces this build supports"),
+    ported("capabilities", "Describe the machine-readable interfaces this build supports", crate::capabilities::run),
     ported("help", "Show this help text", run_help),
 ];
 
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn not_yet_ported_commands_say_so_and_print_nothing_on_stdout() {
-        for args in [&["memory", "--json"][..], &["capabilities"], &["snapshot", "-h"]] {
+        for args in [&["memory", "--json"][..], &["snapshot", "-h"]] {
             let (code, out, err) = run_on(Kind::Linux, args);
             assert_eq!(code, EXIT_NOT_PORTED, "{args:?}");
             assert_eq!(out, "", "{args:?}");

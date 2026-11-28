@@ -1,0 +1,14 @@
+Spectra v0.0.0-contract (linux/arm64)
+Capabilities schema: spectra.capabilities v1
+NAME             OUTPUT  RESULT SCHEMA               ARGV
+version          text    -                           version
+snapshot         json    spectra.snapshot v1         snapshot --json [--no-apps]
+load             json    spectra.load v1             load --json [--top <n>] [--root <dir>]... [--max-load-per-cpu <x>] [--min-free-gb <gib>] [--backoff-free-gb <gib>] [--sample <duration>]
+orphans          json    spectra.orphans v1          orphans --json [--root <dir>]... [--min-age <duration>]
+owner            json    spectra.owner v1            owner --json [--timeout <duration>] <target>
+owner.under      json    spectra.owner.under v1      owner --under --json [--timeout <duration>] <dir>...
+lineage          json    spectra.lineage v1          lineage --json <pid>
+spawns           json    spectra.spawns v1           spawns --json [--interval <duration>] [--duration <duration>] [--pid <pid>]
+idle             json    spectra.idle v1             idle --json [--root <dir>]... [--pids <pid,...>] [--min-age <duration>] [--max-cpu <pct>] [--window <duration>] [--timeout <duration>]
+devices          json    spectra.devices v1          devices --json [--root <dir>]... [--start-adb] [--all-simulators]
+capabilities     json    spectra.capabilities v1     capabilities --json
