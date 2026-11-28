@@ -65,9 +65,9 @@ impl fmt::Display for ErrorCode {
 /// The `error` object of a response (Go's `v1.Error`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct WireError {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub code: ErrorCode,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub message: String,
 }
 

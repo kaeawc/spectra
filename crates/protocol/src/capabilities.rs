@@ -12,16 +12,16 @@ use crate::result::check_result_schema;
 /// A named, versioned result schema.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct SchemaRef {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub version: i64,
 }
 
 /// One operation a peer offers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct OperationCapability {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub name: Operation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_schema: Option<SchemaRef>,
@@ -30,11 +30,11 @@ pub struct OperationCapability {
 /// The limits a peer enforces.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Limits {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub max_request_bytes: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub max_response_bytes: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub max_timeout_ms: i64,
 }
 
@@ -43,13 +43,13 @@ pub struct Limits {
 pub struct CapabilityManifest {
     #[serde(default)]
     pub protocol_versions: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub spectra_version: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub agent_version: String,
     #[serde(default)]
     pub operations: Option<Vec<OperationCapability>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub limits: Limits,
 }
 
