@@ -1,0 +1,72 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-11-21T23:23:18.521967-05:00",
+      "process": "Finder",
+      "pid": 685,
+      "sender": "CoreServicesInternal",
+      "sender_image_path": "/System/Library/PrivateFrameworks/CoreServicesInternal.framework/Versions/A/CoreServicesInternal",
+      "event_type": "activityCreateEvent",
+      "thread_id": 57380453,
+      "event_message": "CFURLCreateBookmarkData",
+      "activity_id": 108462766,
+      "trace_id": 324738293952676098
+    },
+    {
+      "timestamp": "2026-11-21T23:23:18.521969-05:00",
+      "process": "Finder",
+      "pid": 685,
+      "sender": "CoreServicesInternal",
+      "sender_image_path": "/System/Library/PrivateFrameworks/CoreServicesInternal.framework/Versions/A/CoreServicesInternal",
+      "subsystem": "com.apple.FileURL",
+      "category": "bookmark",
+      "event_type": "logEvent",
+      "log_type": "Info",
+      "message_type": "Info",
+      "thread_id": 57380453,
+      "event_message": "ShouldForceRevocable: false, not a Mac Catalyst app",
+      "format_string": "%s: %{bool}d, %s",
+      "activity_id": 108462766,
+      "trace_id": 324739131504918788
+    },
+    {
+      "timestamp": "2026-11-21T23:23:18.532517-05:00",
+      "process": "Finder",
+      "pid": 685,
+      "sender": "CarbonCore",
+      "sender_image_path": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/CarbonCore",
+      "subsystem": "com.apple.CarbonCore",
+      "category": "FileIDMap",
+      "event_type": "logEvent",
+      "log_type": "Error",
+      "message_type": "Error",
+      "thread_id": 57380453,
+      "event_message": "FileIDTreeGetVRefNumForDevice(556160411) returned -36",
+      "format_string": "FileIDTreeGetVRefNumForDevice(%d) returned %d",
+      "trace_id": 323458260588040196
+    },
+    {
+      "timestamp": "2026-11-21T23:23:39.362251-05:00",
+      "process": "Finder",
+      "pid": 685,
+      "sender": "Finder",
+      "sender_image_path": "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+      "subsystem": "com.apple.Finder",
+      "category": "Trash",
+      "event_type": "logEvent",
+      "log_type": "Default",
+      "message_type": "Default",
+      "thread_id": 57398361,
+      "event_message": "Checking empty state isEmpty=0",
+      "format_string": "%{public}s",
+      "trace_id": 46406881148796932
+    },
+    {
+      "timestamp": "0001-01-01T00:00:00Z",
+      "process": ".",
+      "sender": "."
+    }
+  ],
+  "clock": {},
+  "query_duration": 3037868250
+}

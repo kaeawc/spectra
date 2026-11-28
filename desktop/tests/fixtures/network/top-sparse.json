@@ -1,0 +1,11 @@
+{
+  "totals": null,
+  "processes": [
+    {"pid": 77, "command": "syncd", "bytes_in": null, "bytes_out": 2048, "remotes": ["10.0.0.2:443", null, 7]},
+    {"pid": 78, "command": null, "bytes_in": 512},
+    {"command": "no pid", "bytes_in": 99999},
+    {"pid": 79, "command": "idle", "bytes_in": 0, "bytes_out": 0},
+    "not an object",
+    {"pid": 80, "command": "Slack\\x20", "bytes_in": "4096", "avg_in_bytes_per_sec": "819.2"}
+  ]
+}

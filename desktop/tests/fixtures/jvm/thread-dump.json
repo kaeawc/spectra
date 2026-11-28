@@ -1,0 +1,201 @@
+{
+ "summary": {
+  "total": 17,
+  "daemon": 10,
+  "virtual": 0,
+  "by_state": {
+   "BLOCKED": 2,
+   "RUNNABLE": 8,
+   "TIMED_WAITING": 6,
+   "WAITING": 1
+  },
+  "by_category": {
+   "monitor": 2,
+   "park": 1,
+   "running": 8,
+   "sleeping": 5,
+   "wait": 1
+  },
+  "monitor_locks": {
+   "<0x0000007080015a38>": 1,
+   "<0x0000007080015a48>": 1
+  },
+  "deadlocks": 1
+ },
+ "dump": {
+  "runtime": "jvm",
+  "captured_at": "2026-11-21T17:11:48.284726-05:00",
+  "threads": [
+   {
+    "name": "main",
+    "runtime_id": "1",
+    "native_id": "5891",
+    "state": "TIMED_WAITING",
+    "category": "sleeping",
+    "detail": "sleeping",
+    "top_frame": "java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+     "at java.lang.Thread.sleep(java.base@21.0.13.1/Thread.java:509)",
+     "at Lab.main(Lab.java:10)"
+    ],
+    "raw_block": "\"main\" #1 [5891] prio=5 os_prio=31 cpu=31.90ms elapsed=9.89s tid=0x00000001030700a0 nid=5891 waiting on condition  [0x000000016d872000]\n   java.lang.Thread.State: TIMED_WAITING (sleeping)\n\tat java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)\n\tat java.lang.Thread.sleep(java.base@21.0.13.1/Thread.java:509)\n\tat Lab.main(Lab.java:10)"
+   },
+   {
+    "name": "Reference Handler",
+    "runtime_id": "9",
+    "native_id": "29955",
+    "daemon": true,
+    "state": "RUNNABLE",
+    "category": "running",
+    "top_frame": "java.lang.ref.Reference.waitForReferencePendingList(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at java.lang.ref.Reference.waitForReferencePendingList(java.base@21.0.13.1/Native Method)",
+     "at java.lang.ref.Reference.processPendingReferences(java.base@21.0.13.1/Reference.java:246)",
+     "at java.lang.ref.Reference$ReferenceHandler.run(java.base@21.0.13.1/Reference.java:208)"
+    ]
+   },
+   {
+    "name": "Signal Dispatcher",
+    "runtime_id": "11",
+    "native_id": "29443",
+    "daemon": true,
+    "state": "RUNNABLE",
+    "category": "running"
+   },
+   {
+    "name": "Common-Cleaner",
+    "runtime_id": "27",
+    "native_id": "28163",
+    "daemon": true,
+    "state": "TIMED_WAITING",
+    "category": "park",
+    "detail": "parking",
+    "lock": "<0x0000007080013740>",
+    "top_frame": "jdk.internal.misc.Unsafe.park(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at jdk.internal.misc.Unsafe.park(java.base@21.0.13.1/Native Method)",
+     "at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.13.1/LockSupport.java:269)",
+     "at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@21.0.13.1/AbstractQueuedSynchronizer.java:1886)",
+     "at java.lang.ref.ReferenceQueue.await(java.base@21.0.13.1/ReferenceQueue.java:71)",
+     "at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.13.1/ReferenceQueue.java:143)",
+     "at java.lang.ref.ReferenceQueue.remove(java.base@21.0.13.1/ReferenceQueue.java:218)",
+     "at jdk.internal.ref.CleanerImpl.run(java.base@21.0.13.1/CleanerImpl.java:140)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)",
+     "at jdk.internal.misc.InnocuousThread.run(java.base@21.0.13.1/InnocuousThread.java:186)"
+    ]
+   },
+   {
+    "name": "lab-worker-1",
+    "runtime_id": "28",
+    "native_id": "27651",
+    "state": "BLOCKED",
+    "category": "monitor",
+    "detail": "on object monitor",
+    "lock": "<0x0000007080015a38>",
+    "top_frame": "Lab.lambda$main$0(Lab.java:6)",
+    "stack": [
+     "at Lab.lambda$main$0(Lab.java:6)",
+     "at Lab$$Lambda/0x0000000801000a08.run(Unknown Source)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)"
+    ]
+   },
+   {
+    "name": "lab-worker-2",
+    "runtime_id": "29",
+    "native_id": "27139",
+    "state": "BLOCKED",
+    "category": "monitor",
+    "detail": "on object monitor",
+    "lock": "<0x0000007080015a48>",
+    "top_frame": "Lab.lambda$main$1(Lab.java:7)",
+    "stack": [
+     "at Lab.lambda$main$1(Lab.java:7)",
+     "at Lab$$Lambda/0x0000000801000c28.run(Unknown Source)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)"
+    ]
+   },
+   {
+    "name": "lab-sleeper-0",
+    "runtime_id": "30",
+    "native_id": "32771",
+    "state": "TIMED_WAITING",
+    "category": "sleeping",
+    "detail": "sleeping",
+    "top_frame": "java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+     "at java.lang.Thread.sleep(java.base@21.0.13.1/Thread.java:509)",
+     "at Lab.sleep(Lab.java:12)",
+     "at Lab.lambda$main$2(Lab.java:9)",
+     "at Lab$$Lambda/0x0000000801001000.run(Unknown Source)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)"
+    ]
+   },
+   {
+    "name": "lab-sleeper-1",
+    "runtime_id": "31",
+    "native_id": "43267",
+    "state": "TIMED_WAITING",
+    "category": "sleeping",
+    "detail": "sleeping",
+    "top_frame": "java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+     "at java.lang.Thread.sleep(java.base@21.0.13.1/Thread.java:509)",
+     "at Lab.sleep(Lab.java:12)",
+     "at Lab.lambda$main$2(Lab.java:9)",
+     "at Lab$$Lambda/0x0000000801001000.run(Unknown Source)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)"
+    ]
+   },
+   {
+    "name": "lab-sleeper-2",
+    "runtime_id": "32",
+    "native_id": "43011",
+    "state": "TIMED_WAITING",
+    "category": "sleeping",
+    "detail": "sleeping",
+    "top_frame": "java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+    "stack": [
+     "at java.lang.Thread.sleep0(java.base@21.0.13.1/Native Method)",
+     "at java.lang.Thread.sleep(java.base@21.0.13.1/Thread.java:509)",
+     "at Lab.sleep(Lab.java:12)",
+     "at Lab.lambda$main$2(Lab.java:9)",
+     "at Lab$$Lambda/0x0000000801001000.run(Unknown Source)",
+     "at java.lang.Thread.runWith(java.base@21.0.13.1/Thread.java:1596)",
+     "at java.lang.Thread.run(java.base@21.0.13.1/Thread.java:1583)"
+    ]
+   }
+  ],
+  "deadlocks": [
+   {
+    "threads": [
+     "lab-worker-1",
+     "lab-worker-2"
+    ],
+    "locks": [
+     "<0x0000007080015a48> (a java.lang.Object)",
+     "<0x0000007080015a38> (a java.lang.Object)"
+    ],
+    "waits": [
+     {
+      "thread": "lab-worker-1",
+      "lock": "<0x0000007080015a48> (a java.lang.Object)",
+      "held_by": "lab-worker-2"
+     },
+     {
+      "thread": "lab-worker-2",
+      "lock": "<0x0000007080015a38> (a java.lang.Object)",
+      "held_by": "lab-worker-1"
+     }
+    ]
+   }
+  ]
+ }
+}

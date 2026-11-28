@@ -1,0 +1,40 @@
+{
+  "status": {
+    "running": true,
+    "percent": 0.42,
+    "client_id": "com.apple.backupd",
+    "backup_phase": "Copying",
+    "first_backup": false
+  },
+  "destinations": [
+    {
+      "id": "6A1B2C3D-0000-0000-0000-000000000000",
+      "name": "Backup",
+      "kind": "Local",
+      "mount_point": "/Volumes/Backup",
+      "bytes_available": 2748779069440,
+      "bytes_used": 1209462790553,
+      "quota_gb": 0,
+      "encrypted": true
+    }
+  ],
+  "local_snapshots": [
+    {
+      "name": "com.apple.TimeMachine.2026-11-21-093012.local",
+      "date": "2026-11-21T09:30:12Z",
+      "volume": "/"
+    },
+    {
+      "name": "com.apple.TimeMachine.2026-11-21-103540.local",
+      "volume": "/System/Volumes/Data"
+    },
+    {
+      "name": "com.apple.TimeMachine.2026-11-21-113702.local",
+      "date": null,
+      "volume": null
+    }
+  ],
+  "auto_backup_enabled": true,
+  "scheduler_loaded": true,
+  "collected_at": "2026-11-21T12:00:00Z"
+}

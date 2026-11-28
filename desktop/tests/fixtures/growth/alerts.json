@@ -1,0 +1,8 @@
+[
+ {"id": "0a1", "key": "load.high", "severity": "critical", "title": "Host load is critical", "detail": "1-minute load 21.4 across 10 CPUs", "state": "firing", "fired_at": "2026-11-20T11:52:10.130624Z"},
+ {"id": "0a2", "key": "load.climbing", "severity": "warn", "title": "Load climbing", "detail": "1-minute load 9.8 is rising", "state": "resolved", "fired_at": "2026-11-20T10:05:30.5Z", "resolved_at": "2026-11-20T10:21:00.560466Z"},
+ {"id": "0a3", "key": "disk.free", "severity": "warn", "title": "Low disk space", "detail": "6.1 GB free", "state": "resolved", "fired_at": "2026-11-19T22:14:00Z", "resolved_at": "2026-11-19T23:00:00Z"},
+ {"id": "0a4", "key": "kind.count:builds", "severity": "warn", "title": "Many build processes", "detail": "3 processes", "state": "resolved", "fired_at": "2026-11-19T20:00:00Z", "resolved_at": "2026-11-19T20:30:00Z"},
+ {"id": "0a5", "key": "spawn.rate", "severity": "critical", "title": "Processes are starting fast", "detail": "121 new/s; 2112 procs for uid 501; top parent: launchd (pid 1, 491 children)", "state": "resolved", "fired_at": "2026-11-19T18:00:00Z", "resolved_at": "2026-11-19T18:05:00Z"},
+ {"id": "0a6", "key": "memory.pressure", "severity": "warn", "title": "Memory pressure is elevated", "detail": "swap in use: 1843 MB", "state": "resolved", "fired_at": "2026-11-18T09:00:00Z", "resolved_at": "2026-11-18T09:40:00Z"}
+]

@@ -1,0 +1,15 @@
+{
+  "protocol_version": "v1",
+  "request_id": "c0ffee04",
+  "result": {
+    "schema": {"name": "spectra.jvm.list", "version": 1},
+    "spectra_version": "0.42.0",
+    "data": {
+      "jvms": [
+        {"pid":2210,"main_class":"org.gradle.launcher.daemon.bootstrap.GradleDaemon","jdk_vendor":"Eclipse Adoptium","jdk_version":"21.0.5","vm_args":"-Xmx4g -XX:+HeapDumpOnOutOfMemoryError","thread_count":96,"gc":{"s0c":0,"s1c":32768,"s0u":0,"s1u":32768,"ec":786432,"eu":524288,"oc":2621440,"ou":2359296,"mc":196608,"mu":188416,"ygc":412,"fgc":3,"fgct":2.4,"gct":18.7},"classes":{"loaded":41250}},
+        {"pid":2288,"main_class":"org.jetbrains.kotlin.daemon.KotlinCompileDaemon","jdk_vendor":"Eclipse Adoptium","jdk_version":"21.0.5","vm_args":"-Xmx2g","thread_count":61,"gc":{"s0c":0,"s1c":16384,"s0u":0,"s1u":8192,"ec":393216,"eu":131072,"oc":1048576,"ou":655360,"mc":131072,"mu":122880,"ygc":120,"fgc":0,"fgct":0.0,"gct":3.1},"classes":{"loaded":22800}},
+        {"pid":2301,"main_class":"worker.org.gradle.process.internal.worker.GradleWorkerMain","jdk_vendor":"Eclipse Adoptium","jdk_version":"21.0.5","vm_args":"-Xmx1g","thread_count":40,"gc":{"s0c":0,"s1c":8192,"s0u":0,"s1u":4096,"ec":196608,"eu":98304,"oc":262144,"ou":131072,"mc":65536,"mu":61440,"ygc":35,"fgc":0,"fgct":0.0,"gct":0.6},"classes":{"loaded":9800}}
+      ]
+    }
+  }
+}

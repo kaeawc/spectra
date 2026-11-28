@@ -1,0 +1,16 @@
+[
+  {
+    "time": "2026-11-20 04:30:00.00 -0500",
+    "process": "notehelper",
+    "reason": "resident memory crossed a high-watermark limit",
+    "limit": "300",
+    "observed": "512",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/notehelper-2026-11-20-043000.ips"
+  },
+  {
+    "time": "2026-11-19 21:03:17.00 -0500",
+    "process": "previewrenderer",
+    "reason": "jetsam / low-memory kill",
+    "file": "/Users/user/Library/Logs/DiagnosticReports/JetsamEvent-2026-11-19-210317.ips"
+  }
+]

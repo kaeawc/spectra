@@ -1,0 +1,91 @@
+{
+ "histogram": {
+  "entries": [
+   {
+    "rank": 1,
+    "instances": 8065,
+    "bytes": 13851920,
+    "class_name": "[B",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 2,
+    "instances": 7778,
+    "bytes": 186672,
+    "class_name": "java.lang.String",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 3,
+    "instances": 1507,
+    "bytes": 186408,
+    "class_name": "java.lang.Class",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 4,
+    "instances": 1047,
+    "bytes": 129912,
+    "class_name": "[Ljava.lang.Object;",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 5,
+    "instances": 1334,
+    "bytes": 44080,
+    "class_name": "[I",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 6,
+    "instances": 1091,
+    "bytes": 34912,
+    "class_name": "java.util.concurrent.ConcurrentHashMap$Node",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 7,
+    "instances": 8,
+    "bytes": 33560,
+    "class_name": "[C",
+    "module": "java.base@21.0.13.1"
+   },
+   {
+    "rank": 8,
+    "instances": 1022,
+    "bytes": 32704,
+    "class_name": "java.util.HashMap$Node",
+    "module": "java.base@21.0.13.1"
+   }
+  ],
+  "total": {
+   "rank": 0,
+   "instances": 27782,
+   "bytes": 14733912,
+   "class_name": "Total"
+  },
+  "skipped": [
+   "96728:"
+  ]
+ },
+ "suspects": [
+  {
+   "class_name": "[B",
+   "reason": "largest live shallow size in class histogram",
+   "instances": 8065,
+   "bytes": 13851920
+  },
+  {
+   "class_name": "java.lang.String",
+   "reason": "largest live shallow size in class histogram",
+   "instances": 7778,
+   "bytes": 186672
+  },
+  {
+   "class_name": "java.lang.Class",
+   "reason": "largest live shallow size in class histogram",
+   "instances": 1507,
+   "bytes": 186408
+  }
+ ]
+}

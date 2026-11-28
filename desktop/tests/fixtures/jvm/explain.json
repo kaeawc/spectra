@@ -1,0 +1,45 @@
+{
+ "pid": 96728,
+ "jdk_vendor": "Homebrew",
+ "jdk_version": "21.0.13.1",
+ "java_home": "/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home",
+ "vm_args": "-XX:NativeMemoryTracking=summary",
+ "observations": [
+  {
+   "id": "old-gen-occupancy",
+   "severity": "info",
+   "summary": "Old generation is 11% used.",
+   "evidence": "14389 KiB used / 131072 KiB capacity"
+  },
+  {
+   "id": "full-gc-count",
+   "severity": "info",
+   "summary": "Full GC has run 1 times.",
+   "evidence": "0.006s full-GC time, 0.006s total GC time"
+  },
+  {
+   "id": "classloader-footprint",
+   "severity": "info",
+   "summary": "3 classloaders account for 929 loaded classes.",
+   "evidence": "4.29 MiB metaspace chunks, 0.50 MiB blocks"
+  },
+  {
+   "id": "code-cache-use",
+   "severity": "info",
+   "summary": "Code cache is 1% used.",
+   "evidence": "3416 KiB used / 245760 KiB reserved; nmethods=274, adapters=312, full_count=0",
+   "recommendation": "High nmethod use means JIT-compiled Java methods dominate code cache; adapters/non-nmethods are JVM glue. Investigate only if free space is low or full_count increases."
+  },
+  {
+   "id": "native-memory-available",
+   "severity": "info",
+   "summary": "Native memory committed 313MiB across 20 categories.",
+   "evidence": "Top by committed size: Java Heap 160MiB, Thread 64MiB, GC 63MiB, Code 7MiB, Arena Chunk 1MiB",
+   "recommendation": "Compare category growth across two summaries to localize a native leak: Thread = stacks, Class = metaspace/classloaders, Code = JIT, Internal/Other = direct buffers & JNI."
+  }
+ ],
+ "soft_refs": {
+  "instances": 0,
+  "bytes": 0
+ }
+}

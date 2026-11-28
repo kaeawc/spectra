@@ -1,0 +1,11 @@
+{
+  "causes": [
+    {
+      "severity": "medium",
+      "title": "mds_stores sustained high CPU",
+      "detail": "mds_stores (pid 412) averaged 87% CPU for 3h0m0s since 2026-11-22T07:00:00Z; up 5h0m0s (started 2026-11-22T05:00:00Z); owner chain: launchd(1) > mds(300) > mds_stores(412); hint: Spotlight is re-indexing or a client keeps triggering indexing; check `mdutil -s /` and recently changed large directories; sample top of stack: 412 __psynch_cvwait | 88 mach_msg2_trap; next: sample 412 10 [probe unavailable: ps has failed for several consecutive ticks; this alert is not being re-evaluated and may be stale]"
+    }
+  ],
+  "families": null,
+  "trend": "load 4.10/3.90/3.20"
+}

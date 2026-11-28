@@ -1,0 +1,72 @@
+[
+  {
+    "ID": "snap-20261122T121540Z-1001",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-11-22T12:15:40.477356Z",
+    "Kind": "live",
+    "Tag": "",
+    "Name": "",
+    "SpectraVer": "1.0.0",
+    "AppCount": 49
+  },
+  {
+    "ID": "snap-20261122T121519Z-1002",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-11-22T12:15:19.363332Z",
+    "Kind": "live",
+    "Tag": "",
+    "Name": "",
+    "SpectraVer": "1.0.0",
+    "AppCount": 49
+  },
+  {
+    "ID": "snap-20261122T121459Z-1003",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-11-22T12:14:59.157463Z",
+    "Kind": "live",
+    "Tag": "",
+    "Name": "",
+    "SpectraVer": "1.0.0",
+    "AppCount": 49
+  },
+  {
+    "ID": "snap-20261122T121449Z-1004",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-11-22T12:14:49.555821Z",
+    "Kind": "baseline",
+    "Tag": "",
+    "Name": "Before the Xcode update",
+    "SpectraVer": "1.0.0",
+    "AppCount": 49
+  },
+  {
+    "ID": "snap-20261122T120241Z-1005",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-11-22T12:02:41.700652Z",
+    "Kind": "live",
+    "Tag": "",
+    "Name": "",
+    "SpectraVer": "1.0.0",
+    "AppCount": 49
+  },
+  {
+    "ID": "snap-20260905T172543Z-1006",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-09-05T17:25:43.364194Z",
+    "Kind": "live",
+    "Tag": "",
+    "Name": "",
+    "SpectraVer": "1.0.0",
+    "AppCount": 42
+  },
+  {
+    "ID": "snap-20260515T011539Z-1007",
+    "MachineUUID": "00000000-0000-0000-0000-000000000000",
+    "TakenAt": "2026-05-15T01:15:39.361812Z",
+    "Kind": "baseline",
+    "Tag": "",
+    "Name": "Fresh install",
+    "SpectraVer": "1.0.0",
+    "AppCount": 61
+  }
+]

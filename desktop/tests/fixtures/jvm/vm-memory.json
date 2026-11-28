@@ -1,0 +1,28 @@
+{
+ "pid": 96728,
+ "heap_info": {
+  "command": [
+   "jcmd",
+   "96728",
+   "GC.heap_info"
+  ],
+  "output": "96728:\n garbage-first heap   total 163840K, used 17314K [0x0000007001000000, 0x000000777f000000)\n  region size 16384K, 1 young (16384K), 0 survivors (0K)\n Metaspace       used 205K, committed 384K, reserved 1114112K\n  class space    used 12K, committed 128K, reserved 1048576K"
+ },
+ "code_cache": {
+  "command": [
+   "jcmd",
+   "96728",
+   "Compiler.codecache"
+  ],
+  "output": "96728:\nCodeHeap 'non-profiled nmethods': size=119168Kb used=44Kb max_used=44Kb free=119123Kb\n bounds [0x00000001301a4000, 0x0000000130414000, 0x0000000137604000]\nCodeHeap 'profiled nmethods': size=119152Kb used=113Kb max_used=113Kb free=119038Kb\n bounds [0x0000000128604000, 0x0000000128874000, 0x000000012fa60000]\nCodeHeap 'non-nmethods': size=7440Kb used=1236Kb max_used=1243Kb free=6203Kb\n bounds [0x000000012fa60000, 0x000000012fcd0000, 0x00000001301a4000]\nCodeCache: size=245760Kb, used=1393Kb, max_used=1400Kb, free=244364Kb\n total_blobs=478, nmethods=119, adapters=268, full_count=0\nCompilation: enabled, stopped_count=0, restarted_count=0"
+ },
+ "native_memory": {
+  "command": [
+   "jcmd",
+   "96728",
+   "VM.native_memory",
+   "summary"
+  ],
+  "output": "96728:\n\nNative Memory Tracking:\n\nTotal: reserved=33557414KB, committed=312454KB\n"
+ }
+}

@@ -1,0 +1,30 @@
+{
+  "causes": null,
+  "families": [
+    {
+      "key": "browser:Google Chrome",
+      "kind": "browser",
+      "name": "Google Chrome",
+      "members": 12,
+      "cpu_pct": 3.2,
+      "share_pct": 21.5,
+      "rss_kib": 2457600,
+      "age_seconds": 7200,
+      "heaviest": null
+    }
+  ],
+  "signals": {
+    "load": {
+      "memory_pressure": "normal",
+      "pressure_level": 1,
+      "swap_used_mb": 0,
+      "swap_total_mb": 0
+    },
+    "power": {
+      "on_battery": false,
+      "thermal_throttled": false,
+      "assertions": null,
+      "energy_top_users": null
+    }
+  }
+}

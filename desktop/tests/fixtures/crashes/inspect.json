@@ -1,0 +1,52 @@
+{
+  "process": "WidgetHostService",
+  "version": "2.4",
+  "bundle_id": "com.example.WidgetHostService",
+  "path": "/System/Library/PrivateFrameworks/WidgetHost.framework/XPCServices/WidgetHostService.xpc/WidgetHostService",
+  "os_version": "macOS 26.1 (25B78)",
+  "time": "2026-11-20 06:20:00.00 -0500",
+  "incident_id": "0B7C1E52-4A10-4C3E-9F21-7D3A5B8E0003",
+  "pid": 4821,
+  "kind": "crash",
+  "bug_type": "309",
+  "exception": "EXC_BREAKPOINT (SIGTRAP)",
+  "exception_detail": "trap/breakpoint (Swift fatalError/precondition, or a debugger trap)",
+  "signal": "SIGTRAP",
+  "codes": "0x0000000000000001, 0x00000001a2b3c4d0",
+  "termination": "Trace/BPT trap: 5",
+  "faulting_thread": 2,
+  "threads": [
+    {
+      "index": 0,
+      "queue": "com.apple.main-thread",
+      "frames": [
+        "libsystem_kernel.dylib`mach_msg2_trap + 8",
+        "CoreFoundation`__CFRunLoopRun + 1212"
+      ]
+    },
+    {
+      "index": 1,
+      "frames": ["libsystem_pthread.dylib`start_wqthread + 8"]
+    },
+    {
+      "index": 2,
+      "name": "render",
+      "queue": "com.example.widget.render",
+      "triggered": true,
+      "frames": [
+        "libswiftCore.dylib`_assertionFailure(_:_:file:line:flags:) + 208",
+        "WidgetKitCore`TimelineCache.entry(for:) + 344",
+        "WidgetKitCore`TimelineCache.refresh(_:) + 96",
+        "WidgetHostService + 0x1a2c4",
+        "WidgetHostService + 0x18f10",
+        "libdispatch.dylib`_dispatch_call_block_and_release + 32",
+        "libdispatch.dylib`_dispatch_client_callout + 20",
+        "libdispatch.dylib`_dispatch_lane_serial_drain + 744",
+        "libdispatch.dylib`_dispatch_lane_invoke + 432",
+        "libdispatch.dylib`_dispatch_root_queue_drain_deferred_wlh + 292",
+        "libdispatch.dylib`_dispatch_workloop_worker_thread + 540",
+        "libsystem_pthread.dylib`_pthread_wqthread + 288"
+      ]
+    }
+  ]
+}

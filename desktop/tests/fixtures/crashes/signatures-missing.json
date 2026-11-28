@@ -1,0 +1,18 @@
+[
+  {
+    "process": "mediascand",
+    "top_frame": "libsystem_kernel.dylib`__pthread_kill + 8",
+    "count": 2,
+    "last_seen": "not a time"
+  },
+  {
+    "process": "printqueued",
+    "exception": null,
+    "count": null,
+    "first_seen": "2026-11-19 10:00:00.00 -0500",
+    "last_seen": "2026-11-19 10:00:00.00 -0500",
+    "sample_file": "/Users/user/Library/Logs/DiagnosticReports/printqueued-2026-11-19-100000.ips",
+    "added_later": {"ignored": true}
+  },
+  {}
+]

@@ -1,0 +1,99 @@
+(lldb) script exec(bytes.fromhex('696d706f7274206c6c6462').decode())
+WidgetKitCore`TimelineCache.entry(for:):
+WidgetKitCore[0x2a1c40e00] <+0>:   pacibsp
+WidgetKitCore[0x2a1c40e04] <+4>:   sub    sp, sp, #0x60
+WidgetKitCore[0x2a1c40e08] <+8>:   stp    x22, x21, [sp, #0x30]
+WidgetKitCore[0x2a1c40e0c] <+12>:  stp    x20, x19, [sp, #0x40]
+WidgetKitCore[0x2a1c40e10] <+16>:  stp    x29, x30, [sp, #0x50]
+WidgetKitCore[0x2a1c40e14] <+20>:  add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40e18] <+24>:  mov    x19, x0
+WidgetKitCore[0x2a1c40e1c] <+28>:  mov    x20, x1
+WidgetKitCore[0x2a1c40e20] <+32>:  ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40e24] <+36>:  cbz    x8, 0x2a1c40f40               ; <+320>
+WidgetKitCore[0x2a1c40e28] <+40>:  ldr    x9, [x8, #0x10]
+WidgetKitCore[0x2a1c40e2c] <+44>:  cmp    x9, x19
+WidgetKitCore[0x2a1c40e30] <+48>:  b.ne   0x2a1c40e60               ; <+96>
+WidgetKitCore[0x2a1c40e34] <+52>:  ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40e38] <+56>:  bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40e3c] <+60>:  mov    x21, x0
+WidgetKitCore[0x2a1c40e40] <+64>:  ldr    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40e44] <+68>:  add    x10, x10, #0x1
+WidgetKitCore[0x2a1c40e48] <+72>:  str    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40e4c] <+76>:  ldp    x29, x30, [sp, #0x50]
+WidgetKitCore[0x2a1c40e50] <+80>:  ldr    x9, [x8, #0x10]
+WidgetKitCore[0x2a1c40e54] <+84>:  mov    x20, x1
+WidgetKitCore[0x2a1c40e58] <+88>:  cmp    x9, x19
+WidgetKitCore[0x2a1c40e5c] <+92>:  mov    x21, x0
+WidgetKitCore[0x2a1c40e60] <+96>:  add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40e64] <+100>: mov    x19, x0
+WidgetKitCore[0x2a1c40e68] <+104>: str    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40e6c] <+108>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40e70] <+112>: mov    x19, x0
+WidgetKitCore[0x2a1c40e74] <+116>: ldr    x9, [x8, #0x10]
+WidgetKitCore[0x2a1c40e78] <+120>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40e7c] <+124>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40e80] <+128>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40e84] <+132>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40e88] <+136>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40e8c] <+140>: mov    x19, x0
+WidgetKitCore[0x2a1c40e90] <+144>: cmp    x9, x19
+WidgetKitCore[0x2a1c40e94] <+148>: cmp    x9, x19
+WidgetKitCore[0x2a1c40e98] <+152>: mov    x19, x0
+WidgetKitCore[0x2a1c40e9c] <+156>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40ea0] <+160>: mov    x19, x0
+WidgetKitCore[0x2a1c40ea4] <+164>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40ea8] <+168>: cmp    x9, x19
+WidgetKitCore[0x2a1c40eac] <+172>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40eb0] <+176>: str    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40eb4] <+180>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40eb8] <+184>: mov    x19, x0
+WidgetKitCore[0x2a1c40ebc] <+188>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40ec0] <+192>: mov    x21, x0
+WidgetKitCore[0x2a1c40ec4] <+196>: mov    x21, x0
+WidgetKitCore[0x2a1c40ec8] <+200>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40ecc] <+204>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40ed0] <+208>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40ed4] <+212>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40ed8] <+216>: cmp    x9, x19
+WidgetKitCore[0x2a1c40edc] <+220>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40ee0] <+224>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40ee4] <+228>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40ee8] <+232>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40eec] <+236>: str    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40ef0] <+240>: mov    x20, x1
+WidgetKitCore[0x2a1c40ef4] <+244>: cbz    x8, 0x2a1c40f40               ; <+320>
+WidgetKitCore[0x2a1c40ef8] <+248>: cmp    x9, x19
+WidgetKitCore[0x2a1c40efc] <+252>: mov    x20, x1
+WidgetKitCore[0x2a1c40f00] <+256>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40f04] <+260>: mov    x19, x0
+WidgetKitCore[0x2a1c40f08] <+264>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40f0c] <+268>: cbz    x8, 0x2a1c40f40               ; <+320>
+WidgetKitCore[0x2a1c40f10] <+272>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40f14] <+276>: str    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40f18] <+280>: mov    x21, x0
+WidgetKitCore[0x2a1c40f1c] <+284>: mov    x20, x1
+WidgetKitCore[0x2a1c40f20] <+288>: mov    x19, x0
+WidgetKitCore[0x2a1c40f24] <+292>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40f28] <+296>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40f2c] <+300>: mov    x21, x0
+WidgetKitCore[0x2a1c40f30] <+304>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40f34] <+308>: ldr    x9, [x8, #0x10]
+WidgetKitCore[0x2a1c40f38] <+312>: mov    x19, x0
+WidgetKitCore[0x2a1c40f3c] <+316>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40f40] <+320>: ldr    x10, [x20, #0x28]
+WidgetKitCore[0x2a1c40f44] <+324>: mov    x19, x0
+WidgetKitCore[0x2a1c40f48] <+328>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40f4c] <+332>: add    x29, sp, #0x50
+WidgetKitCore[0x2a1c40f50] <+336>: adrp   x0, 1204
+WidgetKitCore[0x2a1c40f54] <+340>: bl     0x2a1c4a200               ; TimelineCache.missingEntry(for:)
+WidgetKitCore[0x2a1c40f58] <+344>: brk    #0x1
+WidgetKitCore[0x2a1c40f5c] <+348>: bl     0x2a1c51a10               ; swift_retain
+WidgetKitCore[0x2a1c40f60] <+352>: ldr    x8, [x20, #0x18]
+WidgetKitCore[0x2a1c40f64] <+356>: b.ne   0x2a1c40e60               ; <+96>
+WidgetKitCore[0x2a1c40f68] <+360>: mov    x21, x0
+WidgetKitCore[0x2a1c40f6c] <+364>: ldr    x0, [x8, #0x20]
+WidgetKitCore[0x2a1c40f70] <+368>: cmp    x9, x19
+WidgetKitCore[0x2a1c40f74] <+372>: add    x10, x10, #0x1
+WidgetKitCore[0x2a1c40f78] <+376>: ldr    x9, [x8, #0x10]
+WidgetKitCore[0x2a1c40f7c] <+380>: retab
+CODEVIEW_AT=0x2a1c40f58

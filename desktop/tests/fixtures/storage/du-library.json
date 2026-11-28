@@ -1,0 +1,55 @@
+{
+  "root": "/Users/me/Library",
+  "skipped": [],
+  "total_bytes": 412316860416,
+  "file_count": 2841977,
+  "dir_count": 611204,
+  "top_dirs": [
+    {
+      "path": "/Users/me/Library/Developer",
+      "allocated_bytes": 168577433600
+    },
+    {
+      "path": "/Users/me/Library/Containers",
+      "allocated_bytes": 83751862272
+    },
+    {
+      "path": "/Users/me/Library/Application Support",
+      "allocated_bytes": 64424509440
+    },
+    {
+      "path": "/Users/me/Library/Caches",
+      "allocated_bytes": 47244640256
+    },
+    {
+      "path": "/Users/me/Library/Group Containers",
+      "allocated_bytes": 21474836480
+    },
+    {
+      "path": "/Users/me/Library/Logs",
+      "allocated_bytes": 686686208
+    },
+    {
+      "path": "/Users/me/Library/Mail",
+      "allocated_bytes": 524288000
+    }
+  ],
+  "top_files": [
+    {
+      "path": "/Users/me/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw",
+      "allocated_bytes": 42949672960
+    },
+    {
+      "path": "/Users/me/Library/Logs/CoreSimulator/CoreSimulator.prev.log",
+      "allocated_bytes": 94838784
+    }
+  ],
+  "unreadable": [
+    {
+      "path": "/Users/me/Library/Mail/V10/MailData",
+      "error": "open /Users/me/Library/Mail/V10/MailData: operation not permitted"
+    }
+  ],
+  "partial": false,
+  "elapsed_ms": 391204
+}

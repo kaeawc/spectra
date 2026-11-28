@@ -1,0 +1,7 @@
+[
+  {"key": "2001", "latest": 2516582, "baseline_mean": 1048576.5, "baseline_stddev": 40000.25, "z": 36.7, "samples": 42},
+  {"key": "2002", "latest": 912384, "baseline_mean": 640000.1, "baseline_stddev": 38000.9, "z": 7.2, "samples": 31},
+  {"key": "2003", "latest": 11472, "baseline_mean": 11456.3, "baseline_stddev": 1.29, "z": 12.15, "samples": 18},
+  {"key": "2004", "latest": 310272, "baseline_mean": 420000.4, "baseline_stddev": 9000.2, "z": -12.2, "samples": 25},
+  {"key": "2005", "latest": 179904, "baseline_mean": 147815.4, "baseline_stddev": 5420.8, "z": 5.9, "samples": 13}
+]

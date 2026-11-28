@@ -1,0 +1,73 @@
+Compiled from "StockLedger.java"
+public class com.acme.checkout.inventory.StockLedger {
+  private final java.util.Map<java.lang.String, java.lang.Integer> onHand;
+
+  public com.acme.checkout.inventory.StockLedger();
+    Code:
+       0: aload_0
+       1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+       4: aload_0
+       5: new           #7                  // class java/util/HashMap
+       8: dup
+       9: invokespecial #9                  // Method java/util/HashMap."<init>":()V
+      12: putfield      #10                 // Field onHand:Ljava/util/Map;
+      15: return
+    LineNumberTable:
+      line 18: 0
+      line 19: 4
+    LocalVariableTable:
+      Start  Length  Slot  Name   Signature
+          0      16     0  this   Lcom/acme/checkout/inventory/StockLedger;
+
+  public synchronized boolean reserve(java.lang.String, int);
+    Code:
+       0: aload_0
+       1: getfield      #10                 // Field onHand:Ljava/util/Map;
+       4: aload_1
+       5: iconst_0
+       6: invokestatic  #16                 // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       9: invokeinterface #22,  3           // InterfaceMethod java/util/Map.getOrDefault:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+      14: checkcast     #26                 // class java/lang/Integer
+      17: invokevirtual #28                 // Method java/lang/Integer.intValue:()I
+      20: istore_3
+      21: iload_3
+      22: iload_2
+      23: if_icmpge     28
+      26: iconst_0
+      27: ireturn
+      28: aload_0
+      29: getfield      #10                 // Field onHand:Ljava/util/Map;
+      32: aload_1
+      33: iload_3
+      34: iload_2
+      35: isub
+      36: invokestatic  #16                 // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      39: invokeinterface #32,  3           // InterfaceMethod java/util/Map.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+      44: pop
+      45: iconst_1
+      46: ireturn
+    LineNumberTable:
+      line 208: 0
+      line 210: 21
+      line 211: 26
+      line 212: 28
+      line 213: 45
+    LocalVariableTable:
+      Start  Length  Slot  Name   Signature
+          0      47     0  this   Lcom/acme/checkout/inventory/StockLedger;
+          0      47     1   sku   Ljava/lang/String;
+          0      47     2 count   I
+         21      26     3  have   I
+
+  public int onHand(java.lang.String);
+    Code:
+       0: aload_0
+       1: getfield      #10                 // Field onHand:Ljava/util/Map;
+       4: aload_1
+       5: invokeinterface #36,  2           // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;
+      10: checkcast     #26                 // class java/lang/Integer
+      13: invokevirtual #28                 // Method java/lang/Integer.intValue:()I
+      16: ireturn
+    LineNumberTable:
+      line 220: 0
+}

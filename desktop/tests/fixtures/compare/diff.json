@@ -1,0 +1,365 @@
+{
+  "AID": "snap-20260515T011539Z-1007",
+  "BID": "snap-20261122T121540Z-1001",
+  "Sections": [
+    {
+      "Name": "host",
+      "Changes": [
+        {
+          "Kind": "changed",
+          "Key": "os_version",
+          "Before": "14.5",
+          "After": "15.2"
+        },
+        {
+          "Kind": "changed",
+          "Key": "os_build",
+          "Before": "23F79",
+          "After": "24C101"
+        },
+        {
+          "Kind": "changed",
+          "Key": "memory.compressor_occupied",
+          "Before": "0",
+          "After": "1743863808"
+        },
+        {
+          "Kind": "changed",
+          "Key": "memory.compressor_stored",
+          "Before": "0",
+          "After": "5328797696"
+        },
+        {
+          "Kind": "changed",
+          "Key": "memory.pressure_level",
+          "Before": "",
+          "After": "Normal"
+        },
+        {
+          "Kind": "changed",
+          "Key": "spectra_version",
+          "Before": "dev",
+          "After": "1.0.0"
+        }
+      ]
+    },
+    {
+      "Name": "apps",
+      "Changes": [
+        {
+          "Kind": "removed",
+          "Key": "com.example.audioedit",
+          "Before": "3.7.4.0",
+          "After": ""
+        },
+        {
+          "Kind": "changed",
+          "Key": "com.example.editor",
+          "Before": "0.212.6",
+          "After": "1.12.0"
+        },
+        {
+          "Kind": "removed",
+          "Key": "org.example.notes",
+          "Before": "1.0.0",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "com.example.mailer",
+          "Before": "4.97.1",
+          "After": ""
+        },
+        {
+          "Kind": "changed",
+          "Key": "com.example.recorder",
+          "Before": "1.4.3",
+          "After": "1.5.0"
+        },
+        {
+          "Kind": "removed",
+          "Key": "com.example.sketch",
+          "Before": "0.7.0",
+          "After": ""
+        },
+        {
+          "Kind": "changed",
+          "Key": "com.example.chat",
+          "Before": "8.8.0",
+          "After": "8.34.0"
+        },
+        {
+          "Kind": "changed",
+          "Key": "org.example.player",
+          "Before": "26.513.20950",
+          "After": "26.1111.71025"
+        },
+        {
+          "Kind": "changed",
+          "Key": "com.example.vm:hardened-runtime",
+          "Before": "false",
+          "After": "true"
+        },
+        {
+          "Kind": "changed",
+          "Key": "com.example.browser:hardened-runtime",
+          "Before": "false",
+          "After": "true"
+        },
+        {
+          "Kind": "added",
+          "Key": "com.example.terminal",
+          "Before": "",
+          "After": "0.1.0"
+        },
+        {
+          "Kind": "added",
+          "Key": "com.example.simulator",
+          "Before": "",
+          "After": "16.4.5"
+        },
+        {
+          "Kind": "added",
+          "Key": "org.example.search",
+          "Before": "",
+          "After": "1.215.0"
+        },
+        {
+          "Kind": "added",
+          "Key": "app.example.notes",
+          "Before": "",
+          "After": "0.31.1"
+        }
+      ]
+    },
+    {
+      "Name": "jdks",
+      "Changes": [
+        {
+          "Kind": "removed",
+          "Key": "25.0.2/Homebrew@system",
+          "Before": "/Library/Java/JavaVirtualMachines/openjdk.jdk/Contents/Home",
+          "After": ""
+        },
+        {
+          "Kind": "added",
+          "Key": "23.0.2/Example Vendor@manual",
+          "Before": "",
+          "After": "/Users/me/Library/Java/JavaVirtualMachines/vendor-23.0.2/Contents/Home"
+        },
+        {
+          "Kind": "added",
+          "Key": "24.0.2/Example Vendor@manual",
+          "Before": "",
+          "After": "/Users/me/Library/Java/JavaVirtualMachines/vendor-24.0.2/Contents/Home"
+        },
+        {
+          "Kind": "added",
+          "Key": "27.0.1/Homebrew@system",
+          "Before": "",
+          "After": "/Library/Java/JavaVirtualMachines/openjdk.jdk/Contents/Home"
+        },
+        {
+          "Kind": "added",
+          "Key": "26.0.1/Example Corp@manual",
+          "Before": "",
+          "After": "/Users/me/Library/Java/JavaVirtualMachines/corp-26.0.1/Contents/Home"
+        }
+      ]
+    },
+    {
+      "Name": "brew_formulae",
+      "Changes": [
+        {
+          "Kind": "removed",
+          "Key": "python@3.11",
+          "Before": "3.11.9",
+          "After": ""
+        },
+        {
+          "Kind": "changed",
+          "Key": "wget",
+          "Before": "1.21.4",
+          "After": "1.24.5"
+        },
+        {
+          "Kind": "changed",
+          "Key": "jq",
+          "Before": "1.7",
+          "After": "1.7.1"
+        },
+        {
+          "Kind": "changed",
+          "Key": "ripgrep",
+          "Before": "14.0.0",
+          "After": "14.1.1"
+        },
+        {
+          "Kind": "changed",
+          "Key": "node",
+          "Before": "20.11.0",
+          "After": "22.3.0"
+        },
+        {
+          "Kind": "changed",
+          "Key": "git",
+          "Before": "2.43.0",
+          "After": "2.45.2"
+        },
+        {
+          "Kind": "changed",
+          "Key": "openssl@3",
+          "Before": "3.2.0",
+          "After": "3.3.1"
+        },
+        {
+          "Kind": "changed",
+          "Key": "sqlite",
+          "Before": "3.44.0",
+          "After": "3.46.0"
+        }
+      ]
+    },
+    {
+      "Name": "active_runtimes",
+      "Changes": null
+    },
+    {
+      "Name": "listening_ports",
+      "Changes": [
+        {
+          "Kind": "removed",
+          "Key": "tcp:3000",
+          "Before": "",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "tcp:5432",
+          "Before": "",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "tcp:8080",
+          "Before": "",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "tcp:6379",
+          "Before": "",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "tcp:5173",
+          "Before": "",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "tcp:4040",
+          "Before": "",
+          "After": ""
+        }
+      ]
+    },
+    {
+      "Name": "vpn",
+      "Changes": null
+    },
+    {
+      "Name": "path_dirs",
+      "Changes": [
+        {
+          "Kind": "removed",
+          "Key": "/Users/me/.example/bin",
+          "Before": "pos 30",
+          "After": ""
+        },
+        {
+          "Kind": "removed",
+          "Key": "/Users/me/.example/tools/bin",
+          "Before": "pos 31",
+          "After": ""
+        },
+        {
+          "Kind": "added",
+          "Key": "/opt/example/bin",
+          "Before": "",
+          "After": "pos 17"
+        }
+      ]
+    },
+    {
+      "Name": "system_limits",
+      "Changes": [
+        {
+          "Kind": "changed",
+          "Key": "pty:pct",
+          "Before": "0.0",
+          "After": "9.8"
+        },
+        {
+          "Kind": "changed",
+          "Key": "files:pct",
+          "Before": "0.0",
+          "After": "3.9"
+        },
+        {
+          "Kind": "changed",
+          "Key": "procs:pct",
+          "Before": "0.0",
+          "After": "11.2"
+        },
+        {
+          "Kind": "changed",
+          "Key": "procs_per_uid:pct",
+          "Before": "0.0",
+          "After": "13.5"
+        }
+      ]
+    },
+    {
+      "Name": "sysctls",
+      "Changes": [
+        {
+          "Kind": "changed",
+          "Key": "kern.boottime",
+          "Before": "{ sec = 1709539200, usec = 0 } Mon Mar  4 08:00:00 2024",
+          "After": "{ sec = 1795161463, usec = 148696 } Fri Nov 20 02:57:43 2026"
+        }
+      ]
+    },
+    {
+      "Name": "install_history",
+      "Changes": [
+        {
+          "Kind": "added",
+          "Key": "Example Update 1.0",
+          "Before": "",
+          "After": "2024-03-01 09:00:00 \u00b7 version 1.0 \u00b7 Example"
+        },
+        {
+          "Kind": "added",
+          "Key": "Example Recovery Tools",
+          "Before": "",
+          "After": "2024-03-01 09:02:00 \u00b7 Example"
+        },
+        {
+          "Kind": "added",
+          "Key": "Example Asset Pack A",
+          "Before": "",
+          "After": "2024-03-01 09:03:00 \u00b7 Example"
+        },
+        {
+          "Kind": "added",
+          "Key": "Example Asset Pack B",
+          "Before": "",
+          "After": "2024-03-01 09:03:30 \u00b7 Example"
+        }
+      ]
+    }
+  ]
+}

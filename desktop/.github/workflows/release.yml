@@ -1,0 +1,163 @@
+name: Release
+
+# Releases happen when a version bump lands on main (scripts/release.sh opens that PR): the push
+# changes the `version` line of Cargo.toml to one with no `vX.Y.Z` tag yet, so this builds the
+# macOS binaries and creates the GitHub release (which creates the tag). Pushing a `vX.Y.Z` tag by
+# hand does the same for that tag. Run it by hand (workflow_dispatch) for a dry run on any branch:
+# the binaries are built and kept as workflow artifacts, but nothing is released. A pull request
+# that changes this workflow or scripts/release.sh gets the same dry run.
+#
+# Not published to crates.io: Rune and its forks of winit, wgpu-hal and others come from git, and
+# crates.io accepts only dependencies that are on crates.io.
+#
+# Every step is safe to rerun: an existing GitHub release gets its assets replaced.
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+    paths: [.github/workflows/release.yml, scripts/release.sh]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      # release: build and release. dry-run: build only. skip: nothing to do.
+      mode: ${{ steps.v.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          read_version() { sed -n 's/^version = "\(.*\)"$/\1/p' | head -1; }
+          version="$(read_version < Cargo.toml)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = workflow_dispatch ] || [ "$EVENT" = pull_request ]; then
+            mode=dry-run
+          elif [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "v$version" ]; then
+              echo "::error::tag $REF_NAME does not match the package version $version"
+              exit 1
+            fi
+            mode=release
+          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" > /dev/null 2>&1; then
+            echo "v$version is already tagged: no release"
+            mode=skip
+          else
+            # A push that changes Cargo.toml for another reason (a dependency) releases nothing:
+            # only a change of the version line does.
+            before=""
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+              before="$(gh api "repos/$GITHUB_REPOSITORY/contents/Cargo.toml?ref=$BEFORE" \
+                --jq .content | base64 -d | read_version)" || before=""
+            fi
+            if [ -n "$before" ] && [ "$before" = "$version" ]; then
+              echo "version $version did not change in this push: no release"
+              mode=skip
+            else
+              mode=release
+            fi
+          fi
+          echo "mode=$mode" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    if: needs.version.outputs.mode != 'skip'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml pins the version and components; rustup installs them on first use.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          name="spectra-desktop-v$VERSION-$TARGET"
+          mkdir -p "dist/$name"
+          cp README.md CHANGELOG.md "dist/$name/"
+          [ -f LICENSE ] && cp LICENSE "dist/$name/"
+          cp "target/$TARGET/release/spectra-desktop" "dist/$name/"
+          cd dist
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          rm -r "$name"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  github-release:
+    needs: [version, build]
+    if: needs.version.outputs.mode == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
+          # Notes: this version's CHANGELOG.md section, else GitHub's generated notes.
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if grep -q '[^[:space:]]' notes.md; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          # Creates the tag at this commit when it does not exist yet (release from main).
+          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Spectra Desktop $tag" "${notes[@]}" "${prerelease[@]}"

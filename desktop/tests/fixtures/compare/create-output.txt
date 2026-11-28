@@ -1,0 +1,5 @@
+=== Spectra snapshot ===
+id:             snap-20261122T121540Z-1001
+kind:           live
+
+host:           Mac.local

@@ -1,0 +1,11 @@
+  0           RESUME                   0
+
+  1           LOAD_CONST               0 (0)
+              LOAD_CONST               1 (None)
+              IMPORT_NAME              0 (json)
+              STORE_NAME               0 (json)
+
+  4           LOAD_CONST               2 (<code object load at 0x10a2b3c40, file "/srv/app/settings.py", line 4>)
+              MAKE_FUNCTION
+              STORE_NAME               1 (load)
+              RETURN_CONST             1 (None)

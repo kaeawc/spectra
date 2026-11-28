@@ -1,0 +1,17 @@
+{
+  "process": "notehelper",
+  "time": "2026-11-20 04:30:00.00 -0500",
+  "kind": "crash",
+  "exception": "EXC_RESOURCE (SIGKILL)",
+  "exception_detail": "resource limit exceeded (CPU time, memory, or wakeups)",
+  "signal": "SIGKILL",
+  "termination": "MEMORY high watermark",
+  "resource": {
+    "flavor": "MEMORY",
+    "explanation": "resident memory crossed a high-watermark limit",
+    "limit": "300",
+    "observed": "512"
+  },
+  "faulting_thread": 0,
+  "threads": null
+}

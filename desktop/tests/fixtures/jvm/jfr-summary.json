@@ -1,0 +1,79 @@
+{
+ "path": "Lab-96728.jfr",
+ "version": "2.1",
+ "chunks": 2,
+ "start": "2026-11-21 22:13:27 (UTC)",
+ "duration": "8 s",
+ "events": [
+  {
+   "type": "jdk.SystemProcess",
+   "count": 4671,
+   "size_bytes": 1011893
+  },
+  {
+   "type": "jdk.NativeLibrary",
+   "count": 2092,
+   "size_bytes": 185394
+  },
+  {
+   "type": "jdk.ActiveSetting",
+   "count": 1080,
+   "size_bytes": 32310
+  },
+  {
+   "type": "jdk.BooleanFlag",
+   "count": 980,
+   "size_bytes": 30808
+  },
+  {
+   "type": "jdk.GCPhaseParallel",
+   "count": 333,
+   "size_bytes": 8421
+  },
+  {
+   "type": "jdk.LongFlag",
+   "count": 324,
+   "size_bytes": 10832
+  },
+  {
+   "type": "jdk.ModuleRequire",
+   "count": 306,
+   "size_bytes": 3060
+  },
+  {
+   "type": "jdk.UnsignedLongFlag",
+   "count": 264,
+   "size_bytes": 9234
+  },
+  {
+   "type": "jdk.NativeMemoryUsage",
+   "count": 189,
+   "size_bytes": 2821
+  },
+  {
+   "type": "jdk.InitialEnvironmentVariable",
+   "count": 174,
+   "size_bytes": 11631
+  },
+  {
+   "type": "jdk.ObjectAllocationSample",
+   "count": 40,
+   "size_bytes": 597
+  },
+  {
+   "type": "jdk.ExecutionSample",
+   "count": 1,
+   "size_bytes": 11
+  },
+  {
+   "type": "jdk.GarbageCollection",
+   "count": 1,
+   "size_bytes": 21
+  },
+  {
+   "type": "jdk.JavaMonitorEnter",
+   "count": 0,
+   "size_bytes": 0
+  }
+ ]
+}
