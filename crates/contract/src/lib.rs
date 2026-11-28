@@ -12,6 +12,8 @@
 //!
 //! A Rust test runs the port with these seams and calls [`Case::assert_stdout`].
 
+pub mod shape;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -101,8 +103,9 @@ impl Case {
     pub fn runner(&self) -> FakeRunner {
         let fake = FakeRunner::new();
         let Some(raw) = self.read("calls.json") else { return fake };
-        let calls: Vec<Call> = serde_json::from_slice(&raw).unwrap_or_else(|e| panic!("{}/calls.json: {e}", self.dir.display()));
-        for call in calls {
+        // A recording that saw no calls is Go's nil slice, `null`.
+        let calls: Option<Vec<Call>> = serde_json::from_slice(&raw).unwrap_or_else(|e| panic!("{}/calls.json: {e}", self.dir.display()));
+        for call in calls.into_iter().flatten() {
             let args: Vec<&str> = call.args.iter().flatten().map(String::as_str).collect();
             let matcher = match_exact(&call.name, &args);
             if call.error.is_empty() {

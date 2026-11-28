@@ -1,0 +1,94 @@
+[
+  {
+    "name": "lsof",
+    "args": [
+      "-n",
+      "-P",
+      "-d",
+      "^txt"
+    ],
+    "exit_code": -1,
+    "error": "exec: \"lsof\": executable file not found in $PATH"
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-A",
+      "-o",
+      "pid="
+    ],
+    "stdout": "    1\n    2\n    3\n    4\n    5\n    6\n    7\n    8\n    9\n\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-u",
+      "501",
+      "-o",
+      "pid="
+    ],
+    "stdout": "    1\n    2\n    3\n    4\n\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.tty.ptmx_max"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.tty.ptmx_max'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.num_files"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.num_files'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxfiles"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.maxfiles'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxfilesperproc"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.maxfilesperproc'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxproc"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.maxproc'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxprocperuid"
+    ],
+    "stderr": "sysctl: unknown oid 'kern.maxprocperuid'\n",
+    "exit_code": 1,
+    "error": "exit status 1"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "args": [
+    "process",
+    "--min-elapsed",
+    "5x"
+  ],
+  "os": "darwin"
+}

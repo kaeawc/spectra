@@ -1,0 +1,13 @@
+FAMILY                                            PROCS   CPU%       SHARE   AGE        HEAVIEST
+--------------------------------------------------------------------------------------------------------------
+Build tools                                       2       248.4%     55%     1h30m      java (pid 710, 150%), clang (pid 720, 98%)
+Xcode                                             2       94.0%      21%     3h0m       xcodebuild (pid 510, 89%), Xcode (pid 500, 5%)
+Google Chrome                                     2       67.1%      15%     5h0m       Google Chrome Helper (Renderer) (pid 401, 42%), Google Chrome (pid 400, 25%)
+Simulator 0A1B2C3D-1111-2222-3333-444455556666    2       21.4%      5%      2h0m       SpringBoard (pid 610, 18%), launchd_sim (pid 600, 3%)
+WindowServer                                      1       12.3%      3%      2d23h      WindowServer (pid 88, 12%)
+node                                              1       7.7%       2%      1d2h       node (pid 730, 8%)
+Terminal                                          1       1.1%       0%      2d0h       Terminal (pid 650, 1%)
+launchd                                           1       0.6%       0%      3d0h       launchd (pid 1, 1%)
+stale-agent                                       1       0.4%       0%      -          stale-agent (pid 750, 0%)
+-zsh                                              1       0.2%       0%      1d23h      -zsh (pid 700, 0%)
+<defunct>                                         1       0.0%       0%      1d1h       <defunct> (pid 740, 0%)

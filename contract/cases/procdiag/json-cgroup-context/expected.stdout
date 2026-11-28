@@ -1,0 +1,86 @@
+{
+  "pid": 90,
+  "comm": "srv",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 90,
+      "comm": "srv",
+      "state": "S",
+      "syscall": "epoll_wait",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "cgroup": {
+    "path": "/app.slice",
+    "cpu": {
+      "usage_usec": 100,
+      "user_usec": 0,
+      "system_usec": 0,
+      "nr_periods": 100,
+      "nr_throttled": 80,
+      "throttled_usec": 5000000,
+      "quota_usec": -1,
+      "period_usec": 0,
+      "pressure": {
+        "some": {
+          "avg10": 55,
+          "avg60": 40,
+          "avg300": 20,
+          "total_usec": 1
+        },
+        "full": {
+          "avg10": 0,
+          "avg60": 0,
+          "avg300": 0,
+          "total_usec": 0
+        }
+      }
+    }
+  },
+  "findings": [
+    {
+      "kind": "cpu-pressure",
+      "severity": "critical",
+      "summary": "cgroup /app.slice cpu: tasks stalled on cpu 55.0% of the last 10s (60s avg 40.0%)",
+      "scope": "cgroup"
+    },
+    {
+      "kind": "cpu-throttled",
+      "severity": "warning",
+      "summary": "cgroup /app.slice was CPU-throttled in 80 of 100 periods (80%, 5.0s total) by its cpu.max quota",
+      "scope": "cgroup"
+    }
+  ],
+  "verdict": "idle",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

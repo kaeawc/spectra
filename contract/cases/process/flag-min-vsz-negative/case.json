@@ -1,0 +1,7 @@
+{
+  "args": [
+    "process",
+    "--min-vsz=-1"
+  ],
+  "os": "darwin"
+}

@@ -1,0 +1,33 @@
+[package]
+name = "kaeawc-spectra"
+description = "Spectra's command layer (library) and the `spectra` binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lib]
+name = "spectra_cli"
+doctest = false
+
+[[bin]]
+name = "spectra"
+path = "src/main.rs"
+
+[dependencies]
+jiff = { workspace = true }
+lexopt = { workspace = true }
+serde = { workspace = true }
+spectra-base = { workspace = true }
+spectra-host = { workspace = true }
+spectra-protocol = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+spectra-contract = { workspace = true }
+
+[lints]
+workspace = true

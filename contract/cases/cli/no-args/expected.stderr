@@ -1,0 +1,81 @@
+Spectra — macOS app diagnostics and JVM-aware debugging.
+
+Usage: spectra <subcommand> [flags] [args]
+
+Global flags:
+  --verbose, --debug   Log enhancement/collection failures to stderr (or set SPECTRA_DEBUG)
+  --no-daemon         Do not use the daemon for alerts, whatswrong, load and idle
+
+Subcommands:
+  inspect    Inspect .app bundles (default; runs when no subcommand given) [macOS only]
+  list       Inspect every .app under /Applications [macOS only]
+  snapshot   Capture a structured snapshot of host + installed apps
+  jvm        List or inspect running JVM processes
+  db         Discover and inspect databases apps connect to (read-only; postgres, mysql, sqlite, mongodb, redis)
+  toolchain  Show installed language runtimes and package managers
+  network    Show current network state (routes, DNS, VPN, proxy, listening ports)
+  power      Show current battery and thermal state
+  thermal    Detect thermal throttling and CPU speed limits (exit 0 nominal, 3 warm, 4 throttled)
+  impact     Compute the documented per-pid energy impact score from delta records
+  devices    List Android devices/emulators (adb), booted iOS simulators, and emulator processes by worktree
+  memory     Show memory pressure and swap (VM compressor on macOS; MemAvailable, PSI and zswap on Linux)
+  storage    Show disk volumes and ~/Library footprint
+  du         Show the largest directories and files under a path by allocated size
+  fswatch    Watch a directory tree by polling and report which files and directories keep changing
+  timemachine Show Time Machine status, destinations, and local snapshots [macOS only]
+  services   Show launchd jobs and plist schedules [macOS only]
+  startup    List what launches at login or boot; disable or enable user launch agents [macOS only]
+  logs       Run bounded unified log queries [macOS only]
+  updates    Show macOS install/update log entries [macOS only]
+  system     Show system resource limits and saturation
+  load       Admit, hold or back off a new job from load and memory, with per-worktree attribution
+  uninstall  Plan (read-only) and apply a conservative app uninstall that moves only your own files to the Trash [macOS only]
+  orphans    Find leftover processes (parent pid 1) whose working directory is under a worktree root
+  process    List running processes sorted by memory (RSS)
+  playbook   Show diagnostic playbooks and command plans
+  diff       Diff two stored snapshots (alias for snapshot diff)
+  rules      Evaluate recommendations rules against a snapshot
+  issues     List, check, or update persisted issues from the recommendations engine
+  baseline   Manage baseline snapshots (list, drop)
+  fleet      Cross-host rollups: which hosts trip a rule, and version-drift matrices
+  bisect     Find the snapshot where a rule started firing, and what changed alongside it
+  reconcile  Print an advisory plan to make one host's toolchain match another's
+  anomalies  Flag processes deviating from their rolling RSS baseline
+  install-helper Install the privileged helper daemon (requires sudo)
+  schedule   Schedule periodic snapshot capture via a launchd agent [macOS only]
+  daemon     Manage the local per-user diagnostic daemon
+  alerts     List, acknowledge, watch, and summarize daemon alerts
+  sample     Collect a user-space CPU sample of a running process [macOS only]
+  symbolicate Resolve raw stack addresses to symbol + file:line via atos [macOS only]
+  spindump   Capture and summarize a per-thread stack report (heaviest stacks) [macOS only]
+  vmmap      Summarize a process's memory composition by region (dirty/resident/swapped) [macOS only]
+  vmregions  Composition by sharing/protection/backing, with RWX (W^X) flagging [macOS only]
+  lsmp       Summarize a process's Mach port table (right counts, leak detection) [macOS only]
+  whois      Attribute a busy XPC/Mach service to the client processes driving it [macOS only]
+  owner      Who has this? Processes behind a port, an open file, a pid, or working under a directory (--under)
+  idle       Find long-idle holders under a root: alive, near 0% CPU, no busy descendants (exit 3 when found)
+  lineage    Show a process's ancestor chain and descendant subtree with RSS/CPU totals
+  malloc-history Attribute allocations to call stacks (requires MallocStackLogging) [macOS only]
+  flamegraph Render a native CPU flamegraph (SVG) from a process sample [macOS only]
+  hang       Classify why a process's main thread is hung (lock/I-O/spin/idle) [macOS only]
+  procdiag   Linux: diagnose a stuck or slow process from /proc (D-state, lock wait, fd leak, CPU spin, cgroup limits)
+  pressure   Linux: show pressure-stall (PSI) and cgroup v2 memory/CPU/pids accounting
+  timeline   Chronological incident timeline: process starts, unified-log errors, and installs
+  spawns     Trace process starts and exits live to catch short-lived children (polling; misses processes shorter than --interval)
+  memtrace   Sample a process's RSS over time (optionally its whole subtree) and say whether it is growing
+  runtime    Identify a live PID's language runtime and the diagnostics available for it
+  xattr-inspect Show quarantine, provenance, where-froms, and AppleDouble state of files
+  core       Inspect crashed-process core files and suggest offline analyzers
+  crash      Audit post-mortem readiness (can this machine produce a debuggable crash?)
+  web        Diff an Electron app's app.asar payload between two versions
+  whatswrong Ranked whole-system triage: why is this Mac slow right now?
+  cache      Manage the local blob cache (stats, clear)
+  version    Print Spectra version and exit
+  capabilities Describe the machine-readable interfaces this build supports
+  help       Show this help text
+
+Flag-only invocations route to `inspect`:
+  spectra /Applications/Slack.app
+  spectra --all -v
+  spectra list -v
+  spectra --json /Applications/Cursor.app

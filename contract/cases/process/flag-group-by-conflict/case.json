@@ -1,0 +1,12 @@
+{
+  "args": [
+    "process",
+    "--group-by",
+    "family",
+    "--sort",
+    "cpu",
+    "--tree",
+    "--classify"
+  ],
+  "os": "darwin"
+}

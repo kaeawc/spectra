@@ -1,0 +1,6 @@
+flag provided but not defined: -nope
+Usage of spectra memory:
+  -json
+    	Emit JSON
+  -watch string
+    	Repeat every interval (for example: 1, 1s, 5s)

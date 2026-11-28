@@ -126,6 +126,14 @@ type CollectOptions struct {
 	// "/proc"). Injectable so the collector is testable against a fixture
 	// tree on any host.
 	ProcFS string
+
+	// PageSize overrides the page size the Linux backend converts RSS pages
+	// with; 0 means os.Getpagesize().
+	PageSize int64
+
+	// LookupUser overrides the Linux backend's uid-to-name lookup; nil
+	// means os/user. An error or empty name shows the numeric uid.
+	LookupUser func(uid int) (string, error)
 }
 
 // Details contains direct per-process metadata collected without spawning
@@ -152,7 +160,7 @@ func CollectAll(ctx context.Context, opts CollectOptions) []Info {
 		if root == "" {
 			root = "/proc"
 		}
-		procs := collectLinuxProcs(root, opts.Now)
+		procs := collectLinuxProcsWith(root, opts.Now, opts.PageSize, opts.LookupUser)
 		applyDerivedFields(procs, collectNow(opts), collectMemoryBytes(opts))
 		if len(opts.BundlePaths) > 0 {
 			attributeBundles(procs, opts.BundlePaths)

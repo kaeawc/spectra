@@ -1,0 +1,54 @@
+{
+  "pid": 20,
+  "comm": "leaky",
+  "cmdline": "/opt/service/bin/leaky-server --config=/etc/leaky/config.yaml --listen=0.0.0.0:8080 --workers=16 --log-level=debug --trace",
+  "state": "S",
+  "interval_sec": 2,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 20,
+      "comm": "leaky",
+      "state": "S",
+      "wchan": "hrtimer_nanosleep",
+      "syscall": "clock_nanosleep",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 25,
+    "limit": 1000,
+    "delta": 20,
+    "rate_per_sec": 10
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "fd-growth",
+      "severity": "warning",
+      "summary": "file descriptor count is climbing 10.0/s — likely a leak; at this rate the limit is reached in 2m (ls -l /proc/20/fd shows what)",
+      "evidence": [
+        "+20 fds in 2.0s (10.0/s)",
+        "limit=1000"
+      ]
+    }
+  ],
+  "verdict": "fd-growth"
+}

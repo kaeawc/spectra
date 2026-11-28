@@ -1,0 +1,321 @@
+[
+  {
+    "pid": 310,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "Elec",
+    "bsd_name": "Elec",
+    "executable_path": "/Applications/Elec.app/Contents/MacOS/Elec",
+    "full_command_line": "/Applications/Elec.app/Contents/MacOS/Elec",
+    "rss_kib": 450000,
+    "vsize_kib": 411000000,
+    "vsz_bytes": 420864000000,
+    "thread_count": 40,
+    "cpu_pct": 9.5,
+    "cpu_percent": 9.5,
+    "mem_percent": 2.682209014892578,
+    "start_time": "2026-11-23T00:00:00-06:00",
+    "started_at": "2026-11-23T00:00:00-06:00",
+    "elapsed": 14400000000000,
+    "role": "app",
+    "runtime": "electron",
+    "app": {
+      "name": "Elec",
+      "bundle_path": "/Applications/Elec.app",
+      "bundle_id": "com.example.elec"
+    },
+    "signing": {
+      "status": "unsigned",
+      "hardened_runtime": false,
+      "validated": false
+    },
+    "evidence": [
+      "role: main executable of Elec.app",
+      "runtime: Elec.app contains Electron Framework.framework",
+      "signing: unsigned as displayed by codesign -dv, not validated; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 350,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "node",
+    "bsd_name": "node",
+    "executable_path": "/opt/homebrew/bin/node",
+    "full_command_line": "/opt/homebrew/bin/node /Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+    "argv": [
+      "/opt/homebrew/bin/node",
+      "/Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+    ],
+    "rss_kib": 401000,
+    "vsize_kib": 421000000,
+    "vsz_bytes": 431104000000,
+    "thread_count": 11,
+    "cpu_pct": 7.7,
+    "cpu_percent": 7.7,
+    "mem_percent": 2.390146255493164,
+    "start_time": "2026-11-22T02:00:00-06:00",
+    "started_at": "2026-11-22T02:00:00-06:00",
+    "elapsed": 93600000000000,
+    "role": "ai_agent",
+    "runtime": "node",
+    "signing": {
+      "status": "adhoc",
+      "hardened_runtime": false,
+      "validated": false
+    },
+    "evidence": [
+      "role: node runs AI agent package @anthropic-ai/claude-code",
+      "runtime: interpreter executable node",
+      "signing: adhoc as displayed by codesign -dv, not validated; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 300,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "Fixture",
+    "bsd_name": "Fixture",
+    "executable_path": "/Applications/Fixture.app/Contents/MacOS/Fixture",
+    "full_command_line": "/Applications/Fixture.app/Contents/MacOS/Fixture",
+    "rss_kib": 150000,
+    "vsize_kib": 410000000,
+    "vsz_bytes": 419840000000,
+    "thread_count": 30,
+    "cpu_pct": 2.5,
+    "cpu_percent": 2.5,
+    "mem_percent": 0.8940696716308594,
+    "start_time": "2026-11-23T01:00:00-06:00",
+    "started_at": "2026-11-23T01:00:00-06:00",
+    "elapsed": 10800000000000,
+    "role": "app",
+    "runtime": "native",
+    "app": {
+      "name": "Fixture",
+      "bundle_path": "/Applications/Fixture.app",
+      "bundle_id": "com.example.fixture"
+    },
+    "signing": {
+      "status": "developer_id",
+      "team_id": "ABCDE12345",
+      "hardened_runtime": true,
+      "validated": true
+    },
+    "evidence": [
+      "role: main executable of Fixture.app",
+      "runtime: Mach-O with no Go, Bun or Rust markers",
+      "signing: developer_id, team ABCDE12345 validated by codesign --verify --strict; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 301,
+    "ppid": 300,
+    "uid": 501,
+    "user": "user",
+    "command": "Fixture Helper",
+    "bsd_name": "Fixture Helper",
+    "executable_path": "/Applications/Fixture.app/Contents/MacOS/Fixture Helper",
+    "full_command_line": "/Applications/Fixture.app/Contents/MacOS/Fixture Helper --type=gpu",
+    "rss_kib": 50000,
+    "vsize_kib": 409000000,
+    "vsz_bytes": 418816000000,
+    "thread_count": 9,
+    "cpu_pct": 1.5,
+    "cpu_percent": 1.5,
+    "mem_percent": 0.2980232238769531,
+    "start_time": "2026-11-23T02:00:00-06:00",
+    "started_at": "2026-11-23T02:00:00-06:00",
+    "elapsed": 7200000000000,
+    "role": "app_helper",
+    "runtime": "unknown",
+    "app": {
+      "name": "Fixture",
+      "bundle_path": "/Applications/Fixture.app",
+      "bundle_id": "com.example.fixture"
+    },
+    "signing": {
+      "status": "adhoc",
+      "hardened_runtime": false,
+      "validated": false
+    },
+    "evidence": [
+      "role: non-main executable inside Fixture.app",
+      "runtime: executable is neither Mach-O nor ELF",
+      "signing: adhoc as displayed by codesign -dv, not validated; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 330,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "rtool",
+    "bsd_name": "rtool",
+    "executable_path": "/Users/user/.cargo/bin/rtool",
+    "full_command_line": "/Users/user/.cargo/bin/rtool watch",
+    "rss_kib": 31000,
+    "vsize_kib": 407000000,
+    "vsz_bytes": 416768000000,
+    "thread_count": 5,
+    "cpu_pct": 0.8,
+    "cpu_percent": 0.8,
+    "mem_percent": 0.18477439880371094,
+    "start_time": "2026-11-23T03:10:00-06:00",
+    "started_at": "2026-11-23T03:10:00-06:00",
+    "elapsed": 3000000000000,
+    "role": "cli",
+    "runtime": "rust",
+    "signing": {
+      "status": "adhoc",
+      "hardened_runtime": false,
+      "validated": false
+    },
+    "evidence": [
+      "role: no app, system, shell, terminal or agent signal",
+      "runtime: stripped Mach-O with 2 rustc std markers and no C++ runtime",
+      "signing: adhoc as displayed by codesign -dv, not validated; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 320,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "gotool",
+    "bsd_name": "gotool",
+    "executable_path": "/usr/local/bin/gotool",
+    "full_command_line": "/usr/local/bin/gotool serve",
+    "rss_kib": 30000,
+    "vsize_kib": 408000000,
+    "vsz_bytes": 417792000000,
+    "thread_count": 12,
+    "cpu_pct": 0.9,
+    "cpu_percent": 0.9,
+    "mem_percent": 0.17881393432617188,
+    "start_time": "2026-11-23T03:00:00-06:00",
+    "started_at": "2026-11-23T03:00:00-06:00",
+    "elapsed": 3600000000000,
+    "role": "cli",
+    "runtime": "go",
+    "signing": {
+      "status": "unsigned",
+      "hardened_runtime": false,
+      "validated": false
+    },
+    "evidence": [
+      "role: no app, system, shell, terminal or agent signal",
+      "runtime: Mach-O has a __go_buildinfo section",
+      "signing: unsigned as displayed by codesign -dv, not validated; verdict is for the file on disk"
+    ]
+  },
+  {
+    "pid": 1,
+    "ppid": 0,
+    "uid": 0,
+    "user": "root",
+    "command": "launchd",
+    "bsd_name": "launchd",
+    "full_command_line": "/sbin/launchd",
+    "rss_kib": 20480,
+    "vsize_kib": 420000,
+    "vsz_bytes": 430080000,
+    "thread_count": 4,
+    "cpu_pct": 0.6,
+    "cpu_percent": 0.6,
+    "mem_percent": 0.1220703125,
+    "start_time": "2026-11-20T04:00:00-06:00",
+    "started_at": "2026-11-20T04:00:00-06:00",
+    "elapsed": 259200000000000,
+    "role": "cli",
+    "runtime": "unknown",
+    "evidence": [
+      "role: no app, system, shell, terminal or agent signal",
+      "runtime: executable path not visible"
+    ]
+  },
+  {
+    "pid": 370,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "app",
+    "bsd_name": "app",
+    "executable_path": "/opt/gone/app",
+    "full_command_line": "/opt/gone/app --run",
+    "rss_kib": 7000,
+    "vsize_kib": 404000000,
+    "vsz_bytes": 413696000000,
+    "thread_count": 2,
+    "cpu_pct": 0.1,
+    "cpu_percent": 0.1,
+    "mem_percent": 0.04172325134277344,
+    "start_time": "2026-11-23T03:30:00-06:00",
+    "started_at": "2026-11-23T03:30:00-06:00",
+    "elapsed": 1800000000000,
+    "role": "cli",
+    "runtime": "unknown",
+    "evidence": [
+      "role: no app, system, shell, terminal or agent signal",
+      "runtime: executable unreadable: stat /opt/gone/app: no such file or directory"
+    ]
+  },
+  {
+    "pid": 360,
+    "ppid": 1,
+    "uid": 501,
+    "user": "user",
+    "command": "-zsh",
+    "full_command_line": "-zsh",
+    "rss_kib": 6100,
+    "vsize_kib": 405000000,
+    "vsz_bytes": 414720000000,
+    "thread_count": 0,
+    "cpu_pct": 0.2,
+    "cpu_percent": 0.2,
+    "mem_percent": 0.03635883331298828,
+    "start_time": "2026-11-21T05:00:00-06:00",
+    "started_at": "2026-11-21T05:00:00-06:00",
+    "elapsed": 169200000000000,
+    "role": "shell",
+    "runtime": "shell",
+    "evidence": [
+      "role: executable zsh is a shell (from argv[0], unverified)",
+      "runtime: argv[0] zsh names an interpreter (from argv[0], unverified)"
+    ]
+  },
+  {
+    "pid": 340,
+    "ppid": 1,
+    "uid": 0,
+    "user": "root",
+    "command": "ls",
+    "bsd_name": "ls",
+    "executable_path": "/bin/ls",
+    "full_command_line": "/bin/ls -la /",
+    "rss_kib": 2000,
+    "vsize_kib": 406000000,
+    "vsz_bytes": 415744000000,
+    "thread_count": 1,
+    "cpu_pct": 0.3,
+    "cpu_percent": 0.3,
+    "mem_percent": 0.011920928955078125,
+    "start_time": "2026-11-23T03:20:00-06:00",
+    "started_at": "2026-11-23T03:20:00-06:00",
+    "elapsed": 2400000000000,
+    "role": "system",
+    "runtime": "native",
+    "signing": {
+      "status": "apple",
+      "hardened_runtime": false,
+      "validated": true
+    },
+    "evidence": [
+      "role: validated Apple platform binary",
+      "runtime: Mach-O with no Go, Bun or Rust markers",
+      "signing: platform binary validated by codesign --verify --ignore-resources -R=\"anchor apple\"; verdict is for the file on disk"
+    ]
+  }
+]

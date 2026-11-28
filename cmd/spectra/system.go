@@ -30,6 +30,10 @@ func runSystem(args []string) int {
 	return 2
 }
 
+// systemLimitsOptions is what runSystemLimits collects with; the contract
+// tests replace it to inject the runner, uid and clock.
+var systemLimitsOptions = func() syslimits.Options { return syslimits.Options{} }
+
 func runSystemLimits(args []string) int {
 	fs := flag.NewFlagSet("spectra system limits", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -39,10 +43,17 @@ func runSystemLimits(args []string) int {
 		return 2
 	}
 
-	limits := syslimits.Collect(syslimits.Options{})
+	limitOpts := systemLimitsOptions()
+	limits := syslimits.Collect(limitOpts)
 	var top syslimits.TopHolders
 	if *showTop {
-		top = syslimits.CollectTopHolders(context.Background(), 10, processCollectOptions())
+		uid := limitOpts.UID
+		if uid == 0 {
+			uid = os.Getuid()
+		}
+		opts := processCollectOptions()
+		opts.Deep = true
+		top = syslimits.TopHoldersOf(collectProcesses(context.Background(), opts), 10, uid)
 	}
 
 	if *asJSON {

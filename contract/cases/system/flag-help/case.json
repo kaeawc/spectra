@@ -1,0 +1,8 @@
+{
+  "args": [
+    "system",
+    "limits",
+    "-h"
+  ],
+  "os": "darwin"
+}

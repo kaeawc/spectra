@@ -1,0 +1,68 @@
+{
+  "args": [
+    "process",
+    "--classify",
+    "--tree"
+  ],
+  "argv": {
+    "350": [
+      "/opt/homebrew/bin/node",
+      "/Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+    ],
+    "360": [
+      "-zsh",
+      "stale"
+    ]
+  },
+  "details": {
+    "1": {
+      "thread_count": 4,
+      "bsd_name": "launchd",
+      "executable_path": ""
+    },
+    "300": {
+      "thread_count": 30,
+      "bsd_name": "Fixture",
+      "executable_path": "/Applications/Fixture.app/Contents/MacOS/Fixture"
+    },
+    "301": {
+      "thread_count": 9,
+      "bsd_name": "Fixture Helper",
+      "executable_path": "/Applications/Fixture.app/Contents/MacOS/Fixture Helper"
+    },
+    "310": {
+      "thread_count": 40,
+      "bsd_name": "Elec",
+      "executable_path": "/Applications/Elec.app/Contents/MacOS/Elec"
+    },
+    "320": {
+      "thread_count": 12,
+      "bsd_name": "gotool",
+      "executable_path": "/usr/local/bin/gotool"
+    },
+    "330": {
+      "thread_count": 5,
+      "bsd_name": "rtool",
+      "executable_path": "/Users/user/.cargo/bin/rtool"
+    },
+    "340": {
+      "thread_count": 1,
+      "bsd_name": "ls",
+      "executable_path": "/bin/ls"
+    },
+    "350": {
+      "thread_count": 11,
+      "bsd_name": "node",
+      "executable_path": "/opt/homebrew/bin/node"
+    },
+    "370": {
+      "thread_count": 2,
+      "bsd_name": "app",
+      "executable_path": "/opt/gone/app"
+    }
+  },
+  "memory_bytes": 17179869184,
+  "now": "2026-11-23T10:00:00Z",
+  "os": "darwin",
+  "tz_offset": -21600
+}

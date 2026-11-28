@@ -15,14 +15,17 @@ pub enum FileType {
     Other,
 }
 
-/// The parts of file metadata collectors use. `modified` is seconds and nanoseconds since the
-/// Unix epoch.
+/// The parts of file metadata collectors use. `modified` and `ctime` are seconds and nanoseconds
+/// since the Unix epoch. `dev`, `ino` and `ctime` feed [`crate::fsutil::identity::identity`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileInfo {
     pub file_type: FileType,
     pub len: u64,
     pub mode: u32,
     pub modified: Option<(i64, u32)>,
+    pub dev: u64,
+    pub ino: u64,
+    pub ctime: Option<(i64, u32)>,
 }
 
 /// One entry of a directory listing.
@@ -50,7 +53,31 @@ pub trait Fs: Send + Sync {
     fn exists(&self, path: &Path) -> bool {
         self.metadata(path).is_ok()
     }
+
+    /// Reads up to `buf.len()` bytes of the regular file at `path` from `offset` (a positioned
+    /// read, like Go's `io.ReaderAt`); fewer bytes than asked means the file ended. Anything but
+    /// a regular file is refused with [`not_regular`], without blocking on a FIFO. The default
+    /// reads the whole file and slices it; [`OsFs`] reads only what is asked.
+    fn read_at(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+        let data = self.read(path)?;
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
+        let n = (data.len() - start).min(buf.len());
+        buf[..n].copy_from_slice(&data[start..start + n]);
+        Ok(n)
+    }
 }
+
+/// The error [`Fs::read_at`] returns for a path that is not a regular file. Its text is Go's
+/// classify `ErrNotRegular`.
+pub fn not_regular() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "not a regular file")
+}
+
+/// `O_NONBLOCK`, so opening a FIFO returns at once instead of waiting for a writer.
+#[cfg(target_os = "macos")]
+const O_NONBLOCK: i32 = 0x0004;
+#[cfg(not(target_os = "macos"))]
+const O_NONBLOCK: i32 = 0o4000;
 
 /// The real filesystem.
 #[derive(Clone, Copy, Debug, Default)]
@@ -84,6 +111,25 @@ impl Fs for OsFs {
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
         std::fs::read_link(path)
     }
+
+    fn read_at(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+        use std::os::unix::fs::{FileExt, OpenOptionsExt};
+        let f = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(path)?;
+        // The open may race a path swapped after the caller's stat; check what was opened.
+        if !f.metadata()?.is_file() {
+            return Err(not_regular());
+        }
+        let mut n = 0;
+        while n < buf.len() {
+            match f.read_at(&mut buf[n..], offset.saturating_add(n as u64)) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(n)
+    }
 }
 
 fn file_type(t: std::fs::FileType) -> FileType {
@@ -100,7 +146,15 @@ fn file_type(t: std::fs::FileType) -> FileType {
 
 fn info(m: &std::fs::Metadata) -> FileInfo {
     use std::os::unix::fs::MetadataExt;
-    FileInfo { file_type: file_type(m.file_type()), len: m.len(), mode: m.mode(), modified: Some((m.mtime(), m.mtime_nsec() as u32)) }
+    FileInfo {
+        file_type: file_type(m.file_type()),
+        len: m.len(),
+        mode: m.mode(),
+        modified: Some((m.mtime(), m.mtime_nsec() as u32)),
+        dev: m.dev(),
+        ino: m.ino(),
+        ctime: Some((m.ctime(), m.ctime_nsec() as u32)),
+    }
 }
 
 /// The real filesystem with absolute paths served from `root`: `/proc/1/stat` reads
@@ -160,6 +214,10 @@ impl Fs for RootedFs {
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
         OsFs.read_link(&self.map(path)?)
     }
+
+    fn read_at(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+        OsFs.read_at(&self.map(path)?, offset, buf)
+    }
 }
 
 #[cfg(test)]
@@ -185,6 +243,62 @@ mod tests {
         assert_eq!(fs.metadata(Path::new("/proc/1")).expect("meta").file_type, FileType::Dir);
         assert!(!fs.exists(Path::new("/proc/2/status")));
         std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn read_at_reads_a_window_and_refuses_non_regular_files() {
+        let root = fixture();
+        let fs = RootedFs::new(&root);
+        let mut buf = [0u8; 4];
+        assert_eq!(fs.read_at(Path::new("/proc/1/status"), 2, &mut buf).expect("read_at"), 4);
+        assert_eq!(&buf, b"me:\t");
+        assert_eq!(fs.read_at(Path::new("/proc/1/status"), 9, &mut buf).expect("tail"), 2, "short at the end");
+        assert_eq!(fs.read_at(Path::new("/proc/1/status"), 99, &mut buf).expect("past"), 0);
+        let err = fs.read_at(Path::new("/proc/1"), 0, &mut buf).expect_err("a directory");
+        assert_eq!(err.to_string(), "not a regular file");
+        assert!(fs.read_at(Path::new("/proc/2/status"), 0, &mut buf).is_err());
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    /// The trait default serves implementations without a positioned read.
+    #[test]
+    fn read_at_default_slices_the_whole_file() {
+        struct One;
+        impl Fs for One {
+            fn read(&self, _: &Path) -> io::Result<Vec<u8>> {
+                Ok(b"abcdef".to_vec())
+            }
+            fn read_dir(&self, _: &Path) -> io::Result<Vec<DirEntry>> {
+                Ok(Vec::new())
+            }
+            fn metadata(&self, _: &Path) -> io::Result<FileInfo> {
+                Err(io::Error::other("none"))
+            }
+            fn symlink_metadata(&self, _: &Path) -> io::Result<FileInfo> {
+                Err(io::Error::other("none"))
+            }
+            fn read_link(&self, _: &Path) -> io::Result<PathBuf> {
+                Err(io::Error::other("none"))
+            }
+        }
+        let mut buf = [0u8; 4];
+        assert_eq!(One.read_at(Path::new("/x"), 4, &mut buf).expect("read_at"), 2);
+        assert_eq!(&buf[..2], b"ef");
+        assert_eq!(One.read_at(Path::new("/x"), u64::MAX, &mut buf).expect("past"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::disallowed_methods)]
+    fn read_at_does_not_block_on_a_fifo() {
+        let dir = crate::fsutil::test_dir("fifo");
+        let fifo = dir.join("pipe");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status().map(|s| s.success()).unwrap_or(false);
+        if made {
+            let err = OsFs.read_at(&fifo, 0, &mut [0u8; 4]).expect_err("fifo");
+            assert_eq!(err.to_string(), "not a regular file");
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 
     #[test]

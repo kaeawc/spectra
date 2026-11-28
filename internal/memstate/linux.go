@@ -23,6 +23,12 @@ const (
 	psiFullCritPct    = 10.0
 )
 
+// CollectLinux runs the Linux backend against opts.ProcRoot on any host, so
+// a fixture /proc tree can be read on macOS too.
+func CollectLinux(opts Options) (MemoryState, error) {
+	return collectLinux(opts)
+}
+
 // collectLinux reads <procRoot>/meminfo, <procRoot>/vmstat and, when the
 // kernel exposes it, <procRoot>/pressure/memory.
 func collectLinux(opts Options) (MemoryState, error) {

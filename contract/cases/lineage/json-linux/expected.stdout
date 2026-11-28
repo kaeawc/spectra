@@ -1,0 +1,75 @@
+{
+  "pid": 100,
+  "flags": [
+    "reparented"
+  ],
+  "ancestors": [
+    {
+      "pid": 100,
+      "ppid": 1,
+      "user": "user",
+      "start_time": "2026-11-21T03:00:00-06:00",
+      "command": "bash"
+    },
+    {
+      "pid": 1,
+      "ppid": 0,
+      "user": "root",
+      "start_time": "2026-11-21T02:00:00.1-06:00",
+      "command": "init"
+    }
+  ],
+  "tree": {
+    "pid": 100,
+    "ppid": 1,
+    "user": "user",
+    "start_time": "2026-11-21T03:00:00-06:00",
+    "command": "bash",
+    "rss_kib": 5208,
+    "cpu_pct": 0.0011337868480725624,
+    "count": 4,
+    "subtree_rss_kib": 513120,
+    "subtree_cpu_pct": 13.584467120181406,
+    "children": [
+      {
+        "pid": 101,
+        "ppid": 100,
+        "user": "user",
+        "start_time": "2026-11-22T16:53:20-06:00",
+        "command": "python3",
+        "rss_kib": 98304,
+        "cpu_pct": 0.25,
+        "count": 1,
+        "subtree_rss_kib": 98304,
+        "subtree_cpu_pct": 0.25
+      },
+      {
+        "pid": 102,
+        "ppid": 100,
+        "user": "user",
+        "start_time": "2026-11-22T19:40:00-06:00",
+        "command": "node",
+        "rss_kib": 409600,
+        "cpu_pct": 13.333333333333334,
+        "count": 1,
+        "subtree_rss_kib": 409600,
+        "subtree_cpu_pct": 13.333333333333334
+      },
+      {
+        "pid": 106,
+        "ppid": 100,
+        "user": "user",
+        "start_time": "2026-11-22T23:50:00-06:00",
+        "command": "sleep",
+        "rss_kib": 8,
+        "cpu_pct": 0,
+        "flags": [
+          "zombie"
+        ],
+        "count": 1,
+        "subtree_rss_kib": 8,
+        "subtree_cpu_pct": 0
+      }
+    ]
+  }
+}

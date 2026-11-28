@@ -1,0 +1,1 @@
+spectra procdiag: /proc process diagnosis: unsupported on host OS (darwin) (use `spectra sample` or `spectra hang` on macOS)

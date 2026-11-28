@@ -1,0 +1,31 @@
+{
+  "physical_bytes": 2048000000,
+  "page_size_bytes": 65536,
+  "wired": 0,
+  "active": 1536000000,
+  "inactive": 307200000,
+  "speculative": 0,
+  "free": 51200000,
+  "purgeable": 0,
+  "file_backed": 133120000,
+  "anonymous": 1638400000,
+  "compressor_occupied": 0,
+  "compressor_stored": 0,
+  "compressor_ratio": 0,
+  "swap": {
+    "total_bytes": 0,
+    "used_bytes": 0,
+    "free_bytes": 0,
+    "encrypted": false
+  },
+  "pressure_level": "Warning",
+  "pressure_free_percent": 10,
+  "compressions": 0,
+  "decompressions": 0,
+  "swap_ins": 0,
+  "swap_outs": 0,
+  "collected_at": "2026-11-23T10:00:00.123456789Z",
+  "os": "linux",
+  "available_bytes": 204800000,
+  "pressure_reason": "10.0% of memory available"
+}

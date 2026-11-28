@@ -1,0 +1,8 @@
+Ancestors of pid 400 (nearest first):
+     400  user          2026-11-22 23:00:00  Google Chrome
+       1  root          2026-11-20 04:00:00  launchd
+Flags: reparented (heuristic: per-user launchd agents also have PPID 1)
+Descendants:
+  Google Chrome (400)  rss 1536000 KiB  cpu 25.4%
+    Google Chrome Helper (Renderer) (401)  rss 640000 KiB  cpu 41.7%
+Subtree: 2 processes, 2176000 KiB RSS, 67.1% CPU

@@ -1,0 +1,8 @@
+{
+  "args": [
+    "process",
+    "--min-rss",
+    "x"
+  ],
+  "os": "darwin"
+}

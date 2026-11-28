@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseVMStat(t *testing.T) {
@@ -106,5 +107,32 @@ Pages speculative:                        21.
 	}
 	if bad := applyMemorystatusLevel(ms, 255); bad.PressureFreePercent != ms.FreePagesPercent {
 		t.Errorf("out-of-range level changed PressureFreePercent to %v", bad.PressureFreePercent)
+	}
+}
+
+func TestFromDarwinSample(t *testing.T) {
+	const page = 4096
+	level := func(v uint32) *uint32 { return &v }
+	at := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	s := DarwinSample{
+		PageSizeBytes: page,
+		PhysicalBytes: 1000 * page,
+		VM:            DarwinVMCounts{Free: 100, Speculative: 21, Compressor: 10, UncompressedCompressor: 25, Swapouts: 3},
+		PressureLevel: level(2),
+	}
+	got := FromDarwinSample(s, at)
+	if got.Free != 100*page || got.CompressorRatio != 2.5 || got.SwapOuts != 3 || !got.CollectedAt.Equal(at) {
+		t.Fatalf("sample = %+v", got)
+	}
+	if got.PressureLevel != PressureWarning || got.PressureFreePercent != 12.1 || got.FreePagesPercent != 12.1 {
+		t.Fatalf("no memorystatus_level: level %s free %v pages %v, want Warning 12.1 12.1", got.PressureLevel, got.PressureFreePercent, got.FreePagesPercent)
+	}
+	s.MemorystatusLevel = level(87)
+	if got := FromDarwinSample(s, at); got.PressureFreePercent != 87 || got.FreePagesPercent != 12.1 {
+		t.Fatalf("memorystatus_level 87: free %v pages %v", got.PressureFreePercent, got.FreePagesPercent)
+	}
+	s.PressureLevel = nil
+	if got := FromDarwinSample(s, at); got.PressureLevel != PressureUnknown {
+		t.Fatalf("unread pressure level = %s, want Unknown", got.PressureLevel)
 	}
 }

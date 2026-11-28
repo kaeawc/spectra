@@ -1,0 +1,294 @@
+{
+  "pid": 100,
+  "comm": "pool-worker-thread-0",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 17,
+  "thread_count": 34,
+  "state_counts": {
+    "R": 5,
+    "S": 29
+  },
+  "threads": [
+    {
+      "tid": 107,
+      "comm": "pool-worker-thread-7",
+      "state": "R",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 121,
+      "comm": "pool-worker-thread-21",
+      "state": "R",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 101,
+      "comm": "pool-worker-thread-1",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 103,
+      "comm": "pool-worker-thread-3",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 105,
+      "comm": "pool-worker-thread-5",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 109,
+      "comm": "pool-worker-thread-9",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 111,
+      "comm": "pool-worker-thread-11",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 113,
+      "comm": "pool-worker-thread-13",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 115,
+      "comm": "pool-worker-thread-15",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 117,
+      "comm": "pool-worker-thread-17",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 119,
+      "comm": "pool-worker-thread-19",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 123,
+      "comm": "pool-worker-thread-23",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 125,
+      "comm": "pool-worker-thread-25",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 127,
+      "comm": "pool-worker-thread-27",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 129,
+      "comm": "pool-worker-thread-29",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 131,
+      "comm": "pool-worker-thread-31",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 133,
+      "comm": "pool-worker-thread-33",
+      "state": "S",
+      "cpu_pct": 1,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 100,
+      "comm": "pool-worker-thread-0",
+      "state": "R",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 114,
+      "comm": "pool-worker-thread-14",
+      "state": "R",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 128,
+      "comm": "pool-worker-thread-28",
+      "state": "R",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 102,
+      "comm": "pool-worker-thread-2",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 104,
+      "comm": "pool-worker-thread-4",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 106,
+      "comm": "pool-worker-thread-6",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 108,
+      "comm": "pool-worker-thread-8",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 110,
+      "comm": "pool-worker-thread-10",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 112,
+      "comm": "pool-worker-thread-12",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 116,
+      "comm": "pool-worker-thread-16",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 118,
+      "comm": "pool-worker-thread-18",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 120,
+      "comm": "pool-worker-thread-20",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 122,
+      "comm": "pool-worker-thread-22",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 124,
+      "comm": "pool-worker-thread-24",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 126,
+      "comm": "pool-worker-thread-26",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": null,
+  "verdict": "active",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "limits": {
+    "pty": {
+      "limit": 0,
+      "current": 0,
+      "pct": 0,
+      "warn": false,
+      "critical": false
+    },
+    "files": {
+      "limit": 0,
+      "current": 0,
+      "pct": 0,
+      "warn": false,
+      "critical": false
+    },
+    "max_files_per_proc": 0,
+    "procs": {
+      "limit": 9,
+      "current": 9,
+      "pct": 100,
+      "warn": true,
+      "critical": true
+    },
+    "procs_per_uid": {
+      "limit": 0,
+      "current": 4,
+      "pct": 0,
+      "warn": false,
+      "critical": false
+    },
+    "collected_at": "2026-11-23T10:00:00Z",
+    "partial_failures": [
+      "lsof:pty",
+      "kern.tty.ptmx_max",
+      "kern.num_files",
+      "kern.maxfiles",
+      "kern.maxfilesperproc",
+      "kern.maxprocperuid"
+    ]
+  },
+  "top_holders": {
+    "files": [],
+    "procs": [
+      {
+        "pid": 1,
+        "count": 3,
+        "command": "init"
+      },
+      {
+        "pid": 100,
+        "count": 3,
+        "command": "bash"
+      },
+      {
+        "pid": 2,
+        "count": 1,
+        "command": "kthreadd"
+      }
+    ],
+    "procs_per_uid": [],
+    "pty": []
+  }
+}

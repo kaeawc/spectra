@@ -1,0 +1,12 @@
+PID      PPID     RSS         VSZ         CPU%     MEM%     STARTED               ROLE        RUNTIME   SIGN          APP               COMMAND
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+310      1        439.5M      392.0G      9.5%     2.7%     2026-11-23 00:00      app         electron  unsigned      Elec              Elec
+350      1        391.6M      401.5G      7.7%     2.4%     2026-11-22 02:00      ai_agent    node      adhoc         -                 node
+300      1        146.5M      391.0G      2.5%     0.9%     2026-11-23 01:00      app         native    developer_id  Fixture           Fixture
+301      300      48.8M       390.1G      1.5%     0.3%     2026-11-23 02:00      app_helper  unknown   adhoc         Fixture           Fixture Helper
+330      1        30.3M       388.1G      0.8%     0.2%     2026-11-23 03:10      cli         rust      adhoc         -                 rtool
+320      1        29.3M       389.1G      0.9%     0.2%     2026-11-23 03:00      cli         go        unsigned      -                 gotool
+1        0        20.0M       410.2M      0.6%     0.1%     2026-11-20 04:00      cli         unknown   -             -                 launchd
+370      1        6.8M        385.3G      0.1%     0.0%     2026-11-23 03:30      cli         unknown   -             -                 app
+360      1        6.0M        386.2G      0.2%     0.0%     2026-11-21 05:00      shell       shell     -             -                 -zsh
+340      1        2.0M        387.2G      0.3%     0.0%     2026-11-23 03:20      system      native    apple         -                 ls

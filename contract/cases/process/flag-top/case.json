@@ -1,0 +1,8 @@
+{
+  "args": [
+    "process",
+    "--top",
+    "x"
+  ],
+  "os": "darwin"
+}

@@ -1,0 +1,16 @@
+MemTotal:        4000000 kB
+MemFree:         1000000 kB
+MemAvailable:    3000000 kB
+Buffers:           50000 kB
+Cached:          2000000 kB
+Active:          1100000 kB
+Inactive:        1500000 kB
+Active(file):    1000000 kB
+Inactive(file):  1000000 kB
+Unevictable:           4 kB
+SwapTotal:       2000000 kB
+SwapFree:        1500000 kB
+Zswap:            100000 kB
+Zswapped:         300000 kB
+AnonPages:        400000 kB
+HugePages_Total:       0

@@ -1,0 +1,64 @@
+{
+  "pid": 30,
+  "comm": "io",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 2,
+  "state_counts": {
+    "D": 2
+  },
+  "threads": [
+    {
+      "tid": 30,
+      "comm": "io",
+      "state": "D",
+      "wchan": "nfs_wait",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 31,
+      "comm": "io-2",
+      "state": "D",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "uninterruptible-io",
+      "severity": "critical",
+      "summary": "2 thread(s) stayed in uninterruptible sleep (D) for the whole 1s interval — SIGKILL will not work; suspect a hung disk, NFS/FUSE mount, or driver",
+      "evidence": [
+        "tid 30 (io) wchan=nfs_wait",
+        "tid 31 (io-2) wchan=?"
+      ]
+    }
+  ],
+  "verdict": "uninterruptible-io",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "physical_bytes": 17179869184,
+  "page_size_bytes": 16384,
+  "wired": 2457600000,
+  "active": 4915200000,
+  "inactive": 4751360000,
+  "speculative": 81920000,
+  "free": 327680000,
+  "purgeable": 49152000,
+  "file_backed": 4096000000,
+  "anonymous": 5406720000,
+  "compressor_occupied": 983040000,
+  "compressor_stored": 3031040000,
+  "compressor_ratio": 3.0833333333333335,
+  "swap": {
+    "total_bytes": 2147483648,
+    "used_bytes": 1073741824,
+    "free_bytes": 1073741824,
+    "encrypted": true
+  },
+  "pressure_level": "Normal",
+  "pressure_free_percent": 42,
+  "free_pages_percent": 2.384185791015625,
+  "compressions": 123456789,
+  "decompressions": 98765432,
+  "swap_ins": 1024,
+  "swap_outs": 2048,
+  "collected_at": "2026-11-23T10:00:00.123456789Z"
+}

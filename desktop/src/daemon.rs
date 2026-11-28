@@ -3,6 +3,8 @@
 //!
 //! Every Spectra call still goes through [`crate::run::run_until`]; it asks [`answer`] first,
 //! and [`route`] decides, in one table, whether the daemon answers that call or the CLI runs.
+//! The memory reading asks through [`crate::run::ask_daemon`] instead: when the daemon doesn't
+//! answer it, the command layer reads it in-process rather than the CLI.
 //! Each entry applies only while `daemon.status` lists its method, so a newer daemon's methods
 //! switch on by themselves.
 //!
@@ -334,7 +336,8 @@ pub static TABLE: &[Entry] = &[
         method: WATCH,
         answer: load,
     },
-    // The Machine page's readings, each the same JSON the CLI's `--json` prints.
+    // The Machine page's readings, each the same JSON the CLI's `--json` prints. Memory the
+    // daemon doesn't answer is read in-process, never by the CLI.
     Entry {
         cli: &["memory", "--json"],
         method: MEMORY,

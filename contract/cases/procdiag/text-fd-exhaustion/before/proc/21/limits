@@ -1,0 +1,2 @@
+Limit                     Soft Limit           Hard Limit           Units
+Max open files            10                  4096                 files

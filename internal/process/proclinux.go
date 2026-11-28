@@ -34,6 +34,12 @@ func ParseLinuxCPUTimes(data []byte) (cpuTicks, startTicks int64, ok bool) {
 // entries (a pid that exits mid-scan, a hidepid mount) are skipped rather
 // than failing the whole collection.
 func collectLinuxProcs(root string, now func() time.Time) []Info {
+	return collectLinuxProcsWith(root, now, 0, nil)
+}
+
+// collectLinuxProcsWith is collectLinuxProcs with the page size (0 means
+// os.Getpagesize()) and the uid lookup (nil means os/user) injectable.
+func collectLinuxProcsWith(root string, now func() time.Time, pageSize int64, lookup func(int) (string, error)) []Info {
 	if now == nil {
 		now = time.Now
 	}
@@ -42,7 +48,13 @@ func collectLinuxProcs(root string, now func() time.Time) []Info {
 		return nil
 	}
 	bootTime, haveBoot := readBtime(root)
-	users := map[int]string{}
+	if pageSize <= 0 {
+		pageSize = int64(os.Getpagesize())
+	}
+	if lookup == nil {
+		lookup = lookupOSUser
+	}
+	users := userCache{names: map[int]string{}, lookup: lookup}
 	at := now()
 
 	var out []Info
@@ -51,7 +63,7 @@ func collectLinuxProcs(root string, now func() time.Time) []Info {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		info, ok := readLinuxProc(root, pid, bootTime, haveBoot, at, users)
+		info, ok := readLinuxProc(root, pid, bootTime, haveBoot, at, pageSize, &users)
 		if ok {
 			out = append(out, info)
 		}
@@ -82,7 +94,7 @@ func parseBtime(data []byte) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func readLinuxProc(root string, pid int, bootTime time.Time, haveBoot bool, at time.Time, users map[int]string) (Info, bool) {
+func readLinuxProc(root string, pid int, bootTime time.Time, haveBoot bool, at time.Time, pageSize int64, users *userCache) (Info, bool) {
 	statBytes, err := os.ReadFile(filepath.Join(root, strconv.Itoa(pid), "stat"))
 	if err != nil {
 		return Info{}, false
@@ -92,7 +104,7 @@ func readLinuxProc(root string, pid int, bootTime time.Time, haveBoot bool, at t
 		return Info{}, false
 	}
 
-	pageKiB := int64(os.Getpagesize()) / 1024
+	pageKiB := pageSize / 1024
 	if pageKiB <= 0 {
 		pageKiB = 4
 	}
@@ -117,7 +129,7 @@ func readLinuxProc(root string, pid int, bootTime time.Time, haveBoot bool, at t
 
 	if uid, ok := readProcUID(root, pid); ok {
 		info.UID = uid
-		info.User = lookupUser(uid, users)
+		info.User = users.name(uid)
 	}
 
 	if haveBoot && st.starttimeTicks > 0 {
@@ -241,17 +253,30 @@ func parseStatusUID(data []byte) (int, bool) {
 	return 0, false
 }
 
-// lookupUser resolves a uid to a username, memoized per collection. Falls
-// back to the numeric uid when the lookup fails (pure-Go /etc/passwd read
-// under CGO_ENABLED=0).
-func lookupUser(uid int, cache map[int]string) string {
-	if name, ok := cache[uid]; ok {
+// userCache resolves uids to user names, memoized per collection. A failed
+// lookup or an empty name falls back to the numeric uid (the pure-Go
+// /etc/passwd read under CGO_ENABLED=0 misses directory-service users).
+type userCache struct {
+	names  map[int]string
+	lookup func(int) (string, error)
+}
+
+func (c *userCache) name(uid int) string {
+	if name, ok := c.names[uid]; ok {
 		return name
 	}
 	name := strconv.Itoa(uid)
-	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil && u.Username != "" {
-		name = u.Username
+	if u, err := c.lookup(uid); err == nil && u != "" {
+		name = u
 	}
-	cache[uid] = name
+	c.names[uid] = name
 	return name
+}
+
+func lookupOSUser(uid int) (string, error) {
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return "", err
+	}
+	return u.Username, nil
 }

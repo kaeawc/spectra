@@ -14,7 +14,9 @@ use super::home::{callout, tile};
 use crate::app::App;
 use crate::findings::Severity;
 use crate::procs::{Process, fmt_count, fmt_cpu, fmt_mem};
-use crate::system::{Fail, Pressure, Section, ThermalState, counter_deltas, fmt_size};
+use crate::system::{
+    Fail, MemoryFigures, Pressure, Section, ThermalState, counter_deltas, fmt_size,
+};
 
 /// Processes in each top-consumer list.
 const TOP: usize = 5;
@@ -221,15 +223,17 @@ fn memory(s: &App, k: &Kit) -> El {
     let Some(m) = &sys.memory.last else {
         return body;
     };
-    let ink = pressure_ink(m.pressure, k);
-    let in_use = match m.free_pct {
+    let (pressure, free_pct) = (m.pressure(), m.free_pct());
+    let physical = m.physical_bytes as f64;
+    let ink = pressure_ink(pressure, k);
+    let in_use = match free_pct {
         Some(free) => 1.0 - free / 100.0,
-        None if m.physical > 0.0 => m.used() / m.physical,
+        None if physical > 0.0 => m.used() / physical,
         None => 0.0,
     };
-    let headline = match m.free_pct {
-        Some(free) => format!("{} · {free:.0}% free for new work", m.pressure.label()),
-        None => m.pressure.label().to_owned(),
+    let headline = match free_pct {
+        Some(free) => format!("{} · {free:.0}% free for new work", pressure.label()),
+        None => pressure.label().to_owned(),
     };
     let gauge_row = col()
         .w_full()
@@ -249,33 +253,44 @@ fn memory(s: &App, k: &Kit) -> El {
                 ),
         )
         .child(gauge("sys-pressure-gauge", in_use, ink, k));
-    let of = |part: f64| format!("{} of {}", fmt_size(part), fmt_size(m.physical));
+    let of = |part: f64| format!("{} of {}", fmt_size(part), fmt_size(physical));
     let mut facts = panel("sys-mem-facts", k)
         .child(gauge_row)
         .child(fact("used", "Used", value(of(m.used()), k), k))
-        .child(fact("app", "App memory", value(fmt_size(m.app), k), k))
-        .child(fact("wired", "Wired", value(fmt_size(m.wired), k), k))
+        .child(fact(
+            "app",
+            "App memory",
+            value(fmt_size(m.anonymous as f64), k),
+            k,
+        ))
+        .child(fact(
+            "wired",
+            "Wired",
+            value(fmt_size(m.wired as f64), k),
+            k,
+        ))
         .child(fact(
             "file",
             "File-backed (cached files)",
-            value(fmt_size(m.file_backed), k),
+            value(fmt_size(m.file_backed as f64), k),
             k,
         ));
-    let compressed = if m.compressed_from > 0.0 && m.ratio > 0.0 {
+    let compressed = if m.compressor_stored > 0 && m.compressor_ratio > 0.0 {
         format!(
             "{} holding {} ({:.1}× smaller)",
-            fmt_size(m.compressed),
-            fmt_size(m.compressed_from),
-            m.ratio
+            fmt_size(m.compressor_occupied as f64),
+            fmt_size(m.compressor_stored as f64),
+            m.compressor_ratio
         )
     } else {
-        fmt_size(m.compressed)
+        fmt_size(m.compressor_occupied as f64)
     };
     facts = facts.child(fact("compressed", "Compressed", value(compressed, k), k));
-    let swap = if m.swap_total > 0.0 {
-        format!("{} of {}", fmt_size(m.swap_used), fmt_size(m.swap_total))
-    } else if m.swap_used > 0.0 {
-        fmt_size(m.swap_used)
+    let (swap_used, swap_total) = (m.swap.used_bytes as f64, m.swap.total_bytes as f64);
+    let swap = if swap_total > 0.0 {
+        format!("{} of {}", fmt_size(swap_used), fmt_size(swap_total))
+    } else if swap_used > 0.0 {
+        fmt_size(swap_used)
     } else {
         "None".to_owned()
     };
@@ -298,7 +313,7 @@ fn memory(s: &App, k: &Kit) -> El {
     let h = &sys.mem_history;
     let compressions: Vec<f64> = h.iter().map(|p| p.compressions).collect();
     let mut all = Vec::new();
-    if m.free_pct.is_some() {
+    if free_pct.is_some() {
         all.push(Lane {
             key: "sys-lane-free",
             label: "Free for new work",

@@ -3,7 +3,38 @@
 //! other crates stay `#![forbid(unsafe_code)]`.
 //!
 //! macOS: sysctl by name, swap usage, Mach VM statistics, libproc rusage, path and BSD name.
-//! Linux collectors read `/proc` and `/sys` through `spectra_base::fs::Fs` and need no FFI.
+//! Linux collectors read `/proc` and `/sys` through `spectra_base::fs::Fs` and need no FFI beyond
+//! [`page_size`].
 
 #[cfg(target_os = "macos")]
 pub mod darwin;
+
+/// The kernel's page size in bytes (Go's `os.Getpagesize`), or 4096 when `sysconf` fails.
+#[cfg(unix)]
+pub fn page_size() -> u64 {
+    // SAFETY: sysconf has no preconditions.
+    let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    u64::try_from(n).unwrap_or(4096)
+}
+
+/// The real user id of this process (Go's `os.Getuid`).
+#[cfg(unix)]
+pub fn uid() -> i64 {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    i64::from(unsafe { libc::getuid() })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn uid_matches_the_environment_of_this_process() {
+        // Not asserting a value: tests run as any user. It must at least be stable.
+        assert_eq!(super::uid(), super::uid());
+    }
+
+    #[test]
+    fn page_size_is_a_power_of_two() {
+        let p = super::page_size();
+        assert!(p >= 4096 && p.is_power_of_two(), "{p}");
+    }
+}

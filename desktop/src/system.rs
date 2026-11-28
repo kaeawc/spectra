@@ -1,21 +1,27 @@
 //! The whole machine at a glance: memory, thermal state, power, load, disks and network, each
 //! read from Spectra on its own schedule off the UI thread, with recent history for the charts.
 //!
-//! Every reading is parsed field by field from JSON, so a field Spectra leaves out (or a Spectra
-//! that names one differently) reads as unknown rather than failing the page. A failed reading
-//! keeps the last good one and says so; one Spectra can't take on this system hides its part.
+//! Memory comes from the command layer in-process ([`spectra_cli::api::memory`]) as the typed
+//! [`MemoryState`], or from the daemon in the same shape. The other readings are parsed field by
+//! field from JSON, so a field Spectra leaves out (or a Spectra that names one differently) reads
+//! as unknown rather than failing the page. A failed reading keeps the last good one and says
+//! so; one Spectra can't take on this system hides its part.
 
 use std::collections::{HashSet, VecDeque};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use serde_json::Value;
+use spectra_cli::Ctx;
+use spectra_host::memstate::{MemoryState, PressureLevel};
 
 use crate::app::{App, fmt_ago};
 use crate::procs::run_failure;
-use crate::run::{Ended, RunError, run_until};
+use crate::run::{Ended, Output, RunError, ask_daemon, run_until};
 
 /// How long the memory, thermal and load readings rest between rounds.
 pub const FAST: Duration = Duration::from_secs(5);
@@ -106,12 +112,12 @@ pub enum Pressure {
 }
 
 impl Pressure {
-    fn of(s: &str) -> Pressure {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "normal" => Pressure::Normal,
-            "warning" | "warn" => Pressure::Warning,
-            "critical" | "urgent" => Pressure::Critical,
-            _ => Pressure::Unknown,
+    fn of(level: PressureLevel) -> Pressure {
+        match level {
+            PressureLevel::Normal => Pressure::Normal,
+            PressureLevel::Warning => Pressure::Warning,
+            PressureLevel::Critical => Pressure::Critical,
+            PressureLevel::Unset | PressureLevel::Unknown => Pressure::Unknown,
         }
     }
 
@@ -125,38 +131,35 @@ impl Pressure {
     }
 }
 
-/// `spectra memory --json`, in bytes; counters are totals since boot.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Memory {
-    pub physical: f64,
-    pub wired: f64,
-    pub free: f64,
-    pub file_backed: f64,
-    /// Memory apps allocated themselves (anonymous pages).
-    pub app: f64,
-    pub purgeable: f64,
-    /// What the compressor holds, and what that would take uncompressed.
-    pub compressed: f64,
-    pub compressed_from: f64,
-    pub ratio: f64,
-    pub swap_total: f64,
-    pub swap_used: f64,
-    pub pressure: Pressure,
-    pub free_pct: Option<f64>,
-    pub compressions: f64,
-    pub decompressions: f64,
-    pub swap_ins: f64,
-    pub swap_outs: f64,
+/// What the pages read off one memory reading. A [`MemoryState`] is in bytes; its counters are
+/// totals since boot, and `anonymous` is the memory apps allocated themselves.
+pub trait MemoryFigures {
+    fn pressure(&self) -> Pressure;
+    /// `pressure_free_percent`: the share free for new work (`kern.memorystatus_level` on macOS,
+    /// MemAvailable on Linux). `None` for a reading with no memory size, which has no share.
+    fn free_pct(&self) -> Option<f64>;
+    /// What's in use: wired, app memory and the compressor, never more than there is.
+    fn used(&self) -> f64;
 }
 
-impl Memory {
-    /// What's in use: wired, app memory and the compressor, never more than there is.
-    pub fn used(&self) -> f64 {
-        let used = self.wired + self.app + self.compressed;
-        if self.physical > 0.0 {
-            used.min(self.physical)
+impl MemoryFigures for MemoryState {
+    fn pressure(&self) -> Pressure {
+        Pressure::of(self.pressure_level)
+    }
+
+    fn free_pct(&self) -> Option<f64> {
+        (self.physical_bytes > 0).then_some(self.pressure_free_percent)
+    }
+
+    fn used(&self) -> f64 {
+        let used = self
+            .wired
+            .saturating_add(self.anonymous)
+            .saturating_add(self.compressor_occupied);
+        if self.physical_bytes > 0 {
+            used.min(self.physical_bytes) as f64
         } else {
-            used
+            used as f64
         }
     }
 }
@@ -304,7 +307,7 @@ pub struct Network {
 /// One landed reading.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Reading {
-    Memory(Result<Memory, Fail>),
+    Memory(Result<MemoryState, Fail>),
     Thermal(Result<Thermal, Fail>),
     Load(Result<Load, Fail>),
     Power(Result<Power, Fail>),
@@ -373,29 +376,17 @@ fn object(json: &str, kind: Kind) -> Result<Value, Fail> {
     }
 }
 
-pub fn parse_memory(json: &str) -> Result<Memory, Fail> {
+/// The daemon's `memory.current` answer (`spectra memory --json`'s shape) as the typed sample.
+pub fn parse_memory(json: &str) -> Result<MemoryState, Fail> {
     let v = object(json, Kind::Memory)?;
-    let swap = v.get("swap").cloned().unwrap_or(Value::Null);
-    let m = Memory {
-        physical: n0(&v, "physical_bytes"),
-        wired: n0(&v, "wired"),
-        free: n0(&v, "free"),
-        file_backed: n0(&v, "file_backed"),
-        app: n0(&v, "anonymous"),
-        purgeable: n0(&v, "purgeable"),
-        compressed: n0(&v, "compressor_occupied"),
-        compressed_from: n0(&v, "compressor_stored"),
-        ratio: n0(&v, "compressor_ratio"),
-        swap_total: n0(&swap, "total_bytes"),
-        swap_used: n0(&swap, "used_bytes"),
-        pressure: Pressure::of(&st(&v, "pressure_level")),
-        free_pct: num(&v, "pressure_free_percent"),
-        compressions: n0(&v, "compressions"),
-        decompressions: n0(&v, "decompressions"),
-        swap_ins: n0(&v, "swap_ins"),
-        swap_outs: n0(&v, "swap_outs"),
-    };
-    if m.physical <= 0.0 && m.pressure == Pressure::Unknown {
+    let m = MemoryState::deserialize(v)
+        .map_err(|e| Fail::Failed(format!("Couldn't read Spectra's memory output: {e}")))?;
+    usable(m)
+}
+
+/// A reading with neither a memory size nor a pressure level is no reading.
+fn usable(m: MemoryState) -> Result<MemoryState, Fail> {
+    if m.physical_bytes == 0 && m.pressure() == Pressure::Unknown {
         return Err(Fail::Failed("Spectra's memory reading was empty".into()));
     }
     Ok(m)
@@ -570,10 +561,11 @@ fn parse(kind: Kind, out: Result<String, Fail>) -> Reading {
     }
 }
 
-/// Runs `bin <kind> --json` with a deadline and parses what it printed. The flag says whether it
-/// ran out of time.
-pub fn fetch(bin: &str, kind: Kind, deadline: Duration) -> (Reading, bool) {
-    fetch_until(bin, kind, deadline, &CANCEL)
+/// Takes one `kind` reading with a deadline: memory from the daemon or the command layer in
+/// `ctx`, the rest by running `bin <kind> --json` and parsing what it printed. The flag says
+/// whether it ran out of time.
+pub fn fetch(ctx: &Ctx, bin: &str, kind: Kind, deadline: Duration) -> (Reading, bool) {
+    fetch_until(ctx, bin, kind, deadline, &CANCEL)
 }
 
 /// Set when the app quits: every reading in flight is killed, and the reading threads end.
@@ -581,8 +573,9 @@ pub static CANCEL: AtomicBool = AtomicBool::new(false);
 /// Set while the window is hidden: the reading threads wait instead of starting a round.
 pub static PAUSED: AtomicBool = AtomicBool::new(false);
 
-/// [`fetch`], also killing the reading once `cancel` is set.
+/// [`fetch`], also stopping the reading once `cancel` is set.
 pub fn fetch_until(
+    ctx: &Ctx,
     bin: &str,
     kind: Kind,
     deadline: Duration,
@@ -590,43 +583,86 @@ pub fn fetch_until(
 ) -> (Reading, bool) {
     let mut cmd = Command::new(bin);
     cmd.args(kind.args());
+    if kind == Kind::Memory {
+        return read_memory(ctx, bin, &cmd, deadline, cancel);
+    }
     if kind == Kind::Storage {
         cmd.env("HOME", EMPTY_HOME)
             .env("XDG_CACHE_HOME", EMPTY_HOME);
     }
-    let mut timed_out = false;
-    let out = match run_until(cmd, deadline, MAX_OUTPUT, cancel) {
-        Err(Ended::Cancelled) => Err(Fail::Failed(format!(
-            "{bin} {} was stopped",
-            kind.command()
-        ))),
+    let (out, timed_out) = printed(bin, kind, run_until(cmd, deadline, MAX_OUTPUT, cancel));
+    (parse(kind, out), timed_out)
+}
+
+/// What a run (or the daemon's answer for it) printed, or why it printed no reading; the flag
+/// says whether it ran out of time.
+fn printed(bin: &str, kind: Kind, run: Result<Output, Ended>) -> (Result<String, Fail>, bool) {
+    match run {
+        Err(Ended::Cancelled) => (
+            Err(Fail::Failed(format!(
+                "{bin} {} was stopped",
+                kind.command()
+            ))),
+            false,
+        ),
         Err(Ended::Failed(e)) => {
-            timed_out = matches!(e, RunError::Timeout(_));
-            Err(Fail::Failed(run_failure(bin, e)))
+            let timed_out = matches!(e, RunError::Timeout(_));
+            (Err(Fail::Failed(run_failure(bin, e))), timed_out)
         }
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
             if kind.reads(out.status.code()) && !stdout.trim().is_empty() {
-                Ok(stdout)
+                (Ok(stdout), false)
             } else {
-                Err(classify(
-                    bin,
-                    kind,
-                    out.status.code(),
-                    &String::from_utf8_lossy(&out.stderr),
-                ))
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                (Err(classify(bin, kind, out.status.code(), &stderr)), false)
             }
         }
-    };
-    (parse(kind, out), timed_out)
+    }
+}
+
+/// The memory reading: the daemon's `memory.current` when it answers `cmd`, else one sample
+/// from the command layer, taken here on the reading thread instead of a `spectra` process. The
+/// sample is a few system calls, so there's nothing to kill: a reading cancelled, or out of time
+/// waiting on the daemon, is never started.
+fn read_memory(
+    ctx: &Ctx,
+    bin: &str,
+    cmd: &Command,
+    deadline: Duration,
+    cancel: &AtomicBool,
+) -> (Reading, bool) {
+    let start = Instant::now();
+    if let Some(run) = ask_daemon(cmd, deadline, MAX_OUTPUT, cancel) {
+        let (out, timed_out) = printed(bin, Kind::Memory, run);
+        return (parse(Kind::Memory, out), timed_out);
+    }
+    if cancel.load(Ordering::Relaxed) {
+        let why = format!("{bin} memory was stopped");
+        return (Reading::Memory(Err(Fail::Failed(why))), false);
+    }
+    if start.elapsed() >= deadline {
+        let why = run_failure(bin, RunError::Timeout(deadline));
+        return (Reading::Memory(Err(Fail::Failed(why))), true);
+    }
+    (Reading::Memory(memory_in_process(ctx, bin)), false)
+}
+
+/// One sample from [`spectra_cli::api::memory`]. Its errors are what `spectra memory` prints, so
+/// they read as that command's failures did.
+fn memory_in_process(ctx: &Ctx, bin: &str) -> Result<MemoryState, Fail> {
+    match spectra_cli::api::memory(ctx, spectra_cli::memory::Options::default()) {
+        Ok(m) => usable(m),
+        Err(e) => Err(classify(bin, Kind::Memory, Some(1), &e.to_string())),
+    }
 }
 
 /// Starts the two reading threads: memory, thermal and load every `FAST`; power, network and
 /// disks every `SLOW`. Each round starts only after the last landed. They stop once the app
 /// stops listening.
-pub fn spawn(tx: Sender<Reading>, wake: rune::Waker) {
+pub fn spawn(ctx: Arc<Ctx>, tx: Sender<Reading>, wake: rune::Waker) {
     let bin = std::env::var("SPECTRA_BIN").unwrap_or_else(|_| "spectra".into());
-    start(tx, wake, bin, &|name, job| {
+    start(ctx, tx, wake, bin, &|name, job| {
         std::thread::Builder::new()
             .name(name.into())
             .spawn(job)
@@ -638,7 +674,7 @@ type Spawner = dyn Fn(&str, Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
 
 /// [`spawn`], with the way a thread starts handed in. A thread that can't start leaves an error
 /// on each of its readings, so the page says why instead of reading "Reading…" forever.
-fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner) {
+fn start(ctx: Arc<Ctx>, tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner) {
     let rounds: [(&str, &[Kind], Duration, Duration); 2] = [
         (
             "spectra-system-fast",
@@ -654,7 +690,7 @@ fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner)
         ),
     ];
     for (name, kinds, rest, deadline) in rounds {
-        let (job_tx, job_wake, bin) = (tx.clone(), wake.clone(), bin.clone());
+        let (job_tx, job_wake, bin, ctx) = (tx.clone(), wake.clone(), bin.clone(), ctx.clone());
         let job = move || {
             let (tx, wake) = (job_tx, job_wake);
             let mut skip_storage = 0;
@@ -670,7 +706,7 @@ fn start(tx: Sender<Reading>, wake: rune::Waker, bin: String, spawner: &Spawner)
                         skip_storage -= 1;
                         continue;
                     }
-                    let (reading, timed_out) = fetch(&bin, kind, deadline);
+                    let (reading, timed_out) = fetch(&ctx, &bin, kind, deadline);
                     if kind == Kind::Storage {
                         skip_storage = if timed_out {
                             STORAGE_BACKOFF
@@ -826,7 +862,7 @@ pub fn swap_growth(history: &VecDeque<MemPoint>) -> Option<f64> {
 
 /// Every machine-wide reading and its history.
 pub struct System {
-    pub memory: Section<Memory>,
+    pub memory: Section<MemoryState>,
     pub thermal: Section<Thermal>,
     pub load: Section<Load>,
     pub power: Section<Power>,
@@ -886,15 +922,15 @@ impl System {
                     && let Some(m) = &self.memory.last
                 {
                     let point = MemPoint {
-                        free_pct: m.free_pct.unwrap_or(0.0),
-                        compressed: m.compressed,
-                        swap_used: m.swap_used,
-                        swap_ins: m.swap_ins,
-                        swap_outs: m.swap_outs,
-                        compressions: m.compressions,
+                        free_pct: m.free_pct().unwrap_or(0.0),
+                        compressed: m.compressor_occupied as f64,
+                        swap_used: m.swap.used_bytes as f64,
+                        swap_ins: m.swap_ins as f64,
+                        swap_outs: m.swap_outs as f64,
+                        compressions: m.compressions as f64,
                     };
                     push(&mut self.mem_history, point);
-                    self.track_pressure(m.pressure);
+                    self.track_pressure(m.pressure());
                 }
             }
             Reading::Load(l) => {
@@ -1049,6 +1085,12 @@ impl App {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use spectra_host::memstate::{DarwinSample, DarwinVmCounts, FixedMemory, SwapUsage};
+
+    /// The command layer on this machine's seams.
+    fn ctx() -> Ctx {
+        Ctx::system("test")
+    }
 
     /// Trimmed from `spectra memory --json` on a 128 GB Mac.
     pub const MEMORY: &str = r#"{
@@ -1113,14 +1155,17 @@ pub mod tests {
     #[test]
     fn parses_memory() {
         let m = parse_memory(MEMORY).unwrap();
-        assert_eq!(m.pressure, Pressure::Normal);
-        assert_eq!(m.physical, 137_438_953_472.0);
-        assert_eq!(m.app, 72_830_222_336.0, "anonymous memory is app memory");
-        assert_eq!(m.compressed, 1_876_557_824.0);
-        assert!((m.ratio - 2.076).abs() < 1e-3);
-        assert_eq!((m.swap_used, m.swap_total), (0.0, 0.0));
-        assert!((m.free_pct.unwrap() - 2.626).abs() < 1e-3);
-        assert_eq!(m.compressions, 536_130.0);
+        assert_eq!(m.pressure(), Pressure::Normal);
+        assert_eq!(m.physical_bytes, 137_438_953_472);
+        assert_eq!(
+            m.anonymous, 72_830_222_336,
+            "anonymous memory is app memory"
+        );
+        assert_eq!(m.compressor_occupied, 1_876_557_824);
+        assert!((m.compressor_ratio - 2.076).abs() < 1e-3);
+        assert_eq!((m.swap.used_bytes, m.swap.total_bytes), (0, 0));
+        assert!((m.free_pct().unwrap() - 2.626).abs() < 1e-3);
+        assert_eq!(m.compressions, 536_130);
         assert_eq!(
             m.used(),
             12_144_508_928.0 + 72_830_222_336.0 + 1_876_557_824.0
@@ -1129,19 +1174,23 @@ pub mod tests {
 
     #[test]
     fn memory_parses_tolerantly() {
-        let m = parse_memory(
-            r#"{"physical_bytes": "1024", "pressure_level": "Critical", "swap": null}"#,
-        )
-        .unwrap();
+        let m = parse_memory(r#"{"physical_bytes": 1024, "pressure_level": "Critical"}"#).unwrap();
         assert_eq!(
-            (m.physical, m.pressure, m.free_pct),
-            (1024.0, Pressure::Critical, None)
+            (m.physical_bytes, m.pressure(), m.free_pct()),
+            (1024, Pressure::Critical, Some(0.0)),
+            "missing fields read as zero"
+        );
+        let level = parse_memory(r#"{"pressure_level": "Warning", "new_field": [1]}"#).unwrap();
+        assert_eq!(
+            (level.pressure(), level.free_pct()),
+            (Pressure::Warning, None)
         );
         assert_eq!(
-            parse_memory(r#"{"pressure_level": "WARN"}"#)
+            parse_memory(r#"{"physical_bytes": 1, "pressure_level": "Elevated"}"#)
                 .unwrap()
-                .pressure,
-            Pressure::Warning
+                .pressure(),
+            Pressure::Unknown,
+            "a level this build doesn't know"
         );
         assert!(
             matches!(parse_memory("{}"), Err(Fail::Failed(_))),
@@ -1149,6 +1198,81 @@ pub mod tests {
         );
         assert!(matches!(parse_memory("[1]"), Err(Fail::Failed(_))));
         assert!(matches!(parse_memory("not json"), Err(Fail::Failed(_))));
+        assert!(
+            matches!(
+                parse_memory(r#"{"physical_bytes": "1024"}"#),
+                Err(Fail::Failed(_))
+            ),
+            "a field of the wrong type"
+        );
+    }
+
+    #[test]
+    fn memory_is_read_in_process_through_the_command_layer() {
+        let sample = DarwinSample {
+            page_size_bytes: 16384,
+            physical_bytes: 32 << 30,
+            swap: SwapUsage {
+                total_bytes: 2 << 30,
+                used_bytes: 1 << 30,
+                ..SwapUsage::default()
+            },
+            vm: DarwinVmCounts {
+                wire: 1000,
+                internal: 5000,
+                compressor: 200,
+                swapins: 7,
+                ..DarwinVmCounts::default()
+            },
+            pressure_level: Some(2),
+            memorystatus_level: Some(37),
+        };
+        let fixed = |darwin| Ctx {
+            os: spectra_base::hostos::Kind::Darwin,
+            memory: Arc::new(FixedMemory {
+                darwin,
+                page_size: 16384,
+            }),
+            ..ctx()
+        };
+        // No `spectra` to run: the reading never starts a process.
+        let bin = "/nonexistent/spectra";
+        let (r, timed_out) = fetch(
+            &fixed(Some(sample)),
+            bin,
+            Kind::Memory,
+            Duration::from_secs(10),
+        );
+        let Reading::Memory(Ok(m)) = r else {
+            panic!("{r:?}")
+        };
+        assert!(!timed_out);
+        assert_eq!(
+            (m.pressure(), m.free_pct()),
+            (Pressure::Warning, Some(37.0))
+        );
+        assert_eq!(m.used(), (6200 * 16384) as f64);
+        assert_eq!((m.swap.used_bytes, m.swap_ins), (1 << 30, 7));
+
+        let (r, _) = fetch(&fixed(None), bin, Kind::Memory, Duration::from_secs(10));
+        assert_eq!(
+            r,
+            Reading::Memory(Err(Fail::Unsupported(
+                "Spectra can't read memory on this system.".into()
+            )))
+        );
+        let (r, timed_out) = fetch_until(
+            &fixed(Some(sample)),
+            bin,
+            Kind::Memory,
+            Duration::from_secs(10),
+            &AtomicBool::new(true),
+        );
+        assert!(!timed_out);
+        assert!(
+            matches!(r, Reading::Memory(Err(Fail::Failed(ref w))) if w.contains("stopped")),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -1293,19 +1417,19 @@ pub mod tests {
         assert!(counter_deltas(&[1.0]).is_empty());
 
         let mut s = System::new();
-        let mem = |swap_ins: f64, compressions: f64| Memory {
-            physical: 1.0,
-            pressure: Pressure::Normal,
+        let mem = |swap_ins: u64, compressions: u64| MemoryState {
+            physical_bytes: 1,
+            pressure_level: PressureLevel::Normal,
             swap_ins,
-            swap_outs: swap_ins / 2.0,
+            swap_outs: swap_ins / 2,
             compressions,
-            ..Memory::default()
+            ..MemoryState::default()
         };
         assert_eq!(s.per_reading(), None);
-        s.land(Reading::Memory(Ok(mem(100.0, 1000.0))), 0.0, 0.0);
-        s.land(Reading::Memory(Ok(mem(130.0, 1600.0))), 5.0, 0.0);
+        s.land(Reading::Memory(Ok(mem(100, 1000))), 0.0, 0.0);
+        s.land(Reading::Memory(Ok(mem(130, 1600))), 5.0, 0.0);
         assert_eq!(s.per_reading(), Some((30.0, 15.0, 600.0)));
-        s.land(Reading::Memory(Ok(mem(4.0, 20.0))), 10.0, 0.0);
+        s.land(Reading::Memory(Ok(mem(4, 20))), 10.0, 0.0);
         assert_eq!(s.per_reading(), Some((0.0, 0.0, 0.0)), "the counters reset");
     }
 
@@ -1442,6 +1566,7 @@ pub mod tests {
             r#"echo '{"verdict": "warm", "evidence": "warning level 1"}'; exit 3"#,
         );
         let (r, timed_out) = fetch(
+            &ctx(),
             warm.to_str().unwrap(),
             Kind::Thermal,
             Duration::from_secs(10),
@@ -1462,6 +1587,7 @@ pub mod tests {
             r#"echo '{"verdict": "throttled", "limits": {"cpu_speed_limit": 55}}'; exit 4"#,
         );
         let (r, _) = fetch(
+            &ctx(),
             hot.to_str().unwrap(),
             Kind::Thermal,
             Duration::from_secs(10),
@@ -1479,19 +1605,31 @@ pub mod tests {
         );
         let held = script("held", r#"echo '{"load1": 30, "cpus": 8}'; exit 3"#);
         assert!(matches!(
-            fetch(held.to_str().unwrap(), Kind::Load, Duration::from_secs(10)).0,
+            fetch(
+                &ctx(),
+                held.to_str().unwrap(),
+                Kind::Load,
+                Duration::from_secs(10)
+            )
+            .0,
             Reading::Load(Ok(_))
         ));
-        // Exit 3 means something else for memory.
+        // Exit 3 means something else for power.
         let bad = script(
             "bad",
-            r#"echo '{"physical_bytes": 1}'; echo 'went wrong' >&2; exit 3"#,
+            r#"echo '{"battery": {"pct": 1}}'; echo 'went wrong' >&2; exit 3"#,
         );
-        let (r, _) = fetch(bad.to_str().unwrap(), Kind::Memory, Duration::from_secs(10));
-        assert!(matches!(r, Reading::Memory(Err(Fail::Failed(_)))), "{r:?}");
+        let (r, _) = fetch(
+            &ctx(),
+            bad.to_str().unwrap(),
+            Kind::Power,
+            Duration::from_secs(10),
+        );
+        assert!(matches!(r, Reading::Power(Err(Fail::Failed(_)))), "{r:?}");
         let err = script("err", r#"echo 'thermal: no zones' >&2; exit 1"#);
         assert!(matches!(
             fetch(
+                &ctx(),
                 err.to_str().unwrap(),
                 Kind::Thermal,
                 Duration::from_secs(10)
@@ -1508,12 +1646,13 @@ pub mod tests {
     fn a_reading_that_hangs_is_stopped_at_its_deadline() {
         let hang = script("hang", "sleep 5");
         let (r, timed_out) = fetch(
+            &ctx(),
             hang.to_str().unwrap(),
-            Kind::Memory,
+            Kind::Thermal,
             Duration::from_millis(200),
         );
         assert!(timed_out);
-        assert!(matches!(r, Reading::Memory(Err(Fail::Failed(_)))));
+        assert!(matches!(r, Reading::Thermal(Err(Fail::Failed(_)))));
         let _ = std::fs::remove_dir_all(hang.parent().unwrap());
     }
 
@@ -1524,6 +1663,7 @@ pub mod tests {
             r#"printf '{"volumes": [{"mount_point": "%s"}]}' "$HOME""#,
         );
         let (r, _) = fetch(
+            &ctx(),
             echo.to_str().unwrap(),
             Kind::Storage,
             Duration::from_secs(10),
@@ -1551,7 +1691,7 @@ pub mod tests {
             Kind::Network,
             Kind::Storage,
         ] {
-            let (r, _) = fetch(&bin, kind, Duration::from_secs(120));
+            let (r, _) = fetch(&ctx(), &bin, kind, Duration::from_secs(120));
             println!("{kind:?}: {r:?}");
             let failed = match &r {
                 Reading::Memory(r) => r.as_ref().err().cloned(),
@@ -1580,8 +1720,9 @@ pub mod tests {
         });
         let start = std::time::Instant::now();
         let (r, timed_out) = fetch_until(
+            &ctx(),
             slow.to_str().unwrap(),
-            Kind::Memory,
+            Kind::Thermal,
             Duration::from_secs(20),
             &cancel,
         );
@@ -1593,7 +1734,7 @@ pub mod tests {
         );
         assert!(!timed_out);
         assert!(
-            matches!(r, Reading::Memory(Err(Fail::Failed(ref w))) if w.contains("stopped")),
+            matches!(r, Reading::Thermal(Err(Fail::Failed(ref w))) if w.contains("stopped")),
             "{r:?}"
         );
     }
@@ -1602,7 +1743,7 @@ pub mod tests {
     fn a_thread_that_cant_start_leaves_an_error_on_every_section() {
         let (tx, rx) = channel();
         let wake: rune::Waker = std::sync::Arc::new(|| {});
-        start(tx, wake, "spectra".into(), &|_, _| {
+        start(Arc::new(ctx()), tx, wake, "spectra".into(), &|_, _| {
             Err(std::io::Error::other("out of threads"))
         });
         let mut s = System::new();

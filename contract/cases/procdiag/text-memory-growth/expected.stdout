@@ -1,0 +1,14 @@
+=== pid 80 (grow) — memory-growth ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 1 thread(s) (S=1)
+  cpu:      0% of one core
+  memory:   rss 120 MiB (+20.0 MiB/s), anon 120 MiB, swap 400 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  top threads:
+         80 grow            S   0.0%  
+  [warning] memory-growth: resident memory grew 20.0 MiB/s (+20 MiB in 1.0s); sample again over a longer interval to separate a leak from a warm-up
+         · rss=120 MiB
+  [info] swapped-out: 400 MiB of this process lives in swap (77% of its footprint); page faults back in will look like latency
+         · rss=120 MiB swap=400 MiB
+  note: fd table not readable (permission)

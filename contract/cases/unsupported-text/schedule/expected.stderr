@@ -1,0 +1,1 @@
+spectra schedule: launchd snapshot scheduling: unsupported on host OS (linux) (run `spectra snapshot` from cron or a systemd timer instead)

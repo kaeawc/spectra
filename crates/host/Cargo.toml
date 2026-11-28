@@ -1,0 +1,28 @@
+[package]
+name = "kaeawc-spectra-host"
+description = "Spectra's cross-platform host collectors: memory state, memory load, and Linux pressure stall and cgroup v2 accounting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lib]
+name = "spectra_host"
+doctest = false
+
+[dependencies]
+jiff = { workspace = true }
+serde = { workspace = true }
+# The classify disk cache entries are JSON (Go's exeEntry).
+serde_json = { workspace = true }
+spectra-base = { workspace = true }
+spectra-sys = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

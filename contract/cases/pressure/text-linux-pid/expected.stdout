@@ -1,0 +1,20 @@
+=== pressure stall (share of the last 10s / 60s / 300s tasks were stalled) ===
+  cpu     some   4.8%  26.3%  10.3%
+  memory  some  12.5%   3.0%   1.0%   full   2.2%   0.5%   0.1%
+  io      some   0.1%   0.3%   0.1%   full   0.1%   0.2%   0.1%
+=== cgroup /svc.slice/app.service ===
+  memory: 1000 MiB used (anon 953 MiB, file 46 MiB), limit 1024 MiB (from /svc.slice), swap 4 MiB
+  events: max=12 high=5 oom=3 oom_kill=2
+  cpu:    5.0s used, throttled 40/100 periods (2.5s)
+  pids:   95 / 100
+[warning] memory-pressure: host memory: tasks stalled on memory 12.5% of the last 10s (60s avg 3.0%)
+[warning] memory-stall: host memory: ALL non-idle tasks stalled on memory 2.2% of the last 10s — it is the bottleneck
+[critical] cgroup-oom-kill: cgroup /svc.slice/app.service: kernel OOM-killed 2 process(es) for exceeding a memory limit (memory.events oom_kill)
+[warning] cgroup-memory-throttled: cgroup /svc.slice/app.service exceeded memory.high 5 time(s); its tasks were throttled into direct reclaim
+[critical] cgroup-memory-near-limit: cgroup /svc.slice/app.service has anonymous memory at 93% of its 1024 MiB memory limit (limit set on /svc.slice)
+[critical] memory-pressure: cgroup /svc.slice/app.service memory: tasks stalled on memory 31.0% of the last 10s (60s avg 9.0%)
+[critical] memory-stall: cgroup /svc.slice/app.service memory: ALL non-idle tasks stalled on memory 11.0% of the last 10s — it is the bottleneck
+[warning] cpu-throttled: cgroup /svc.slice/app.service was CPU-throttled in 40 of 100 periods (40%, 2.5s total) by its cpu.max quota
+[warning] cpu-pressure: cgroup /svc.slice/app.service cpu: tasks stalled on cpu 10.0% of the last 10s (60s avg 2.0%)
+[critical] pids-near-limit: cgroup /svc.slice/app.service has 95 of 100 allowed tasks; fork/clone will start failing with EAGAIN
+[warning] io-stall: cgroup /svc.slice/app.service io: ALL non-idle tasks stalled on io 1.5% of the last 10s — it is the bottleneck

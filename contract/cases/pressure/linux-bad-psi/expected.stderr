@@ -1,0 +1,1 @@
+spectra pressure: psi cpu: parse avg10=abc: strconv.ParseFloat: parsing "abc": invalid syntax

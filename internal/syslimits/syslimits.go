@@ -169,11 +169,17 @@ func (s SystemLimits) AnyCritical() bool {
 
 // CollectTopHolders returns top process holders for saturated resources.
 func CollectTopHolders(ctx context.Context, limit int, opts process.CollectOptions) TopHolders {
+	opts.Deep = true
+	return TopHoldersOf(process.CollectAll(ctx, opts), limit, os.Getuid())
+}
+
+// TopHoldersOf ranks procs, a deep process table, by what each holds of the
+// saturated resources; uid is the user whose processes count against
+// procs_per_uid.
+func TopHoldersOf(procs []process.Info, limit int, uid int) TopHolders {
 	if limit <= 0 {
 		limit = 10
 	}
-	opts.Deep = true
-	procs := process.CollectAll(ctx, opts)
 	out := TopHolders{}
 	out["pty"] = topBy(procs, limit, func(p process.Info) int {
 		if p.FDBreakdown == nil {
@@ -183,7 +189,7 @@ func CollectTopHolders(ctx context.Context, limit int, opts process.CollectOptio
 	})
 	out["files"] = topBy(procs, limit, func(p process.Info) int { return p.OpenFDs })
 	out["procs"] = topByChildren(procs, limit, -1)
-	out["procs_per_uid"] = topByChildren(procs, limit, os.Getuid())
+	out["procs_per_uid"] = topByChildren(procs, limit, uid)
 	return out
 }
 

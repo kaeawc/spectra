@@ -1,0 +1,54 @@
+{
+  "pid": 70,
+  "comm": "defunct",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "Z",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "Z": 1
+  },
+  "threads": [
+    {
+      "tid": 70,
+      "comm": "defunct",
+      "state": "Z",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "zombie",
+      "severity": "warning",
+      "summary": "process has exited but its parent has not reaped it (wait()); it holds a pid slot but no memory",
+      "evidence": [
+        "state=Z"
+      ]
+    }
+  ],
+  "verdict": "zombie",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

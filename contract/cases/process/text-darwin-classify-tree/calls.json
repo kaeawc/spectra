@@ -1,0 +1,109 @@
+[
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="
+    ],
+    "stdout": "    1     0   0.6    20480     420000     0 root           Fri Nov 20 10:00:00 2026 /sbin/launchd\n  300     1   2.5   150000  410000000   501 user           Mon Nov 23 07:00:00 2026 /Applications/Fixture.app/Contents/MacOS/Fixture\n  301   300   1.5    50000  409000000   501 user           Mon Nov 23 08:00:00 2026 /Applications/Fixture.app/Contents/MacOS/Fixture Helper --type=gpu\n  310     1   9.5   450000  411000000   501 user           Mon Nov 23 06:00:00 2026 /Applications/Elec.app/Contents/MacOS/Elec\n  320     1   0.9    30000  408000000   501 user           Mon Nov 23 09:00:00 2026 /usr/local/bin/gotool serve\n  330     1   0.8    31000  407000000   501 user           Mon Nov 23 09:10:00 2026 /Users/user/.cargo/bin/rtool watch\n  340     1   0.3     2000  406000000     0 root           Mon Nov 23 09:20:00 2026 /bin/ls -la /\n  350     1   7.7   401000  421000000   501 user           Sun Nov 22 08:00:00 2026 /opt/homebrew/bin/node /Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js\n  360     1   0.2     6100  405000000   501 user           Sat Nov 21 11:00:00 2026 -zsh\n  370     1   0.1     7000  404000000   501 user           Mon Nov 23 09:30:00 2026 /opt/gone/app --run\n  999 short row\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,comm="
+    ],
+    "stdout": "  301 /Applications/Fixture.app/Contents/MacOS/Fixture Helper\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/Applications/Elec.app/Contents/MacOS/Elec"
+    ],
+    "stderr": "/Applications/Elec.app/Contents/MacOS/Elec: code object is not signed at all\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/opt/homebrew/bin/node"
+    ],
+    "stderr": "CodeDirectory v=20400 size=50564 flags=0x2(adhoc) hashes=1574+2 location=embedded\nSignature=adhoc\nTeamIdentifier=not set\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/Applications/Fixture.app/Contents/MacOS/Fixture"
+    ],
+    "stderr": "Executable=/Applications/Fixture.app/Contents/MacOS/Fixture\nCodeDirectory v=20500 size=645 flags=0x10000(runtime) hashes=9+7 location=embedded\nAuthority=Developer ID Application: Fixture Inc. (ABCDE12345)\nAuthority=Developer ID Certification Authority\nAuthority=Apple Root CA\nTeamIdentifier=ABCDE12345\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "--verify",
+      "--strict",
+      "/Applications/Fixture.app/Contents/MacOS/Fixture"
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/Applications/Fixture.app/Contents/MacOS/Fixture Helper"
+    ],
+    "stderr": "CodeDirectory v=20400 size=50564 flags=0x2(adhoc) hashes=1574+2 location=embedded\nSignature=adhoc\nTeamIdentifier=not set\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/Users/user/.cargo/bin/rtool"
+    ],
+    "stderr": "CodeDirectory v=20400 size=50564 flags=0x2(adhoc) hashes=1574+2 location=embedded\nSignature=adhoc\nTeamIdentifier=not set\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/usr/local/bin/gotool"
+    ],
+    "stderr": "/usr/local/bin/gotool: code object is not signed at all\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "-dv",
+      "--verbose=2",
+      "/bin/ls"
+    ],
+    "stderr": "Executable=/bin/ls\nIdentifier=com.apple.ls\nFormat=Mach-O universal (x86_64 arm64e)\nCodeDirectory v=20400 size=325 flags=0x0(none) hashes=5+2 location=embedded\nPlatform identifier=26\nAuthority=macOS Software Signing\nAuthority=Apple Code Signing Certification Authority\nAuthority=Apple Root CA\nTeamIdentifier=not set\n",
+    "exit_code": 0
+  },
+  {
+    "name": "codesign",
+    "args": [
+      "--verify",
+      "--ignore-resources",
+      "-R=anchor apple",
+      "/bin/ls"
+    ],
+    "exit_code": 0
+  }
+]

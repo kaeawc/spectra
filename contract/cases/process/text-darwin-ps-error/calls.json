@@ -1,0 +1,11 @@
+[
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="
+    ],
+    "exit_code": -1,
+    "error": "exec: \"ps\": executable file not found in $PATH"
+  }
+]

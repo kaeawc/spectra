@@ -1,0 +1,8 @@
+{
+  "args": [
+    "process",
+    "--group-by",
+    "pid"
+  ],
+  "os": "darwin"
+}

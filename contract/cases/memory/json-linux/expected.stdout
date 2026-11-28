@@ -1,0 +1,45 @@
+{
+  "physical_bytes": 4096000000,
+  "page_size_bytes": 4096,
+  "wired": 4096,
+  "active": 1126400000,
+  "inactive": 1536000000,
+  "speculative": 0,
+  "free": 1024000000,
+  "purgeable": 0,
+  "file_backed": 2048000000,
+  "anonymous": 409600000,
+  "compressor_occupied": 102400000,
+  "compressor_stored": 307200000,
+  "compressor_ratio": 3,
+  "swap": {
+    "total_bytes": 2048000000,
+    "used_bytes": 512000000,
+    "free_bytes": 1536000000,
+    "encrypted": false
+  },
+  "pressure_level": "Warning",
+  "pressure_free_percent": 75,
+  "compressions": 0,
+  "decompressions": 0,
+  "swap_ins": 12,
+  "swap_outs": 34,
+  "collected_at": "2026-11-23T10:00:00.123456789Z",
+  "os": "linux",
+  "available_bytes": 3072000000,
+  "psi": {
+    "some": {
+      "avg10": 12.5,
+      "avg60": 3,
+      "avg300": 1,
+      "total_usec": 100
+    },
+    "full": {
+      "avg10": 2.25,
+      "avg60": 0.5,
+      "avg300": 0.1,
+      "total_usec": 50
+    }
+  },
+  "pressure_reason": "all tasks stalled on memory 2.2% of the last 10s"
+}

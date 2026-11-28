@@ -1,0 +1,17 @@
+PID      THR     RSS       FDS    PTY    SOCK   REG    PIPE   CHR    KQ     OTH    COMMAND
+---------------------------------------------------------------------------------------------------------
+500      -       2.0G      -      0      0      0      0      0      0      0      Xcode
+710      -       1.7G      1      0      1      0      0      0      0      0      java
+400      42      1.5G      12     1      5      3      1      1      1      0      Google Chrome
+88       21      793.0M    -      0      0      0      0      0      0      0      WindowServer
+401      17      625.0M    -      0      0      0      0      0      0      0      Google Chrome Helper (Renderer)
+730      11      391.6M    -      0      0      0      0      0      0      0      node
+510      -       294.9M    -      0      0      0      0      0      0      0      xcodebuild
+610      -       200.2M    -      0      0      0      0      0      0      0      SpringBoard
+650      -       95.7M     -      0      0      0      0      0      0      0      Terminal
+720      -       50.8M     -      0      0      0      0      0      0      0      clang
+600      -       40.0M     -      0      0      0      0      0      0      0      launchd_sim
+1        4       20.0M     1      0      0      0      0      0      1      0      launchd
+750      -       7.1M      -      0      0      0      0      0      0      0      stale-agent
+700      -       6.0M      2      1      0      1      0      0      0      0      -zsh
+740      -       -         -      0      0      0      0      0      0      0      <defunct>

@@ -1,0 +1,1 @@
+warning: partial collection failures: lsof:pty, kern.num_files, kern.maxprocperuid

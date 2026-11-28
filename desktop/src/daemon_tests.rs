@@ -572,7 +572,7 @@ fn memory_comes_from_the_daemon_in_the_shape_the_cli_prints() {
         .unwrap()
         .unwrap();
     let m = crate::system::parse_memory(&out).unwrap();
-    assert_eq!((m.physical, m.swap_used), (17179869184.0, 1024.0));
+    assert_eq!((m.physical_bytes, m.swap.used_bytes), (17179869184, 1024));
     assert_eq!(f.calls("memory.current"), vec![json!({})]);
 }
 

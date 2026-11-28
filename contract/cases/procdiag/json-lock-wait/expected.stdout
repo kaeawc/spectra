@@ -1,0 +1,67 @@
+{
+  "pid": 40,
+  "comm": "app",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 2,
+  "state_counts": {
+    "S": 2
+  },
+  "threads": [
+    {
+      "tid": 40,
+      "comm": "app",
+      "state": "S",
+      "wchan": "futex_do_wait",
+      "syscall": "futex",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 41,
+      "comm": "worker",
+      "state": "S",
+      "wchan": "futex_do_wait",
+      "syscall": "futex",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "lock-wait",
+      "severity": "warning",
+      "summary": "all 2 threads were parked on a futex and none ran for 1s — consistent with a deadlock or lost wake-up (also what an idle thread pool looks like; confirm with a stack dump)",
+      "evidence": [
+        "tid 40 (app) in futex",
+        "tid 41 (worker) in futex"
+      ]
+    }
+  ],
+  "verdict": "lock-wait",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

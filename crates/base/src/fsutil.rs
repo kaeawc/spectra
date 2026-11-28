@@ -2,6 +2,8 @@
 //! directory, fsync it, then rename it over the target, so readers see the old file or the new
 //! one, never half of either.
 
+pub mod identity;
+
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};

@@ -1,0 +1,17 @@
+PID      THR     RSS         CPU%        FDS    COMMAND
+----------------------------------------------------------------------------------
+500      -       2.0G        5.2%        -      Xcode
+710      -       1.7G        150.5%      1      java
+400      42      1.5G        25.4%       12     Google Chrome
+88       21      793.0M      12.3%       -      WindowServer
+401      17      625.0M      41.7%       -      Google Chrome Helper (Renderer)
+730      11      391.6M      7.7%        -      node
+510      -       294.9M      88.8%       -      xcodebuild
+610      -       200.2M      18.1%       -      SpringBoard
+650      -       95.7M       1.1%        -      Terminal
+720      -       50.8M       97.9%       -      clang
+600      -       40.0M       3.3%        -      launchd_sim
+1        4       20.0M       0.6%        1      launchd
+750      -       7.1M        0.4%        -      stale-agent
+700      -       6.0M        0.2%        2      -zsh
+740      -       -           -           -      <defunct>

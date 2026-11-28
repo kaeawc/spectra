@@ -1,0 +1,55 @@
+{
+  "pid": 71,
+  "comm": "stopped",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "T",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "T": 1
+  },
+  "threads": [
+    {
+      "tid": 71,
+      "comm": "stopped",
+      "state": "T",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "stopped",
+      "severity": "warning",
+      "summary": "process is stopped (SIGSTOP/SIGTSTP or ptrace-attached); it will make no progress until continued",
+      "evidence": [
+        "state=T",
+        "send SIGCONT or detach the debugger"
+      ]
+    }
+  ],
+  "verdict": "stopped",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

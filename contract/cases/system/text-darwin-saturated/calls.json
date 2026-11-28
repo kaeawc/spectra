@@ -1,0 +1,88 @@
+[
+  {
+    "name": "lsof",
+    "args": [
+      "-n",
+      "-P",
+      "-d",
+      "^txt"
+    ],
+    "stdout": "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nlaunchd     1 root  cwd    DIR   1,16      640    2 /\nzsh       700 user    0u   CHR   16,3      0t0 1011 /dev/ttys003\nApp       777 alice 0u   CHR    3,2      0t0  339 /dev/ttys000\nApp       777 alice 1u   CHR    3,2      0t0  339 /dev/ttys001\nApp       777 alice 2u   CHR    3,2      0t0  339 /dev/ttys002\nApp       777 alice 3u   CHR    3,2      0t0  339 /dev/ttys003\nApp       777 alice 4u   CHR    3,2      0t0  339 /dev/ttys004\nApp       777 alice 5u   CHR    3,2      0t0  339 /dev/ttys005\nApp       777 alice 6u   CHR    3,2      0t0  339 /dev/ttys006\nApp       777 alice 7u   CHR    3,2      0t0  339 /dev/ttys007\nApp       777 alice 8u   CHR    3,2      0t0  339 /dev/ttys008\nApp       777 alice 9u   CHR    3,2      0t0  339 /dev/ttys009\nApp       777 alice 10u   CHR    3,2      0t0  339 /dev/ttys010\nApp       777 alice 11u   CHR    3,2      0t0  339 /dev/ttys011\nApp       777 alice 12u   CHR    3,2      0t0  339 /dev/ttys012\nApp       777 alice 13u   CHR    3,2      0t0  339 /dev/ttys013\nApp       777 alice  90u   CHR    3,2      0t0  340 /dev/ptmx\nApp       777 alice  91u   CHR    3,2      0t0  341 /dev/null\nApp       777 alice   9u  PIPE 0x1111 16384      -\u003e0x2222\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-A",
+      "-o",
+      "pid="
+    ],
+    "stdout": "    1\n    2\n    3\n    4\n    5\n    6\n    7\n    8\n    9\n   10\n   11\n   12\n   13\n   14\n   15\n   16\n\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-u",
+      "501",
+      "-o",
+      "pid="
+    ],
+    "stdout": "    1\n    2\n    3\n    4\n    5\n    6\n    7\n    8\n    9\n   10\n   11\n   12\n\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.tty.ptmx_max"
+    ],
+    "stdout": "16\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.num_files"
+    ],
+    "stdout": "90\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxfiles"
+    ],
+    "stdout": "100\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxfilesperproc"
+    ],
+    "stdout": "10240\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxproc"
+    ],
+    "stdout": "17\n",
+    "exit_code": 0
+  },
+  {
+    "name": "sysctl",
+    "args": [
+      "-n",
+      "kern.maxprocperuid"
+    ],
+    "stdout": "12\n",
+    "exit_code": 0
+  }
+]

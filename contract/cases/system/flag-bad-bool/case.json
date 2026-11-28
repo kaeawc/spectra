@@ -1,0 +1,8 @@
+{
+  "args": [
+    "system",
+    "limits",
+    "--json=maybe"
+  ],
+  "os": "darwin"
+}

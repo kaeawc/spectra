@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "notes": [
+    "PSI is not available on this kernel (needs Linux 4.20+ with CONFIG_PSI, and not booted with psi=0)",
+    "pid 7 is not on a cgroup v2 hierarchy; cgroup accounting skipped"
+  ]
+}

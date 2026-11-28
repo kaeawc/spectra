@@ -1,0 +1,13 @@
+=== pid 71 (stopped) — stopped ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 1 thread(s) (T=1)
+  cpu:      0% of one core
+  memory:   rss 0 MiB (+0.0 MiB/s), anon 0 MiB, swap 0 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  top threads:
+         71 stopped         T   0.0%  
+  [warning] stopped: process is stopped (SIGSTOP/SIGTSTP or ptrace-attached); it will make no progress until continued
+         · state=T
+         · send SIGCONT or detach the debugger
+  note: fd table not readable (permission)

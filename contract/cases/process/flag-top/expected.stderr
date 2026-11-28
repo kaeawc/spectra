@@ -1,0 +1,28 @@
+invalid value "x" for flag -top: parse error
+Usage of spectra process:
+  -classify
+    	Add role, runtime, owning app and (macOS) code signing per process
+  -deep
+    	Enrich with open FD count and listening ports via lsof (slower)
+  -fd-breakdown
+    	Show typed FD columns (implies --deep)
+  -group-by string
+    	Group processes: family (sums CPU per simulator device, Xcode, build tools, browsers)
+  -json
+    	Emit JSON instead of a human summary
+  -min-elapsed duration
+    	Minimum elapsed runtime
+  -min-rss string
+    	Minimum RSS (for example 500M, 2G)
+  -min-vsz string
+    	Minimum VSZ (for example 1G)
+  -ppid int
+    	Only direct children of PID (default -1)
+  -sort string
+    	Sort by: rss, vsz, cpu, mem, elapsed, startedat, pid, or cmd (default "rss")
+  -top int
+    	Show only top N processes (0 = all)
+  -tree
+    	Render a parent/child process tree
+  -user string
+    	Only processes owned by user name

@@ -126,6 +126,18 @@ fn daemon_output(
     }
 }
 
+/// The daemon's answer for `cmd` as the CLI's output, when the daemon takes it; `None` when the
+/// call has to be made here instead.
+pub fn ask_daemon(
+    cmd: &Command,
+    deadline: Duration,
+    cap: usize,
+    cancel: &AtomicBool,
+) -> Option<Result<Output, Ended>> {
+    let _running = Running::new();
+    crate::daemon::answer(cmd, deadline, cancel).map(|a| daemon_output(a, deadline, cap))
+}
+
 /// Reads a pipe on its own thread until it closes, keeping at most `cap` bytes. Past the cap it
 /// says so at once and keeps draining, so the child never blocks on a full pipe.
 fn drain(mut pipe: impl Read + Send + 'static, cap: usize) -> Receiver<Result<Vec<u8>, RunError>> {
@@ -182,8 +194,8 @@ pub fn run_until(
     let _running = Running::new();
     let start = Instant::now();
     // A call Spectra's daemon answers starts no process.
-    if let Some(answer) = crate::daemon::answer(&cmd, deadline, cancel) {
-        return daemon_output(answer, deadline, cap);
+    if let Some(out) = ask_daemon(&cmd, deadline, cap, cancel) {
+        return out;
     }
     // Time spent waiting for a daemon that was connecting counts against the same deadline.
     if start.elapsed() >= deadline {

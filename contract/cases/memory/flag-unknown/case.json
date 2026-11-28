@@ -1,0 +1,7 @@
+{
+  "args": [
+    "memory",
+    "--nope"
+  ],
+  "os": "darwin"
+}

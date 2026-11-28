@@ -1,0 +1,233 @@
+[
+  {
+    "key": "build",
+    "kind": "build",
+    "name": "Build tools",
+    "members": 2,
+    "cpu_pct": 248.4,
+    "share_pct": 54.81023830538394,
+    "rss_kib": 1852000,
+    "started_at": "2026-11-23T02:30:00-06:00",
+    "age_seconds": 5400,
+    "heaviest": [
+      {
+        "pid": 710,
+        "command": "java",
+        "cpu_pct": 150.5,
+        "age_seconds": 5400
+      },
+      {
+        "pid": 720,
+        "command": "clang",
+        "cpu_pct": 97.9,
+        "age_seconds": 120
+      }
+    ]
+  },
+  {
+    "key": "xcode",
+    "kind": "xcode",
+    "name": "Xcode",
+    "members": 2,
+    "cpu_pct": 94,
+    "share_pct": 20.741394527802296,
+    "rss_kib": 2402000,
+    "started_at": "2026-11-23T01:00:00-06:00",
+    "age_seconds": 10800,
+    "heaviest": [
+      {
+        "pid": 510,
+        "command": "xcodebuild",
+        "cpu_pct": 88.8,
+        "age_seconds": 1200
+      },
+      {
+        "pid": 500,
+        "command": "Xcode",
+        "cpu_pct": 5.2,
+        "age_seconds": 10800
+      }
+    ]
+  },
+  {
+    "key": "browser:Google Chrome",
+    "kind": "browser",
+    "name": "Google Chrome",
+    "members": 2,
+    "cpu_pct": 67.1,
+    "share_pct": 14.805825242718445,
+    "rss_kib": 2176000,
+    "started_at": "2026-11-22T23:00:00-06:00",
+    "age_seconds": 18000,
+    "heaviest": [
+      {
+        "pid": 401,
+        "command": "Google Chrome Helper (Renderer)",
+        "cpu_pct": 41.7,
+        "age_seconds": 16200
+      },
+      {
+        "pid": 400,
+        "command": "Google Chrome",
+        "cpu_pct": 25.4,
+        "age_seconds": 18000
+      }
+    ]
+  },
+  {
+    "key": "simulator:0A1B2C3D-1111-2222-3333-444455556666",
+    "kind": "simulator",
+    "name": "Simulator 0A1B2C3D-1111-2222-3333-444455556666",
+    "udid": "0A1B2C3D-1111-2222-3333-444455556666",
+    "members": 2,
+    "cpu_pct": 21.400000000000002,
+    "share_pct": 4.72197705207414,
+    "rss_kib": 246000,
+    "started_at": "2026-11-23T02:00:00-06:00",
+    "age_seconds": 7200,
+    "heaviest": [
+      {
+        "pid": 610,
+        "command": "SpringBoard",
+        "cpu_pct": 18.1,
+        "age_seconds": 6600
+      },
+      {
+        "pid": 600,
+        "command": "launchd_sim",
+        "cpu_pct": 3.3,
+        "age_seconds": 7200
+      }
+    ]
+  },
+  {
+    "key": "other:WindowServer",
+    "kind": "other",
+    "name": "WindowServer",
+    "members": 1,
+    "cpu_pct": 12.3,
+    "share_pct": 2.714033539276258,
+    "rss_kib": 812000,
+    "started_at": "2026-11-20T05:00:00-06:00",
+    "age_seconds": 255600,
+    "heaviest": [
+      {
+        "pid": 88,
+        "command": "WindowServer",
+        "cpu_pct": 12.3,
+        "age_seconds": 255600
+      }
+    ]
+  },
+  {
+    "key": "other:node",
+    "kind": "other",
+    "name": "node",
+    "members": 1,
+    "cpu_pct": 7.7,
+    "share_pct": 1.6990291262135921,
+    "rss_kib": 401000,
+    "started_at": "2026-11-22T02:00:00-06:00",
+    "age_seconds": 93600,
+    "heaviest": [
+      {
+        "pid": 730,
+        "command": "node",
+        "cpu_pct": 7.7,
+        "age_seconds": 93600
+      }
+    ]
+  },
+  {
+    "key": "other:Terminal",
+    "kind": "other",
+    "name": "Terminal",
+    "members": 1,
+    "cpu_pct": 1.1,
+    "share_pct": 0.24271844660194178,
+    "rss_kib": 98000,
+    "started_at": "2026-11-21T04:00:00-06:00",
+    "age_seconds": 172800,
+    "heaviest": [
+      {
+        "pid": 650,
+        "command": "Terminal",
+        "cpu_pct": 1.1,
+        "age_seconds": 172800
+      }
+    ]
+  },
+  {
+    "key": "other:launchd",
+    "kind": "other",
+    "name": "launchd",
+    "members": 1,
+    "cpu_pct": 0.6,
+    "share_pct": 0.13239187996469548,
+    "rss_kib": 20480,
+    "started_at": "2026-11-20T04:00:00-06:00",
+    "age_seconds": 259200,
+    "heaviest": [
+      {
+        "pid": 1,
+        "command": "launchd",
+        "cpu_pct": 0.6,
+        "age_seconds": 259200
+      }
+    ]
+  },
+  {
+    "key": "other:stale-agent",
+    "kind": "other",
+    "name": "stale-agent",
+    "members": 1,
+    "cpu_pct": 0.4,
+    "share_pct": 0.088261253309797,
+    "rss_kib": 7300,
+    "heaviest": [
+      {
+        "pid": 750,
+        "command": "stale-agent",
+        "cpu_pct": 0.4
+      }
+    ]
+  },
+  {
+    "key": "other:-zsh",
+    "kind": "other",
+    "name": "-zsh",
+    "members": 1,
+    "cpu_pct": 0.2,
+    "share_pct": 0.0441306266548985,
+    "rss_kib": 6100,
+    "started_at": "2026-11-21T05:00:00-06:00",
+    "age_seconds": 169200,
+    "heaviest": [
+      {
+        "pid": 700,
+        "command": "-zsh",
+        "cpu_pct": 0.2,
+        "age_seconds": 169200
+      }
+    ]
+  },
+  {
+    "key": "other:\u003cdefunct\u003e",
+    "kind": "other",
+    "name": "\u003cdefunct\u003e",
+    "members": 1,
+    "cpu_pct": 0,
+    "share_pct": 0,
+    "rss_kib": 0,
+    "started_at": "2026-11-22T03:00:00-06:00",
+    "age_seconds": 90000,
+    "heaviest": [
+      {
+        "pid": 740,
+        "command": "\u003cdefunct\u003e",
+        "cpu_pct": 0,
+        "age_seconds": 90000
+      }
+    ]
+  }
+]

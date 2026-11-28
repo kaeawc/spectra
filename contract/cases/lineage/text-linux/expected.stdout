@@ -1,0 +1,10 @@
+Ancestors of pid 100 (nearest first):
+     100  user          2026-11-21 03:00:00  bash
+       1  root          2026-11-21 02:00:00  init
+Flags: reparented (heuristic: per-user launchd agents also have PPID 1)
+Descendants:
+  bash (100)  rss 5208 KiB  cpu 0.0%
+    python3 (101)  rss 98304 KiB  cpu 0.2%
+    node (102)  rss 409600 KiB  cpu 13.3%
+    sleep (106)  rss 8 KiB  cpu 0.0% [zombie]
+Subtree: 4 processes, 513120 KiB RSS, 13.6% CPU
