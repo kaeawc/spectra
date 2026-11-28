@@ -1,0 +1,32 @@
+[package]
+name = "kaeawc-spectra-sys"
+description = "Spectra's FFI: the only crate allowed unsafe code (Mach, sysctl, libproc)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lib]
+name = "spectra_sys"
+doctest = false
+
+[dependencies]
+libc = { workspace = true }
+
+# Not `workspace = true`: this crate opts out of `unsafe_code = "forbid"`. Every other workspace
+# lint is repeated here, and every unsafe block must say why it is sound.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "deny"
+todo = "warn"
+unwrap_used = "warn"
+await_holding_lock = "deny"
+cognitive_complexity = "warn"
+disallowed_methods = "deny"
