@@ -9,12 +9,12 @@ require (
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/kaeawc/spectra-protocol v0.3.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/redis/go-redis/v9 v9.23.0
+	github.com/redis/go-redis/v9 v9.24.0
 	go.mongodb.org/mongo-driver/v2 v2.10.1
 	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	howett.net/plist v1.0.1
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
