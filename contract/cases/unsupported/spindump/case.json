@@ -1,0 +1,6 @@
+{
+  "command": "spindump",
+  "feature": "spindump stack reports",
+  "hint": "on Linux, `spectra procdiag \u003cpid\u003e` diagnoses a stuck or slow process from /proc",
+  "os": "linux"
+}

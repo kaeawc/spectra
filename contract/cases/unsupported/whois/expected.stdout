@@ -1,0 +1,7 @@
+{
+  "command": "whois",
+  "error": "unsupported_platform",
+  "feature": "XPC/Mach service attribution",
+  "os": "linux",
+  "message": "XPC/Mach service attribution: unsupported on host OS (linux)"
+}

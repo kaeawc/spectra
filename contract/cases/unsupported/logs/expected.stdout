@@ -1,0 +1,8 @@
+{
+  "command": "logs",
+  "error": "unsupported_platform",
+  "feature": "unified log queries",
+  "os": "linux",
+  "message": "unified log queries: unsupported on host OS (linux)",
+  "hint": "on Linux, use journalctl"
+}

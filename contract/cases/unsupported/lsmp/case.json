@@ -1,0 +1,6 @@
+{
+  "command": "lsmp",
+  "feature": "Mach port tables",
+  "hint": "",
+  "os": "linux"
+}

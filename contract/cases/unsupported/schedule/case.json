@@ -1,0 +1,6 @@
+{
+  "command": "schedule",
+  "feature": "launchd snapshot scheduling",
+  "hint": "run `spectra snapshot` from cron or a systemd timer instead",
+  "os": "linux"
+}

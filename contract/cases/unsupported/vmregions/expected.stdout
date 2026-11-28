@@ -1,0 +1,8 @@
+{
+  "command": "vmregions",
+  "error": "unsupported_platform",
+  "feature": "vmmap region composition",
+  "os": "linux",
+  "message": "vmmap region composition: unsupported on host OS (linux)",
+  "hint": "on Linux, read /proc/<pid>/smaps"
+}

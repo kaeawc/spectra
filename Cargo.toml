@@ -22,8 +22,10 @@ publish = false
 [workspace.dependencies]
 spectra-base = { package = "kaeawc-spectra-base", path = "crates/base", version = "0.2.0" }
 spectra-protocol = { path = "crates/protocol", version = "0.3.0" }
+spectra-contract = { path = "crates/contract" }
 spectra-sys = { package = "kaeawc-spectra-sys", path = "crates/sys", version = "0.2.0" }
 
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 jiff = { version = "1", default-features = false, features = ["std"] }
 libc = { version = "0.2", default-features = false, features = ["std"] }
 ryu = "1"

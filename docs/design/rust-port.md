@@ -88,6 +88,20 @@ make rust-ci     # all of the above, like the Rust CI workflow
 
 ## Parity proof
 
+Recorded cases live in `contract/cases/<kind>/<name>/`. A Go test writes each one from the
+Go build with `-contract-update` (helpers in `internal/contracttest`) and otherwise fails when
+the checked-in case no longer matches Go; the Rust crate `spectra-contract` replays the same
+inputs (recorded subprocess calls, environment, clock, filesystem tree) and asserts the same
+stdout bytes and exit code. `contracttest.Recorder` records a case's subprocess calls once on
+a real host.
+
+```bash
+go test ./cmd/spectra/ -run TestContract -contract-update   # rewrite cases from Go
+cargo t -p spectra-contract                                 # check Rust against them
+```
+
+The layers:
+
 1. **Replay fixtures, byte-equal:** recorded subprocess calls, a fake filesystem root, a fixed
    clock and env; Go (test-only hook) and Rust run the same fixture and must print the same
    bytes.

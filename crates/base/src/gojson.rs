@@ -55,6 +55,38 @@ pub fn to_writer_encoder<W: io::Write, T: Serialize + ?Sized>(mut writer: W, val
     writer.write_all(b"\n").map_err(Error::io)
 }
 
+/// Go's `json.Encoder` with its settings: `Encoder::default()` is `json.NewEncoder(w)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Encoder {
+    /// `SetIndent("", "  ")`.
+    pub indent: bool,
+    /// `SetEscapeHTML`; true by default, as in Go.
+    pub escape_html: bool,
+}
+
+impl Default for Encoder {
+    fn default() -> Self {
+        Encoder { indent: false, escape_html: true }
+    }
+}
+
+impl Encoder {
+    /// `enc.Encode(v)`: the value followed by a newline.
+    pub fn encode<W: io::Write, T: Serialize + ?Sized>(&self, mut writer: W, value: &T) -> Result<(), Error> {
+        let layout = if self.indent { Layout::Indent } else { Layout::Compact };
+        let mut ser = serde_json::Serializer::with_formatter(&mut writer, GoFormatter::with_escape_html(layout, self.escape_html));
+        value.serialize(&mut ser)?;
+        writer.write_all(b"\n").map_err(Error::io)
+    }
+
+    /// [`Encoder::encode`] into a new buffer.
+    pub fn encode_to_vec<T: Serialize + ?Sized>(&self, value: &T) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::with_capacity(256);
+        self.encode(&mut out, value)?;
+        Ok(out)
+    }
+}
+
 /// Writes `value` with Go's escaping and number formatting.
 pub fn to_writer<W: io::Write, T: Serialize + ?Sized>(writer: W, value: &T, layout: Layout) -> Result<(), Error> {
     let mut ser = serde_json::Serializer::with_formatter(writer, GoFormatter::new(layout));
@@ -71,6 +103,7 @@ pub enum Layout {
 /// A `serde_json` formatter that writes strings and floats as Go's `encoding/json` does.
 pub struct GoFormatter {
     inner: Inner,
+    escape_html: bool,
 }
 
 enum Inner {
@@ -80,11 +113,17 @@ enum Inner {
 
 impl GoFormatter {
     pub fn new(layout: Layout) -> Self {
+        GoFormatter::with_escape_html(layout, true)
+    }
+
+    /// `escape_html: false` is Go's `Encoder.SetEscapeHTML(false)`: `<`, `>` and `&` are written
+    /// as is. U+2028 and U+2029 are escaped either way, as in Go.
+    pub fn with_escape_html(layout: Layout, escape_html: bool) -> Self {
         let inner = match layout {
             Layout::Compact => Inner::Compact(CompactFormatter),
             Layout::Indent => Inner::Pretty(PrettyFormatter::with_indent(b"  ")),
         };
-        GoFormatter { inner }
+        GoFormatter { inner, escape_html }
     }
 }
 
@@ -133,9 +172,9 @@ impl Formatter for GoFormatter {
         let mut start = 0;
         for (i, c) in fragment.char_indices() {
             let escape: &[u8] = match c {
-                '<' => b"\\u003c",
-                '>' => b"\\u003e",
-                '&' => b"\\u0026",
+                '<' if self.escape_html => b"\\u003c",
+                '>' if self.escape_html => b"\\u003e",
+                '&' if self.escape_html => b"\\u0026",
                 '\u{2028}' => b"\\u2028",
                 '\u{2029}' => b"\\u2029",
                 _ => continue,

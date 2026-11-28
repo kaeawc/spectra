@@ -1,0 +1,6 @@
+{
+  "command": "symbolicate",
+  "feature": "atos symbolication",
+  "hint": "",
+  "os": "linux"
+}

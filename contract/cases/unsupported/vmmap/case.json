@@ -1,0 +1,6 @@
+{
+  "command": "vmmap",
+  "feature": "vmmap memory composition",
+  "hint": "on Linux, read /proc/\u003cpid\u003e/smaps_rollup; `spectra procdiag \u003cpid\u003e` covers cgroup memory limits",
+  "os": "linux"
+}

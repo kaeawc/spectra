@@ -1,0 +1,25 @@
+[package]
+name = "spectra-contract"
+description = "Test-only: replays the Go build's parity cases (contract/cases) against the Rust port."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Never published, even after the rest of the workspace is.
+publish = false
+
+[lib]
+name = "spectra_contract"
+doctest = false
+
+[dependencies]
+base64 = { workspace = true }
+jiff = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+spectra-base = { workspace = true }
+
+[lints]
+workspace = true

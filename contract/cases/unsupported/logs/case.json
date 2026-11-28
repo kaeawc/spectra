@@ -1,0 +1,6 @@
+{
+  "command": "logs",
+  "feature": "unified log queries",
+  "hint": "on Linux, use journalctl",
+  "os": "linux"
+}

@@ -1,0 +1,8 @@
+{
+  "command": "spindump",
+  "error": "unsupported_platform",
+  "feature": "spindump stack reports",
+  "os": "linux",
+  "message": "spindump stack reports: unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}

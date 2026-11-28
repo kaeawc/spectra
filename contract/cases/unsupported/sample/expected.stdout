@@ -1,0 +1,8 @@
+{
+  "command": "sample",
+  "error": "unsupported_platform",
+  "feature": "process sampling (sample(1))",
+  "os": "linux",
+  "message": "process sampling (sample(1)): unsupported on host OS (linux)",
+  "hint": "on Linux, `spectra procdiag <pid>` diagnoses a stuck or slow process from /proc"
+}
