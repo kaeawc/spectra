@@ -174,6 +174,10 @@ func (s *Server) Run(ctx context.Context) error {
 	srv := s.sdkServer()
 	defer s.live.close()
 	defer s.jobs.close()
+	// Refreshes outlive no session: cancel them and wait before returning.
+	cctx, stopCompletions := context.WithCancel(context.WithoutCancel(ctx))
+	s.completions.bind(cctx)
+	defer func() { stopCompletions(); s.completions.wait() }()
 	s.warmCompletions(ctx)
 	tracker := newReplyTracker()
 	err := srv.Run(ctx, &sdk.IOTransport{

@@ -36,7 +36,9 @@ func startWireSession(t *testing.T, srv *Server) *wireSession {
 	clientIn, serverOut := io.Pipe()
 	srv.reader, srv.writer = serverIn, serverOut
 	r := &wireSession{t: t, in: clientOut, msgs: make(chan map[string]any, 64), done: make(chan error, 1)}
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		r.done <- srv.Run(ctx)
 		_ = serverOut.Close()
 	}()
@@ -53,7 +55,12 @@ func startWireSession(t *testing.T, srv *Server) *wireSession {
 			r.msgs <- m
 		}
 	}()
-	t.Cleanup(func() { _ = clientOut.Close(); _ = clientIn.Close() })
+	t.Cleanup(func() {
+		_ = clientOut.Close()
+		_ = clientIn.Close()
+		cancel()
+		waitServerDone(t, stopped)
+	})
 	r.send(`{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"raw","version":"0"}}}`)
 	r.reply("init")
 	r.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)

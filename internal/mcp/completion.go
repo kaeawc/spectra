@@ -42,6 +42,10 @@ type listing[T any] struct {
 	inflight bool
 	// done is closed when the in-flight refresh finishes.
 	done chan struct{}
+	// base, when set, parents refreshes so ending the session cancels them.
+	base context.Context
+	// wg counts running refresh goroutines so Run can wait for them.
+	wg sync.WaitGroup
 }
 
 type pidListing = listing[pidEntry]
@@ -53,8 +57,14 @@ func (l *listing[T]) refreshLocked(ctx context.Context, now time.Time, load func
 		l.inflight = true
 		done := make(chan struct{})
 		l.done = done
+		parent := l.base
+		if parent == nil {
+			parent = context.WithoutCancel(ctx)
+		}
+		l.wg.Add(1)
 		go func() {
-			lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer l.wg.Done()
+			lctx, cancel := context.WithTimeout(parent, 5*time.Second)
 			defer cancel()
 			entries := load(lctx)
 			l.mu.Lock()
@@ -103,6 +113,24 @@ type completionCache struct {
 	procs     pidListing
 	jvms      pidListing
 	snapshots listing[string]
+}
+
+// bind parents every listing's refreshes on ctx.
+func (c *completionCache) bind(ctx context.Context) {
+	for _, set := range []func(){
+		func() { c.procs.mu.Lock(); c.procs.base = ctx; c.procs.mu.Unlock() },
+		func() { c.jvms.mu.Lock(); c.jvms.base = ctx; c.jvms.mu.Unlock() },
+		func() { c.snapshots.mu.Lock(); c.snapshots.base = ctx; c.snapshots.mu.Unlock() },
+	} {
+		set()
+	}
+}
+
+// wait blocks until every refresh goroutine has finished.
+func (c *completionCache) wait() {
+	c.procs.wg.Wait()
+	c.jvms.wg.Wait()
+	c.snapshots.wg.Wait()
 }
 
 // completionClock times the completion caches: wall time even when tests fix
