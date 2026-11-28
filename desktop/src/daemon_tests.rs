@@ -745,8 +745,12 @@ fn a_failed_hello_leaves_no_thread_or_connection_behind() {
         assert!(d.answer(&["load", "--json"], SEC, &never()).is_none());
         std::thread::sleep(Duration::from_millis(150));
     }
-    let n = lock(&f.conns).len();
-    assert!(n >= 5, "it dialled each time: {n}");
+    // A loaded runner can still be dialling the last attempt: wait for the count, don't sample it.
+    assert!(
+        eventually(|| lock(&f.conns).len() >= 5),
+        "it dialled each time: {}",
+        lock(&f.conns).len()
+    );
     assert!(
         eventually(|| d.s.readers.load(Ordering::SeqCst) == 0),
         "{} reader threads left",
