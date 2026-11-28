@@ -1,0 +1,19 @@
+# Buildkite trial: the `docs` job of .github/workflows/ci.yml on Buildkite's hosted Linux agents
+# (queue `linux-small`: 2 vCPU, 4 GB). GitHub Actions starts these builds through the Buildkite API
+# only while the repository variable CI_ON_BUILDKITE is `true`, and skips its own `docs` job then;
+# scripts/ci-backend.sh flips the variable and the required check together. The step reports a
+# commit status named `docs`, so the green-main ruleset keeps the same check name.
+#
+# Only `docs` moved because it fits the Free plan's hosted minutes (2,000 vCPU-minutes a month,
+# about 1,000 minutes on this queue) at about 430 builds a month. complexity and check-licenses
+# would take the total to about 1,500.
+steps:
+  - label: ":books: docs"
+    key: docs
+    command: .buildkite/run-in.sh docs bash -c "pip install --user --quiet mkdocs mkdocs-material && ./scripts/lychee/install_lychee.sh && ./scripts/validate_mkdocs_nav.sh && ./scripts/lychee/validate_lychee.sh && mkdocs build --strict"
+    agents:
+      queue: linux-small
+    timeout_in_minutes: 15
+    notify:
+      - github_commit_status:
+          context: docs

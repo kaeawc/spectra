@@ -483,7 +483,9 @@ jobs:
       - name: Check core remote boundary
         run: bash scripts/check_no_remote.sh
 
+  # Runs on Buildkite instead while CI_ON_BUILDKITE is true (see the buildkite job).
   docs:
+    if: ${{ !(vars.CI_ON_BUILDKITE == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/main'))) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -509,3 +511,35 @@ jobs:
 
       - name: MkDocs build (strict)
         run: mkdocs build --strict
+
+  # Starts the Buildkite build (.buildkite/pipeline.yml) for this commit while the repository
+  # variable CI_ON_BUILDKITE is true: same-repo pull requests and pushes to main. Fork PRs, other
+  # pushes and workflow_call runs keep the GitHub `docs` job. Switch with scripts/ci-backend.sh,
+  # which also repoints the required `docs` check.
+  buildkite:
+    if: ${{ vars.CI_ON_BUILDKITE == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Create the Buildkite build
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          BUILDKITE_ORG: ${{ vars.BUILDKITE_ORG }}
+          BUILDKITE_PIPELINE: ${{ vars.BUILDKITE_PIPELINE }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          MESSAGE: ${{ github.event.pull_request.title || github.event.head_commit.message }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          jq -n --arg commit "$COMMIT" --arg branch "$BRANCH" --arg message "$MESSAGE" \
+            --arg pr "$PR_NUMBER" --arg base "$PR_BASE" \
+            '{commit: $commit, branch: $branch, message: $message}
+             + (if $pr != "" then {pull_request_id: ($pr | tonumber), pull_request_base_branch: $base} else {} end)' \
+            > build.json
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -X POST -H "Authorization: Bearer $BUILDKITE_API_TOKEN" -H "Content-Type: application/json" \
+            --data @build.json \
+            "https://api.buildkite.com/v2/organizations/$BUILDKITE_ORG/pipelines/$BUILDKITE_PIPELINE/builds" \
+            | jq -r '"Buildkite build: " + .web_url'

@@ -37,3 +37,15 @@ updates:
     groups:
       rust-minor-patch:
         update-types: [minor, patch]
+
+  # Buildkite step images (.buildkite/images/*/Dockerfile), pinned by digest
+  - package-ecosystem: docker
+    directories:
+      - /.buildkite/images/*
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    groups:
+      buildkite-images:
+        patterns: ["*"]
