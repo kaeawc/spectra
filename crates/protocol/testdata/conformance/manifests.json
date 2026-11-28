@@ -1,0 +1,281 @@
+[
+  {
+    "name": "valid manifest",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "other version only",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v2"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "no versions",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "duplicate operation",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect"
+        },
+        {
+          "name": "inspect"
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "invalid operation",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "bad-op"
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "zero request limit",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 0,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "request over max",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048577,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "zero response limit",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 0,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "response over max",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777217,
+        "max_timeout_ms": 600000
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "zero timeout limit",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "timeout over max",
+    "kind": "manifest",
+    "input": {
+      "protocol_versions": [
+        "v1"
+      ],
+      "spectra_version": "1.0",
+      "agent_version": "1.0",
+      "operations": [
+        {
+          "name": "inspect",
+          "result_schema": {
+            "name": "spectra.inspect",
+            "version": 1
+          }
+        }
+      ],
+      "limits": {
+        "max_request_bytes": 1048576,
+        "max_response_bytes": 16777216,
+        "max_timeout_ms": 600001
+      }
+    },
+    "valid": false
+  }
+]

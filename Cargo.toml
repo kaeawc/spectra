@@ -21,11 +21,12 @@ publish = false
 # names carry the crates.io prefix, so renaming it touches only this table and the package names.
 [workspace.dependencies]
 spectra-base = { package = "kaeawc-spectra-base", path = "crates/base", version = "0.2.0" }
+spectra-protocol = { path = "crates/protocol", version = "0.3.0" }
 
 jiff = { version = "1", default-features = false, features = ["std"] }
 ryu = "1"
 serde = { version = "1", default-features = false, features = ["std", "derive"] }
-serde_json = { version = "1", default-features = false, features = ["std"] }
+serde_json = { version = "1", default-features = false, features = ["std", "raw_value"] }
 
 [workspace.lints.rust]
 # kaeawc-spectra-sys (FFI) is the one crate that opts out of this, with its own [lints] table.
