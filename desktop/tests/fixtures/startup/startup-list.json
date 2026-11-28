@@ -1,0 +1,816 @@
+{
+  "uid": 501,
+  "items": [
+    {
+      "label": "2BUA8C4S2C.com.1password.browser-helper",
+      "name": "1Password Browser Helper",
+      "kind": "login_item",
+      "scope": "user",
+      "domain": "gui/501",
+      "program": "/Applications/1Password.app/Contents/Library/LoginItems/1Password Browser Helper.app",
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": true,
+      "pid": 1107,
+      "owner": {
+        "app": "1Password",
+        "bundle_path": "/Applications/1Password.app",
+        "bundle_id": "com.1password.1password",
+        "team_id": "2BUA8C4S2C",
+        "developer": "AgileBits Inc.",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "4.2BUA8C4S2C.com.1password.browser-helper",
+        "type": "login item",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Applications/1Password.app/Contents/Library/LoginItems/1Password%20Browser%20Helper.app",
+        "bundle_id": "2BUA8C4S2C.com.1password.browser-helper",
+        "team_id": "2BUA8C4S2C",
+        "developer_name": "AgileBits Inc.",
+        "parent_identifier": "2.com.1password.1password",
+        "uid": 501
+      },
+      "sources": [
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "ai.openclaw.gateway",
+      "name": "node",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/ai.openclaw.gateway.plist",
+      "plist_owner": "me",
+      "program": "/opt/homebrew/Cellar/node/25.6.1/bin/node",
+      "program_arguments": [
+        "/opt/homebrew/Cellar/node/25.6.1/bin/node",
+        "/opt/homebrew/lib/node_modules/openclaw/dist/index.js",
+        "gateway",
+        "--port",
+        "18789"
+      ],
+      "trigger": "keep_alive",
+      "triggers": [
+        "keep_alive",
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "disabled_by": "launchctl override",
+      "loaded": true,
+      "running": false,
+      "last_exit": "78",
+      "btm": {
+        "identifier": "8.ai.openclaw.gateway",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/ai.openclaw.gateway.plist",
+        "executable_path": "/opt/homebrew/Cellar/node/25.6.1/bin/node",
+        "parent_identifier": "Unknown Developer",
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print"
+      ]
+    },
+    {
+      "label": "com.1password.1password-launcher",
+      "name": "1Password Launcher",
+      "kind": "login_item",
+      "scope": "user",
+      "domain": "gui/501",
+      "program": "/Applications/1Password.app/Contents/Library/LoginItems/1Password Launcher.app",
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "1Password",
+        "bundle_path": "/Applications/1Password.app",
+        "bundle_id": "com.1password.1password",
+        "team_id": "2BUA8C4S2C",
+        "developer": "AgileBits Inc.",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "4.com.1password.1password-launcher",
+        "type": "login item",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Applications/1Password.app/Contents/Library/LoginItems/1Password%20Launcher.app",
+        "bundle_id": "com.1password.1password-launcher",
+        "team_id": "2BUA8C4S2C",
+        "developer_name": "AgileBits Inc.",
+        "parent_identifier": "2.com.1password.1password",
+        "uid": 501
+      },
+      "sources": [
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.docker.helper",
+      "name": "DockerHelper",
+      "kind": "login_item",
+      "scope": "user",
+      "domain": "gui/501",
+      "program": "/Applications/Docker.app/Contents/Library/LoginItems/DockerHelper.app",
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "Docker",
+        "bundle_path": "/Applications/Docker.app",
+        "bundle_id": "com.docker.docker",
+        "team_id": "9BNSXJN65R",
+        "developer": "Docker Inc",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "4.com.docker.helper",
+        "type": "login item",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Applications/Docker.app/Contents/Library/LoginItems/DockerHelper.app",
+        "bundle_id": "com.docker.helper",
+        "team_id": "9BNSXJN65R",
+        "developer_name": "Docker Inc",
+        "parent_identifier": "2.com.docker.docker",
+        "uid": 501
+      },
+      "sources": [
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.github.domt4.homebrew-autoupdate",
+      "name": "brew_autoupdate",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist",
+      "plist_owner": "me",
+      "program": "/Users/me/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate"
+      ],
+      "trigger": "login",
+      "triggers": [
+        "login",
+        "interval"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "1",
+      "btm": {
+        "identifier": "8.com.github.domt4.homebrew-autoupdate",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist",
+        "executable_path": "/Users/me/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate",
+        "parent_identifier": "Unknown Developer",
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print"
+      ]
+    },
+    {
+      "label": "com.github.facebook.watchman",
+      "name": "watchman",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/com.github.facebook.watchman.plist",
+      "plist_owner": "me",
+      "program": "/opt/homebrew/bin/watchman",
+      "program_arguments": [
+        "/opt/homebrew/bin/watchman",
+        "--foreground",
+        "--logfile=/Users/me/.local/state/watchman/me-state/log",
+        "--log-level=1",
+        "--sockname=/Users/me/.local/state/watchman/me-state/sock",
+        "--statefile=/Users/me/.local/state/watchman/me-state/state",
+        "--pidfile=/Users/me/.local/state/watchman/me-state/pid"
+      ],
+      "trigger": "keep_alive",
+      "triggers": [
+        "keep_alive",
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": true,
+      "pid": 1114,
+      "btm": {
+        "identifier": "8.com.github.facebook.watchman",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/com.github.facebook.watchman.plist",
+        "executable_path": "/opt/homebrew/bin/watchman",
+        "parent_identifier": "Unknown Developer",
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print"
+      ]
+    },
+    {
+      "label": "com.google.GoogleUpdater.wake",
+      "name": "GoogleUpdater",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist",
+      "plist_owner": "me",
+      "program": "/Users/me/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater",
+        "--wake-all",
+        "--enable-logging",
+        "--vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2"
+      ],
+      "trigger": "interval",
+      "triggers": [
+        "interval"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "GoogleUpdater",
+        "bundle_path": "/Users/me/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app",
+        "bundle_id": "com.google.GoogleUpdater",
+        "team_id": "EQHXZ8M8AV",
+        "developer": "Google LLC",
+        "via": "program_in_bundle"
+      },
+      "btm": {
+        "identifier": "8.com.google.GoogleUpdater.wake",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist",
+        "executable_path": "/Users/me/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater",
+        "team_id": "EQHXZ8M8AV",
+        "developer_name": "Google LLC",
+        "parent_identifier": "Google LLC",
+        "assoc_bundle_ids": [
+          "com.google.GoogleUpdater"
+        ],
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.jetbrains.toolbox",
+      "name": "JetBrains Toolbox",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/com.jetbrains.toolbox.plist",
+      "plist_owner": "me",
+      "program": "/Applications/JetBrains Toolbox.app/Contents/MacOS/jetbrains-toolbox",
+      "program_arguments": [
+        "/Applications/JetBrains Toolbox.app/Contents/MacOS/jetbrains-toolbox",
+        "--minimize"
+      ],
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "JetBrains Toolbox",
+        "bundle_path": "/Applications/JetBrains Toolbox.app",
+        "bundle_id": "com.jetbrains.toolbox",
+        "team_id": "2ZEFAR8TH3",
+        "developer": "JetBrains s.r.o.",
+        "via": "program_in_bundle"
+      },
+      "btm": {
+        "identifier": "8.com.jetbrains.toolbox",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/com.jetbrains.toolbox.plist",
+        "executable_path": "/Applications/JetBrains Toolbox.app/Contents/MacOS/jetbrains-toolbox",
+        "team_id": "2ZEFAR8TH3",
+        "developer_name": "JetBrains s.r.o.",
+        "parent_identifier": "JetBrains s.r.o.",
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.valvesoftware.steam",
+      "name": "Steam",
+      "kind": "login_item",
+      "scope": "user",
+      "program": "/Applications/Steam.app",
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "disabled": false,
+      "loaded": false,
+      "running": false,
+      "owner": {
+        "app": "Steam",
+        "bundle_path": "/Applications/Steam.app",
+        "bundle_id": "com.valvesoftware.steam",
+        "team_id": "MXGJJ98X76",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "2.com.valvesoftware.steam",
+        "type": "app",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Applications/Steam.app/",
+        "bundle_id": "com.valvesoftware.steam",
+        "team_id": "MXGJJ98X76",
+        "uid": 501
+      },
+      "sources": [
+        "btm_store",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.valvesoftware.steamclean",
+      "name": "steamclean",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/com.valvesoftware.steamclean.plist",
+      "plist_owner": "me",
+      "program": "/Users/me/Library/Application Support/Steam/SteamApps/steamclean",
+      "program_arguments": [
+        "/Users/me/Library/Application Support/Steam/SteamApps/steamclean",
+        "Public"
+      ],
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "Steam",
+        "bundle_path": "/Applications/Steam.app",
+        "bundle_id": "com.valvesoftware.steam",
+        "team_id": "MXGJJ98X76",
+        "developer": "Steam",
+        "via": "associated_bundle_identifier"
+      },
+      "btm": {
+        "identifier": "8.com.valvesoftware.steamclean",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/com.valvesoftware.steamclean.plist",
+        "executable_path": "/Users/me/Library/Application Support/Steam/SteamApps/steamclean",
+        "team_id": "MXGJJ98X76",
+        "developer_name": "Steam",
+        "parent_identifier": "Steam",
+        "assoc_bundle_ids": [
+          "com.valvesoftware.steam"
+        ],
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "dev.spectra.daemon",
+      "name": "spectra",
+      "kind": "launch_agent",
+      "scope": "user",
+      "domain": "gui/501",
+      "plist_path": "/Users/me/Library/LaunchAgents/dev.spectra.daemon.plist",
+      "plist_owner": "me",
+      "program": "/Users/me/.local/bin/spectra",
+      "program_arguments": [
+        "/Users/me/.local/bin/spectra",
+        "daemon",
+        "run"
+      ],
+      "trigger": "keep_alive",
+      "triggers": [
+        "keep_alive",
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": true,
+      "pid": 1123,
+      "btm": {
+        "identifier": "8.dev.spectra.daemon",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Users/me/Library/LaunchAgents/dev.spectra.daemon.plist",
+        "executable_path": "/Users/me/.local/bin/spectra",
+        "parent_identifier": "Unknown Developer",
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print"
+      ]
+    },
+    {
+      "label": "com.docker.socket",
+      "name": "com.docker.socket",
+      "kind": "launch_daemon",
+      "scope": "system",
+      "domain": "system",
+      "plist_path": "/Library/LaunchDaemons/com.docker.socket.plist",
+      "plist_owner": "root",
+      "program": "/Library/PrivilegedHelperTools/com.docker.socket",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/com.docker.socket",
+        "me"
+      ],
+      "trigger": "boot",
+      "triggers": [
+        "boot"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "disabled_by": "launchctl override",
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "team_id": "9BNSXJN65R",
+        "developer": "Docker Inc",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "16.com.docker.socket",
+        "type": "legacy daemon",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Library/LaunchDaemons/com.docker.socket.plist",
+        "executable_path": "/Library/PrivilegedHelperTools/com.docker.socket",
+        "team_id": "9BNSXJN65R",
+        "developer_name": "Docker Inc",
+        "parent_identifier": "Docker Inc",
+        "uid": -2
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "com.docker.vmnetd",
+      "name": "com.docker.vmnetd",
+      "kind": "launch_daemon",
+      "scope": "system",
+      "domain": "system",
+      "plist_path": "/Library/LaunchDaemons/com.docker.vmnetd.plist",
+      "plist_owner": "root",
+      "program": "/Library/PrivilegedHelperTools/com.docker.vmnetd",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/com.docker.vmnetd"
+      ],
+      "trigger": "boot",
+      "triggers": [
+        "boot"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "disabled_by": "launchctl override",
+      "loaded": true,
+      "running": true,
+      "pid": 597,
+      "owner": {
+        "app": "Docker",
+        "bundle_path": "/Applications/Docker.app",
+        "bundle_id": "com.docker.docker",
+        "team_id": "9BNSXJN65R",
+        "developer": "Docker",
+        "via": "associated_bundle_identifier"
+      },
+      "btm": {
+        "identifier": "16.com.docker.vmnetd",
+        "type": "legacy daemon",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Library/LaunchDaemons/com.docker.vmnetd.plist",
+        "executable_path": "/Library/PrivilegedHelperTools/com.docker.vmnetd",
+        "team_id": "9BNSXJN65R",
+        "developer_name": "Docker",
+        "parent_identifier": "Docker",
+        "assoc_bundle_ids": [
+          "com.docker.docker"
+        ],
+        "uid": -2
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "us.zoom.ZoomDaemon",
+      "name": "us.zoom.ZoomDaemon",
+      "kind": "launch_daemon",
+      "scope": "system",
+      "domain": "system",
+      "plist_path": "/Library/LaunchDaemons/us.zoom.ZoomDaemon.plist",
+      "plist_owner": "root",
+      "program": "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon",
+      "program_arguments": [
+        "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon"
+      ],
+      "trigger": "on_demand",
+      "triggers": [
+        "on_demand"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "owner": {
+        "app": "zoom.us",
+        "bundle_path": "/Applications/zoom.us.app",
+        "bundle_id": "us.zoom.xos",
+        "team_id": "BJ4HAAB9B3",
+        "developer": "Zoom Video Communications, Inc.",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "16.us.zoom.ZoomDaemon",
+        "type": "legacy daemon",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Library/LaunchDaemons/us.zoom.ZoomDaemon.plist",
+        "executable_path": "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon",
+        "team_id": "BJ4HAAB9B3",
+        "developer_name": "Zoom Video Communications, Inc.",
+        "parent_identifier": "2.us.zoom.xos",
+        "assoc_bundle_ids": [
+          "us.zoom.xos"
+        ],
+        "uid": -2
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "us.zoom.updater",
+      "name": "Zoom",
+      "kind": "launch_agent",
+      "scope": "system",
+      "domain": "gui/501",
+      "plist_path": "/Library/LaunchAgents/us.zoom.updater.plist",
+      "plist_owner": "root",
+      "program": "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+      "program_arguments": [
+        "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+        "--update"
+      ],
+      "trigger": "interval",
+      "triggers": [
+        "interval"
+      ],
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "zoom.us",
+        "bundle_path": "/Applications/zoom.us.app",
+        "bundle_id": "us.zoom.xos",
+        "team_id": "BJ4HAAB9B3",
+        "developer": "Zoom Video Communications, Inc.",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "8.us.zoom.updater",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Library/LaunchAgents/us.zoom.updater.plist",
+        "executable_path": "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+        "team_id": "BJ4HAAB9B3",
+        "developer_name": "Zoom Video Communications, Inc.",
+        "parent_identifier": "2.us.zoom.xos",
+        "assoc_bundle_ids": [
+          "us.zoom.xos"
+        ],
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    },
+    {
+      "label": "us.zoom.updater.login.check",
+      "name": "Zoom",
+      "kind": "launch_agent",
+      "scope": "system",
+      "domain": "gui/501",
+      "plist_path": "/Library/LaunchAgents/us.zoom.updater.login.check.plist",
+      "plist_owner": "root",
+      "program": "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+      "program_arguments": [
+        "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+        "--login-check"
+      ],
+      "trigger": "login",
+      "triggers": [
+        "login"
+      ],
+      "run_at_load": true,
+      "disabled": false,
+      "loaded": true,
+      "running": false,
+      "last_exit": "0",
+      "owner": {
+        "app": "zoom.us",
+        "bundle_path": "/Applications/zoom.us.app",
+        "bundle_id": "us.zoom.xos",
+        "team_id": "BJ4HAAB9B3",
+        "developer": "Zoom Video Communications, Inc.",
+        "via": "btm"
+      },
+      "btm": {
+        "identifier": "8.us.zoom.updater.login.check",
+        "type": "legacy agent",
+        "disposition": [
+          "enabled",
+          "allowed",
+          "notified"
+        ],
+        "url": "file:///Library/LaunchAgents/us.zoom.updater.login.check.plist",
+        "executable_path": "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater",
+        "team_id": "BJ4HAAB9B3",
+        "developer_name": "Zoom Video Communications, Inc.",
+        "parent_identifier": "2.us.zoom.xos",
+        "assoc_bundle_ids": [
+          "us.zoom.xos"
+        ],
+        "uid": 501
+      },
+      "sources": [
+        "launchd_plist",
+        "btm_store",
+        "launchctl_print",
+        "owner"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "name": "launchd_plist",
+      "status": "ok",
+      "detail": "17 plists read, 2 unreadable"
+    },
+    {
+      "name": "launchctl_print_disabled",
+      "status": "ok"
+    },
+    {
+      "name": "launchctl_print",
+      "status": "ok"
+    },
+    {
+      "name": "btm_store",
+      "status": "ok",
+      "detail": "54 items from BackgroundItems-v16.btm"
+    },
+    {
+      "name": "owner",
+      "status": "ok"
+    }
+  ],
+  "errors": [
+    {
+      "path": "/Users/me/Library/LaunchAgents/com.google.keystone.agent.plist",
+      "error": "plist has no Label"
+    },
+    {
+      "path": "/Users/me/Library/LaunchAgents/com.google.keystone.xpcservice.plist",
+      "error": "plist has no Label"
+    }
+  ],
+  "collected_at": "2026-11-22T00:51:07.219875Z"
+}

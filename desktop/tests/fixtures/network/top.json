@@ -1,0 +1,122 @@
+{
+  "duration_ms": 5071,
+  "interval_ms": 1000,
+  "samples": 6,
+  "samples_failed": 0,
+  "samples_skipped": 0,
+  "basis": "nettop",
+  "remotes_basis": "end-snapshot",
+  "totals": {
+    "bytes_in": 30892114,
+    "bytes_out": 104936,
+    "avg_in_bytes_per_sec": 6091916.4,
+    "avg_out_bytes_per_sec": 20693.0,
+    "peak_in_bytes_per_sec": 13376204.0,
+    "peak_out_bytes_per_sec": 63207.1,
+    "peak_total_bytes_per_sec": 13397425.3,
+    "active_processes": 19
+  },
+  "processes": [
+    {
+      "pid": 4101,
+      "command": "java",
+      "user": "user",
+      "cwd": "/Users/user/src/service",
+      "bytes_in": 10647871,
+      "bytes_out": 31375,
+      "avg_in_bytes_per_sec": 2099757.6,
+      "avg_out_bytes_per_sec": 6187.1,
+      "peak_in_bytes_per_sec": 9629467.7,
+      "peak_out_bytes_per_sec": 14723.6,
+      "remotes": [
+        "127.0.0.1:50833",
+        "172.217.165.219:443",
+        "104.16.72.101:443",
+        "140.82.112.4:443"
+      ]
+    },
+    {
+      "pid": 1320,
+      "command": "node",
+      "user": "user",
+      "cwd": "/Users/user/src/web",
+      "bytes_in": 20166904,
+      "bytes_out": 0,
+      "avg_in_bytes_per_sec": 3976909.7,
+      "avg_out_bytes_per_sec": 0,
+      "peak_in_bytes_per_sec": 8049369.6,
+      "peak_out_bytes_per_sec": 0,
+      "remotes": [
+        "185.199.110.133:443"
+      ]
+    },
+    {
+      "pid": 1200,
+      "command": "claude",
+      "user": "user",
+      "cwd": "/Users/user/src/app",
+      "bytes_in": 14075,
+      "bytes_out": 28749,
+      "avg_in_bytes_per_sec": 2775.5,
+      "avg_out_bytes_per_sec": 5669.2,
+      "peak_in_bytes_per_sec": 12332.2,
+      "peak_out_bytes_per_sec": 23772.4,
+      "remotes": [
+        "160.79.104.10:443",
+        "34.149.66.165:443"
+      ]
+    },
+    {
+      "pid": 901,
+      "command": "Slack Helper (R",
+      "user": "user",
+      "bytes_in": 8326,
+      "bytes_out": 28439,
+      "avg_in_bytes_per_sec": 1641.8,
+      "avg_out_bytes_per_sec": 5608.1,
+      "peak_in_bytes_per_sec": 4491.8,
+      "peak_out_bytes_per_sec": 27789.0,
+      "remotes": [
+        "3.12.228.222:443"
+      ]
+    },
+    {
+      "pid": 1311,
+      "command": "gh",
+      "bytes_in": 8553,
+      "bytes_out": 1948,
+      "avg_in_bytes_per_sec": 1686.6,
+      "avg_out_bytes_per_sec": 384.1,
+      "peak_in_bytes_per_sec": 8380.6,
+      "peak_out_bytes_per_sec": 1908.7,
+      "started": true,
+      "stopped": true
+    },
+    {
+      "pid": 1201,
+      "command": "curl",
+      "user": "user",
+      "bytes_in": 4000,
+      "bytes_out": 1200,
+      "avg_in_bytes_per_sec": 788.7,
+      "avg_out_bytes_per_sec": 236.6,
+      "remotes": null
+    }
+  ],
+  "started": [
+    {
+      "pid": 1311,
+      "command": "gh"
+    }
+  ],
+  "stopped": [
+    {
+      "pid": 1311,
+      "command": "gh"
+    }
+  ],
+  "limitations": [
+    "nettop -t external: loopback traffic is not counted",
+    "remote endpoints are the connections open at the end of the window (one listing), not necessarily those that moved the bytes; 1 listed process(es) had none open then"
+  ]
+}

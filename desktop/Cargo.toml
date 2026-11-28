@@ -1,0 +1,24 @@
+[package]
+name = "spectra-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Diagnosis-first JVM desktop app for Spectra, built with Rune"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276", features = ["tooling"] }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Rune's vendored forks; Cargo doesn't inherit patches from a dependency. Keep every rev equal
+# to the rune rev above.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "dacf5d89ba56939c5ff2565c7e6a2983f7f7e276" }

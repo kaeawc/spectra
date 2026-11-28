@@ -1,0 +1,14 @@
+/opt/tools/bin/ledgerd:
+(__TEXT,__text) section
+_ledger_flush:
+0000000100003f10	sub	sp, sp, #0x30
+0000000100003f14	stp	x29, x30, [sp, #0x20]
+0000000100003f18	add	x29, sp, #0x20
+0000000100003f1c	str	x0, [sp, #0x8]
+0000000100003f20	ldr	x8, [sp, #0x8]
+0000000100003f24	bl	__ZN6ledger5Store5flushEv
+0000000100003f28	ldp	x29, x30, [sp, #0x20]
+0000000100003f2c	ret
+_ledger_open:
+0000000100003f30	sub	sp, sp, #0x20
+0000000100003f34	ret

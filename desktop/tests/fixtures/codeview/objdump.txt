@@ -1,0 +1,17 @@
+
+/opt/tools/bin/ledgerd:	file format mach-o arm64
+
+Disassembly of section __TEXT,__text:
+
+0000000100003f10 <_ledger_flush>:
+100003f10:     	sub	sp, sp, #0x30
+100003f14:     	stp	x29, x30, [sp, #0x20]
+100003f18:     	add	x29, sp, #0x20
+100003f1c:     	str	x0, [sp, #0x8]
+100003f20:     	ldr	x8, [sp, #0x8]
+100003f24:     	ldr	x0, [x8, #0x10]
+100003f28:     	bl	0x100004a20 <_$s6Ledger5EntryV4hashSivg>
+100003f2c:     	bl	0x100004b00 <__ZN6ledger5Store5flushEv>
+100003f30:     	ldp	x29, x30, [sp, #0x20]
+100003f34:     	add	sp, sp, #0x30
+100003f38:     	ret

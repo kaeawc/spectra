@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Spectra
+GenericName=Process Diagnostics
+Comment=What's wrong with this machine, worst first, with every process and JVM in depth
+Exec=spectra-desktop
+Icon=io.github.kaeawc.SpectraDesktop
+Terminal=false
+Categories=Development;System;Monitor;
+Keywords=process;JVM;memory;CPU;diagnostics;spectra;
+StartupWMClass=spectra-desktop

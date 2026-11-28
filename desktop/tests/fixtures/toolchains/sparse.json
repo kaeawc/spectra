@@ -1,0 +1,15 @@
+{
+  "brew": null,
+  "jdks": [
+    { "path": "/Users/user/jdks/jdk-11" },
+    { "version_major": 8, "source": "manual" }
+  ],
+  "node": [ { "version": "20.1.0" }, {} ],
+  "zig": [
+    { "version": "0.13.0", "path": "/Users/user/.zvm/0.13.0/zig" },
+    { "name": "zls", "version": "0.13.0" }
+  ],
+  "telemetry": { "enabled": false },
+  "label": "not a section",
+  "env": { "java_home": "/Users/user/gone/jdk-17" }
+}

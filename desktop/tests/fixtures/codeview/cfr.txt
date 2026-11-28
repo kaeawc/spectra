@@ -1,0 +1,24 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
+package com.acme.checkout.inventory;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class StockLedger {
+    private final Map<String, Integer> onHand = new HashMap<String, Integer>();
+
+    public synchronized boolean reserve(String sku, int count) {
+        int have = this.onHand.getOrDefault(sku, 0);
+        if (have < count) {
+            return false;
+        }
+        this.onHand.put(sku, have - count);
+        return true;
+    }
+
+    public int onHand(String sku) {
+        return this.onHand.get(sku);
+    }
+}

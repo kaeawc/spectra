@@ -1,0 +1,65 @@
+{
+ "total_shallow_bytes": 23212764,
+ "reachable_objects": 34081,
+ "reachable_bytes": 23195560,
+ "suspects": [
+  {
+   "id": 481053184600,
+   "class_name": "class Lab",
+   "shallow_bytes": 0,
+   "retained_bytes": 21768773,
+   "percent_of_heap": 93.84887883715676
+  },
+  {
+   "id": 481053186408,
+   "class_name": "java.util.ArrayList",
+   "shallow_bytes": 16,
+   "retained_bytes": 21767688,
+   "percent_of_heap": 93.84420121781928
+  },
+  {
+   "id": 481054716120,
+   "class_name": "[Ljava.lang.Object;",
+   "shallow_bytes": 4408,
+   "retained_bytes": 21767672,
+   "percent_of_heap": 93.84413223910093
+  },
+  {
+   "id": 481053945944,
+   "class_name": "class sun.util.calendar.ZoneInfoFile",
+   "shallow_bytes": 0,
+   "retained_bytes": 146489,
+   "percent_of_heap": 0.6315389669402248
+  }
+ ],
+ "classes": [
+  {
+   "class_name": "[B",
+   "instances": 11046,
+   "shallow_bytes": 22258624,
+   "retained_bytes": 22258624,
+   "percent_of_heap": 95.96070972203302
+  },
+  {
+   "class_name": "java.lang.Class",
+   "instances": 810,
+   "shallow_bytes": 0,
+   "retained_bytes": 22146823,
+   "percent_of_heap": 95.47871661645591
+  },
+  {
+   "class_name": "[Ljava.lang.Object;",
+   "instances": 1092,
+   "shallow_bytes": 268584,
+   "retained_bytes": 22134441,
+   "percent_of_heap": 95.42533571079983
+  },
+  {
+   "class_name": "java.util.ArrayList",
+   "instances": 13,
+   "shallow_bytes": 208,
+   "retained_bytes": 21772564,
+   "percent_of_heap": 93.86522248223366
+  }
+ ]
+}

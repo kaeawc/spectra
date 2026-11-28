@@ -1,0 +1,208 @@
+{
+  "causes": [
+    {
+      "severity": "medium",
+      "title": "Build tools uses 52% of machine CPU",
+      "detail": "834% CPU (8.3 cores busy) across 2 processes, oldest member running for 1m3s; heaviest: java (pid 18523, 786%), java (pid 12201, 48%)"
+    },
+    {
+      "severity": "medium",
+      "title": "A process is using heavy CPU",
+      "detail": "java (pid 18523) at 786% CPU"
+    }
+  ],
+  "families": [
+    {
+      "key": "build",
+      "kind": "build",
+      "name": "Build tools",
+      "members": 2,
+      "cpu_pct": 833.7,
+      "share_pct": 73.87682764731946,
+      "rss_kib": 3691280,
+      "started_at": "2026-11-21T23:23:22-05:00",
+      "age_seconds": 63,
+      "heaviest": [
+        {
+          "pid": 18523,
+          "command": "java",
+          "cpu_pct": 786.2,
+          "age_seconds": 40
+        },
+        {
+          "pid": 12201,
+          "command": "java",
+          "cpu_pct": 47.5,
+          "age_seconds": 63
+        }
+      ]
+    },
+    {
+      "key": "xcode",
+      "kind": "xcode",
+      "name": "Xcode",
+      "members": 5,
+      "cpu_pct": 101.1,
+      "share_pct": 8.958794860434203,
+      "rss_kib": 2233168,
+      "started_at": "2026-11-21T23:23:15-05:00",
+      "age_seconds": 70,
+      "heaviest": [
+        {
+          "pid": 15193,
+          "command": "git",
+          "cpu_pct": 82.8,
+          "age_seconds": 50
+        },
+        {
+          "pid": 26921,
+          "command": "git",
+          "cpu_pct": 18.3,
+          "age_seconds": 1
+        },
+        {
+          "pid": 10011,
+          "command": "git",
+          "cpu_pct": 0,
+          "age_seconds": 70
+        }
+      ]
+    },
+    {
+      "key": "simulator:00000000-0000-4000-8000-000000000001",
+      "kind": "simulator",
+      "name": "Simulator 00000000-0000-4000-8000-000000000001",
+      "udid": "00000000-0000-4000-8000-000000000001",
+      "members": 263,
+      "cpu_pct": 7.4,
+      "share_pct": 0.6557377049180327,
+      "rss_kib": 35673104,
+      "started_at": "2026-11-21T20:31:54-05:00",
+      "age_seconds": 10351,
+      "heaviest": [
+        {
+          "pid": 25687,
+          "command": "pairedsyncd",
+          "cpu_pct": 6.9,
+          "age_seconds": 6
+        },
+        {
+          "pid": 22190,
+          "command": "SpringBoard",
+          "cpu_pct": 0.5,
+          "age_seconds": 10351
+        },
+        {
+          "pid": 10216,
+          "command": "feedbackd",
+          "cpu_pct": 0,
+          "age_seconds": 4003
+        }
+      ]
+    },
+    {
+      "key": "browser:Google Chrome",
+      "kind": "browser",
+      "name": "Google Chrome",
+      "members": 39,
+      "cpu_pct": 1.6,
+      "share_pct": 0.14178112538768278,
+      "rss_kib": 10057024,
+      "started_at": "2026-11-20T03:31:23-05:00",
+      "age_seconds": 157982,
+      "heaviest": [
+        {
+          "pid": 60983,
+          "command": "Google Chrome Helper (Renderer)",
+          "cpu_pct": 1.5,
+          "age_seconds": 138058
+        },
+        {
+          "pid": 45384,
+          "command": "Google Chrome Helper",
+          "cpu_pct": 0.1,
+          "age_seconds": 157981
+        },
+        {
+          "pid": 14257,
+          "command": "Google Chrome Helper (Renderer)",
+          "cpu_pct": 0,
+          "age_seconds": 53
+        }
+      ]
+    }
+  ],
+  "trend": "load 5.80/4.66/16.71; memory pressure normal",
+  "signals": {
+    "load": {
+      "memory_pressure": "normal",
+      "pressure_level": 1,
+      "swap_used_mb": 0,
+      "swap_total_mb": 0
+    },
+    "power": {
+      "on_battery": true,
+      "battery_pct": 66,
+      "thermal_throttled": false,
+      "assertions": [
+        {
+          "type": "BackgroundTask",
+          "pid": 364,
+          "name": "com.apple.metadata.mds.power"
+        },
+        {
+          "type": "PreventUserIdleSystemSleep",
+          "pid": 21574,
+          "name": "caffeinate command-line tool"
+        }
+      ],
+      "energy_top_users": [
+        {
+          "pid": 18523,
+          "energy_impact": 334.6,
+          "command": "java"
+        },
+        {
+          "pid": 15193,
+          "energy_impact": 34.5,
+          "command": "git"
+        },
+        {
+          "pid": 339,
+          "energy_impact": 29.8,
+          "command": "fseventsd"
+        }
+      ]
+    },
+    "top_cpu": {
+      "pid": 18523,
+      "ppid": 12201,
+      "uid": 501,
+      "user": "user",
+      "command": "java",
+      "bsd_name": "java",
+      "executable_path": "/opt/homebrew/Cellar/openjdk@21/21.0.13.1/libexec/openjdk.jdk/Contents/Home/bin/java",
+      "full_command_line": "/opt/homebrew/Cellar/openjdk@21/21.0.13.1/libexec/openjdk.jdk/Contents/Home/bin/java -Xmx2g -XX:+UseG1GC -cp /Users/user/.gradle/caches/kotlin-compiler-embeddable.jar org.jetbrains.kotlin.daemon.KotlinCompileDaemon",
+      "rss_kib": 1473280,
+      "thread_count": 55,
+      "cpu_pct": 786.2,
+      "mem_percent": 1.0976791381835938,
+      "started_at": "2026-11-21T23:23:45-05:00",
+      "elapsed": 40000000000
+    },
+    "top_rss": {
+      "pid": 547,
+      "ppid": 1,
+      "uid": 308,
+      "user": "_mds_stores",
+      "command": "mds_stores",
+      "executable_path": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+      "rss_kib": 3539312,
+      "thread_count": 0,
+      "cpu_pct": 3.5,
+      "mem_percent": 2.636992931365967,
+      "started_at": "2026-11-20T02:58:49-05:00",
+      "elapsed": 159936000000000
+    }
+  }
+}

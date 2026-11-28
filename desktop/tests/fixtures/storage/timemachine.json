@@ -1,0 +1,13 @@
+{
+  "status": {
+    "running": false,
+    "percent": -1,
+    "client_id": "com.apple.backupd",
+    "first_backup": false
+  },
+  "destinations": [],
+  "local_snapshots": [],
+  "auto_backup_enabled": false,
+  "scheduler_loaded": false,
+  "collected_at": "2026-11-22T04:27:29.103951Z"
+}

@@ -1,0 +1,28 @@
+{
+  "protocol_version": "v1",
+  "request_id": "c0ffee03",
+  "result": {
+    "schema": {"name": "spectra.process.list", "version": 1},
+    "spectra_version": "0.42.0",
+    "data": {
+      "sampled_at": "2026-11-24T14:02:10Z",
+      "processes": [
+        {"pid":1,"ppid":0,"uid":0,"user":"root","command":"launchd","executable_path":"/sbin/launchd","rss_kib":28672,"thread_count":5,"cpu_pct":0.4,"started_at":"2026-11-20T08:00:01Z","role":"system","runtime":"native","signing":{"status":"apple","validated":true}},
+        {"pid":312,"ppid":1,"uid":0,"user":"root","command":"tailscaled","executable_path":"/usr/local/bin/tailscaled","rss_kib":61440,"thread_count":18,"cpu_pct":0.8,"started_at":"2026-11-20T08:00:09Z","role":"system","runtime":"go","signing":{"status":"developer_id","team_id":"W5364U7YZB"}},
+        {"pid":540,"ppid":1,"uid":501,"user":"ci","command":"spectra","executable_path":"/opt/spectra/bin/spectra","full_command_line":"/opt/spectra/bin/spectra daemon run","rss_kib":90112,"thread_count":14,"cpu_pct":1.2,"started_at":"2026-11-20T08:01:00Z","role":"cli","runtime":"go","signing":{"status":"developer_id","team_id":"EXAMPLE123"}},
+        {"pid":541,"ppid":1,"uid":501,"user":"ci","command":"spectra-remote-agent","executable_path":"/opt/spectra/bin/spectra-remote-agent","full_command_line":"/opt/spectra/bin/spectra-remote-agent serve-tsnet --tsnet-hostname build-mac","rss_kib":73728,"thread_count":16,"cpu_pct":0.3,"started_at":"2026-11-20T08:01:00Z","role":"cli","runtime":"go","signing":{"status":"developer_id","team_id":"EXAMPLE123"}},
+        {"pid":2210,"ppid":1,"uid":501,"user":"ci","command":"java","executable_path":"/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java","full_command_line":"java -Xmx4g -cp gradle-daemon-main-8.11.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.11","rss_kib":3145728,"thread_count":96,"cpu_pct":184.0,"started_at":"2026-11-24T13:40:12Z","role":"cli","runtime":"jvm","signing":{"status":"developer_id","team_id":"JCDTMS22B4"}},
+        {"pid":2288,"ppid":2210,"uid":501,"user":"ci","command":"java","executable_path":"/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java","full_command_line":"java -Xmx2g org.jetbrains.kotlin.daemon.KotlinCompileDaemon","rss_kib":1572864,"thread_count":61,"cpu_pct":92.5,"started_at":"2026-11-24T13:41:02Z","role":"cli","runtime":"jvm","signing":{"status":"developer_id","team_id":"JCDTMS22B4"}},
+        {"pid":2301,"ppid":2210,"uid":501,"user":"ci","command":"java","executable_path":"/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java","full_command_line":"java -Xmx1g worker.org.gradle.process.internal.worker.GradleWorkerMain","rss_kib":786432,"thread_count":40,"cpu_pct":61.0,"started_at":"2026-11-24T13:58:30Z","role":"cli","runtime":"jvm","signing":{"status":"developer_id","team_id":"JCDTMS22B4"}},
+        {"pid":1801,"ppid":1,"uid":501,"user":"ci","command":"Runner.Listener","executable_path":"/Users/ci/actions-runner/bin/Runner.Listener","rss_kib":118784,"thread_count":22,"cpu_pct":2.1,"started_at":"2026-11-20T08:02:00Z","role":"cli","runtime":"native","signing":{"status":"adhoc"}},
+        {"pid":1950,"ppid":1801,"uid":501,"user":"ci","command":"Runner.Worker","executable_path":"/Users/ci/actions-runner/bin/Runner.Worker","rss_kib":143360,"thread_count":25,"cpu_pct":3.4,"started_at":"2026-11-24T13:39:58Z","role":"cli","runtime":"native","signing":{"status":"adhoc"}},
+        {"pid":1960,"ppid":1950,"uid":501,"user":"ci","command":"zsh","executable_path":"/bin/zsh","rss_kib":4096,"thread_count":1,"cpu_pct":0.0,"started_at":"2026-11-24T13:40:00Z","role":"shell","runtime":"shell","signing":{"status":"apple","validated":true}},
+        {"pid":1961,"ppid":1960,"uid":501,"user":"ci","command":"zsh","executable_path":"/bin/zsh","rss_kib":4096,"thread_count":1,"cpu_pct":0.0,"started_at":"2026-11-24T13:40:01Z","role":"shell","runtime":"shell","signing":{"status":"apple","validated":true}},
+        {"pid":1962,"ppid":1961,"uid":501,"user":"ci","command":"gradlew","executable_path":"/bin/zsh","full_command_line":"/bin/sh ./gradlew assembleRelease","rss_kib":3072,"thread_count":1,"cpu_pct":0.0,"started_at":"2026-11-24T13:40:02Z","role":"shell","runtime":"shell","signing":{"status":"apple","validated":true}},
+        {"pid":2400,"ppid":1,"uid":501,"user":"ci","command":"Simulator","executable_path":"/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app/Contents/MacOS/Simulator","rss_kib":409600,"thread_count":12,"cpu_pct":4.0,"started_at":"2026-11-24T12:10:00Z","role":"app","runtime":"native","app":{"name":"Simulator","bundle_path":"/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app","bundle_id":"com.apple.iphonesimulator"},"signing":{"status":"apple","validated":true}},
+        {"pid":402,"ppid":1,"uid":0,"user":"root","command":"sshd","executable_path":"/usr/sbin/sshd","rss_kib":6144,"thread_count":2,"cpu_pct":0.0,"started_at":"2026-11-20T08:00:12Z","role":"system","runtime":"native","signing":{"status":"apple","validated":true}},
+        {"pid":118,"ppid":1,"uid":0,"user":"root","command":"WindowServer","executable_path":"/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer","rss_kib":163840,"thread_count":20,"cpu_pct":1.5,"started_at":"2026-11-20T08:00:03Z","role":"system","runtime":"native","signing":{"status":"apple","validated":true}}
+      ]
+    }
+  }
+}

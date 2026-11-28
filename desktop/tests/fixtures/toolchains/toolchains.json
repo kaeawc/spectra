@@ -1,0 +1,86 @@
+{
+  "brew": {
+    "formulae": [
+      { "name": "cmake", "version": "3.31.2", "installed_via": "core" },
+      { "name": "gradle", "version": "8.12", "installed_via": "core" },
+      { "name": "jq", "version": "1.7.1", "installed_via": "core" },
+      { "name": "openjdk@21", "version": "21.0.5", "installed_via": "core" },
+      { "name": "python@3.12", "version": "3.12.8", "installed_via": "core", "pinned": true },
+      { "name": "ripgrep", "version": "14.1.1", "installed_via": "core" },
+      { "name": "tool-from-tap", "version": "0.4.0", "installed_via": "tap" },
+      { "name": "old-formula", "version": "1.2", "installed_via": "core", "deprecated": true }
+    ],
+    "casks": [
+      { "name": "example-editor", "version": "1.90.2" },
+      { "name": "example-terminal", "version": "2.3" }
+    ],
+    "taps": [
+      { "name": "example/tools" },
+      { "name": "example/extras" }
+    ]
+  },
+  "jdks": [
+    {
+      "install_id": "temurin-17-system",
+      "path": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+      "source": "system",
+      "version_major": 17,
+      "version_minor": 0,
+      "version_patch": 13,
+      "vendor": "Eclipse Adoptium",
+      "release_string": "17.0.13+11"
+    },
+    {
+      "install_id": "asdf-temurin-17",
+      "path": "/Users/user/.asdf/installs/java/temurin-17.0.9+9/Contents/Home",
+      "source": "asdf",
+      "version_major": 17,
+      "version_minor": 0,
+      "version_patch": 9,
+      "vendor": "Eclipse Adoptium",
+      "release_string": "17.0.9+9"
+    },
+    {
+      "install_id": "temurin-21-manual",
+      "path": "/Users/user/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+      "source": "manual",
+      "version_major": 21,
+      "version_minor": 0,
+      "version_patch": 5,
+      "vendor": "Eclipse Adoptium",
+      "release_string": "21.0.5+11",
+      "is_active_java_home": true
+    }
+  ],
+  "node": [
+    { "version": "22.11.0", "source": "nvm", "path": "/Users/user/.nvm/versions/node/v22.11.0/bin/node", "active": true },
+    { "version": "18.20.4", "source": "nvm", "path": "/Users/user/.nvm/versions/node/v18.20.4/bin/node" }
+  ],
+  "python": [
+    { "version": "3.12.8", "source": "brew", "path": "/opt/homebrew/bin/python3.12", "active": true },
+    { "version": "3.9.6", "source": "system", "path": "/usr/bin/python3" }
+  ],
+  "go": [
+    { "version": "1.23.4", "source": "brew", "path": "/opt/homebrew/bin/go", "active": true }
+  ],
+  "ruby": [
+    { "version": "2.6.10", "source": "system", "path": "/usr/bin/ruby" }
+  ],
+  "rust": [
+    { "toolchain": "stable-aarch64-apple-darwin", "channel": "stable", "default": true },
+    { "toolchain": "nightly-aarch64-apple-darwin", "channel": "nightly" }
+  ],
+  "jvm_managers": ["asdf"],
+  "active_jvm_manager": "asdf",
+  "build_tools": [
+    { "name": "gradle", "version": "8.12", "source": "brew" },
+    { "name": "maven", "version": "3.9.9", "source": "brew" },
+    { "name": "make", "version": "3.81", "source": "system" }
+  ],
+  "env": {
+    "shell": "zsh",
+    "path_dirs": ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"],
+    "java_home": "/Users/user/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+    "go_path": "/Users/user/go"
+  }
+}

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Spectra</title>
+<defs>
+<linearGradient id="spectra-icon-small-g1" gradientUnits="userSpaceOnUse" x1="837.202" y1="0" x2="883.52" y2="0"><stop offset="0" stop-color="#ffffff" stop-opacity="0.12"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.38"/></linearGradient>
+<linearGradient id="spectra-icon-small-g2" gradientUnits="userSpaceOnUse" x1="795.202" y1="0" x2="837.202" y2="0"><stop offset="0" stop-color="#6e7681"/><stop offset="1" stop-color="#e6edf3"/></linearGradient>
+<linearGradient id="spectra-icon-small-g3" gradientUnits="userSpaceOnUse" x1="907" y1="147.6" x2="852" y2="284.4"><stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.03"/></linearGradient>
+<linearGradient id="spectra-icon-small-g4" gradientUnits="userSpaceOnUse" x1="852" y1="0" x2="979" y2="0"><stop offset="0" stop-color="#ffffff" stop-opacity="0.19"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.06"/></linearGradient>
+<linearGradient id="spectra-icon-small-g5" gradientUnits="userSpaceOnUse" x1="962" y1="284.4" x2="924" y2="137.6"><stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.11"/></linearGradient>
+<linearGradient id="spectra-icon-small-g6" gradientUnits="userSpaceOnUse" x1="0" y1="147.6" x2="0" y2="284.4"><stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.05"/></linearGradient>
+<clipPath id="spectra-icon-small-c7"><path d="M907 147.6L852 284.4L962 284.4Z"/></clipPath>
+</defs>
+<path d="M224 0L800 0A224 224 0 0 1 1024 224L1024 800A224 224 0 0 1 800 1024L224 1024A224 224 0 0 1 0 800L0 224A224 224 0 0 1 224 0Z" fill="#0d1117"/>
+<path d="M224 3L800 3A221 221 0 0 1 1021 224L1021 800A221 221 0 0 1 800 1021L224 1021A221 221 0 0 1 3 800L3 224A221 221 0 0 1 224 3Z" fill="none" stroke="#30363d" stroke-width="6"/>
+<g id="spectra-icon-small-art" transform="translate(-2862.938 -273.129) scale(3.721)">
+<path d="M839.202 155.5L883.52 206L839.202 264.5Z" fill="url(#spectra-icon-small-g1)"/>
+<path d="M839.202 162.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M839.202 181.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M839.202 200.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M839.202 219.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M839.202 238.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M839.202 257.5L883.52 206" fill="none" stroke="#e6edf3" stroke-opacity="0.5" stroke-width="1.3"/>
+<path d="M797.002 159L835.402 159A1.2 1.2 0 0 1 836.602 160.2L836.602 164.8A1.2 1.2 0 0 1 835.402 166L797.002 166A1.2 1.2 0 0 1 795.802 164.8L795.802 160.2A1.2 1.2 0 0 1 797.002 159Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 159L814.402 159A1.2 1.2 0 0 1 815.602 160.2L815.602 164.8A1.2 1.2 0 0 1 814.402 166L802.252 166A1.2 1.2 0 0 1 801.052 164.8L801.052 160.2A1.2 1.2 0 0 1 802.252 159Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M828.502 159L835.402 159A1.2 1.2 0 0 1 836.602 160.2L836.602 164.8A1.2 1.2 0 0 1 835.402 166L828.502 166A1.2 1.2 0 0 1 827.302 164.8L827.302 160.2A1.2 1.2 0 0 1 828.502 159Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M797.002 178L835.402 178A1.2 1.2 0 0 1 836.602 179.2L836.602 183.8A1.2 1.2 0 0 1 835.402 185L797.002 185A1.2 1.2 0 0 1 795.802 183.8L795.802 179.2A1.2 1.2 0 0 1 797.002 178Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 178L814.402 178A1.2 1.2 0 0 1 815.602 179.2L815.602 183.8A1.2 1.2 0 0 1 814.402 185L802.252 185A1.2 1.2 0 0 1 801.052 183.8L801.052 179.2A1.2 1.2 0 0 1 802.252 178Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M797.002 197L835.402 197A1.2 1.2 0 0 1 836.602 198.2L836.602 202.8A1.2 1.2 0 0 1 835.402 204L797.002 204A1.2 1.2 0 0 1 795.802 202.8L795.802 198.2A1.2 1.2 0 0 1 797.002 197Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 197L809.152 197A1.2 1.2 0 0 1 810.352 198.2L810.352 202.8A1.2 1.2 0 0 1 809.152 204L802.252 204A1.2 1.2 0 0 1 801.052 202.8L801.052 198.2A1.2 1.2 0 0 1 802.252 197Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M823.252 197L824.902 197A1.2 1.2 0 0 1 826.102 198.2L826.102 202.8A1.2 1.2 0 0 1 824.902 204L823.252 204A1.2 1.2 0 0 1 822.052 202.8L822.052 198.2A1.2 1.2 0 0 1 823.252 197Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M833.752 197L835.402 197A1.2 1.2 0 0 1 836.602 198.2L836.602 202.8A1.2 1.2 0 0 1 835.402 204L833.752 204A1.2 1.2 0 0 1 832.552 202.8L832.552 198.2A1.2 1.2 0 0 1 833.752 197Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M797.002 216L835.402 216A1.2 1.2 0 0 1 836.602 217.2L836.602 221.8A1.2 1.2 0 0 1 835.402 223L797.002 223A1.2 1.2 0 0 1 795.802 221.8L795.802 217.2A1.2 1.2 0 0 1 797.002 216Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 216L809.152 216A1.2 1.2 0 0 1 810.352 217.2L810.352 221.8A1.2 1.2 0 0 1 809.152 223L802.252 223A1.2 1.2 0 0 1 801.052 221.8L801.052 217.2A1.2 1.2 0 0 1 802.252 216Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M828.502 216L835.402 216A1.2 1.2 0 0 1 836.602 217.2L836.602 221.8A1.2 1.2 0 0 1 835.402 223L828.502 223A1.2 1.2 0 0 1 827.302 221.8L827.302 217.2A1.2 1.2 0 0 1 828.502 216Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M797.002 235L835.402 235A1.2 1.2 0 0 1 836.602 236.2L836.602 240.8A1.2 1.2 0 0 1 835.402 242L797.002 242A1.2 1.2 0 0 1 795.802 240.8L795.802 236.2A1.2 1.2 0 0 1 797.002 235Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 235L814.402 235A1.2 1.2 0 0 1 815.602 236.2L815.602 240.8A1.2 1.2 0 0 1 814.402 242L802.252 242A1.2 1.2 0 0 1 801.052 240.8L801.052 236.2A1.2 1.2 0 0 1 802.252 235Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M823.252 235L824.902 235A1.2 1.2 0 0 1 826.102 236.2L826.102 240.8A1.2 1.2 0 0 1 824.902 242L823.252 242A1.2 1.2 0 0 1 822.052 240.8L822.052 236.2A1.2 1.2 0 0 1 823.252 235Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M797.002 254L835.402 254A1.2 1.2 0 0 1 836.602 255.2L836.602 259.8A1.2 1.2 0 0 1 835.402 261L797.002 261A1.2 1.2 0 0 1 795.802 259.8L795.802 255.2A1.2 1.2 0 0 1 797.002 254Z" fill="#6e7681" fill-opacity="0.28"/>
+<path d="M802.252 254L814.402 254A1.2 1.2 0 0 1 815.602 255.2L815.602 259.8A1.2 1.2 0 0 1 814.402 261L802.252 261A1.2 1.2 0 0 1 801.052 259.8L801.052 255.2A1.2 1.2 0 0 1 802.252 254Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M828.502 254L830.152 254A1.2 1.2 0 0 1 831.352 255.2L831.352 259.8A1.2 1.2 0 0 1 830.152 261L828.502 261A1.2 1.2 0 0 1 827.302 259.8L827.302 255.2A1.2 1.2 0 0 1 828.502 254Z" fill="url(#spectra-icon-small-g2)"/>
+<path d="M883.52 206L910.377 156L915.604 169Z" fill="#ff453a" fill-opacity="0.5"/>
+<path d="M883.52 206L918.016 175L923.243 188Z" fill="#ff9f0a" fill-opacity="0.5"/>
+<path d="M883.52 206L925.655 194L930.882 207Z" fill="#ffd60a" fill-opacity="0.5"/>
+<path d="M883.52 206L933.294 213L938.52 226Z" fill="#30d158" fill-opacity="0.5"/>
+<path d="M883.52 206L940.933 232L946.159 245Z" fill="#0a84ff" fill-opacity="0.5"/>
+<path d="M883.52 206L948.572 251L953.798 264Z" fill="#bf5af2" fill-opacity="0.5"/>
+<path d="M910.377 156L992.758 156L992.758 169L910.377 169Z" fill="#ff453a" fill-opacity="0.42"/>
+<path d="M994.258 156L1017.298 156A1.5 1.5 0 0 1 1018.798 157.5L1018.798 167.5A1.5 1.5 0 0 1 1017.298 169L994.258 169A1.5 1.5 0 0 1 992.758 167.5L992.758 157.5A1.5 1.5 0 0 1 994.258 156Z" fill="#ff453a"/>
+<path d="M918.016 175L992.758 175L992.758 188L918.016 188Z" fill="#ff9f0a" fill-opacity="0.42"/>
+<path d="M994.258 175L1017.298 175A1.5 1.5 0 0 1 1018.798 176.5L1018.798 186.5A1.5 1.5 0 0 1 1017.298 188L994.258 188A1.5 1.5 0 0 1 992.758 186.5L992.758 176.5A1.5 1.5 0 0 1 994.258 175Z" fill="#ff9f0a"/>
+<path d="M925.655 194L992.758 194L992.758 207L925.655 207Z" fill="#ffd60a" fill-opacity="0.42"/>
+<path d="M994.258 194L1017.298 194A1.5 1.5 0 0 1 1018.798 195.5L1018.798 205.5A1.5 1.5 0 0 1 1017.298 207L994.258 207A1.5 1.5 0 0 1 992.758 205.5L992.758 195.5A1.5 1.5 0 0 1 994.258 194Z" fill="#ffd60a"/>
+<path d="M933.294 213L992.758 213L992.758 226L933.294 226Z" fill="#30d158" fill-opacity="0.42"/>
+<path d="M994.258 213L1017.298 213A1.5 1.5 0 0 1 1018.798 214.5L1018.798 224.5A1.5 1.5 0 0 1 1017.298 226L994.258 226A1.5 1.5 0 0 1 992.758 224.5L992.758 214.5A1.5 1.5 0 0 1 994.258 213Z" fill="#30d158"/>
+<path d="M940.933 232L992.758 232L992.758 245L940.933 245Z" fill="#0a84ff" fill-opacity="0.42"/>
+<path d="M994.258 232L1017.298 232A1.5 1.5 0 0 1 1018.798 233.5L1018.798 243.5A1.5 1.5 0 0 1 1017.298 245L994.258 245A1.5 1.5 0 0 1 992.758 243.5L992.758 233.5A1.5 1.5 0 0 1 994.258 232Z" fill="#0a84ff"/>
+<path d="M948.572 251L992.758 251L992.758 264L948.572 264Z" fill="#bf5af2" fill-opacity="0.42"/>
+<path d="M994.258 251L1017.298 251A1.5 1.5 0 0 1 1018.798 252.5L1018.798 262.5A1.5 1.5 0 0 1 1017.298 264L994.258 264A1.5 1.5 0 0 1 992.758 262.5L992.758 252.5A1.5 1.5 0 0 1 994.258 251Z" fill="#bf5af2"/>
+<path d="M924 137.6L869 274.4L979 274.4Z" fill="#ffffff" fill-opacity="0.04"/>
+<path d="M924 137.6L869 274.4L979 274.4Z" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2.1" stroke-linejoin="round"/>
+<path d="M907 147.6L852 284.4L869 274.4L924 137.6Z" fill="url(#spectra-icon-small-g3)"/>
+<path d="M907 147.6L852 284.4L869 274.4L924 137.6Z" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="2.52" stroke-linejoin="round"/>
+<path d="M852 284.4L962 284.4L979 274.4L869 274.4Z" fill="url(#spectra-icon-small-g4)"/>
+<path d="M852 284.4L962 284.4L979 274.4L869 274.4Z" fill="none" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.52" stroke-linejoin="round"/>
+<path d="M962 284.4L907 147.6L924 137.6L979 274.4Z" fill="url(#spectra-icon-small-g5)"/>
+<path d="M962 284.4L907 147.6L924 137.6L979 274.4Z" fill="none" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.52" stroke-linejoin="round"/>
+<path d="M907 147.6L852 284.4L962 284.4Z" fill="url(#spectra-icon-small-g6)"/>
+<path d="M852 236L962 236L962 251L852 251Z" fill="#ffffff" fill-opacity="0.3" clip-path="url(#spectra-icon-small-c7)"/>
+<path d="M907 147.6L852 284.4L962 284.4Z" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="5.04" stroke-linejoin="round"/>
+<path d="M907 147.6L924 137.6" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="3.78" stroke-linecap="round"/>
+<path d="M852 284.4L869 274.4" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="3.78" stroke-linecap="round"/>
+<path d="M962 284.4L979 274.4" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="3.78" stroke-linecap="round"/>
+</g>
+</svg>
