@@ -8,6 +8,8 @@ pub mod capabilities;
 pub mod dispatch;
 pub mod flags;
 pub mod help;
+pub mod memory;
+pub mod pressure;
 pub mod unsupported;
 
 use std::io::Write;

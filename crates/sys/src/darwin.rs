@@ -84,11 +84,7 @@ pub fn swap_usage() -> io::Result<SwapUsage> {
 }
 
 /// The kernel's page size in bytes.
-pub fn page_size() -> u64 {
-    // SAFETY: sysconf has no preconditions.
-    let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    u64::try_from(n).unwrap_or(4096)
-}
+pub use crate::page_size;
 
 /// `host_statistics64(HOST_VM_INFO64)` page counts.
 pub type VmStatistics64 = libc::vm_statistics64;

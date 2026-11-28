@@ -1,0 +1,6 @@
+invalid value "x" for flag -pid: parse error
+Usage of spectra pressure:
+  -json
+    	Emit JSON instead of a human summary
+  -pid int
+    	Also read the cgroup v2 accounting for this process

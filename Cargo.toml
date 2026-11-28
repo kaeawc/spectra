@@ -25,6 +25,7 @@ spectra-protocol = { path = "crates/protocol", version = "0.3.0" }
 spectra-contract = { path = "crates/contract" }
 spectra-sys = { package = "kaeawc-spectra-sys", path = "crates/sys", version = "0.2.0" }
 spectra-cli = { package = "kaeawc-spectra", path = "crates/cli", version = "0.2.0" }
+spectra-host = { package = "kaeawc-spectra-host", path = "crates/host", version = "0.2.0" }
 
 base64 = { version = "0.23", default-features = false, features = ["std"] }
 jiff = { version = "1", default-features = false, features = ["std"] }

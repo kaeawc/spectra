@@ -61,29 +61,25 @@ func CollectWithOptions(opts Options) (MemoryState, error) {
 	if now == nil {
 		now = time.Now
 	}
+	at := now().UTC()
 
-	ms := MemoryState{
-		PageSizeBytes: uint64(syscall.Getpagesize()),
-		CollectedAt:   now().UTC(),
-		PressureLevel: PressureUnknown,
-	}
+	s := DarwinSample{PageSizeBytes: uint64(syscall.Getpagesize())}
 	if v, err := unix.SysctlUint64("hw.memsize"); err == nil {
-		ms.PhysicalBytes = v
+		s.PhysicalBytes = v
 	}
-	if err := readSwapUsage(&ms.Swap); err != nil {
-		return ms, err
+	if err := readSwapUsage(&s.Swap); err != nil {
+		return s.base(at), err
 	}
-	if err := readVMStat(&ms); err != nil {
-		return ms, err
+	if err := readVMStat(&s.VM); err != nil {
+		return s.base(at), err
 	}
 	if v, err := unix.SysctlUint32("kern.memorystatus_vm_pressure_level"); err == nil {
-		ms.PressureLevel = pressureLevel(uint64(v))
+		s.PressureLevel = &v
 	}
-	ms = finish(ms)
 	if v, err := unix.SysctlUint32("kern.memorystatus_level"); err == nil {
-		ms = applyMemorystatusLevel(ms, v)
+		s.MemorystatusLevel = &v
 	}
-	return ms, nil
+	return FromDarwinSample(s, at), nil
 }
 
 func readSwapUsage(out *SwapUsage) error {
@@ -98,25 +94,24 @@ func readSwapUsage(out *SwapUsage) error {
 	return nil
 }
 
-func readVMStat(ms *MemoryState) error {
+func readVMStat(vm *DarwinVMCounts) error {
 	var raw C.vm_statistics64_data_t
 	if kr := C.read_vm_statistics(&raw); kr != C.KERN_SUCCESS {
 		return fmt.Errorf("host_statistics64: kern_return=%d", int(kr))
 	}
-	page := ms.PageSizeBytes
-	ms.Wired = uint64(raw.wire_count) * page
-	ms.Active = uint64(raw.active_count) * page
-	ms.Inactive = uint64(raw.inactive_count) * page
-	ms.Speculative = uint64(raw.speculative_count) * page
-	ms.Free = uint64(raw.free_count) * page
-	ms.Purgeable = uint64(raw.purgeable_count) * page
-	ms.FileBacked = uint64(raw.external_page_count) * page
-	ms.Anonymous = uint64(raw.internal_page_count) * page
-	ms.CompressorOccupied = uint64(raw.compressor_page_count) * page
-	ms.CompressorStored = uint64(raw.total_uncompressed_pages_in_compressor) * page
-	ms.Compressions = uint64(raw.compressions)
-	ms.Decompressions = uint64(raw.decompressions)
-	ms.SwapIns = uint64(raw.swapins)
-	ms.SwapOuts = uint64(raw.swapouts)
+	vm.Wire = uint64(raw.wire_count)
+	vm.Active = uint64(raw.active_count)
+	vm.Inactive = uint64(raw.inactive_count)
+	vm.Speculative = uint64(raw.speculative_count)
+	vm.Free = uint64(raw.free_count)
+	vm.Purgeable = uint64(raw.purgeable_count)
+	vm.External = uint64(raw.external_page_count)
+	vm.Internal = uint64(raw.internal_page_count)
+	vm.Compressor = uint64(raw.compressor_page_count)
+	vm.UncompressedCompressor = uint64(raw.total_uncompressed_pages_in_compressor)
+	vm.Compressions = uint64(raw.compressions)
+	vm.Decompressions = uint64(raw.decompressions)
+	vm.Swapins = uint64(raw.swapins)
+	vm.Swapouts = uint64(raw.swapouts)
 	return nil
 }

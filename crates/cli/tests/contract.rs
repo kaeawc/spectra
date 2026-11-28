@@ -2,7 +2,12 @@
 //!
 //! - `cli/`: `spectra help`, `spectra version` with the version injected, and a bare `spectra`;
 //! - `unsupported/`: `spectra <macOS-only command> --json` on Linux;
-//! - `unsupported-text/`: the same commands without `--json`, which report on stderr.
+//! - `unsupported-text/`: the same commands without `--json`, which report on stderr;
+//! - `capabilities/`: the manifest, JSON and text, per OS;
+//! - `memory/`: `spectra memory` from a recorded macOS reading or a Linux `/proc` tree, and its
+//!   flag errors;
+//! - `pressure/`: `spectra pressure` on Linux PSI and cgroup v2 trees, its errors, and the
+//!   refusal on macOS.
 //!
 //! Each compares stdout and the exit code with the Go build's, and stderr with
 //! `expected.stderr` where the case recorded one (`cmd/spectra/contract_cases_test.go`).
@@ -10,10 +15,12 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
+use spectra_base::clock::FakeClock;
 use spectra_base::fs::{Fs, OsFs};
 use spectra_base::hostos::Kind;
 use spectra_cli::Ctx;
 use spectra_contract::{Case, first_difference};
+use spectra_host::memstate::{DarwinSample, FixedMemory};
 
 /// The seams a case replays: its env, clock, runner and filesystem, on `os`.
 fn ctx(case: &Case, os: Kind, version: &str) -> Ctx {
@@ -165,5 +172,115 @@ fn capabilities_json_decodes_with_the_protocol_crate() {
         assert_eq!((m.os.as_str(), m.arch.as_str(), m.spectra_version.as_str()), (input.os.as_str(), "arm64", input.version.as_str()));
         assert_eq!(m.interface("inspect").is_some(), input.os == "darwin", "{}", case.name);
         assert_eq!(m.interface("startup").is_some(), input.os == "darwin", "{}", case.name);
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryInput {
+    args: Vec<String>,
+    os: String,
+    #[serde(default)]
+    now: Option<String>,
+    #[serde(default)]
+    page_size: u64,
+    #[serde(default)]
+    darwin_sample: Option<DarwinSample>,
+}
+
+/// The case's OS, its collection time, and its recorded macOS reading or Linux page size.
+fn memory_ctx(case: &Case, input: &MemoryInput) -> Ctx {
+    let now = input.now.as_deref().map_or(jiff::Timestamp::UNIX_EPOCH, |n| n.parse().expect("now"));
+    Ctx {
+        clock: Arc::new(FakeClock::new(now)),
+        memory: Arc::new(FixedMemory { darwin: input.darwin_sample, page_size: input.page_size }),
+        ..ctx(case, kind_of(&input.os), "test")
+    }
+}
+
+/// `spectra memory`, JSON and text, on macOS readings and Linux trees, and its flag errors: stdout,
+/// stderr and exit code, byte for byte.
+#[test]
+fn memory_matches_go_through_dispatch() {
+    let cases = spectra_contract::cases("memory");
+    let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "flag-help",
+            "flag-unknown",
+            "flag-watch-invalid",
+            "flag-watch-zero",
+            "json-darwin",
+            "json-darwin-fallback",
+            "json-linux",
+            "json-linux-nopsi",
+            "linux-no-memtotal",
+            "text-darwin",
+            "text-darwin-fallback",
+            "text-linux",
+            "text-linux-nopsi",
+        ]
+    );
+    for case in &cases {
+        let input: MemoryInput = case.input();
+        assert!(expected_stderr(case).is_some(), "{}: no expected.stderr", case.name);
+        let (code, out, err) = run(&memory_ctx(case, &input), &input.args);
+        assert_case(case, code, &out, &err);
+    }
+}
+
+/// PR #755: on macOS `pressure_free_percent` is `kern.memorystatus_level` when it reads as at
+/// most 100, else the page fraction, which `free_pages_percent` always holds; Linux has no
+/// `free_pages_percent`.
+#[test]
+fn memory_pressure_free_percent_follows_memorystatus_level() {
+    for case in spectra_contract::cases("memory").iter().filter(|c| c.name.starts_with("json-")) {
+        let input: MemoryInput = case.input();
+        let (_, out, _) = run(&memory_ctx(case, &input), &input.args);
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap_or_else(|e| panic!("{}: {e}", case.name));
+        let free = v["pressure_free_percent"].as_f64().expect("pressure_free_percent");
+        match input.darwin_sample {
+            Some(s) => {
+                let pages = v["free_pages_percent"].as_f64().expect("free_pages_percent");
+                let want = s.memorystatus_level.filter(|&l| l <= 100).map_or(pages, f64::from);
+                assert_eq!(free, want, "{}", case.name);
+            }
+            None => assert!(v.get("free_pages_percent").is_none(), "{}: Linux omits free_pages_percent", case.name),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PressureInput {
+    args: Vec<String>,
+    os: String,
+}
+
+/// `spectra pressure`, JSON and text, on Linux fixture trees (served from the case's `root/` at
+/// `/proc` and `/sys/fs/cgroup`), its errors, and the macOS refusal.
+#[test]
+fn pressure_matches_go_through_dispatch() {
+    let cases = spectra_contract::cases("pressure");
+    let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "flag-invalid-pid",
+            "json-darwin",
+            "json-linux-healthy",
+            "json-linux-nopsi",
+            "json-linux-pid",
+            "linux-bad-psi",
+            "text-darwin",
+            "text-linux-healthy",
+            "text-linux-nopsi",
+            "text-linux-pid",
+        ]
+    );
+    for case in &cases {
+        let input: PressureInput = case.input();
+        assert!(expected_stderr(case).is_some(), "{}: no expected.stderr", case.name);
+        let (code, out, err) = run(&ctx(case, kind_of(&input.os), "test"), &input.args);
+        assert_case(case, code, &out, &err);
     }
 }

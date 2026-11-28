@@ -1,0 +1,35 @@
+{
+  "args": [
+    "memory"
+  ],
+  "darwin_sample": {
+    "page_size_bytes": 16384,
+    "physical_bytes": 17179869184,
+    "swap": {
+      "total_bytes": 2147483648,
+      "used_bytes": 1073741824,
+      "free_bytes": 1073741824,
+      "encrypted": true
+    },
+    "vm": {
+      "wire_count": 150000,
+      "active_count": 300000,
+      "inactive_count": 290000,
+      "speculative_count": 5000,
+      "free_count": 20000,
+      "purgeable_count": 3000,
+      "external_page_count": 250000,
+      "internal_page_count": 330000,
+      "compressor_page_count": 60000,
+      "total_uncompressed_pages_in_compressor": 185000,
+      "compressions": 123456789,
+      "decompressions": 98765432,
+      "swapins": 1024,
+      "swapouts": 2048
+    },
+    "pressure_level": 1,
+    "memorystatus_level": 42
+  },
+  "now": "2026-11-23T10:00:00.123456789Z",
+  "os": "darwin"
+}

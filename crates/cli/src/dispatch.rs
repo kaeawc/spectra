@@ -55,7 +55,7 @@ pub const SUBCOMMANDS: &[Subcommand] = &[
     pending("thermal", "Detect thermal throttling and CPU speed limits (exit 0 nominal, 3 warm, 4 throttled)"),
     pending("impact", "Compute the documented per-pid energy impact score from delta records"),
     pending("devices", "List Android devices/emulators (adb), booted iOS simulators, and emulator processes by worktree"),
-    pending("memory", "Show memory pressure and swap (VM compressor on macOS; MemAvailable, PSI and zswap on Linux)"),
+    ported("memory", "Show memory pressure and swap (VM compressor on macOS; MemAvailable, PSI and zswap on Linux)", crate::memory::run),
     pending("storage", "Show disk volumes and ~/Library footprint"),
     pending("du", "Show the largest directories and files under a path by allocated size"),
     pending("fswatch", "Watch a directory tree by polling and report which files and directories keep changing"),
@@ -96,7 +96,7 @@ pub const SUBCOMMANDS: &[Subcommand] = &[
     pending("flamegraph", "Render a native CPU flamegraph (SVG) from a process sample"),
     pending("hang", "Classify why a process's main thread is hung (lock/I-O/spin/idle)"),
     pending("procdiag", "Linux: diagnose a stuck or slow process from /proc (D-state, lock wait, fd leak, CPU spin, cgroup limits)"),
-    pending("pressure", "Linux: show pressure-stall (PSI) and cgroup v2 memory/CPU/pids accounting"),
+    ported("pressure", "Linux: show pressure-stall (PSI) and cgroup v2 memory/CPU/pids accounting", crate::pressure::run),
     pending("timeline", "Chronological incident timeline: process starts, unified-log errors, and installs"),
     pending(
         "spawns",
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn not_yet_ported_commands_say_so_and_print_nothing_on_stdout() {
-        for args in [&["memory", "--json"][..], &["snapshot", "-h"]] {
+        for args in [&["storage", "--json"][..], &["snapshot", "-h"]] {
             let (code, out, err) = run_on(Kind::Linux, args);
             assert_eq!(code, EXIT_NOT_PORTED, "{args:?}");
             assert_eq!(out, "", "{args:?}");

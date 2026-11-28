@@ -81,7 +81,9 @@ dependencies = [
 name = "kaeawc-spectra"
 version = "0.2.0"
 dependencies = [
+ "jiff",
  "kaeawc-spectra-base",
+ "kaeawc-spectra-host",
  "lexopt",
  "serde",
  "serde_json",
@@ -98,6 +100,16 @@ dependencies = [
  "ryu",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "kaeawc-spectra-host"
+version = "0.2.0"
+dependencies = [
+ "jiff",
+ "kaeawc-spectra-base",
+ "kaeawc-spectra-sys",
+ "serde",
 ]
 
 [[package]]

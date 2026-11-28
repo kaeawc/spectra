@@ -1,0 +1,11 @@
+MemTotal:        2000000 kB
+MemFree:           50000 kB
+Buffers:           20000 kB
+Cached:           130000 kB
+Active:          1500000 kB
+Inactive:         300000 kB
+Active(file):      90000 kB
+Inactive(file):    40000 kB
+AnonPages:       1600000 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB

@@ -1,0 +1,7 @@
+{
+  "args": [
+    "memory",
+    "--watch=5x"
+  ],
+  "os": "darwin"
+}

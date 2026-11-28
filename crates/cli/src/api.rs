@@ -12,6 +12,7 @@ use spectra_base::fs::{Fs, OsFs};
 use spectra_base::hostos::{Kind, Unsupported};
 use spectra_base::logger::{self, Format, Level, Logger};
 use spectra_base::proc::{OsRunner, Runner};
+use spectra_host::memstate::{self, HostMemory, MemorySource};
 
 /// The version a source build reports (Go's `buildversion.Dev`).
 pub const DEV_VERSION: &str = "dev";
@@ -28,6 +29,9 @@ pub struct Ctx {
     pub sleeper: Arc<dyn Sleeper>,
     pub runner: Arc<dyn Runner>,
     pub fs: Arc<dyn Fs>,
+    /// macOS memory readings (Mach VM statistics and sysctls); recorded cases replay a
+    /// [`memstate::FixedMemory`].
+    pub memory: Arc<dyn MemorySource>,
     /// What `spectra version` prints (Go's ldflags-stamped `main.version`).
     pub version: String,
     /// Receives debug records when `--verbose`, `--debug` or `SPECTRA_DEBUG` is given; without
@@ -50,6 +54,7 @@ impl Ctx {
             sleeper: Arc::new(SystemSleeper),
             runner: Arc::new(OsRunner),
             fs: Arc::new(OsFs),
+            memory: Arc::new(HostMemory),
             version: version.into(),
             debug_logger,
         }
@@ -109,4 +114,15 @@ pub fn host_arch() -> &'static str {
 pub fn capabilities(ctx: &Ctx) -> spectra_protocol::SpectraCapabilities {
     let arch = if ctx.arch.is_empty() { host_arch() } else { ctx.arch.as_str() };
     crate::capabilities::build(&ctx.version, ctx.os.resolve(), arch)
+}
+
+/// What `spectra memory` reports: one host memory sample for `ctx.os` (Go's `memstate.Collect`).
+pub fn memory(ctx: &Ctx, opts: crate::memory::Options) -> Result<crate::memory::Report, memstate::Error> {
+    crate::memory::collect(ctx, &opts)
+}
+
+/// What `spectra pressure` reports: host PSI and, for `opts.pid`, its cgroup v2 accounting, with
+/// the findings drawn from them. Linux only; elsewhere [`crate::pressure::Error::Unsupported`].
+pub fn pressure(ctx: &Ctx, opts: crate::pressure::Options) -> Result<crate::pressure::Report, crate::pressure::Error> {
+    crate::pressure::collect(ctx, &opts)
 }

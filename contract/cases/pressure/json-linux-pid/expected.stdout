@@ -1,0 +1,179 @@
+{
+  "psi": {
+    "cpu": {
+      "some": {
+        "avg10": 4.76,
+        "avg60": 26.31,
+        "avg300": 10.34,
+        "total_usec": 36510539
+      },
+      "full": {
+        "avg10": 0,
+        "avg60": 0,
+        "avg300": 0,
+        "total_usec": 0
+      }
+    },
+    "memory": {
+      "some": {
+        "avg10": 12.5,
+        "avg60": 3,
+        "avg300": 1,
+        "total_usec": 100
+      },
+      "full": {
+        "avg10": 2.25,
+        "avg60": 0.5,
+        "avg300": 0.1,
+        "total_usec": 50
+      }
+    },
+    "io": {
+      "some": {
+        "avg10": 0.12,
+        "avg60": 0.3,
+        "avg300": 0.15,
+        "total_usec": 793942
+      },
+      "full": {
+        "avg10": 0.1,
+        "avg60": 0.18,
+        "avg300": 0.08,
+        "total_usec": 496093
+      }
+    }
+  },
+  "cgroup": {
+    "path": "/svc.slice/app.service",
+    "memory": {
+      "current_bytes": 1048576000,
+      "max_bytes": -1,
+      "high_bytes": 805306368,
+      "swap_current_bytes": 4194304,
+      "anon_bytes": 1000000000,
+      "file_bytes": 48576000,
+      "events": {
+        "low": 0,
+        "high": 5,
+        "max": 12,
+        "oom": 3,
+        "oom_kill": 2
+      },
+      "pressure": {
+        "some": {
+          "avg10": 31,
+          "avg60": 9,
+          "avg300": 2,
+          "total_usec": 7
+        },
+        "full": {
+          "avg10": 11,
+          "avg60": 1,
+          "avg300": 0.5,
+          "total_usec": 3
+        }
+      },
+      "effective_max_bytes": 1073741824,
+      "limited_by": "/svc.slice"
+    },
+    "cpu": {
+      "usage_usec": 5000000,
+      "user_usec": 4000000,
+      "system_usec": 1000000,
+      "nr_periods": 100,
+      "nr_throttled": 40,
+      "throttled_usec": 2500000,
+      "quota_usec": 50000,
+      "period_usec": 100000,
+      "pressure": {
+        "some": {
+          "avg10": 10,
+          "avg60": 2,
+          "avg300": 1,
+          "total_usec": 9
+        },
+        "full": {
+          "avg10": 5,
+          "avg60": 1,
+          "avg300": 1,
+          "total_usec": 1
+        }
+      }
+    },
+    "pids": {
+      "current": 95,
+      "max": 100
+    },
+    "io_pressure": {
+      "some": {
+        "avg10": 0,
+        "avg60": 0,
+        "avg300": 0,
+        "total_usec": 0
+      },
+      "full": {
+        "avg10": 1.5,
+        "avg60": 0,
+        "avg300": 0,
+        "total_usec": 1
+      }
+    }
+  },
+  "findings": [
+    {
+      "kind": "memory-pressure",
+      "severity": "warning",
+      "summary": "host memory: tasks stalled on memory 12.5% of the last 10s (60s avg 3.0%)"
+    },
+    {
+      "kind": "memory-stall",
+      "severity": "warning",
+      "summary": "host memory: ALL non-idle tasks stalled on memory 2.2% of the last 10s — it is the bottleneck"
+    },
+    {
+      "kind": "cgroup-oom-kill",
+      "severity": "critical",
+      "summary": "cgroup /svc.slice/app.service: kernel OOM-killed 2 process(es) for exceeding a memory limit (memory.events oom_kill)"
+    },
+    {
+      "kind": "cgroup-memory-throttled",
+      "severity": "warning",
+      "summary": "cgroup /svc.slice/app.service exceeded memory.high 5 time(s); its tasks were throttled into direct reclaim"
+    },
+    {
+      "kind": "cgroup-memory-near-limit",
+      "severity": "critical",
+      "summary": "cgroup /svc.slice/app.service has anonymous memory at 93% of its 1024 MiB memory limit (limit set on /svc.slice)"
+    },
+    {
+      "kind": "memory-pressure",
+      "severity": "critical",
+      "summary": "cgroup /svc.slice/app.service memory: tasks stalled on memory 31.0% of the last 10s (60s avg 9.0%)"
+    },
+    {
+      "kind": "memory-stall",
+      "severity": "critical",
+      "summary": "cgroup /svc.slice/app.service memory: ALL non-idle tasks stalled on memory 11.0% of the last 10s — it is the bottleneck"
+    },
+    {
+      "kind": "cpu-throttled",
+      "severity": "warning",
+      "summary": "cgroup /svc.slice/app.service was CPU-throttled in 40 of 100 periods (40%, 2.5s total) by its cpu.max quota"
+    },
+    {
+      "kind": "cpu-pressure",
+      "severity": "warning",
+      "summary": "cgroup /svc.slice/app.service cpu: tasks stalled on cpu 10.0% of the last 10s (60s avg 2.0%)"
+    },
+    {
+      "kind": "pids-near-limit",
+      "severity": "critical",
+      "summary": "cgroup /svc.slice/app.service has 95 of 100 allowed tasks; fork/clone will start failing with EAGAIN"
+    },
+    {
+      "kind": "io-stall",
+      "severity": "warning",
+      "summary": "cgroup /svc.slice/app.service io: ALL non-idle tasks stalled on io 1.5% of the last 10s — it is the bottleneck"
+    }
+  ]
+}

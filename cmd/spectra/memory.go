@@ -13,6 +13,10 @@ import (
 	"github.com/kaeawc/spectra/internal/memstate"
 )
 
+// collectMemory is the memory sampler; contract tests replace it with a
+// fixture reading.
+var collectMemory = memstate.Collect
+
 func runMemory(args []string) int {
 	fs := flag.NewFlagSet("spectra memory", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -29,7 +33,7 @@ func runMemory(args []string) int {
 	if interval > 0 {
 		return runMemoryWatch(interval, *asJSON)
 	}
-	state, err := memstate.Collect()
+	state, err := collectMemory()
 	if err != nil {
 		return printMemoryErr(err)
 	}
@@ -48,7 +52,7 @@ func runMemoryWatch(interval time.Duration, asJSON bool) int {
 	defer t.Stop()
 	var prev memstate.MemoryState
 	for {
-		state, err := memstate.Collect()
+		state, err := collectMemory()
 		if err != nil {
 			return printMemoryErr(err)
 		}

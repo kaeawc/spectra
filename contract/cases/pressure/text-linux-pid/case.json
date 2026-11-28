@@ -1,0 +1,8 @@
+{
+  "args": [
+    "pressure",
+    "--pid",
+    "42"
+  ],
+  "os": "linux"
+}

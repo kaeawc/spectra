@@ -1,0 +1,2 @@
+phys=3.8GB  available=2.9GB(75%)  anon=391MB  file=1.9GB  zswap=98MB(stored=293MB ratio=3.0x)  swap=488MB/1.9GB  psi_some10=12.5% psi_full10=2.2%  pressure=Warning
+pressure: all tasks stalled on memory 2.2% of the last 10s

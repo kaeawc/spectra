@@ -19,11 +19,13 @@ path = "src/main.rs"
 
 [dependencies]
 lexopt = { workspace = true }
+serde = { workspace = true }
 spectra-base = { workspace = true }
+spectra-host = { workspace = true }
 spectra-protocol = { workspace = true }
 
 [dev-dependencies]
-serde = { workspace = true }
+jiff = { workspace = true }
 serde_json = { workspace = true }
 spectra-contract = { workspace = true }
 
