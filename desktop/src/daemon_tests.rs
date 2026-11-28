@@ -740,12 +740,17 @@ fn a_failed_hello_leaves_no_thread_or_connection_behind() {
         ..TIMING
     });
     // Once the first hello failed the methods are known (none), so a call doesn't wait for the
-    // next attempt: each is given time to fail.
-    for _ in 0..5 {
+    // next attempt. A call dials only when no attempt is in flight, so before each one the last
+    // attempt must have failed and closed; otherwise a slow runner folds two calls into one dial.
+    for i in 0..5 {
+        assert!(
+            eventually(|| lock(&f.conns).len() >= i
+                && d.s.readers.load(Ordering::SeqCst) == 0
+                && f.open.load(Ordering::SeqCst) == 0),
+            "attempt {i} still in flight"
+        );
         assert!(d.answer(&["load", "--json"], SEC, &never()).is_none());
-        std::thread::sleep(Duration::from_millis(150));
     }
-    // A loaded runner can still be dialling the last attempt: wait for the count, don't sample it.
     assert!(
         eventually(|| lock(&f.conns).len() >= 5),
         "it dialled each time: {}",
