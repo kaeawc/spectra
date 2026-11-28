@@ -128,6 +128,16 @@ Living docs in `docs/`. mkdocs nav at `mkdocs.yml`. Validation:
 
 Go version comes from `go.mod`.
 
+`docs` can also run on Buildkite's hosted Linux agents (`.buildkite/pipeline.yml`, a trial).
+While the repository variable `CI_ON_BUILDKITE` is `true`, the `buildkite` job starts a Buildkite
+build for same-repo PRs and pushes to `main` and the GitHub `docs` job is skipped; the Buildkite
+step reports a commit status named `docs`. Switch with `scripts/ci-backend.sh buildkite|github`
+(`status` shows the current state): it sets the variable and points the required `docs` check in
+the green-main ruleset at the app that reports it, because a skipped GitHub job counts as passing.
+The step runs in `.buildkite/images/docs` through `.buildkite/run-in.sh`, which works locally with
+Docker. The trigger needs the `BUILDKITE_API_TOKEN` secret and the `BUILDKITE_ORG` and
+`BUILDKITE_PIPELINE` variables.
+
 ## Conventions
 
 - **Errors:** wrap with `fmt.Errorf("context: %w", err)` so callers can
