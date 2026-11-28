@@ -1,0 +1,7 @@
+RESOURCE        USED      LIMIT     PCT      STATE
+----------------------------------------------------
+pty slots       0         511       0%       
+open files      0         245760    0%       
+processes       480       6000      8%       
+processes/uid   310       0         -        
+files/proc      -         122880    -        

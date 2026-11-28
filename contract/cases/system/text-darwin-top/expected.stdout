@@ -1,0 +1,39 @@
+RESOURCE        USED      LIMIT     PCT      STATE
+----------------------------------------------------
+pty slots       16        16        100%     CRITICAL
+open files      90        100       90%      WARN
+processes       16        17        94%      WARN
+processes/uid   12        12        100%     CRITICAL
+files/proc      -         10240     -        
+
+RESOURCE: pty slots (16/16, CRITICAL)
+  PID      COUNT    COMMAND
+  400      1        Google Chrome
+  700      1        -zsh
+
+RESOURCE: open files (90/100, WARN)
+  PID      COUNT    COMMAND
+  400      12       Google Chrome
+  700      2        -zsh
+  1        1        launchd
+  710      1        java
+
+RESOURCE: processes (16/17, WARN)
+  PID      COUNT    COMMAND
+  1        6        launchd
+  700      3        -zsh
+  400      1        Google Chrome
+  500      1        Xcode
+  600      1        launchd_sim
+  650      1        Terminal
+  710      1        java
+
+RESOURCE: processes/uid (12/12, CRITICAL)
+  PID      COUNT    COMMAND
+  1        5        launchd
+  700      3        -zsh
+  400      1        Google Chrome
+  500      1        Xcode
+  600      1        launchd_sim
+  650      1        Terminal
+  710      1        java

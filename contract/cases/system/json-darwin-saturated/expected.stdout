@@ -1,0 +1,32 @@
+{
+  "pty": {
+    "limit": 16,
+    "current": 16,
+    "pct": 100,
+    "warn": true,
+    "critical": true
+  },
+  "files": {
+    "limit": 100,
+    "current": 90,
+    "pct": 90,
+    "warn": true,
+    "critical": false
+  },
+  "max_files_per_proc": 10240,
+  "procs": {
+    "limit": 17,
+    "current": 16,
+    "pct": 94.11764705882352,
+    "warn": true,
+    "critical": false
+  },
+  "procs_per_uid": {
+    "limit": 12,
+    "current": 12,
+    "pct": 100,
+    "warn": true,
+    "critical": true
+  },
+  "collected_at": "2026-11-23T10:00:00Z"
+}

@@ -8,6 +8,8 @@
 //!   flag errors;
 //! - `pressure/`: `spectra pressure` on Linux PSI and cgroup v2 trees, its errors, and the
 //!   refusal on macOS.
+//! - `system/`: `spectra system limits` on recorded `sysctl`, `lsof` and `ps` answers (with a
+//!   process table for `--top`), its usage and flag errors, and the same commands on a Linux host.
 //! - `procdiag/`: `spectra procdiag` on Linux `/proc` trees sampled twice (`before/`, then
 //!   `root/`), its errors, and the refusal on macOS.
 //!
@@ -419,6 +421,9 @@ struct ProcessInput {
     /// libproc details per decimal pid.
     #[serde(default)]
     details: std::collections::BTreeMap<String, spectra_host::process::Details>,
+    /// The invoking user (`spectra system`); 0 when the case has none.
+    #[serde(default)]
+    uid: i64,
     /// Raw `kern.procargs2` argv per decimal pid.
     #[serde(default)]
     argv: std::collections::BTreeMap<String, Vec<String>>,
@@ -432,6 +437,7 @@ fn process_ctx(case: &Case, input: &ProcessInput) -> Ctx {
     let offset = jiff::tz::Offset::from_seconds(input.tz_offset).expect("tz_offset");
     Ctx {
         clock: Arc::new(FakeClock::new(now)),
+        system: Arc::new(spectra_host::syslimits::FixedSystem { uid: input.uid }),
         tz: jiff::tz::TimeZone::fixed(offset),
         processes: Arc::new(spectra_host::process::FixedProcesses {
             details: input.details.iter().map(|(k, v)| (k.parse().expect("pid"), v.clone())).collect(),
@@ -540,6 +546,42 @@ fn lineage_matches_go_through_dispatch() {
             "text-darwin",
             "text-darwin-reparented",
             "text-linux",
+        ],
+    );
+}
+
+/// `spectra system limits`: limits against usage, saturated hosts (exit 1), partial failures,
+/// `--top` attribution from a deep process table, JSON and text, on macOS and on a Linux host
+/// (where Go still asks the macOS tools), and its usage and flag errors.
+#[test]
+fn system_matches_go_through_dispatch() {
+    replay_process_kind(
+        "system",
+        &[
+            "flag-bad-bool",
+            "flag-help",
+            "flag-top-bad-value",
+            "flag-unknown",
+            "json-darwin",
+            "json-darwin-lsof-exit1",
+            "json-darwin-partial",
+            "json-darwin-saturated",
+            "json-darwin-top",
+            "json-darwin-top-healthy",
+            "json-linux",
+            "json-linux-top",
+            "text-darwin",
+            "text-darwin-lsof-exit1",
+            "text-darwin-partial",
+            "text-darwin-positional-stops-flags",
+            "text-darwin-saturated",
+            "text-darwin-top",
+            "text-darwin-top-healthy",
+            "text-linux",
+            "text-linux-top",
+            "usage-flag-first",
+            "usage-none",
+            "usage-unknown",
         ],
     );
 }

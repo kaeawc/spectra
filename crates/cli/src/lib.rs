@@ -13,6 +13,7 @@ pub mod memory;
 pub mod pressure;
 pub mod procdiag;
 pub mod process;
+pub mod system;
 pub mod unsupported;
 
 use std::io::Write;

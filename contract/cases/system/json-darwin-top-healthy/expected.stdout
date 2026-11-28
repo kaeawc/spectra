@@ -1,0 +1,144 @@
+{
+  "limits": {
+    "pty": {
+      "limit": 511,
+      "current": 14,
+      "pct": 2.73972602739726,
+      "warn": false,
+      "critical": false
+    },
+    "files": {
+      "limit": 245760,
+      "current": 4096,
+      "pct": 1.6666666666666667,
+      "warn": false,
+      "critical": false
+    },
+    "max_files_per_proc": 122880,
+    "procs": {
+      "limit": 6000,
+      "current": 480,
+      "pct": 8,
+      "warn": false,
+      "critical": false
+    },
+    "procs_per_uid": {
+      "limit": 4000,
+      "current": 310,
+      "pct": 7.75,
+      "warn": false,
+      "critical": false
+    },
+    "collected_at": "2026-11-23T10:00:00Z"
+  },
+  "top_holders": {
+    "files": [
+      {
+        "pid": 400,
+        "count": 12,
+        "command": "Google Chrome"
+      },
+      {
+        "pid": 700,
+        "count": 2,
+        "command": "-zsh"
+      },
+      {
+        "pid": 1,
+        "count": 1,
+        "command": "launchd"
+      },
+      {
+        "pid": 710,
+        "count": 1,
+        "command": "java"
+      }
+    ],
+    "procs": [
+      {
+        "pid": 1,
+        "count": 6,
+        "command": "launchd"
+      },
+      {
+        "pid": 700,
+        "count": 3,
+        "command": "-zsh"
+      },
+      {
+        "pid": 400,
+        "count": 1,
+        "command": "Google Chrome"
+      },
+      {
+        "pid": 500,
+        "count": 1,
+        "command": "Xcode"
+      },
+      {
+        "pid": 600,
+        "count": 1,
+        "command": "launchd_sim"
+      },
+      {
+        "pid": 650,
+        "count": 1,
+        "command": "Terminal"
+      },
+      {
+        "pid": 710,
+        "count": 1,
+        "command": "java"
+      }
+    ],
+    "procs_per_uid": [
+      {
+        "pid": 1,
+        "count": 5,
+        "command": "launchd"
+      },
+      {
+        "pid": 700,
+        "count": 3,
+        "command": "-zsh"
+      },
+      {
+        "pid": 400,
+        "count": 1,
+        "command": "Google Chrome"
+      },
+      {
+        "pid": 500,
+        "count": 1,
+        "command": "Xcode"
+      },
+      {
+        "pid": 600,
+        "count": 1,
+        "command": "launchd_sim"
+      },
+      {
+        "pid": 650,
+        "count": 1,
+        "command": "Terminal"
+      },
+      {
+        "pid": 710,
+        "count": 1,
+        "command": "java"
+      }
+    ],
+    "pty": [
+      {
+        "pid": 400,
+        "count": 1,
+        "command": "Google Chrome"
+      },
+      {
+        "pid": 700,
+        "count": 1,
+        "command": "-zsh"
+      }
+    ]
+  }
+}

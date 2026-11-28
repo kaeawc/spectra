@@ -11,10 +11,14 @@
 //! - [`process`]: the process table, families, trees and argv (Go's `internal/process`), with
 //!   macOS facts through a [`process::ProcessSource`].
 //! - [`lineage`]: a process's ancestors and descendant subtree (Go's `internal/lineage`).
+//! - [`sysinfo`]: kernel tunables, battery and thermal state, per-process energy (Go's
+//!   `internal/sysinfo`).
+//! - [`syslimits`]: kernel resource limits against current usage (Go's `internal/syslimits`).
 //! - [`localtz`]: the local time zone, chosen as Go chooses `time.Local`.
 //! - [`gosort`]: Go's unstable `sort.Slice`, for ties that must land where Go puts them.
 
 pub mod classify;
+pub(crate) mod cmdrun;
 pub mod goerr;
 pub mod gosort;
 pub mod lineage;
@@ -23,6 +27,8 @@ pub mod memstate;
 pub mod pressure;
 pub mod procdiag;
 pub mod process;
+pub mod sysinfo;
+pub mod syslimits;
 pub mod sysload;
 
 #[cfg(test)]

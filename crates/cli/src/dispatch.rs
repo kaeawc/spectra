@@ -64,7 +64,7 @@ pub const SUBCOMMANDS: &[Subcommand] = &[
     pending("startup", "List what launches at login or boot; disable or enable user launch agents"),
     pending("logs", "Run bounded unified log queries"),
     pending("updates", "Show macOS install/update log entries"),
-    pending("system", "Show system resource limits and saturation"),
+    ported("system", "Show system resource limits and saturation", crate::system::run),
     pending("load", "Admit, hold or back off a new job from load and memory, with per-worktree attribution"),
     pending("uninstall", "Plan (read-only) and apply a conservative app uninstall that moves only your own files to the Trash"),
     pending("orphans", "Find leftover processes (parent pid 1) whose working directory is under a worktree root"),

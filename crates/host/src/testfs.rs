@@ -28,8 +28,19 @@ impl Fs for MapFs {
         self.0.get(path).cloned().ok_or_else(not_found)
     }
 
-    fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
-        Err(io::Error::other("MapFs: read_dir is not supported"))
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+        let mut names: BTreeMap<String, FileType> = BTreeMap::new();
+        for key in self.0.keys() {
+            let Ok(rest) = key.strip_prefix(path) else { continue };
+            let mut parts = rest.iter();
+            let Some(first) = parts.next().and_then(|p| p.to_str()) else { continue };
+            let kind = if parts.next().is_some() { FileType::Dir } else { FileType::File };
+            names.entry(first.to_string()).or_insert(kind);
+        }
+        if names.is_empty() {
+            return Err(not_found());
+        }
+        Ok(names.into_iter().map(|(name, file_type)| DirEntry { name, file_type }).collect())
     }
 
     fn metadata(&self, path: &Path) -> io::Result<FileInfo> {

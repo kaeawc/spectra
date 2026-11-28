@@ -17,8 +17,21 @@ pub fn page_size() -> u64 {
     u64::try_from(n).unwrap_or(4096)
 }
 
+/// The real user id of this process (Go's `os.Getuid`).
+#[cfg(unix)]
+pub fn uid() -> i64 {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    i64::from(unsafe { libc::getuid() })
+}
+
 #[cfg(all(test, unix))]
 mod tests {
+    #[test]
+    fn uid_matches_the_environment_of_this_process() {
+        // Not asserting a value: tests run as any user. It must at least be stable.
+        assert_eq!(super::uid(), super::uid());
+    }
+
     #[test]
     fn page_size_is_a_power_of_two() {
         let p = super::page_size();
