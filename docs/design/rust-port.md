@@ -59,6 +59,11 @@ OpenSSL; `dev`, `release`, `dist` and `ci` profiles; `cargo c`, `cargo t` and `c
 aliases; bacon; nextest; doctests off. Argument parsing stays Go-`flag` compatible (single-dash
 long flags), so `clap` is not used.
 
+CI (`.github/workflows/rust.yml`) follows [simee](https://github.com/kaeawc/simee)'s layout: a
+`changes` job (`scripts/rust-ci-scope.sh`) skips every Rust job for changes that can't reach the
+workspace, lint and tests share one job per OS so a run takes one macOS runner, the macOS
+toolchain comes from an Actions cache, and `rust-ok` sums the run up in one check.
+
 ```bash
 cargo c          # check --all-targets
 cargo t          # nextest run (or: make rust-test)

@@ -1,8 +1,9 @@
 name: Rust
 
 # The Rust port (docs/design/rust-port.md). Runs beside the Go CI until the cutover wave, then
-# replaces it. Conventions from rust-build: one job per signal, rust-cache saved only from main,
-# debuginfo-free `ci` profile, `--locked`, prebuilt tools, superseded runs cancelled.
+# replaces it. Conventions from rust-build (one job per signal, rust-cache saved only from main,
+# debuginfo-free `ci` profile, `--locked`, prebuilt tools, superseded runs cancelled) and from
+# simee (change scoping, one macOS job per run, a cached macOS toolchain, one summary check).
 on:
   push:
     branches: [main]
@@ -26,73 +27,92 @@ env:
   RUSTUP_MAX_RETRIES: 10
 
 jobs:
+  # What a pull request can reach (scripts/rust-ci-scope.sh): a Go-only, docs-only or
+  # other-workflow change skips every Rust job, so it takes no macOS runner. Pushes to main and
+  # manual runs run everything. Scoping fails safe: if the script fails, every job runs.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.scope.outputs.rust }}
+    steps:
+      # A pull request's checkout is its merge commit; its first parent is the base branch. A
+      # rename lists both paths (--no-renames), so moving a file the workspace reads counts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: scope
+        run: |
+          set -o pipefail
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            scope() { git diff --no-renames --name-only HEAD^1 HEAD | bash scripts/rust-ci-scope.sh; }
+          else
+            scope() { bash scripts/rust-ci-scope.sh --all; }
+          fi
+          if ! scope > scope.txt; then
+            echo "::warning::rust-ci-scope.sh failed: running every job"
+            echo rust=true > scope.txt
+          fi
+          cat scope.txt
+          cat scope.txt >> "$GITHUB_OUTPUT"
+
   # Formatting needs no compilation and no cache: the fastest signal.
   fmt:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: ./.github/actions/rust-toolchain
       - run: cargo fmt --all --check
-
-  # Clippy on both OSes: collectors have macOS-only and Linux-only code paths.
-  lint:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: lint-${{ matrix.os }}
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo clippy --locked --all-targets --all-features --profile ci -- -D warnings
 
   # Dependency policy (deny.toml): one version per crate, no aws-lc/OpenSSL, RustSec advisories,
   # licenses, sources. Reads Cargo.lock only — no compilation. Replaces go-licenses and gosec.
   deny:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-deny
       - run: cargo deny --locked check
 
-  # Tests through nextest on both OSes, JUnit output.
-  test:
+  # Lint and test on each OS in one job each: collectors have macOS-only and Linux-only code
+  # paths, and one job per OS restores one cache and takes one runner (macOS runners are the
+  # scarce ones). Clippy runs first: it fails fast and its metadata is reused by the build.
+  lint-test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: test-${{ matrix.os }}
+          shared-key: lint-test-${{ matrix.os }}
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+      - run: cargo clippy --locked --all-targets --all-features --profile ci -- -D warnings
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-nextest
-      - run: cargo nextest run --locked --cargo-profile ci --profile ci --no-tests=warn
+      - run: cargo nextest run --locked --cargo-profile ci --profile ci --hide-progress-bar --no-tests=warn
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -100,9 +120,28 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
+  # One check that sums up the run, for the merge loop: green when every job passed or was
+  # skipped because the change can't reach Rust, red when any failed or was cancelled (a failed
+  # `changes` fails it too, though the jobs after it show as skipped).
+  rust-ok:
+    if: always()
+    needs: [changes, fmt, deny, lint-test, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case $r in success | skipped) ;; *) exit 1 ;; esac
+          done
+
   # Packages every crate as crates.io would receive it (no upload, no token), so packaging
   # breaks show up on the PR that causes them rather than on release day.
   package:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

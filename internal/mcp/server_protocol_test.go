@@ -257,11 +257,18 @@ func rawSession(t *testing.T) (send func(string), recv func() map[string]any) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	serverIn, clientOut := io.Pipe()
 	clientIn, serverOut := io.Pipe()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = NewServer(serverIn, serverOut).Run(ctx)
 		_ = serverOut.Close()
 	}()
-	t.Cleanup(func() { _ = clientOut.Close(); cancel() })
+	t.Cleanup(func() {
+		_ = clientOut.Close()
+		_ = clientIn.Close()
+		cancel()
+		waitServerDone(t, done)
+	})
 	lines := bufio.NewScanner(clientIn)
 	lines.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	send = func(line string) {
@@ -305,5 +312,16 @@ func TestLegacyInitializeAndPing(t *testing.T) {
 	send(`{"jsonrpc":"2.0","id":4,"method":"no/such/method"}`)
 	if got := recv(); got["id"] != float64(4) || got["error"] == nil {
 		t.Fatalf("unknown method response = %v, want an error", got)
+	}
+}
+
+// waitServerDone fails the test, rather than hanging, when a server started
+// by a helper outlives its cleanup.
+func waitServerDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Errorf("server goroutine did not stop")
 	}
 }

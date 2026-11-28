@@ -1,8 +1,10 @@
 //! Request and response envelopes.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -58,13 +60,13 @@ fn is_zero(n: &i64) -> bool {
 /// A request envelope.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Request {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub protocol_version: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub request_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub operation: Operation,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, deserialize_with = "crate::null_default", skip_serializing_if = "is_zero")]
     pub timeout_ms: i64,
     #[serde(default, deserialize_with = "present_raw", skip_serializing_if = "Option::is_none")]
     pub params: Option<Box<RawValue>>,
@@ -85,7 +87,9 @@ impl Request {
             return Err(ProtocolError::plain("invalid timeout_ms"));
         }
         if let Some(params) = &self.params {
-            let obj: Option<serde_json::Map<String, serde_json::Value>> =
+            // Members stay unparsed, as Go's `map[string]json.RawMessage` leaves them, so a value
+            // like `1e400` that `serde_json::Value` cannot hold is still a valid member.
+            let obj: Option<HashMap<String, IgnoredAny>> =
                 serde_json::from_str(params.get()).map_err(|e| ProtocolError::plain(format!("invalid params: {e}")))?;
             if obj.is_none() {
                 return Err(ProtocolError::plain("params must be a JSON object"));
@@ -98,9 +102,9 @@ impl Request {
 /// A response envelope: exactly one of a non-null `result` or an `error`.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Response {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub protocol_version: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub request_id: String,
     #[serde(default, deserialize_with = "present_raw", skip_serializing_if = "Option::is_none")]
     pub result: Option<Box<RawValue>>,
@@ -142,7 +146,7 @@ pub(crate) fn valid_non_null(raw: &RawValue) -> bool {
 /// The result of `health`.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct HealthResult {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub capabilities: CapabilityManifest,
 }
 
@@ -156,6 +160,35 @@ pub struct InspectParams {
 /// Params of `snapshot.create`.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct SnapshotCreateParams {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub include_apps: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(line: &str) -> Result<(), ProtocolError> {
+        serde_json::from_str::<Request>(line).map_err(|e| ProtocolError::plain(e.to_string()))?.validate()
+    }
+
+    #[test]
+    fn null_timeout_is_zero_as_in_go() {
+        let line = r#"{"protocol_version":"v1","request_id":"r","operation":"health","timeout_ms":null}"#;
+        assert_eq!(serde_json::from_str::<Request>(line).expect("decode").timeout_ms, 0);
+        assert!(request(line).is_ok());
+        assert!(request(r#"{"protocol_version":"v1","request_id":"r","operation":"health","timeout_ms":"1"}"#).is_err());
+        assert!(request(r#"{"protocol_version":"v1","request_id":"r","operation":"health","timeout_ms":600001}"#).is_err());
+    }
+
+    #[test]
+    fn params_members_stay_raw() {
+        let with =
+            |params: &str| request(&format!(r#"{{"protocol_version":"v1","request_id":"r","operation":"inspect","params":{params}}}"#));
+        assert!(with(r#"{"n":1e400}"#).is_ok());
+        assert!(with("{}").is_ok());
+        for bad in ["null", "[]", "1", r#""x""#] {
+            assert!(with(bad).is_err(), "{bad}");
+        }
+    }
 }

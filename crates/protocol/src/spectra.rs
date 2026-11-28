@@ -24,11 +24,11 @@ pub const OUTPUT_JSON: &str = "json";
 /// One CLI interface: how to call it and what it prints.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SpectraInterface {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub name: String,
     #[serde(default)]
     pub argv: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub output: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_schema: Option<SchemaRef>,
@@ -37,13 +37,13 @@ pub struct SpectraInterface {
 /// The `spectra.capabilities` document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SpectraCapabilities {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub schema: SchemaRef,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub spectra_version: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub os: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::null_default")]
     pub arch: String,
     #[serde(default)]
     pub interfaces: Option<Vec<SpectraInterface>>,

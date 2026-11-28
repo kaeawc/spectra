@@ -185,6 +185,27 @@ impl Formatter for GoFormatter {
         }
         writer.write_all(&fragment.as_bytes()[start..])
     }
+
+    /// Go writes a `json.RawMessage` through `appendCompact` with HTML escaping: whitespace
+    /// between tokens dropped, and `<`, `>`, `&`, U+2028 and U+2029 (which valid JSON holds only
+    /// inside strings) escaped as in [`write_string_fragment`](Self::write_string_fragment).
+    /// Under [`Layout::Indent`] Go would also re-indent the value; it stays compact here.
+    fn write_raw_fragment<W: ?Sized + io::Write>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()> {
+        let mut compact = String::with_capacity(fragment.len());
+        let (mut in_string, mut escaped) = (false, false);
+        for c in fragment.chars() {
+            if in_string {
+                in_string = escaped || c != '"';
+                escaped = !escaped && c == '\\';
+            } else if matches!(c, ' ' | '\t' | '\n' | '\r') {
+                continue;
+            } else {
+                in_string = c == '"';
+            }
+            compact.push(c);
+        }
+        self.write_string_fragment(writer, &compact)
+    }
 }
 
 /// Lays out the shortest round-trip digits of a finite float the way Go's
@@ -475,6 +496,13 @@ mod tests {
         let out = to_vec("<a href=\"x\">&\u{2028}").expect("string");
         let want = r#""\u003ca href=\"x\"\u003e\u0026\u2028""#;
         assert_eq!(String::from_utf8(out).expect("utf8"), want);
+    }
+
+    #[test]
+    fn raw_values_are_compacted_and_escaped() {
+        let raw = serde_json::value::RawValue::from_string("{ \"t\" : \"<a> & \\\" \u{2029}\",\n\"n\": 1.50 }".into()).expect("raw");
+        let out = to_vec(&raw).expect("raw");
+        assert_eq!(String::from_utf8(out).expect("utf8"), r#"{"t":"\u003ca\u003e \u0026 \" \u2029","n":1.50}"#);
     }
 
     #[test]

@@ -32,3 +32,9 @@ pub use spectra::{
 fn present_raw<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Box<serde_json::value::RawValue>>, D::Error> {
     serde::Deserialize::deserialize(d).map(Some)
 }
+
+/// Go's `json.Unmarshal` leaves a non-pointer field at its zero value when the JSON is `null`;
+/// `#[serde(default)]` covers only an absent field, so value fields deserialize with this.
+fn null_default<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de> + Default>(d: D) -> Result<T, D::Error> {
+    <Option<T> as serde::Deserialize>::deserialize(d).map(Option::unwrap_or_default)
+}
