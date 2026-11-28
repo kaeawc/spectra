@@ -1,0 +1,2 @@
+# desktop/ keeps clippy's defaults: this file stops the root clippy.toml (the port crates'
+# disallowed std fs/time/env/process calls) applying to the desktop app.

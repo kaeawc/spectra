@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
+      desktop: ${{ steps.scope.outputs.desktop }}
     steps:
       # A pull request's checkout is its merge commit; its first parent is the base branch. A
       # rename lists both paths (--no-renames), so moving a file the workspace reads counts.
@@ -52,7 +53,7 @@ jobs:
           fi
           if ! scope > scope.txt; then
             echo "::warning::rust-ci-scope.sh failed: running every job"
-            echo rust=true > scope.txt
+            printf 'rust=true\ndesktop=true\n' > scope.txt
           fi
           cat scope.txt
           cat scope.txt >> "$GITHUB_OUTPUT"
@@ -69,6 +70,21 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
       - run: cargo fmt --all --check
+
+  # The desktop is its own workspace (it fetches Rune), so cargo fmt can't run there without a
+  # fetch; rustfmt over its sources needs none. desktop/rustfmt.toml keeps it on rustfmt's
+  # defaults instead of the root width of 140. Runs for any change that can reach the desktop.
+  fmt-desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/rust-toolchain
+      - run: find desktop/src -name '*.rs' -print0 | xargs -0 rustfmt --check --edition 2024
 
   # Dependency policy (deny.toml): one version per crate, no aws-lc/OpenSSL, RustSec advisories,
   # licenses, sources. Reads Cargo.lock only — no compilation. Replaces go-licenses and gosec.
@@ -120,12 +136,64 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
+  # The desktop app (desktop/, its own workspace and lockfile) on macOS, its real target:
+  # clippy then tests, from desktop/'s own cache. Runs only when a change can reach the desktop
+  # (desktop/, crates/, Cargo.lock, rust-toolchain.toml).
+  desktop-macos:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/rust-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop
+          shared-key: desktop-macos
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  # The window and its view tests also build on Linux (the macOS-only parts compile to stubs),
+  # so a Linux-only break shows without a Mac. libxkbcommon-dev is what linking the tests needs;
+  # Wayland, X11 and fontconfig load at run time, so no other packages.
+  desktop-linux:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The runner image's package index is usually fresh enough; refresh only when the install fails.
+      - run: sudo apt-get install -y --no-install-recommends libxkbcommon-dev || (sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-dev)
+      - uses: ./.github/actions/rust-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop
+          shared-key: desktop-linux
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
   # One check that sums up the run, for the merge loop: green when every job passed or was
   # skipped because the change can't reach Rust, red when any failed or was cancelled (a failed
   # `changes` fails it too, though the jobs after it show as skipped).
   rust-ok:
     if: always()
-    needs: [changes, fmt, deny, lint-test, package]
+    needs: [changes, fmt, fmt-desktop, deny, lint-test, package, desktop-macos, desktop-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

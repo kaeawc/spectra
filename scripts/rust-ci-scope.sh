@@ -5,7 +5,8 @@
 #   scripts/rust-ci-scope.sh --all
 #
 # Prints `rust=true|false`: whether any changed path can affect the Rust workspace's build,
-# lints, tests or packaging. A Go-only, docs-only or other-workflow change skips the Rust jobs,
+# lints, tests or packaging, and `desktop=true|false`: whether one can reach the desktop app
+# (desktop/, its own workspace, which path-depends on crates/). A Go-only, docs-only or other-workflow change skips the Rust jobs,
 # so it doesn't take a scarce macOS runner. Pushes to main and manual runs pass --all. The
 # workflow fails safe: if this script fails, every job runs.
 set -euo pipefail
@@ -22,8 +23,18 @@ affects_rust() {
   esac
 }
 
+# Paths the desktop app reads: its own tree, the workspace crates it depends on, and the
+# lockfile and toolchain pin it shares.
+affects_desktop() {
+  case $1 in
+    desktop/* | crates/* | Cargo.lock | rust-toolchain.toml) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [[ ${1:-} == --all ]]; then
   echo rust=true
+  echo desktop=true
   exit 0
 fi
 if [[ $# -gt 0 ]]; then
@@ -32,10 +43,15 @@ if [[ $# -gt 0 ]]; then
 fi
 
 rust=false
+desktop=false
 while IFS= read -r path; do
   [[ -n $path ]] || continue
   if affects_rust "$path"; then
     rust=true
   fi
+  if affects_desktop "$path"; then
+    desktop=true
+  fi
 done
 echo "rust=$rust"
+echo "desktop=$desktop"

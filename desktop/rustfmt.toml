@@ -1,0 +1,2 @@
+# desktop/ is formatted with rustfmt defaults; this file stops the root rustfmt.toml (max_width 140) applying here.
+edition = "2024"
