@@ -1,0 +1,9 @@
+{
+  "arch": "amd64",
+  "args": [
+    "procdiag",
+    "5"
+  ],
+  "now": "2026-11-23T10:00:00Z",
+  "os": "darwin"
+}

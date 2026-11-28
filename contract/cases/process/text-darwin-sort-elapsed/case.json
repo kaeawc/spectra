@@ -1,0 +1,43 @@
+{
+  "args": [
+    "process",
+    "--sort",
+    "elapsed"
+  ],
+  "details": {
+    "1": {
+      "thread_count": 4,
+      "bsd_name": "launchd",
+      "executable_path": "/sbin/launchd"
+    },
+    "400": {
+      "thread_count": 42,
+      "bsd_name": "Google Chrome",
+      "executable_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    },
+    "401": {
+      "thread_count": 17,
+      "bsd_name": "",
+      "executable_path": ""
+    },
+    "500": {
+      "thread_count": 0,
+      "bsd_name": "Xcode",
+      "executable_path": ""
+    },
+    "730": {
+      "thread_count": 11,
+      "bsd_name": "node",
+      "executable_path": "/opt/homebrew/bin/node"
+    },
+    "88": {
+      "thread_count": 21,
+      "bsd_name": "WindowServer",
+      "executable_path": "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer"
+    }
+  },
+  "memory_bytes": 17179869184,
+  "now": "2026-11-23T10:00:00Z",
+  "os": "darwin",
+  "tz_offset": -21600
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="
+    ],
+    "stdout": "    1     0   0.6    20480     420000     0 root           Fri Nov 20 10:00:00 2026 /sbin/launchd\n   88     1  12.3   812000   41000000    88 _windowserver  Fri Nov 20 11:00:00 2026 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon\n  400     1  25.4  1536000  451000000   501 user           Mon Nov 23 05:00:00 2026 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --restore-last-session\n  401   400  41.7   640000  452000000   501 user           Mon Nov 23 05:30:00 2026 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer) --type=renderer\n  500     1   5.2  2100000  433000000   501 user           Mon Nov 23 07:00:00 2026 /Applications/Xcode.app/Contents/MacOS/Xcode\n  510   500  88.8   302000  412000000   501 user           Mon Nov 23 09:40:00 2026 /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build -scheme App\n  600     1   3.3    41000  410000000   501 user           Mon Nov 23 08:00:00 2026 /Library/Developer/CoreSimulator/Runtimes/iOS.simruntime/RuntimeRoot/sbin/launchd_sim /Library/Developer/CoreSimulator/Devices/0A1B2C3D-1111-2222-3333-444455556666/data/var/run/launchd_bootstrap.plist\n  610   600  18.1   205000  415000000   501 user           Mon Nov 23 08:10:00 2026 /Library/Developer/CoreSimulator/Runtimes/iOS.simruntime/RuntimeRoot/System/Library/CoreServices/SpringBoard.app/SpringBoard\n  650     1   1.1    98000  409000000   501 user           Sat Nov 21 10:00:00 2026 /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal\n  700   650   0.2     6100  408000000   501 user           Sat Nov 21 11:00:00 2026 -zsh\n  710   700 150.5  1800000  440000000   501 user           Mon Nov 23 08:30:00 2026 /usr/bin/java -cp gradle-launcher.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.10\n  720   710  97.9    52000  407000000   501 user           Mon Nov 23 09:58:00 2026 /usr/bin/clang -c src/main.c -o build/main.o\n  730   700   7.7   401000  421000000   501 user           Sun Nov 22 08:00:00 2026 /opt/homebrew/bin/node /Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js\n  740   700   0.0        0          0   501 user           Sun Nov 22 09:00:00 2026 \u003cdefunct\u003e\n  750     1   0.4     7300  406000000   501 user           Xyz Nov 23 07:00:00 2026 /usr/local/bin/stale-agent --serve\n  999 short row\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,comm="
+    ],
+    "stdout": "    1 /sbin/launchd\n  400 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n  401 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n  700 -zsh\n  730 /opt/homebrew/bin/node\n  750 /usr/local/bin/recycled\n",
+    "exit_code": 0
+  }
+]

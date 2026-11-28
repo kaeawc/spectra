@@ -1,0 +1,7 @@
+{
+  "args": [
+    "process",
+    "--nope"
+  ],
+  "os": "darwin"
+}

@@ -14,12 +14,14 @@ name = "spectra_host"
 doctest = false
 
 [dependencies]
+jiff = { workspace = true }
 serde = { workspace = true }
+# The classify disk cache entries are JSON (Go's exeEntry).
+serde_json = { workspace = true }
 spectra-base = { workspace = true }
 spectra-sys = { workspace = true }
 
 [dev-dependencies]
-jiff = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

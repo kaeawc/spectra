@@ -1,0 +1,63 @@
+{
+  "pid": 80,
+  "comm": "grow",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 80,
+      "comm": "grow",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 122880,
+    "anon_kib": 122880,
+    "swap_kib": 409600,
+    "pss_kib": 61440,
+    "rss_delta_kib": 20480,
+    "rss_rate_kib_per_sec": 20480
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "memory-growth",
+      "severity": "warning",
+      "summary": "resident memory grew 20.0 MiB/s (+20 MiB in 1.0s); sample again over a longer interval to separate a leak from a warm-up",
+      "evidence": [
+        "rss=120 MiB"
+      ]
+    },
+    {
+      "kind": "swapped-out",
+      "severity": "info",
+      "summary": "400 MiB of this process lives in swap (77% of its footprint); page faults back in will look like latency",
+      "evidence": [
+        "rss=120 MiB swap=400 MiB"
+      ]
+    }
+  ],
+  "verdict": "memory-growth",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

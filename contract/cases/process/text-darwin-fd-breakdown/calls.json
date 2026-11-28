@@ -1,0 +1,29 @@
+[
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,ppid=,pcpu=,rss=,vsz=,uid=,user=,lstart=,command="
+    ],
+    "stdout": "    1     0   0.6    20480     420000     0 root           Fri Nov 20 10:00:00 2026 /sbin/launchd\n   88     1  12.3   812000   41000000    88 _windowserver  Fri Nov 20 11:00:00 2026 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon\n  400     1  25.4  1536000  451000000   501 user           Mon Nov 23 05:00:00 2026 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --restore-last-session\n  401   400  41.7   640000  452000000   501 user           Mon Nov 23 05:30:00 2026 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer) --type=renderer\n  500     1   5.2  2100000  433000000   501 user           Mon Nov 23 07:00:00 2026 /Applications/Xcode.app/Contents/MacOS/Xcode\n  510   500  88.8   302000  412000000   501 user           Mon Nov 23 09:40:00 2026 /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build -scheme App\n  600     1   3.3    41000  410000000   501 user           Mon Nov 23 08:00:00 2026 /Library/Developer/CoreSimulator/Runtimes/iOS.simruntime/RuntimeRoot/sbin/launchd_sim /Library/Developer/CoreSimulator/Devices/0A1B2C3D-1111-2222-3333-444455556666/data/var/run/launchd_bootstrap.plist\n  610   600  18.1   205000  415000000   501 user           Mon Nov 23 08:10:00 2026 /Library/Developer/CoreSimulator/Runtimes/iOS.simruntime/RuntimeRoot/System/Library/CoreServices/SpringBoard.app/SpringBoard\n  650     1   1.1    98000  409000000   501 user           Sat Nov 21 10:00:00 2026 /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal\n  700   650   0.2     6100  408000000   501 user           Sat Nov 21 11:00:00 2026 -zsh\n  710   700 150.5  1800000  440000000   501 user           Mon Nov 23 08:30:00 2026 /usr/bin/java -cp gradle-launcher.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.10\n  720   710  97.9    52000  407000000   501 user           Mon Nov 23 09:58:00 2026 /usr/bin/clang -c src/main.c -o build/main.o\n  730   700   7.7   401000  421000000   501 user           Sun Nov 22 08:00:00 2026 /opt/homebrew/bin/node /Users/user/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js\n  740   700   0.0        0          0   501 user           Sun Nov 22 09:00:00 2026 \u003cdefunct\u003e\n  750     1   0.4     7300  406000000   501 user           Xyz Nov 23 07:00:00 2026 /usr/local/bin/stale-agent --serve\n  999 short row\n",
+    "exit_code": 0
+  },
+  {
+    "name": "ps",
+    "args": [
+      "-axwwo",
+      "pid=,comm="
+    ],
+    "stdout": "    1 /sbin/launchd\n  400 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n  401 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n  700 -zsh\n  730 /opt/homebrew/bin/node\n  750 /usr/local/bin/recycled\n",
+    "exit_code": 0
+  },
+  {
+    "name": "lsof",
+    "args": [
+      "-p",
+      "1,88,400,401,500,510,600,610,650,700,710,720,730,740,750"
+    ],
+    "stdout": "COMMAND     PID   USER   FD     TYPE             DEVICE SIZE/OFF      NODE NAME\nlaunchd       1   root  cwd      DIR               1,16      640         2 /\nlaunchd       1   root    3u  KQUEUE                                       count=0, state=0xa\nGoogle      400   user  cwd      DIR               1,16      640    123456 /Users/user/my project\nGoogle      400   user   12u    IPv4 0x1234567890abcdef      0t0       TCP 127.0.0.1:9222 (LISTEN)\nGoogle      400   user   13u    IPv4 0x1234567890abcdf0      0t0       TCP 10.0.0.2:50000-\u003e142.250.0.1:443 (ESTABLISHED)\nGoogle      400   user   14u    IPv6 0x1234567890abcdf1      0t0       TCP *:8080 (LISTEN)\nGoogle      400   user   15w     REG               1,16    10240    777777 /Users/user/Library/Logs/Chrome/chrome.log\nGoogle      400   user   16w     REG               1,16    10240    777777 /Users/user/Library/Logs/Chrome/chrome.log\nGoogle      400   user   17r     REG               1,16     2048    777778 /Applications/Google Chrome.app/Contents/Info.plist\nGoogle      400   user   18u     CHR               16,2      0t0       909 /dev/ttys002\nGoogle      400   user   19     PIPE 0x1111111111111111    16384           -\u003e0x2222222222222222\nGoogle      400   user   20u  KQUEUE                                       count=0, state=0x8\nGoogle      400   user   21u    unix 0x3333333333333333      0t0           -\u003e0x4444444444444444\nGoogle      400   user   22u     CHR                3,2      0t0       333 /dev/null\nGoogle      400   user   23u    IPv4 0x1234567890abcdf2      0t0       UDP *:5353\n-zsh        700   user  cwd      DIR               1,16      960    222222 /Users/user\n-zsh        700   user    0u     CHR               16,3      0t0      1011 /dev/ttys003\n-zsh        700   user   10w     REG               1,16        0    888888 /tmp/zsh-history.log (deleted)\njava        710   user   40u    IPv6 0x1234567890abcdf3      0t0       TCP [::1]:52000-\u003e[::1]:52001 (ESTABLISHED)\n",
+    "exit_code": 0
+  }
+]

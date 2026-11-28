@@ -1,0 +1,6 @@
+invalid value "fast" for flag -interval: parse error
+Usage of spectra procdiag:
+  -interval duration
+    	Time between the two samples (longer separates leaks from noise) (default 1s)
+  -json
+    	Emit JSON instead of a human summary

@@ -255,6 +255,55 @@ pub fn proc_pidpath(pid: i32) -> io::Result<String> {
     String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+/// What `PROC_PIDTASKALLINFO` says about a process that `spectra process` reports.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaskAllInfo {
+    /// `ptinfo.pti_threadnum`.
+    pub thread_count: i32,
+    /// `pbsd.pbi_name` up to its NUL.
+    pub bsd_name: String,
+}
+
+/// The thread count and BSD short name of `pid`, from one `PROC_PIDTASKALLINFO` call (Go's
+/// `collectProcessDetails`).
+pub fn proc_task_all_info(pid: i32) -> io::Result<TaskAllInfo> {
+    let mut info = MaybeUninit::<libc::proc_taskallinfo>::zeroed();
+    let size = size_of::<libc::proc_taskallinfo>() as c_int;
+    // SAFETY: `info` is a zeroed `proc_taskallinfo` of `size` bytes, the struct this flavor fills.
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTASKALLINFO, 0, info.as_mut_ptr().cast::<c_void>(), size) };
+    if n != size {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the call filled the whole struct (n == size), which holds only integers and arrays.
+    let info = unsafe { info.assume_init() };
+    let name: Vec<u8> = info.pbsd.pbi_name.iter().map(|&c| c as u8).collect();
+    let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    Ok(TaskAllInfo { thread_count: info.ptinfo.pti_threadnum, bsd_name: String::from_utf8_lossy(&name[..end]).into_owned() })
+}
+
+/// The raw `kern.procargs2` buffer of `pid` (`sysctl({CTL_KERN, KERN_PROCARGS2, pid})`): argc,
+/// the exec path and the argument and environment strings, as Go's
+/// `unix.SysctlRaw("kern.procargs2", pid)` returns it.
+pub fn procargs2(pid: i32) -> io::Result<Vec<u8>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut len: libc::size_t = 0;
+    // SAFETY: `mib` holds 3 valid ints and its length is passed; a null old-value pointer asks
+    // only for the size, written to `len`.
+    let rc = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut buf = vec![0u8; len];
+    // SAFETY: `buf` has `len` writable bytes and `len` says so; the kernel writes at most that
+    // many and stores the written length back in `len`.
+    let rc = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast::<c_void>(), &mut len, std::ptr::null_mut(), 0) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    buf.truncate(len);
+    Ok(buf)
+}
+
 /// The BSD short name (`pbi_name`, up to 32 bytes) of `pid` from `PROC_PIDTASKALLINFO`.
 pub fn proc_bsd_name(pid: i32) -> io::Result<String> {
     let mut info = MaybeUninit::<libc::proc_taskallinfo>::zeroed();
@@ -322,6 +371,18 @@ mod tests {
         let name = proc_bsd_name(own_pid()).expect("own name");
         assert!(!name.is_empty());
         assert!(path.contains(&name), "{path} vs {name}");
+    }
+
+    #[test]
+    fn own_task_info_and_procargs2() {
+        let info = proc_task_all_info(own_pid()).expect("own task info");
+        assert!(info.thread_count >= 1, "{info:?}");
+        assert_eq!(info.bsd_name, proc_bsd_name(own_pid()).expect("name"));
+        let raw = procargs2(own_pid()).expect("own procargs2");
+        let argc = u32::from_ne_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+        assert_eq!(argc, std::env::args().count());
+        assert!(proc_task_all_info(i32::MAX).is_err());
+        assert!(procargs2(i32::MAX).is_err());
     }
 
     #[test]

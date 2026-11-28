@@ -8,6 +8,8 @@
 //!   flag errors;
 //! - `pressure/`: `spectra pressure` on Linux PSI and cgroup v2 trees, its errors, and the
 //!   refusal on macOS.
+//! - `procdiag/`: `spectra procdiag` on Linux `/proc` trees sampled twice (`before/`, then
+//!   `root/`), its errors, and the refusal on macOS.
 //!
 //! Each compares stdout and the exit code with the Go build's, and stderr with
 //! `expected.stderr` where the case recorded one (`cmd/spectra/contract_cases_test.go`).
@@ -283,4 +285,261 @@ fn pressure_matches_go_through_dispatch() {
         let (code, out, err) = run(&ctx(case, kind_of(&input.os), "test"), &input.args);
         assert_case(case, code, &out, &err);
     }
+}
+
+#[derive(Deserialize)]
+struct ProcdiagInput {
+    args: Vec<String>,
+    os: String,
+    arch: String,
+    now: String,
+}
+
+/// Serves the case's `before/` tree (the first sample) until [`ProcdiagSleeper`] runs, then its
+/// `root/` tree (the second sample, which the analysis also reads).
+struct ProcdiagFs {
+    before: spectra_base::fs::RootedFs,
+    after: spectra_base::fs::RootedFs,
+    slept: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ProcdiagFs {
+    fn current(&self) -> &spectra_base::fs::RootedFs {
+        if self.slept.load(std::sync::atomic::Ordering::SeqCst) { &self.after } else { &self.before }
+    }
+}
+
+impl Fs for ProcdiagFs {
+    fn read(&self, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+        self.current().read(path)
+    }
+    fn read_dir(&self, path: &std::path::Path) -> std::io::Result<Vec<spectra_base::fs::DirEntry>> {
+        self.current().read_dir(path)
+    }
+    fn metadata(&self, path: &std::path::Path) -> std::io::Result<spectra_base::fs::FileInfo> {
+        self.current().metadata(path)
+    }
+    fn symlink_metadata(&self, path: &std::path::Path) -> std::io::Result<spectra_base::fs::FileInfo> {
+        self.current().symlink_metadata(path)
+    }
+    fn read_link(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        self.current().read_link(path)
+    }
+}
+
+/// The wait between samples: switches [`ProcdiagFs`] to the second tree and moves the clock by
+/// the slept duration, as the Go recording's `Sleep` re-points its symlink and advances `Now`.
+struct ProcdiagSleeper {
+    slept: Arc<std::sync::atomic::AtomicBool>,
+    clock: Arc<FakeClock>,
+}
+
+impl spectra_base::clock::Sleeper for ProcdiagSleeper {
+    fn sleep(&self, d: std::time::Duration) {
+        self.slept.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.clock.advance(d);
+    }
+}
+
+/// `spectra procdiag`, JSON and text, on Linux trees sampled twice, its errors, and the macOS
+/// refusal: stdout, stderr and exit code, byte for byte.
+#[test]
+fn procdiag_matches_go_through_dispatch() {
+    let cases = spectra_contract::cases("procdiag");
+    let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+    let mut want = vec![
+        "darwin-json",
+        "darwin-text",
+        "flag-help",
+        "flag-unknown",
+        "interval-invalid",
+        "interval-zero",
+        "invalid-pid",
+        "invalid-pid-zero",
+    ];
+    let scenarios = [
+        "blocked-connect",
+        "blocked-read",
+        "cgroup-context",
+        "cpu-spin",
+        "fd-exhaustion",
+        "fd-growth",
+        "idle",
+        "lock-wait",
+        "many-threads",
+        "memory-growth",
+        "missing-files",
+        "stopped",
+        "uninterruptible",
+        "zombie",
+    ];
+    let json: Vec<String> = scenarios.iter().map(|s| format!("json-{s}")).collect();
+    let text: Vec<String> = scenarios.iter().map(|s| format!("text-{s}")).collect();
+    want.extend(json.iter().map(String::as_str));
+    want.push("no-such-process");
+    want.extend(text.iter().map(String::as_str));
+    want.extend(["usage-no-pid", "usage-two-pids"]);
+    assert_eq!(names, want);
+    for case in &cases {
+        let input: ProcdiagInput = case.input();
+        assert!(expected_stderr(case).is_some(), "{}: no expected.stderr", case.name);
+        let slept = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let clock = Arc::new(FakeClock::new(input.now.parse().expect("now")));
+        let fs = ProcdiagFs {
+            before: spectra_base::fs::RootedFs::new(case.dir.join("before")),
+            after: spectra_base::fs::RootedFs::new(case.dir.join("root")),
+            slept: Arc::clone(&slept),
+        };
+        let ctx = Ctx {
+            arch: input.arch.clone(),
+            fs: Arc::new(fs),
+            clock: Arc::clone(&clock) as Arc<dyn spectra_base::clock::Clock>,
+            sleeper: Arc::new(ProcdiagSleeper { slept, clock }),
+            ..ctx(case, kind_of(&input.os), "test")
+        };
+        let (code, out, err) = run(&ctx, &input.args);
+        assert_case(case, code, &out, &err);
+    }
+}
+
+/// A `process` or `lineage` case: the collection inputs Go injected (`cmd/spectra/contract_process_test.go`).
+#[derive(Deserialize)]
+struct ProcessInput {
+    args: Vec<String>,
+    os: String,
+    #[serde(default)]
+    now: Option<String>,
+    /// `time.Local` while recording: a fixed zone this many seconds east of UTC.
+    #[serde(default)]
+    tz_offset: i32,
+    #[serde(default)]
+    page_size: u64,
+    #[serde(default)]
+    memory_bytes: u64,
+    /// libproc details per decimal pid.
+    #[serde(default)]
+    details: std::collections::BTreeMap<String, spectra_host::process::Details>,
+    /// Raw `kern.procargs2` argv per decimal pid.
+    #[serde(default)]
+    argv: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// The case's OS, collection time, local zone and recorded macOS process facts, with `ps`,
+/// `lsof` and `codesign` from `calls.json` and the Linux `/proc` tree (and classified bundles)
+/// from `root/`.
+fn process_ctx(case: &Case, input: &ProcessInput) -> Ctx {
+    let now = input.now.as_deref().map_or(jiff::Timestamp::UNIX_EPOCH, |n| n.parse().expect("now"));
+    let offset = jiff::tz::Offset::from_seconds(input.tz_offset).expect("tz_offset");
+    Ctx {
+        clock: Arc::new(FakeClock::new(now)),
+        tz: jiff::tz::TimeZone::fixed(offset),
+        processes: Arc::new(spectra_host::process::FixedProcesses {
+            details: input.details.iter().map(|(k, v)| (k.parse().expect("pid"), v.clone())).collect(),
+            memory_bytes: input.memory_bytes,
+            page_size: input.page_size,
+            argv: input.argv.iter().map(|(k, v)| (k.parse().expect("pid"), v.clone())).collect(),
+        }),
+        ..ctx(case, kind_of(&input.os), "test")
+    }
+}
+
+fn replay_process_kind(kind: &str, want: &[&str]) {
+    let cases = spectra_contract::cases(kind);
+    let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, want);
+    // Every case runs, so one report names every difference.
+    let failed: Vec<String> = cases
+        .iter()
+        .filter_map(|case| {
+            let input: ProcessInput = case.input();
+            assert!(expected_stderr(case).is_some(), "{}: no expected.stderr", case.name);
+            let (code, out, err) = run(&process_ctx(case, &input), &input.args);
+            std::panic::catch_unwind(|| assert_case(case, code, &out, &err))
+                .err()
+                .map(|e| e.downcast_ref::<String>().cloned().unwrap_or_else(|| case.name.clone()))
+        })
+        .collect();
+    assert!(failed.is_empty(), "{} of {} {kind} cases differ from Go:\n{}", failed.len(), cases.len(), failed.join("\n"));
+}
+
+/// `spectra process`: rows, trees, families, `--deep`, `--fd-breakdown`, every sort key, filters
+/// and `--classify`, JSON and text, on macOS `ps` listings and Linux `/proc` trees, and its flag
+/// errors: stdout, stderr and exit code, byte for byte.
+#[test]
+fn process_matches_go_through_dispatch() {
+    replay_process_kind(
+        "process",
+        &[
+            "flag-group-by-bogus",
+            "flag-group-by-conflict",
+            "flag-help",
+            "flag-min-elapsed",
+            "flag-min-rss",
+            "flag-min-vsz-negative",
+            "flag-top",
+            "flag-unknown",
+            "json-darwin",
+            "json-darwin-classify",
+            "json-darwin-deep",
+            "json-darwin-family",
+            "json-darwin-filters",
+            "json-darwin-top-cpu",
+            "json-darwin-tree",
+            "json-linux",
+            "json-linux-classify",
+            "json-linux-tree",
+            "text-darwin",
+            "text-darwin-bad-sort",
+            "text-darwin-classify",
+            "text-darwin-classify-tree",
+            "text-darwin-deep",
+            "text-darwin-family",
+            "text-darwin-family-top",
+            "text-darwin-fd-breakdown",
+            "text-darwin-min-elapsed",
+            "text-darwin-min-rss",
+            "text-darwin-min-vsz",
+            "text-darwin-no-match",
+            "text-darwin-ppid",
+            "text-darwin-ppid-tree",
+            "text-darwin-ps-error",
+            "text-darwin-sort-cmd",
+            "text-darwin-sort-cpu",
+            "text-darwin-sort-elapsed",
+            "text-darwin-sort-mem",
+            "text-darwin-sort-pid",
+            "text-darwin-sort-rss",
+            "text-darwin-sort-startedat",
+            "text-darwin-sort-vsz",
+            "text-darwin-top-cpu",
+            "text-darwin-tree",
+            "text-linux",
+            "text-linux-classify",
+            "text-linux-tree",
+        ],
+    );
+}
+
+/// `spectra lineage <pid>`: ancestors, the descendant subtree, zombie and reparented flags, JSON
+/// and text, on macOS and Linux, and its usage and lookup errors.
+#[test]
+fn lineage_matches_go_through_dispatch() {
+    replay_process_kind(
+        "lineage",
+        &[
+            "flag-bad-pid",
+            "flag-help",
+            "flag-no-pid",
+            "flag-two-pids",
+            "flag-unknown",
+            "flag-zero-pid",
+            "json-darwin",
+            "json-darwin-reparented",
+            "json-linux",
+            "no-such-pid",
+            "text-darwin",
+            "text-darwin-reparented",
+            "text-linux",
+        ],
+    );
 }

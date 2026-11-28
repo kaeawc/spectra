@@ -14,6 +14,13 @@ import (
 	"github.com/kaeawc/spectra/internal/process"
 )
 
+// collectProcesses and processNow are the process table and the clock
+// runProcess reads; contract tests replace them.
+var (
+	collectProcesses = process.CollectAll
+	processNow       = time.Now
+)
+
 func runProcess(args []string) int {
 	fs := flag.NewFlagSet("spectra process", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -47,7 +54,7 @@ func runProcess(args []string) int {
 		return 2
 	}
 
-	procs := process.CollectAll(context.Background(), process.CollectOptions{Deep: *deep})
+	procs := collectProcesses(context.Background(), process.CollectOptions{Deep: *deep})
 	procs = filterProcesses(procs, filters)
 	if len(procs) == 0 {
 		fmt.Fprintln(os.Stderr, "no processes found")
@@ -55,7 +62,7 @@ func runProcess(args []string) int {
 	}
 
 	if *groupBy == "family" {
-		return emitProcessFamilies(os.Stdout, procs, time.Now(), *topN, *asJSON)
+		return emitProcessFamilies(os.Stdout, procs, processNow(), *topN, *asJSON)
 	}
 
 	if !sortProcesses(procs, *sortBy) {

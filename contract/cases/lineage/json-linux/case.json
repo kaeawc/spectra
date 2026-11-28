@@ -1,0 +1,11 @@
+{
+  "args": [
+    "lineage",
+    "--json",
+    "100"
+  ],
+  "now": "2026-11-23T10:00:00Z",
+  "os": "linux",
+  "page_size": 4096,
+  "tz_offset": -21600
+}

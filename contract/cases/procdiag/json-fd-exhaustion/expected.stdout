@@ -1,0 +1,51 @@
+{
+  "pid": 21,
+  "comm": "x",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 21,
+      "comm": "x",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 10,
+    "limit": 10,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "fd-exhaustion",
+      "severity": "critical",
+      "summary": "10 of 10 file descriptors in use (100%); the next open()/accept()/socket() will fail with EMFILE once the limit is hit",
+      "evidence": [
+        "RLIMIT_NOFILE soft=10"
+      ]
+    }
+  ],
+  "verdict": "fd-exhaustion"
+}

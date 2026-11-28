@@ -1,0 +1,93 @@
+{
+  "pid": 700,
+  "ancestors": [
+    {
+      "pid": 700,
+      "ppid": 650,
+      "user": "user",
+      "start_time": "2026-11-21T05:00:00-06:00",
+      "command": "-zsh"
+    },
+    {
+      "pid": 650,
+      "ppid": 1,
+      "user": "user",
+      "start_time": "2026-11-21T04:00:00-06:00",
+      "command": "Terminal"
+    },
+    {
+      "pid": 1,
+      "ppid": 0,
+      "user": "root",
+      "start_time": "2026-11-20T04:00:00-06:00",
+      "command": "launchd"
+    }
+  ],
+  "tree": {
+    "pid": 700,
+    "ppid": 650,
+    "user": "user",
+    "start_time": "2026-11-21T05:00:00-06:00",
+    "command": "-zsh",
+    "rss_kib": 6100,
+    "cpu_pct": 0.2,
+    "count": 5,
+    "subtree_rss_kib": 2259100,
+    "subtree_cpu_pct": 256.3,
+    "children": [
+      {
+        "pid": 710,
+        "ppid": 700,
+        "user": "user",
+        "start_time": "2026-11-23T02:30:00-06:00",
+        "command": "java",
+        "rss_kib": 1800000,
+        "cpu_pct": 150.5,
+        "count": 2,
+        "subtree_rss_kib": 1852000,
+        "subtree_cpu_pct": 248.4,
+        "children": [
+          {
+            "pid": 720,
+            "ppid": 710,
+            "user": "user",
+            "start_time": "2026-11-23T03:58:00-06:00",
+            "command": "clang",
+            "rss_kib": 52000,
+            "cpu_pct": 97.9,
+            "count": 1,
+            "subtree_rss_kib": 52000,
+            "subtree_cpu_pct": 97.9
+          }
+        ]
+      },
+      {
+        "pid": 730,
+        "ppid": 700,
+        "user": "user",
+        "start_time": "2026-11-22T02:00:00-06:00",
+        "command": "node",
+        "rss_kib": 401000,
+        "cpu_pct": 7.7,
+        "count": 1,
+        "subtree_rss_kib": 401000,
+        "subtree_cpu_pct": 7.7
+      },
+      {
+        "pid": 740,
+        "ppid": 700,
+        "user": "user",
+        "start_time": "2026-11-22T03:00:00-06:00",
+        "command": "\u003cdefunct\u003e",
+        "rss_kib": 0,
+        "cpu_pct": 0,
+        "flags": [
+          "zombie"
+        ],
+        "count": 1,
+        "subtree_rss_kib": 0,
+        "subtree_cpu_pct": 0
+      }
+    ]
+  }
+}

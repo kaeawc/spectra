@@ -8,8 +8,11 @@ pub mod capabilities;
 pub mod dispatch;
 pub mod flags;
 pub mod help;
+pub mod lineage;
 pub mod memory;
 pub mod pressure;
+pub mod procdiag;
+pub mod process;
 pub mod unsupported;
 
 use std::io::Write;

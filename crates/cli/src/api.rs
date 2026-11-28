@@ -6,6 +6,7 @@
 use std::io::Write;
 use std::sync::Arc;
 
+use jiff::tz::TimeZone;
 use spectra_base::clock::{Clock, Sleeper, SystemClock, SystemSleeper};
 use spectra_base::env::{Env, SystemEnv};
 use spectra_base::fs::{Fs, OsFs};
@@ -13,6 +14,7 @@ use spectra_base::hostos::{Kind, Unsupported};
 use spectra_base::logger::{self, Format, Level, Logger};
 use spectra_base::proc::{OsRunner, Runner};
 use spectra_host::memstate::{self, HostMemory, MemorySource};
+use spectra_host::process::{self, HostProcesses, ProcessSource};
 
 /// The version a source build reports (Go's `buildversion.Dev`).
 pub const DEV_VERSION: &str = "dev";
@@ -32,6 +34,11 @@ pub struct Ctx {
     /// macOS memory readings (Mach VM statistics and sysctls); recorded cases replay a
     /// [`memstate::FixedMemory`].
     pub memory: Arc<dyn MemorySource>,
+    /// macOS process facts (libproc details, `hw.memsize`, `kern.procargs2`) and the page size;
+    /// recorded cases replay a [`spectra_host::process::FixedProcesses`].
+    pub processes: Arc<dyn ProcessSource>,
+    /// The zone process start times are shown in (Go's `time.Local`).
+    pub tz: TimeZone,
     /// What `spectra version` prints (Go's ldflags-stamped `main.version`).
     pub version: String,
     /// Receives debug records when `--verbose`, `--debug` or `SPECTRA_DEBUG` is given; without
@@ -40,8 +47,8 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// The real host: process environment, wall clock, real subprocesses and filesystem, and
-    /// debug records as text on stderr (Go's `enableVerbose`).
+    /// The real host: process environment, wall clock, real subprocesses and filesystem, the
+    /// local time zone, and debug records as text on stderr (Go's `enableVerbose`).
     pub fn system(version: impl Into<String>) -> Ctx {
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let debug_logger =
@@ -55,8 +62,24 @@ impl Ctx {
             runner: Arc::new(OsRunner),
             fs: Arc::new(OsFs),
             memory: Arc::new(HostMemory),
+            processes: Arc::new(HostProcesses),
+            tz: spectra_host::localtz::local(&SystemEnv, &OsFs),
             version: version.into(),
             debug_logger,
+        }
+    }
+
+    /// The process-collection seams for this context on `os`.
+    pub fn process_seams(&self, os: Kind) -> process::Seams<'_> {
+        process::Seams {
+            os,
+            runner: self.runner.as_ref(),
+            env: self.env.as_ref(),
+            fs: self.fs.as_ref(),
+            clock: self.clock.as_ref(),
+            source: self.processes.as_ref(),
+            tz: &self.tz,
+            proc_fs: "",
         }
     }
 }
@@ -125,4 +148,23 @@ pub fn memory(ctx: &Ctx, opts: crate::memory::Options) -> Result<crate::memory::
 /// the findings drawn from them. Linux only; elsewhere [`crate::pressure::Error::Unsupported`].
 pub fn pressure(ctx: &Ctx, opts: crate::pressure::Options) -> Result<crate::pressure::Report, crate::pressure::Error> {
     crate::pressure::collect(ctx, &opts)
+}
+
+/// What `spectra procdiag` reports: two `/proc` samples of `opts.pid`, `opts.interval` apart
+/// (through `ctx.fs`, `ctx.clock` and `ctx.sleeper`), and the findings drawn from them. Linux
+/// only; elsewhere [`crate::procdiag::Error::Unsupported`].
+pub fn procdiag(ctx: &Ctx, opts: crate::procdiag::Options) -> Result<spectra_host::procdiag::Report, crate::procdiag::Error> {
+    crate::procdiag::collect(ctx, &opts)
+}
+
+/// What `spectra process` reports: the process table for `ctx.os` (`ps` and libproc facts on
+/// macOS, `/proc` on Linux), filtered, then as rows, a tree or families (Go's `runProcess`).
+pub fn process(ctx: &Ctx, opts: crate::process::Options) -> Result<crate::process::Report, crate::process::Error> {
+    crate::process::collect(ctx, &opts)
+}
+
+/// What `spectra lineage` reports: `opts.pid`'s ancestor chain and descendant subtree with
+/// RSS and CPU totals, from one process snapshot (Go's `lineage.Collect`).
+pub fn lineage(ctx: &Ctx, opts: crate::lineage::Options) -> Result<crate::lineage::Report, spectra_host::lineage::NotFound> {
+    crate::lineage::collect(ctx, &opts)
 }

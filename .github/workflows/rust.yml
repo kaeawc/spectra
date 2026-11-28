@@ -166,6 +166,7 @@ jobs:
       - run: cargo build --locked --profile ci -p kaeawc-spectra -p spectra-contract
       - run: target/ci/spectra-shape-diff ./spectra-go target/ci/spectra -- capabilities --json
       - run: target/ci/spectra-shape-diff ./spectra-go target/ci/spectra -- memory --json
+      - run: target/ci/spectra-shape-diff ./spectra-go target/ci/spectra -- process --json
 
   # The desktop app (desktop/, its own workspace and lockfile) on macOS, its real target:
   # clippy then tests, from desktop/'s own cache. Runs only when a change can reach the desktop

@@ -1,0 +1,40 @@
+{
+  "pid": 9,
+  "comm": "bare",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 9,
+      "comm": "bare",
+      "state": "S",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "oom_score": 0,
+  "findings": null,
+  "verdict": "idle",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

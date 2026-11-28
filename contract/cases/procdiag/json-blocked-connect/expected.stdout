@@ -1,0 +1,57 @@
+{
+  "pid": 60,
+  "comm": "cli",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 0,
+  "thread_count": 1,
+  "state_counts": {
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 60,
+      "comm": "cli",
+      "state": "S",
+      "wchan": "inet_stream_connect",
+      "syscall": "connect",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 0,
+    "limit": 0,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 0,
+    "write_bytes": 0
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "blocked-syscall",
+      "severity": "warning",
+      "summary": "main thread sat in connect() for the whole 1s interval without being scheduled; it is waiting on a network peer",
+      "evidence": [
+        "syscall=connect",
+        "wchan=inet_stream_connect"
+      ]
+    }
+  ],
+  "verdict": "blocked-syscall",
+  "notes": [
+    "fd table not readable (permission)"
+  ]
+}

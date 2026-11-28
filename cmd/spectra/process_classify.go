@@ -16,13 +16,18 @@ import (
 func classifyProcesses(procs []process.Info) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if err := processClassify(ctx, procs); err != nil {
+		fmt.Fprintf(os.Stderr, "classify: %v (remaining processes left unknown)\n", err)
+	}
+}
+
+// processClassify classifies procs in place; contract tests replace it.
+var processClassify = func(ctx context.Context, procs []process.Info) error {
 	opts := classify.Options{}
 	if cacheStores != nil && cacheStores.Classify != nil {
 		opts.Store = cacheStores.Classify
 	}
-	if err := process.Classify(ctx, procs, classify.New(opts)); err != nil {
-		fmt.Fprintf(os.Stderr, "classify: %v (remaining processes left unknown)\n", err)
-	}
+	return process.Classify(ctx, procs, classify.New(opts))
 }
 
 // classAppWidth bounds the APP column; longer app names are truncated.

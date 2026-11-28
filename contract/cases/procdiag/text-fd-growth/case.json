@@ -1,0 +1,11 @@
+{
+  "arch": "amd64",
+  "args": [
+    "procdiag",
+    "--interval",
+    "2s",
+    "20"
+  ],
+  "now": "2026-11-23T10:00:00Z",
+  "os": "linux"
+}

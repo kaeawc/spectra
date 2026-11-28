@@ -1,0 +1,15 @@
+=== pid 100 (pool-worker-thread-0) — active ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 34 thread(s) (R=5 S=29)
+  cpu:      17% of one core
+  memory:   rss 0 MiB (+0.0 MiB/s), anon 0 MiB, swap 0 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  top threads:
+        107 pool-worker-th… R   1.0%  
+        121 pool-worker-th… R   1.0%  
+        101 pool-worker-th… S   1.0%  
+        103 pool-worker-th… S   1.0%  
+        105 pool-worker-th… S   1.0%  
+  no problems found in this window
+  note: fd table not readable (permission)

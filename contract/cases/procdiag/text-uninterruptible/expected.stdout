@@ -1,0 +1,14 @@
+=== pid 30 (io) — uninterruptible-io ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 2 thread(s) (D=2)
+  cpu:      0% of one core
+  memory:   rss 0 MiB (+0.0 MiB/s), anon 0 MiB, swap 0 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  top threads:
+         30 io              D   0.0%   @nfs_wait
+         31 io-2            D   0.0%  
+  [critical] uninterruptible-io: 2 thread(s) stayed in uninterruptible sleep (D) for the whole 1s interval — SIGKILL will not work; suspect a hung disk, NFS/FUSE mount, or driver
+         · tid 30 (io) wchan=nfs_wait
+         · tid 31 (io-2) wchan=?
+  note: fd table not readable (permission)

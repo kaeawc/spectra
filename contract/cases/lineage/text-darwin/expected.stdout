@@ -1,0 +1,11 @@
+Ancestors of pid 700 (nearest first):
+     700  user          2026-11-21 05:00:00  -zsh
+     650  user          2026-11-21 04:00:00  Terminal
+       1  root          2026-11-20 04:00:00  launchd
+Descendants:
+  -zsh (700)  rss 6100 KiB  cpu 0.2%
+    java (710)  rss 1800000 KiB  cpu 150.5%
+      clang (720)  rss 52000 KiB  cpu 97.9%
+    node (730)  rss 401000 KiB  cpu 7.7%
+    <defunct> (740)  rss 0 KiB  cpu 0.0% [zombie]
+Subtree: 5 processes, 2259100 KiB RSS, 256.3% CPU

@@ -1,0 +1,12 @@
+=== pid 70 (defunct) — zombie ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 1 thread(s) (Z=1)
+  cpu:      0% of one core
+  memory:   rss 0 MiB (+0.0 MiB/s), anon 0 MiB, swap 0 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  top threads:
+         70 defunct         Z   0.0%  
+  [warning] zombie: process has exited but its parent has not reaped it (wait()); it holds a pid slot but no memory
+         · state=Z
+  note: fd table not readable (permission)

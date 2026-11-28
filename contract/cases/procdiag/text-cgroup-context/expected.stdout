@@ -1,0 +1,13 @@
+=== pid 90 (srv) — idle ===
+  cmd:      /usr/bin/app --serve
+  sampled:  1.0s, 1 thread(s) (S=1)
+  cpu:      0% of one core
+  memory:   rss 0 MiB (+0.0 MiB/s), anon 0 MiB, swap 0 MiB
+  fds:      0 / unlimited (+0.0/s)
+  disk io:  read 0 KiB, wrote 0 KiB
+  cgroup:   /app.slice
+  top threads:
+         90 srv             S   0.0%  epoll_wait
+  [critical] (cgroup) cpu-pressure: cgroup /app.slice cpu: tasks stalled on cpu 55.0% of the last 10s (60s avg 40.0%)
+  [warning] (cgroup) cpu-throttled: cgroup /app.slice was CPU-throttled in 80 of 100 periods (80%, 5.0s total) by its cpu.max quota
+  note: fd table not readable (permission)

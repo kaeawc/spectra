@@ -1,0 +1,65 @@
+{
+  "pid": 10,
+  "comm": "spin",
+  "cmdline": "/usr/bin/app --serve",
+  "state": "S",
+  "interval_sec": 1,
+  "cpu_pct": 108,
+  "thread_count": 2,
+  "state_counts": {
+    "R": 1,
+    "S": 1
+  },
+  "threads": [
+    {
+      "tid": 10,
+      "comm": "spin",
+      "state": "R",
+      "syscall": "running",
+      "cpu_pct": 108,
+      "system_pct": 9,
+      "ctx_switches": 0
+    },
+    {
+      "tid": 11,
+      "comm": "spin-worker",
+      "state": "S",
+      "wchan": "futex_wait_queue",
+      "syscall": "futex",
+      "cpu_pct": 0,
+      "system_pct": 0,
+      "ctx_switches": 0
+    }
+  ],
+  "fds": {
+    "count": 3,
+    "limit": 1024,
+    "delta": 0,
+    "rate_per_sec": 0
+  },
+  "memory": {
+    "rss_kib": 0,
+    "anon_kib": 0,
+    "swap_kib": 0,
+    "rss_delta_kib": 0,
+    "rss_rate_kib_per_sec": 0
+  },
+  "io": {
+    "read_bytes": 405504,
+    "write_bytes": 811008
+  },
+  "oom_score": 7,
+  "findings": [
+    {
+      "kind": "cpu-spin",
+      "severity": "warning",
+      "summary": "process is pegging CPU — user-space loop",
+      "evidence": [
+        "process cpu=108% of one core over 1.0s",
+        "hottest thread tid 10 (spin) at 108%",
+        "8% of that time in the kernel"
+      ]
+    }
+  ],
+  "verdict": "cpu-spin"
+}

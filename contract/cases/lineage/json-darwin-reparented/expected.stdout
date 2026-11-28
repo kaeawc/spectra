@@ -1,0 +1,48 @@
+{
+  "pid": 400,
+  "flags": [
+    "reparented"
+  ],
+  "ancestors": [
+    {
+      "pid": 400,
+      "ppid": 1,
+      "user": "user",
+      "start_time": "2026-11-22T23:00:00-06:00",
+      "command": "Google Chrome"
+    },
+    {
+      "pid": 1,
+      "ppid": 0,
+      "user": "root",
+      "start_time": "2026-11-20T04:00:00-06:00",
+      "command": "launchd"
+    }
+  ],
+  "tree": {
+    "pid": 400,
+    "ppid": 1,
+    "user": "user",
+    "start_time": "2026-11-22T23:00:00-06:00",
+    "command": "Google Chrome",
+    "rss_kib": 1536000,
+    "cpu_pct": 25.4,
+    "count": 2,
+    "subtree_rss_kib": 2176000,
+    "subtree_cpu_pct": 67.1,
+    "children": [
+      {
+        "pid": 401,
+        "ppid": 400,
+        "user": "user",
+        "start_time": "2026-11-22T23:30:00-06:00",
+        "command": "Google Chrome Helper (Renderer)",
+        "rss_kib": 640000,
+        "cpu_pct": 41.7,
+        "count": 1,
+        "subtree_rss_kib": 640000,
+        "subtree_cpu_pct": 41.7
+      }
+    ]
+  }
+}

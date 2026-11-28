@@ -10,6 +10,13 @@ import (
 // It returns ctx.Err() when cancelled; procs are still fully populated, with
 // runtime unknown for executables the cold phase did not reach.
 func Classify(ctx context.Context, procs []Info, c *classify.Classifier) error {
+	return ClassifyWithArgv(ctx, procs, c, argvFor)
+}
+
+// ClassifyWithArgv is Classify with the argv reader injected: argv(pid, full)
+// returns pid's argument vector when it still matches the listed command
+// line full, nil otherwise.
+func ClassifyWithArgv(ctx context.Context, procs []Info, c *classify.Classifier, argv func(pid int, full string) []string) error {
 	inputs := make([]classify.Input, len(procs))
 	for i, p := range procs {
 		inputs[i] = classify.Input{
@@ -26,7 +33,7 @@ func Classify(ctx context.Context, procs []Info, c *classify.Classifier) error {
 			// Read only when the classifier asks (interpreters), and keep
 			// what was read so --classify output shows the boundaries used.
 			inputs[i].LoadArgv = func() []string {
-				procs[i].Argv = argvFor(p.PID, p.FullCommandLine)
+				procs[i].Argv = argv(p.PID, p.FullCommandLine)
 				return procs[i].Argv
 			}
 		}
